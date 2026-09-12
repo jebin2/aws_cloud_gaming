@@ -773,6 +773,11 @@ if [[ -n $(aws ec2 describe-instances --region "$REGION" \
   REUSED=1
 fi
 
+# Layer 4 first: it is account-level, costs nothing, and needs no instance. If
+# the build dies - or the laptop does - the bill is still being watched.
+say "arming the budget before anything launches"
+lib/aws-setup.sh budget 2>&1 | sed 's/^/    /' || log "budget setup failed - continuing"
+
 say "provisioning instance"
 lib/provision.sh
 # shellcheck disable=SC1091
@@ -859,7 +864,10 @@ stream_build "ubuntu@$TS_NODE" "$KEY" \
 say "arming cloud-side backstops"
 lib/aws-setup.sh
 
-say "installing the on-host watchdog"
+# The build already installed this (15-watchdog.sh), so the box has been
+# guarded since minute one. This pass refreshes it from the local host/ - which
+# matters on a REUSED instance built from older code, and costs nothing here.
+say "refreshing the on-host watchdog"
 log "copying host/ ..."
 scp -q -i "$KEY" -o StrictHostKeyChecking=accept-new -r host "ubuntu@$TS_NODE:"
 log "installing units ..."

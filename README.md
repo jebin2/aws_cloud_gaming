@@ -206,6 +206,13 @@ each session, so set Moonlight to 1920x1080 for the box's native mode.
 
 Worst-case leak with all four armed is about 30 minutes of runtime.
 
+The guards are armed as early as each one can be: the **budget before anything launches** (it
+is account-level and needs no instance), and the **on-host watchdog during the build** rather
+than over ssh afterwards. That window used to be unguarded - a `Ctrl+C`, a dropped laptop or a
+stalled build left a GPU instance running with nothing to stop it. The watchdog is safe that
+early because it has a 20-minute boot grace and counts inbound bytes as activity, so it cannot
+shut down a build in progress.
+
 Layer 3 is armed by `cg open` rather than at build time, because a freshly created alarm is
 evaluated against the previous 30 minutes and would otherwise stop the box mid-build - see
 [docs/troubleshooting.md](docs/troubleshooting.md).

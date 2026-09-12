@@ -10,12 +10,17 @@ if [[ -f "$(dirname "$0")/../.env" ]]; then
 fi
 
 INSTANCE_ID="${GAME_INSTANCE_ID:-i-CHANGEME}"
+# `budget` mode arms layer 4 BEFORE anything is launched: it is account-level and
+# needs no instance, and a build that dies with the laptop should not leave an
+# unwatched bill. The instance-level guards necessarily come after the launch.
+MODE="${1:-all}"
 REGION="${GAME_REGION:-ap-south-2}"
 BUDGET_INR="${GAME_BUDGET_INR:-5000}"
 # Resource names must match what setup/game look up, which is $TS_HOST-based.
 TS_HOST="${GAME_TS_HOST:-gamevps}"
 EMAIL="${GAME_ALERT_EMAIL:?set GAME_ALERT_EMAIL}"
 
+if [[ $MODE != budget ]]; then
 # --- CRITICAL: make an in-guest `shutdown -h` STOP the instance, not destroy it.
 # If this is left as 'terminate', the watchdog deletes your machine and its disk.
 #
@@ -69,6 +74,8 @@ aws cloudwatch put-metric-alarm --region "$REGION" \
 # this layer is meant to be watching.
 aws cloudwatch disable-alarm-actions --region "$REGION" --alarm-name "${TS_HOST}-idle-stop"
 echo "    idle-stop action stays disarmed until 'game up' arms it"
+
+fi   # end of the instance-dependent guards
 
 # --- Layer 4: budget. ---------------------------------------------------------
 # AWS Budgets rather than a CloudWatch EstimatedCharges alarm. That alarm needs

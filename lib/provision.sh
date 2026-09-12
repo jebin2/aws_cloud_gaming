@@ -97,9 +97,13 @@ else
     # git. Shebangs are exempt: `#!` lines matter inside the heredocs that write
     # the on-host scripts. This bought back ~3 KB of a 16 KB budget that had
     # 409 bytes left.
+    # host/ is injected as a tarball so those scripts have one home, and so the
+    # watchdog is installed by the build itself rather than over ssh afterwards.
+    HOST_TGZ_B64=$(tar -cz -C host . 2>/dev/null | base64 -w0)
     cat "${parts[@]}" \
       | grep -vE '^[[:space:]]*#([^!]|$)' \
-      | sed -e "s|__TS_AUTHKEY__|$TS_AUTHKEY|" -e "s|__TS_HOST__|$TS_HOST|" > "$USERDATA"
+      | sed -e "s|__TS_AUTHKEY__|$TS_AUTHKEY|" -e "s|__TS_HOST__|$TS_HOST|" \
+            -e "s|__HOST_TGZ_B64__|$HOST_TGZ_B64|" > "$USERDATA"
     echo "    assembled ${#parts[@]} modules"
     # EC2 caps user-data at 16 KB, which bootstrap.sh outgrew. cloud-init
     # detects the gzip magic bytes and decompresses on its own, so shipping it
