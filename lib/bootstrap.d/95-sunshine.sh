@@ -131,4 +131,24 @@ install -d -o "$USER_NAME" -g "$USER_NAME" "$WANTS"
 ln -sf "$UNIT" "$WANTS/$(basename "$UNIT")"
 chown -h "$USER_NAME:$USER_NAME" "$WANTS/$(basename "$UNIT")"
 
+# Sunshine probes every encoder once at startup and gives up permanently if it
+# finds no display: "Fatal: Unable to find display or encoder during startup".
+# Its user service starts alongside the graphical session, so on a cold boot it
+# regularly wins the race against X and then sits there active and useless,
+# while Moonlight gets 503 "Is a display connected and turned on?". The packaged
+# unit tries to cover this with ExecStartPre=/bin/sleep 5, which is a guess, not
+# a check. Wait for X to actually answer, and let systemd retry if it still
+# loses.
+DROPIN="/home/$USER_NAME/.config/systemd/user/$(basename "$UNIT").d"
+install -d -o "$USER_NAME" -g "$USER_NAME" "$DROPIN"
+cat > "$DROPIN/wait-for-x.conf" <<EOF
+[Service]
+Environment=DISPLAY=:0
+ExecStartPre=/bin/sh -c 'for i in \$(seq 1 60); do xset q >/dev/null 2>&1 && exit 0; sleep 2; done; echo "no X after 2 min"; exit 1'
+Restart=on-failure
+RestartSec=10
+EOF
+chown -R "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.config/systemd"
+
 verify "sunshine binary installed" test -x /usr/bin/sunshine
+verify "sunshine waits for X before starting" test -f "$DROPIN/wait-for-x.conf"
