@@ -190,7 +190,13 @@ cmd_destroy() {
 cmd_watchdog() {
   local host="${GAME_WATCHDOG_HOST:-}"
   [[ -n $host ]] || die "set GAME_WATCHDOG_HOST=user@host in .env (an always-on box with the aws CLI)"
-  local rsh=(ssh -o ConnectTimeout=10 -o BatchMode=yes "$host")
+  # That host is almost never reachable with a default key - an Oracle box wants
+  # its own. GAME_WATCHDOG_KEY supplies it; unset means use the ssh default.
+  local kf="${GAME_WATCHDOG_KEY:-}"
+  local ident=(); [[ -n $kf ]] && ident=(-i "${kf/#\~/$HOME}")
+  local rsh=(ssh "${ident[@]}" -o ConnectTimeout=10 -o BatchMode=yes
+             -o StrictHostKeyChecking=accept-new "$host")
+  local scpid=("${ident[@]}")
   case "${1:-status}" in
     install)
       say "checking $host"
@@ -213,7 +219,8 @@ cmd_watchdog() {
       fi
       say "installing the off-site watchdog on $host"
       "${rsh[@]}" 'sudo install -d -m 755 /var/lib/cloud-gaming-watchdog' 2>/dev/null || true
-      scp -q -o BatchMode=yes host/remote-watchdog.sh host/remote-watchdog.service \
+      scp -q "${scpid[@]}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        host/remote-watchdog.sh host/remote-watchdog.service \
         host/remote-watchdog.timer "$host:/tmp/" || die "copy to $host failed"
       "${rsh[@]}" "
         set -e
@@ -232,7 +239,11 @@ cmd_watchdog() {
       ;;
     status)
       printf '  host    %s\n' "$host"
-      printf '  timer   %s\n' "$("${rsh[@]}" 'systemctl is-enabled remote-watchdog.timer 2>/dev/null || echo not-installed' 2>/dev/null)"
+      # is-enabled prints "not-found" AND exits non-zero, so a `|| echo` prints
+      # both. Take the first word and normalise it.
+      local st
+      st=$("${rsh[@]}" 'systemctl is-enabled remote-watchdog.timer 2>/dev/null | head -1' 2>/dev/null)
+      printf '  timer   %s\n' "${st:-not installed}"
       "${rsh[@]}" 'systemctl list-timers remote-watchdog.timer --no-pager 2>/dev/null | sed -n 2p' 2>/dev/null | sed 's/^/  next    /'
       echo "  recent decisions:"
       "${rsh[@]}" 'sudo tail -n 8 /var/log/cloud-gaming-watchdog.log 2>/dev/null' 2>/dev/null | sed 's/^/    /' \
