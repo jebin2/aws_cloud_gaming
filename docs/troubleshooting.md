@@ -665,3 +665,143 @@ already bypassed once.
 An ad-hoc measurement written during the same session *did* hardcode `nvme2n1` and reported
 nonsense (zero disk writes during an active download). Convenience scripts deserve the same
 identification discipline as the real ones.
+
+### A test stub that invented its own output format, and the archive it deleted
+
+The S3 game-library mirror refuses to push when the local copy is far smaller than the archive,
+because push propagates deletions and the local copy lives on a disk that is wiped on every
+stop. That guard was written, tested, and passed 30 assertions.
+
+On its first run against real S3 it did not fire, and a real 250 MB archive was deleted.
+
+`s5cmd du` prints:
+
+    262144000 bytes in 2 objects: s3://bucket/prefix/*
+
+The parser matched `$i == "objects"`. The real token is `objects:` - with a colon - so the count
+read **0 forever**, and the guard was written as `if (( remote_objects > 0 ))`. Zero objects
+meant "the archive is empty, nothing to protect", so every push was waved through.
+
+The unit test passed because the stub emitted `TOTAL: N bytes in M objects` - a format I had
+assumed rather than one I had ever run. **The stub validated the parser against itself.** A
+stub's output is only evidence if it was copied from the real thing; anything else tests that
+the code agrees with the assumption it was written from.
+
+Both halves were fixed:
+
+- the stub is now byte-for-byte the observed output, colon included
+- both words are matched with an optional colon, `/^objects:?$/`
+- and the guards key off **bytes**, not the object count - so a parse change on the more
+  decorated of the two fields cannot silently switch a safety check off again
+
+The last point is the general one. Two fields were available and only one was needed; the guard
+had been wired to the one that was easier to get wrong, for no reason other than that it read
+more naturally. A safety check should depend on the least decorated input that can express it.
+
+Two further cases were added: one asserting the count is parsed out of the real format, and one
+feeding a deliberately unparseable count (`in ?? widgets:`) to prove the refusal still happens.
+
+### A Proton prefix contains a symlink to `/`, and it OOM-killed the uploader
+
+The first real push of a game library - 2.9 GB, one small game - was killed by the OOM killer
+with a 12 GB resident set, on a box with 16 GB and Steam running next to it.
+
+The first diagnosis was wrong. `s5cmd` holds roughly `numworkers x concurrency x part-size` in
+transfer buffers, and the defaults (256 x 5 x 50 MB) do want tens of GB, so the flags were
+tuned down to `16 x 4 x 16 MB` - about 1 GB by that arithmetic. **It OOM-killed again at exactly
+the same 12 GB.** Two controlled runs then showed worker count was not the lever at all:
+
+    numworkers 4,  concurrency 2, part-size 5   -> 92s, peak  287 MB
+    numworkers 64, concurrency 4, part-size 16  -> 18s, peak  391 MB
+
+Both fine - because both synced `steamapps/common/` only. Syncing the **whole** library blew up
+regardless of flags, with or without `--delete`. The difference was `steamapps/compatdata`:
+
+    compatdata/438040/pfx/dosdevices/z: -> /
+    compatdata/438040/pfx/dosdevices/s: -> /scratch/steam/steamapps
+
+A Wine prefix maps drive letters as symlinks, and `Z:` is conventionally the **root of the
+filesystem**. `S:` here pointed back into the library being walked. s5cmd follows symlinks by
+default, so enumerating the library descended into the entire root filesystem *and* into itself,
+without end. The memory was the file list, not the transfer buffers - which is why tuning the
+buffers changed nothing.
+
+`--no-follow-symlinks` fixed it: the same push then completed in **21s with a peak of 323 MB**.
+
+Two things worth taking from this:
+
+- **The measurement that justified the flags could not have reproduced the bug.** The 10 GB
+  benchmark used ten 1 GiB objects, so at most ten workers were ever live and no prefix was
+  involved. It was used to choose `--numworkers 32` on a memory argument it had never tested,
+  and it also over-reported throughput by 3.6x against real game files (508 MB/s vs 140 MB/s).
+  A benchmark is evidence about the shape it measured and nothing else.
+- **When tuning a resource does not move the resource, stop tuning it.** The second OOM landed
+  on the same 12 GB as the first. That number not moving was the whole clue, and it was
+  available before any further flag changes.
+
+The cost of the fix is that the ~1,350 symlinks in a prefix are skipped rather than stored. S3
+has no symlink concept, and dereferencing them would upload a copy of the Proton runtime into
+every game's prefix. Proton rebuilds `dosdevices` and its DLL links when it next starts the
+prefix, and the save games under `drive_c/users/steamuser` are ordinary files that mirror
+normally.
+
+### Editing a script while it is running
+
+    2026-09-13T00:01:05  ==> removing tailnet nodes
+          no gamevps nodes on the tailnet - nothing to remove
+    ./cg: line 784: /scratch/tmp: No such file or directory
+
+Nothing is wrong with `/scratch/tmp`, and line 784 is a line of help text. `cg destroy` spends
+about five minutes waiting for an instance to terminate, and `cg` was **rewritten during that
+wait**.
+
+Bash does not load a script into memory. It reads, executes, and comes back for more input at a
+**byte offset**. Replace the file underneath a running instance and the next read resumes at that
+offset in the *new* contents - which is a different place entirely. Here it landed inside the
+help heredoc, so a line of documentation was executed as a command.
+
+The failure is loud but arbitrary: it depends on where the interpreter happened to be. It can
+equally resume mid-word, skip a cleanup step, or run a branch that was never reachable. Every
+step here had already completed, which was luck rather than design.
+
+Two ways out. Edit a copy and move it into place - `mv` is atomic and swaps the inode, so the
+running process keeps reading the file it started with. Or simply do not edit while a long
+command is in flight. `cg destroy`, `cg init` and `cg open` all run for minutes.
+
+### `cg destroy --all` left a live access key behind, and status could not show it
+
+After `--all` reported "everything deleted", an IAM audit by hand found:
+
+    gamevps-watchdog    AKIA................    Active
+
+The off-site watchdog's user, with an active long-lived key scoped to
+`ec2:StopInstances` - held in `.env` and on an internet-facing VPS. Two separate reasons it
+survived:
+
+**It cost nothing.** Every other resource in `--all` was on the list because it billed: the
+instance, the volume, the archive, the bucket. An IAM user bills nothing, so it was never on
+the list. "Free" is a bad filter for what to clean up - a credential that can act on the
+account outranks a bucket that merely sits there.
+
+**Nothing listed it.** `cg status` showed instances, volumes, snapshots, images, EIPs, key
+pairs, security groups, alarms and the budget - and no IAM whatsoever. A leftover that no
+command displays is one nobody notices. Status now prints the instance role and the watchdog
+key, including whether the key is `ACTIVE` and what it can do.
+
+It also flags a key AWS still honours that `.env` no longer holds. That combination is the
+worst of the three states: unusable, because the secret is gone, and unauditable, because
+nothing local records it. It can only be revoked.
+
+Writing the test for that orphan check found a third bug in the check itself:
+
+    envk=$(grep -c '^GAME_WATCHDOG_AWS_KEY_ID=' .env || echo 0)
+    [[ $envk == 0 ]] && printf 'orphaned...'
+
+`grep -c` **prints `0` and exits `1`** when nothing matches. So `|| echo 0` appends a second
+zero, `envk` becomes `"0\n0"`, and the comparison against `"0"` is never true - the warning
+could not fire under any circumstances. The same duplicated count had already appeared in a
+manual audit's output (`0` on one line, `  0` on the next) and was read as harmless formatting
+rather than a signal.
+
+`grep -c` needs no `|| echo 0`. It already reports the count; only its exit status needs
+tolerating, and the comparison should be numeric (`-eq`), not string.

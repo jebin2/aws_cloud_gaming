@@ -35,6 +35,58 @@ box() {
       -o ConnectTimeout=10 -o BatchMode=yes "ubuntu@$(tailscale ip -4 "${GAME_TS_NODE:-$TS_HOST}")" "$@"
 }
 
+# The S3 archive is the ONLY copy of the games, so status has to say what is in
+# it - not merely name the bucket. Printing a bucket name next to the words
+# "game library" reads as reassurance, and read exactly the same when the
+# archive had just been emptied.
+archive_line() {
+  local b="${GAME_S3_BUCKET:-}" out n sz
+  [[ -n $b ]] || { printf '  game library    not set up yet - cg init creates it\n'; return; }
+  out=$(aws s3 ls "s3://$b/steam/" --recursive --summarize 2>/dev/null | tail -2) || true
+  n=$(awk '/Total Objects:/{print $3}' <<<"$out")
+  sz=$(awk '/Total Size:/{print $3}' <<<"$out")
+  if [[ ${n:-0} -eq 0 ]]; then
+    printf '  game library    s3://%s  EMPTY - no games archived\n' "$b"
+  else
+    printf '  game library    s3://%s  %s objects, %s  ($%.2f/mo)\n' "$b" "$n" \
+      "$(numfmt --to=iec --suffix=B "$sz" 2>/dev/null || echo "${sz}B")" \
+      "$(awk -v x="$sz" 'BEGIN{printf "%.2f", x/1073741824*0.025}')"
+  fi
+}
+
+# Status used to show no IAM at all, and that is exactly how a live access key
+# survived `cg destroy --all` unnoticed: nothing that lists what exists ever
+# mentioned it. Anything that can act on the account, or cost money, belongs in
+# a status view - "free" is not a reason to hide a credential.
+iam_lines() {
+  local role="${TS_HOST}-box" wd="${TS_HOST}-watchdog" keys envk
+  if aws iam get-role --role-name "$role" >/dev/null 2>&1; then
+    printf '  instance role   %s  (lets the box read/write its library bucket)\n' "$role"
+  else
+    printf '  instance role   none - cg init creates it\n'
+  fi
+
+  if aws iam get-user --user-name "$wd" >/dev/null 2>&1; then
+    keys=$(aws iam list-access-keys --user-name "$wd" \
+      --query 'AccessKeyMetadata[?Status==`Active`].AccessKeyId' --output text 2>/dev/null)
+    # `grep -c` PRINTS 0 and EXITS 1 when nothing matches, so the obvious
+    # `$(grep -c ... || echo 0)` yields "0\n0" - which is never equal to "0",
+    # and the orphan check below could not fire at all. Let grep report the
+    # count, tolerate its exit status, and compare numerically.
+    envk=$(grep -c '^GAME_WATCHDOG_AWS_KEY_ID=' .env 2>/dev/null || true)
+    if [[ -n ${keys:-} && $keys != None ]]; then
+      printf '  watchdog key    %s  ACTIVE: %s  (can stop instances)\n' "$wd" "$keys"
+      # A key AWS still honours but that we no longer hold is unusable and
+      # unauditable - it can only be revoked, never used again.
+      [[ ${envk:-0} -eq 0 ]] && printf '                  not in .env - orphaned; revoke it: cg destroy --all\n'
+    else
+      printf '  watchdog key    %s exists but has no active key\n' "$wd"
+    fi
+  else
+    printf '  watchdog key    none\n'
+  fi
+}
+
 status() {
   local id state itype ip launched plan credits q_od q_spot vcpus
   ec2() { aws ec2 "$@" --region "$REGION"; }
@@ -90,16 +142,17 @@ status() {
   [[ $sgid == None || -z $sgid ]] && sgid=none
   printf '  key pair        %s\n' "$kp"
   printf '  security group  %s\n' "$sgid"
-  # The game volume outlives every destroy, so its presence - and its monthly
-  # cost - is the one resource state people most need to see at a glance.
+  # The game library is in S3 now; the EBS volume is legacy and the only thing
+  # worth saying about it is that it still bills.
   local gv gsz gaz
   read -r gv gsz gaz < <(ec2 describe-volumes --filters "Name=tag:Name,Values=${TS_HOST}-games" \
     --query 'Volumes[0].[VolumeId,Size,AvailabilityZone]' --output text 2>/dev/null)
   if [[ -n ${gv:-} && $gv != None ]]; then
-    printf '  game volume     %s  %s GB in %s  (~$%.2f/mo, survives destroy)\n' \
+    printf '  old EBS volume  %s  %s GB in %s  (~$%.2f/mo, LEGACY - cg games --delete)\n' \
       "$gv" "$gsz" "$gaz" "$(awk -v s="$gsz" 'BEGIN{printf "%.2f", s*0.0912}')"
   else
-    printf '  game volume     none yet - cg init creates one (GAME_GAMES_GB)\n'
+    archive_line
+    iam_lines
   fi
   if [[ $sgid != none ]]; then
     local ingress
@@ -208,16 +261,17 @@ cost() {
   printf '  images          %s\n' "$imgs"
   printf '  key pair        %s\n' "$([[ $key == 0 ]] && echo none || echo "$TS_HOST")"
   printf '  security group  %s\n' "$([[ $sg == 0 ]] && echo none || echo "${TS_HOST}-sg")"
-  # The game volume outlives every destroy, so it is the one resource whose
-  # absence or presence people most need to see.
+  # The game library is in S3 now; the EBS volume is legacy and the only thing
+  # worth saying about it is that it still bills.
   local gv gsz gaz
   read -r gv gsz gaz < <(ec2 describe-volumes --filters "Name=tag:Name,Values=${TS_HOST}-games" \
     --query 'Volumes[0].[VolumeId,Size,AvailabilityZone]' --output text 2>/dev/null)
   if [[ -n ${gv:-} && $gv != None ]]; then
-    printf '  game volume     %s  %s GB in %s  (~$%.2f/mo, survives destroy)\n' \
+    printf '  old EBS volume  %s  %s GB in %s  (~$%.2f/mo, LEGACY - cg games --delete)\n' \
       "$gv" "$gsz" "$gaz" "$(awk -v s="$gsz" 'BEGIN{printf "%.2f", s*0.0912}')"
   else
-    printf '  game volume     none yet - cg init creates one (GAME_GAMES_GB)\n'
+    archive_line
+    iam_lines
   fi
   printf '  idle alarm      %s\n' "$([[ ${alarms:-0} == 0 ]] && echo none || echo present)"
   printf '  budget          %s\n' "$([[ -z $budget || $budget == None ]] && echo none || printf '$%.0f/month' "$budget")"
@@ -400,11 +454,20 @@ destroy_all() {
   echo "  alarms          ${TS_HOST}-idle-stop"
   echo "  budget          ${TS_HOST}-monthly"
   echo
-  echo "The desktop and its configuration go. The game library volume is KEPT -
-it is separate on purpose, so games survive a destroy. Remove it with
-cg games --delete (and check cg games first to see what it costs)."
-  echo "There is no undo and no image is kept. The game volume, if one exists,
-is the single exception."
+  # `cg destroy --all` is deleting the archive itself, so the reassurance below
+  # is false on that path - and it was printed there anyway, directly above the
+  # step that removed every game. A destroy must not tell you your games are
+  # safe while deleting them.
+  if [[ ${CG_DESTROY_ALL:-0} == 1 ]]; then
+    echo "The desktop, its configuration AND the S3 game archive all go.
+There is no undo, no image and no versioning behind the archive."
+  else
+    echo "The desktop and its configuration go. The GAMES do not: they were
+mirrored to S3 before this started, and the next cg init restores them.
+Check with: cg library"
+    echo "There is no undo and no image is kept. The S3 archive is the single
+exception - nothing here touches it."
+  fi
   echo
 
   # A persistent spot request relaunches the moment its instance dies.
@@ -868,10 +931,11 @@ grep -v '^GAME_TS_NODE=' .env 2>/dev/null > "$tmp" || true
 echo "GAME_TS_NODE=$TS_NODE" >> "$tmp"
 cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
 
-# The Steam library lives on the persistent volume (see 86-games.sh). Defined
-# once: when this path moved from /scratch/steam, three hardcoded copies went
-# stale and reported a correctly registered library as "NOT registered".
-GAMES_LIB="${GAME_LIB_DIR:-/games/steam}"
+# The Steam library lives on local NVMe, mirrored to S3 (see 16-library.sh).
+# Defined once: the last time this path moved, three hardcoded copies went stale
+# and reported a correctly registered library as "NOT registered".
+GAMES_LIB="${GAME_LIB_DIR:-/scratch/steam}"
+
 KEY="$HOME/.ssh/${TS_HOST}.pem"
 SSH="ssh -i $KEY -o StrictHostKeyChecking=accept-new ubuntu@$TS_NODE"
 

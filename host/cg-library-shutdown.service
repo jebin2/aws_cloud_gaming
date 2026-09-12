@@ -1,0 +1,35 @@
+[Unit]
+Description=Mirror the Steam library to S3 before the machine goes down
+# This is what makes the box safe to stop AUTOMATICALLY. Three things stop it
+# without anyone typing a command - the on-host idle watchdog's `shutdown -h`,
+# the CloudWatch alarm, and the off-site watchdog - and the last two call
+# StopInstances, which AWS turns into a graceful OS shutdown. All three
+# therefore arrive here, which is why one unit covers all of them.
+#
+# There is deliberately no periodic timer beside it: this only ever runs when
+# the machine is already going away, never while you are playing.
+#
+# DefaultDependencies=no keeps systemd from ordering this after the very
+# shutdown targets it has to run before.
+DefaultDependencies=no
+Requires=scratch-disk.service
+After=scratch-disk.service network-online.target cg-library-restore.service
+Before=shutdown.target umount.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=ubuntu
+Group=ubuntu
+# Nothing happens at start. The work is in ExecStop, which systemd runs as the
+# machine goes down, while the network is still up.
+ExecStart=/bin/true
+ExecStop=/usr/local/bin/cg-library push
+# Bounded on purpose. AWS gives a stopping instance only a few minutes before
+# forcing the power off, so waiting longer than this cannot finish an upload
+# that was not going to finish - it just makes a doomed shutdown hang. A push
+# with nothing to send takes seconds, which is the normal case after `cg stop`.
+TimeoutStopSec=300
+
+[Install]
+WantedBy=multi-user.target

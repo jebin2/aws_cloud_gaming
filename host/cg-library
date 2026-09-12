@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# The game library, on the box. Lives on the instance store (/scratch) because
+# that is local NVMe - the fastest disk here and free - and is mirrored to S3
+# because the instance store is wiped on every stop.
+#
+#   pull    S3 -> /scratch/steam   (run at boot, in parallel with the build)
+#   push    /scratch/steam -> S3   (run on a timer, and before any shutdown)
+#   status  what is where, and whether a push is currently safe
+#
+# The whole design rests on one uncomfortable fact: push deletes remote objects
+# that are no longer present locally, and the local copy is on a disk that
+# vanishes on stop. A push that runs against an empty /scratch would therefore
+# destroy the archive. Everything below labelled GUARD exists to make that
+# impossible, and the guards are tested in tests/library.sh.
+set -uo pipefail
+
+[[ -r /etc/cg-library.conf ]] && . /etc/cg-library.conf
+
+LIB="${CG_LIB_DIR:-/scratch/steam}"
+BUCKET="${CG_S3_BUCKET:-}"
+PREFIX="${CG_S3_PREFIX:-steam}"
+STATE="${CG_STATE_DIR:-/var/lib/cg-library}"
+S5="${CG_S5CMD:-/usr/local/bin/s5cmd}"
+# s5cmd holds roughly workers x concurrency x part-size in memory at once. The
+# defaults (256 workers, 5 parts, 50 MB) want tens of GB; even --numworkers 32
+# is ~8 GB, which OOM-killed a real 2.9 GB push on this 16 GB box while Steam
+# was running. 16 x 4 x 16 MB is ~1 GB.
+#
+# The 10 GB benchmark that chose 32 did not OOM because it transferred ten 1 GiB
+# objects, so at most ten workers were ever live. A game library is thousands of
+# files and keeps every worker busy - the benchmark measured throughput on a
+# shape that could not reproduce the memory behaviour it was being used to
+# justify.
+WORKERS="${CG_WORKERS:-64}"
+CONCURRENCY="${CG_CONCURRENCY:-4}"
+PART_MB="${CG_PART_MB:-16}"
+# --no-follow-symlinks is not a nicety, it is what makes this work at all.
+# A Proton prefix contains:
+#     compatdata/<id>/pfx/dosdevices/z: -> /
+#     compatdata/<id>/pfx/dosdevices/s: -> /scratch/steam/steamapps
+# so a symlink-following walk of the library descends into the entire root
+# filesystem AND into the library itself, endlessly. s5cmd follows by default,
+# and the result was a 12 GB resident set and an OOM kill, on a 2.9 GB library.
+# Worker and part-size tuning made no difference to it, because the enumeration
+# was the thing exploding, not the transfer buffers.
+#
+# The cost: the ~1,350 symlinks in a prefix are skipped rather than stored - S3
+# has no symlink concept, and dereferencing them would upload copies of the
+# Proton runtime into every game's prefix. Proton rebuilds dosdevices and its
+# DLL links when it next starts the prefix; the save games under
+# drive_c/users/steamuser are real files and are mirrored normally.
+TUNE=(--concurrency "$CONCURRENCY" --part-size "$PART_MB" --no-follow-symlinks)
+# Below this fraction of the archive, a local library is assumed to be broken or
+# half-restored rather than deliberately shrunk. 0.5 is generous: uninstalling
+# one game out of two is a legitimate halving, so the guard asks rather than
+# refuses outright - it can be overridden with --force.
+MIN_FRACTION="${CG_MIN_FRACTION:-0.5}"
+
+# Steam writes partial chunks here during a download and reassembles them; they
+# are large, worthless once the download finishes, and change constantly.
+EXCLUDES=(--exclude "steamapps/downloading/*" --exclude "steamapps/temp/*")
+
+log() { echo "$(date -Iseconds) cg-library: $*"; }
+die() { log "error: $*" >&2; exit 1; }
+hb()  { numfmt --to=iec --suffix=B "${1:-0}" 2>/dev/null || echo "${1:-0}B"; }
+
+[[ -n $BUCKET ]] || die "no bucket configured (expected CG_S3_BUCKET in /etc/cg-library.conf)"
+[[ -x $S5 ]] || die "s5cmd not installed at $S5"
+mkdir -p "$STATE" 2>/dev/null || true
+
+# s5cmd du prints one line: "<bytes> bytes in <n> objects: s3://bucket/prefix/*".
+# Note the COLON on "objects:" - matching the bare word silently yielded a count
+# of 0 forever, which disabled the size guard below and let a real push delete a
+# real archive. Both words are matched with an optional colon now, and the
+# guards key off BYTES rather than the count, so a parse change on the more
+# decorated field cannot switch a safety check off again.
+# An empty prefix is not an error here - it is the first-ever run.
+remote_du() { # -> "<bytes> <objects>"
+  local out
+  out=$("$S5" du "s3://$BUCKET/$PREFIX/*" 2>/dev/null | tail -1)
+  awk '{b=0;n=0; for(i=1;i<=NF;i++){ if($i ~ /^bytes:?$/)b=$(i-1); if($i ~ /^objects:?$/)n=$(i-1)} print b+0" "n+0}' <<<"${out:-}"
+}
+local_bytes() { du -sb --exclude=downloading --exclude=temp "$LIB" 2>/dev/null | cut -f1 || echo 0; }
+
+# The marker records WHICH boot restored the library, not merely that some boot
+# did. /var/lib is on the root volume and survives a reboot, while /scratch does
+# not, so a bare flag file could outlive the data it vouches for. It also means
+# re-running install-library.sh on a live box no longer has to delete the marker
+# to stay correct - deleting it locked the box out of pushing, which locks
+# `cg stop` and `cg destroy` out of saving the games.
+BOOT_ID_FILE="${CG_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}"
+boot_id() { cat "$BOOT_ID_FILE" 2>/dev/null || echo unknown; }
+mark_restored() { boot_id > "$STATE/restored"; }
+restored() {
+  [[ -f "$STATE/restored" ]] || return 1
+  [[ "$(cat "$STATE/restored" 2>/dev/null)" == "$(boot_id)" ]]
+}
+
+# --- pull ----------------------------------------------------------------------
+cmd_pull() {
+  local parent; parent=$(dirname "$LIB")
+  # GUARD: never restore onto the root volume by accident. If /scratch failed to
+  # mount, the games would land on the 50 GB root disk and fill it.
+  mountpoint -q "$parent" || die "$parent is not a mountpoint - refusing to restore onto the root disk"
+  mkdir -p "$LIB/steamapps"
+
+  local rb ro; read -r rb ro < <(remote_du)
+  # Bytes, not the object count: see remote_du.
+  if [[ ${rb:-0} -eq 0 ]]; then
+    log "archive s3://$BUCKET/$PREFIX is empty - nothing to restore (first run)"
+    mark_restored
+    return 0
+  fi
+
+  log "restoring $ro objects, $(hb "$rb"), from s3://$BUCKET/$PREFIX"
+  local t0 dt; t0=$(date +%s)
+  # --size-only is deliberate. s5cmd's default compares modification times, and
+  # a freshly restored file is always NEWER than the S3 object it came from - so
+  # the very next push would re-upload the entire library. Size-only comparison
+  # makes pull and push idempotent. The cost is that a game patch which rewrites
+  # a file to exactly the same length is not noticed; `cg library push --verify`
+  # exists for that.
+  if ! "$S5" --numworkers "$WORKERS" sync --size-only "${TUNE[@]}" "${EXCLUDES[@]}" \
+        "s3://$BUCKET/$PREFIX/*" "$LIB/"; then
+    # No marker on failure: that is what stops a later push from mistaking a
+    # partial restore for a deliberately emptied library.
+    die "restore failed - NOT marking the library as restored (push will refuse)"
+  fi
+  dt=$(( $(date +%s) - t0 )); (( dt > 0 )) || dt=1
+  mark_restored
+  log "restored in ${dt}s ($(( rb / dt / 1048576 )) MB/s)"
+}
+
+# --- push ----------------------------------------------------------------------
+cmd_push() {
+  local force=0 verify=0 a
+  for a in "$@"; do
+    case $a in
+      --force)  force=1 ;;
+      --verify) verify=1 ;;
+      *) die "unknown option '$a' for push" ;;
+    esac
+  done
+
+  [[ -d $LIB ]] || die "$LIB does not exist - nothing to push"
+  mountpoint -q "$(dirname "$LIB")" || die "$(dirname "$LIB") is not a mountpoint - refusing to push"
+
+  # GUARD: the library must have been restored on THIS boot. Without this, a box
+  # that booted with a broken restore - or never ran one - would push its empty
+  # /scratch over the archive and delete every game.
+  if ! restored && (( ! force )); then
+    die "the library was never restored on this boot; pushing now would delete the archive (--force overrides)"
+  fi
+
+  local lb rb ro; lb=$(local_bytes); read -r rb ro < <(remote_du)
+  # GUARD: a local copy far smaller than the archive means something went wrong,
+  # not that games were uninstalled. Checked with integer arithmetic - this runs
+  # as a systemd unit at shutdown where a floating-point surprise is not welcome.
+  if (( rb > 0 )) && (( lb * 100 < rb * $(awk -v f="$MIN_FRACTION" 'BEGIN{printf "%d", f*100}') )); then
+    if (( ! force )); then
+      die "local library $(hb "$lb") is far smaller than the archive $(hb "$rb") - refusing (--force overrides)"
+    fi
+    log "WARNING: local $(hb "$lb") << archive $(hb "$rb"), pushing anyway (--force)"
+  fi
+
+  local strategy=(--size-only)
+  (( verify )) && strategy=()   # full comparison; re-uploads anything whose mtime moved
+  log "pushing $(hb "$lb") to s3://$BUCKET/$PREFIX"
+  local t0 dt; t0=$(date +%s)
+  if ! "$S5" --numworkers "$WORKERS" sync --delete "${strategy[@]}" "${TUNE[@]}" "${EXCLUDES[@]}" \
+        "$LIB/" "s3://$BUCKET/$PREFIX/"; then
+    die "push failed - the archive still holds the previous contents"
+  fi
+  dt=$(( $(date +%s) - t0 ))
+  date -Iseconds > "$STATE/last-push"
+  log "pushed in ${dt}s"
+}
+
+# --- status --------------------------------------------------------------------
+cmd_status() {
+  local lb rb ro; lb=$(local_bytes); read -r rb ro < <(remote_du)
+  echo "  bucket    s3://$BUCKET/$PREFIX"
+  echo "  local     $(hb "$lb")  at $LIB"
+  echo "  archive   $(hb "$rb")  in ${ro:-0} objects"
+  echo "  restored  $(restored && echo "yes (this boot)" || echo "NO - push will refuse")"
+  echo "  last push $(cat "$STATE/last-push" 2>/dev/null || echo never)"
+  # S3 Standard, ap-south-2.
+  awk -v b="$rb" 'BEGIN{ g=b/1073741824; u=g*0.025;
+    printf "  cost      %.1f GB -> $%.2f/month (INR %.0f)\n", g, u, u*88 }'
+}
+
+# Exits 0 when a push would transfer nothing - i.e. the archive already matches
+# the disk that is about to be wiped. Uses s5cmd's own dry run rather than
+# comparing byte totals, so the answer comes from the same comparison the real
+# push would make.
+cmd_check() {
+  local out
+  out=$("$S5" --dry-run --numworkers "$WORKERS" sync --size-only --delete \
+          "${TUNE[@]}" "${EXCLUDES[@]}" "$LIB/" "s3://$BUCKET/$PREFIX/" 2>/dev/null)
+  if [[ -z ${out//[[:space:]]/} ]]; then
+    log "library is mirrored - nothing to push"
+    return 0
+  fi
+  log "NOT mirrored: $(grep -c . <<<"$out") object(s) differ from the archive"
+  return 1
+}
+
+case "${1:-status}" in
+  pull|restore) shift; cmd_pull "$@" ;;
+  check)        cmd_check ;;
+  push|sync)    shift; cmd_push "$@" ;;
+  status|"")    cmd_status ;;
+  *) echo "usage: cg-library [pull|push [--force|--verify]|check|status]" >&2; exit 1 ;;
+esac

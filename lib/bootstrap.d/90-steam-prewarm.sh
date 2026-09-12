@@ -47,7 +47,7 @@ cat > /usr/local/bin/steam-ensure-library.sh <<'EOF'
 #!/usr/bin/env bash
 set -uo pipefail
 LOG="$HOME/steam-prewarm.log"
-LIB="${STEAM_LIB_DIR:-/games/steam}"   # overridable so the logic can be tested off-box
+LIB="${STEAM_LIB_DIR:-/scratch/steam}"  # overridable so the logic can be tested off-box
 say() { echo "$(date -Iseconds) ensure-library: $*" >>"$LOG"; }
 
 export DISPLAY=:0
@@ -173,7 +173,7 @@ chmod 755 /usr/local/bin/steam-ensure-library.sh
 cat > /etc/systemd/system/steam-library.service <<'EOF'
 [Unit]
 Description=Keep the game library registered with Steam
-After=graphical.target steam-prewarm.service games-disk.service
+After=graphical.target steam-prewarm.service cg-library-restore.service
 
 [Service]
 Type=oneshot
@@ -316,8 +316,11 @@ chmod 755 /usr/local/bin/steam-prewarm.sh
 cat > /etc/systemd/system/steam-prewarm.service <<'EOF'
 [Unit]
 Description=Download and update the Steam client once, after the desktop is up
-After=graphical.target games-disk.service
-Requires=games-disk.service
+# The library is restored from S3 at boot; starting Steam before that
+# finishes would have it adopt a half-populated library and decide the
+# games are damaged.
+After=graphical.target cg-library-restore.service
+Requires=cg-library-restore.service
 
 [Service]
 Type=oneshot

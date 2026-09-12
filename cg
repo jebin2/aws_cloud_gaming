@@ -68,10 +68,10 @@ box() {
 # Only ever ADDS the key when absent: someone who deliberately set it to 0 keeps
 # that. And never while Moonlight runs - it does not re-read its config, and it
 # rewrites the file on exit, discarding anything changed underneath it.
-# Save games live inside the Proton prefix, in the Steam library on /games - so
-# they now survive a stop. Steam Cloud is still the thing that protects them
-# against a destroy, and Cloud only syncs when Steam shuts down cleanly, so ask
-# it to exit and give it time before stopping the box.
+# Save games live inside the Proton prefix, in the Steam library on /scratch -
+# so they survive a stop only by way of the S3 mirror, which runs after this.
+# Steam Cloud is the independent copy, and Cloud only syncs when Steam shuts
+# down cleanly, so ask it to exit and give it time before stopping the box.
 # Streaming is the charge that can exceed the instance, and `cg cost` cannot
 # help in the moment: Cost Explorer lags about a day. The box has the counter
 # already, so read it live and for free. Since boot, not since the session -
@@ -139,35 +139,246 @@ ensure_moonlight_syskeys() {
 }
 
 
+# The games live on the instance store now, which is wiped on every stop, so the
+# S3 archive is the only durable copy. The box mirrors continuously on a timer
+# and again from a pre-shutdown unit, but both of those run INSIDE a machine
+# that is about to disappear - and on a spot interruption there are two minutes
+# to work with. So anything initiated from here pushes first, from here, and
+# waits for it.
+box_state() {
+  [[ -n $INSTANCE_ID ]] || { echo none; return; }
+  ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+    --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo unknown
+}
+
+# What the archive holds, asked from HERE rather than from the box - which is
+# the only way to ask once the box is stopped or gone, and exactly when the
+# question matters most.
+archive_report() {
+  local b="${GAME_S3_BUCKET:-}"
+  [[ -n $b ]] || { log "no bucket in .env - cannot check the archive"; return 1; }
+  local out
+  out=$(aws s3 ls "s3://$b/steam/" --recursive --summarize 2>/dev/null | tail -2) || true
+  local n sz
+  n=$(awk '/Total Objects:/{print $3}' <<<"$out")
+  sz=$(awk '/Total Size:/{print $3}' <<<"$out")
+  printf '      archive s3://%s/steam holds %s objects, %s\n' \
+    "$b" "${n:-0}" "$(numfmt --to=iec --suffix=B "${sz:-0}" 2>/dev/null || echo "${sz:-0}B")"
+  [[ ${n:-0} -gt 0 ]]
+}
+
+library_push() { # library_push [--force]; 0 on a completed push
+  local extra="${1:-}"
+  tailscale ip -4 "$TS_NODE" >/dev/null 2>&1 || { log "box is not reachable - no push"; return 1; }
+  say "mirroring the game library to S3 before the box goes away"
+  box "/usr/local/bin/cg-library push $extra" 2>&1 | sed 's/^/      /'
+  return "${PIPESTATUS[0]}"
+}
+
+# Stopping wipes the instance store, exactly like destroying does, so it gets
+# the same gate. The push is here and in destroy and nowhere else: there is no
+# timer and no pre-shutdown hook, so if this does not run, the games are gone.
+# Which is why a failure stops the stop rather than printing a note next to it.
+# The push and its gate live in lib/game's down(), which every stop path goes
+# through - including the "stop instance now?" prompt at the end of `cg open`,
+# which does not come back through here. Duplicating the gate would mean two
+# pushes on `cg stop` and still none on that prompt.
+cmd_stop() {
+  local a
+  for a in "$@"; do
+    case $a in
+      --force) export CG_FORCE=1 ;;
+      *) die "unknown option '$a' for stop (only --force is accepted)" ;;
+    esac
+  done
+  steam_shutdown_for_cloud_sync
+  exec lib/game stop
+}
+
+cmd_library() {
+  case "${1:-status}" in
+    status|"")
+      need_node
+      box '/usr/local/bin/cg-library status' ;;
+    push|sync)
+      shift
+      need_node
+      box "/usr/local/bin/cg-library push $*" ;;
+    pull|restore)
+      shift
+      need_node
+      box "/usr/local/bin/cg-library pull $*" ;;
+    check)
+      need_node
+      box '/usr/local/bin/cg-library check' ;;
+    --bucket|bucket)
+      # Answerable without the box, which matters when it is gone: this is where
+      # the games are, and the one thing worth knowing then.
+      echo "${GAME_S3_BUCKET:-(not set - run cg init)}" ;;
+    *) die "usage: cg library [status|push [--force|--verify]|pull|check|--bucket]" ;;
+  esac
+}
+
 # `cg destroy` deliberately keeps the game volume. `--all` is the way to say
 # "no, everything" - and it has to be a real flag rather than a silently
 # ignored argument, or someone types it, sees "everything deleted", and keeps
 # paying INR 1,284/month for a volume they believe is gone.
 cmd_destroy() {
-  local all=0 a
+  local all=0 force=0 a
   for a in "$@"; do
     case $a in
-      --all) all=1 ;;
+      --all)   all=1 ;;
+      --force) force=1 ;;
       # Refuse anything else rather than ignore it: a typo like --everything
       # must not quietly behave as a plain destroy and leave the volume billing.
-      *) die "unknown option '$a' for destroy (only --all is accepted)" ;;
+      *) die "unknown option '$a' for destroy (--all and --force are accepted)" ;;
     esac
   done
-  if (( ! all )); then
-    lib/setup destroy
+  # --all means the games go too, so mirroring them to S3 first and then
+  # deleting the archive would be absurd. That path skips the push entirely.
+  if (( all )); then
+    destroy_everything "$force"
     return
   fi
-  local vol size
+
+  # Destroy takes the instance store with it, and that is where the games are.
+  # A failed push is not a warning to print and carry on past - it means the
+  # next `cg init` re-downloads everything, which is the exact problem this
+  # whole design exists to solve.
+  #
+  # But only a RUNNING box can be pushed from. Gating on the push regardless of
+  # state made destroying a stopped box impossible without --force, which would
+  # have trained the habit of passing --force to destroy.
+  local st; st=$(box_state)
+  if [[ $st == running ]]; then
+    if ! library_push; then
+      if (( ! force )); then
+        die "the library was not mirrored to S3 - destroying now would lose it. Fix it, or: cg destroy --force"
+      fi
+      log "WARNING: proceeding without a mirror (--force) - games will be re-downloaded"
+    fi
+  else
+    log "box is $st - nothing local to push"
+    archive_report || log "the archive is EMPTY - if you expected games in it, stop here"
+  fi
+  lib/setup destroy
+}
+
+# `--all` used to mean "the box and the EBS game volume". The games moved to S3,
+# so a flag that deleted the volume and left the archive billing was promising
+# "nothing left billing" while ignoring the only storage that still costs
+# anything - and, once that volume was gone, it was silently identical to a
+# plain destroy. It now deletes the ARCHIVE, which is the games.
+#
+# This is the single unrecoverable action in this repo: the archive is the only
+# copy, with no versioning and no snapshot. So it asks for a typed word rather
+# than trusting a flag - a mis-typed flag is exactly what must not reach here.
+destroy_everything() {
+  local force="${1:-0}" vol size b n sz out a i
+  b="${GAME_S3_BUCKET:-}"
   read -r vol size < <(ec2 describe-volumes --filters "Name=tag:Name,Values=${TS_HOST}-games" \
     --query 'Volumes[0].[VolumeId,Size]' --output text 2>/dev/null)
-  echo "--all: the game library volume goes too, with every game on it."
-  [[ -n ${vol:-} && $vol != None ]] && echo "        $vol  ${size} GB" || echo "        (none exists)"
+
+  echo "--all deletes the box AND every game you have."
   echo
-  lib/setup destroy
-  [[ -n ${vol:-} && $vol != None ]] || { log "no game volume to remove"; return 0; }
+  if [[ -n $b ]]; then
+    out=$(aws s3 ls "s3://$b/steam/" --recursive --summarize 2>/dev/null | tail -2) || true
+    n=$(awk '/Total Objects:/{print $3}' <<<"$out")
+    sz=$(awk '/Total Size:/{print $3}' <<<"$out")
+    printf '  game archive    s3://%s/steam  %s objects, %s\n' "$b" "${n:-0}" \
+      "$(numfmt --to=iec --suffix=B "${sz:-0}" 2>/dev/null || echo "${sz:-0}B")"
+    echo "                  THIS IS THE ONLY COPY - no versions, no snapshot, no undo"
+  else
+    echo "  game archive    (no bucket recorded in .env - nothing to delete)"
+  fi
+  [[ -n ${vol:-} && $vol != None ]] && printf '  old EBS volume  %s  %s GB\n' "$vol" "$size"
+  echo "  the box         everything cg destroy normally removes"
+  echo
+  if [[ -n $b ]]; then
+    echo "  the bucket      s3://$b itself"
+  fi
+  echo "  IAM            ${TS_HOST}-box role, and the ${TS_HOST}-watchdog user"
+  echo "                  (a long-lived key that can stop instances - it lives"
+  echo "                   in .env and on the off-site watchdog host)"
+  echo
+  echo "Nothing is left behind. cg init recreates all of it - the bucket name is"
+  echo "derived from your account, so it comes back identical."
+  echo
+  if (( ! force )); then
+    read -r -p "type DESTROY-ALL to confirm: " a
+    [[ $a == DESTROY-ALL ]] || { echo "aborted - nothing was deleted"; return 1; }
+  fi
+
+  CG_DESTROY_ALL=1 lib/setup destroy
+
+  if [[ -n $b ]]; then
+    say "deleting the game archive and its bucket s3://$b"
+    # --force empties the bucket first; a bucket with anything in it cannot be
+    # removed, and that includes incomplete multipart uploads, which appear in
+    # no listing and are the usual reason a "delete the bucket" step fails.
+    if aws s3 rb "s3://$b" --force >/dev/null 2>&1; then
+      log "bucket deleted - storage charges stop now"
+    else
+      log "could not delete the bucket; check: aws s3 ls s3://$b --recursive --summarize"
+      log "  incomplete multipart uploads also block it:"
+      log "  aws s3api list-multipart-uploads --bucket $b"
+    fi
+    # .env must not keep pointing at a bucket that no longer exists, or the next
+    # status prints a name for something deleted.
+    if [[ -f .env ]]; then
+      local tmp; tmp=$(mktemp)
+      grep -vE '^GAME_S3_BUCKET=' .env > "$tmp" 2>/dev/null || true
+      cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
+    fi
+  fi
+
+  # The role and instance profile cost nothing, but "--all" that leaves IAM
+  # objects behind is not --all. Order matters: a role cannot be deleted while
+  # it is in an instance profile or has an inline policy attached.
+  local prof="${TS_HOST}-box"
+  say "removing the instance role $prof"
+  aws iam remove-role-from-instance-profile --instance-profile-name "$prof" \
+    --role-name "$prof" >/dev/null 2>&1 || true
+  aws iam delete-instance-profile --instance-profile-name "$prof" >/dev/null 2>&1 || true
+  aws iam delete-role-policy --role-name "$prof" --policy-name library-rw >/dev/null 2>&1 || true
+  if aws iam delete-role --role-name "$prof" >/dev/null 2>&1; then
+    log "deleted role and instance profile $prof"
+  else
+    log "role $prof was already gone"
+  fi
+
+  # The off-site watchdog's user. This one is not about cost - it holds a
+  # long-lived access key that can call ec2:StopInstances, and it sits on an
+  # internet-facing VPS. "everything deleted" leaving a live AWS credential
+  # behind is the leftover that actually matters, and it survived --all until
+  # someone went looking for it.
+  local wd="${TS_HOST}-watchdog" k
+  if aws iam get-user --user-name "$wd" >/dev/null 2>&1; then
+    say "removing the off-site watchdog credential $wd"
+    for k in $(aws iam list-access-keys --user-name "$wd" \
+               --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null); do
+      [[ -n $k && $k != None ]] && aws iam delete-access-key --user-name "$wd" \
+        --access-key-id "$k" >/dev/null 2>&1 && log "revoked key $k"
+    done
+    aws iam delete-user-policy --user-name "$wd" --policy-name idle-stop >/dev/null 2>&1 || true
+    if aws iam delete-user --user-name "$wd" >/dev/null 2>&1; then
+      log "deleted IAM user $wd - that key can no longer stop anything"
+    else
+      log "could not delete $wd; check: aws iam list-access-keys --user-name $wd"
+    fi
+    if [[ -f .env ]]; then
+      local t2; t2=$(mktemp)
+      grep -vE '^GAME_WATCHDOG_AWS_(KEY_ID|SECRET)=' .env > "$t2" 2>/dev/null || true
+      cat "$t2" > .env; rm -f "$t2"; chmod 600 .env
+      log "cleared the watchdog key from .env"
+    fi
+    [[ -n ${GAME_WATCHDOG_HOST:-} ]] && \
+      log "the units on ${GAME_WATCHDOG_HOST} still exist - remove them with: cg watchdog remove"
+  fi
+
+  [[ -n ${vol:-} && $vol != None ]] || return 0
   # Terminating the instance detaches it, but AWS takes a moment to let go.
-  say "deleting the game library volume $vol"
-  local i
+  say "deleting the old game library volume $vol"
   for i in $(seq 1 40); do
     [[ $(ec2 describe-volumes --volume-ids "$vol" --query 'Volumes[0].State' \
          --output text 2>/dev/null) == available ]] && break
@@ -176,8 +387,7 @@ cmd_destroy() {
   if ec2 delete-volume --volume-id "$vol" >/dev/null 2>&1; then
     log "deleted $vol - storage charges stop now"
   else
-    log "could not delete $vol; it may still be attaching/detaching"
-    log "  retry with: cg games --delete"
+    log "could not delete $vol; retry with: cg games --delete"
   fi
 }
 
@@ -456,8 +666,8 @@ cmd_games() {
     --filters "Name=tag:Name,Values=${TS_HOST}-games" \
     --query 'Volumes[0].[VolumeId,AvailabilityZone,Size,State]' --output text 2>/dev/null)
   if [[ -z ${vol:-} || $vol == None ]]; then
-    echo "no game library volume exists yet - cg init creates one"
-    echo "size it with GAME_GAMES_GB in .env (default 160)"
+    echo "no EBS game volume exists - nothing billing."
+    echo "the game library lives in S3 now: cg library"
     return 0
   fi
   case "${1:-show}" in
@@ -465,13 +675,16 @@ cmd_games() {
       awk -v v="$vol" -v a="$az" -v s="$size" -v st="$state" 'BEGIN{
         m=s*0.0912;
         printf "  volume   %s  (%s)\n", v, st;
-        printf "  zone     %s   <- every instance is pinned here; EBS cannot cross AZs\n", a;
+        printf "  zone     %s\n", a;
         printf "  size     %s GB\n", s;
         printf "  cost     $%.2f/month (INR %.0f) - billed whether or not the box exists\n", m, m*88;
       }'
-      echo "  delete   cg games --delete   (permanent; the games go with it)" ;;
+      echo "  status   LEGACY - nothing mounts or attaches this any more."
+      echo "           the library is in S3: cg library"
+      echo "  delete   cg games --delete   (permanent; anything left on it goes too)" ;;
     --delete|delete)
       [[ $state == available ]] || die "volume is $state - stop or destroy the instance first"
+      echo "Nothing uses this volume any more; the games are in S3 (cg library)."
       echo "This permanently deletes $vol and every game on it."
       read -r -p "type DELETE to confirm: " a
       [[ $a == DELETE ]] || { echo "aborted"; return 1; }
@@ -622,16 +835,19 @@ cg - cloud gaming rig
 build (changes things)
   cg init                    build everything; reuses an existing box   [costs money]
   cg open                    start, stream, stop on exit                [costs money]
-  cg stop                    stop the instance - this ends hourly billing
+  cg stop                    mirror the games to S3, then stop - ends hourly billing
   cg status                  instance, disks, guards, tailnet, ping
-  cg games                   the persistent game library volume and its cost
-  cg games --delete          delete it and every game on it            [permanent]
+  cg library                 what is on the box vs in S3, and what it costs
+  cg library push            mirror the games to S3 now (--verify for a full pass)
+  cg library pull            restore the games from S3 now
+  cg library check           is the disk mirrored? (no upload)
+  cg games                   the OLD EBS volume, if you still have one
+  cg games --delete          delete it and reclaim INR ~1,284/month    [permanent]
   cg snapshot                save an AMI of the current box             [bills monthly]
   cg snapshot --list         what images exist and what they cost
-  cg snapshot --delete <id>  delete an image and its snapshots
-  cg clean                   free space: apt caches, logs, /scratch (not /games)
-  cg destroy                 delete the box, no confirmation (game volume survives)
-  cg destroy --all           the box AND the game volume - nothing left billing
+  cg clean                   free space: apt caches, logs, /scratch/tmp
+  cg destroy                 mirror the games to S3, then delete the box
+  cg destroy --force         destroy even if the mirror failed - loses the games
 
 info (read-only)
   cg check                   every preflight check, creates nothing
@@ -652,14 +868,18 @@ EOF
 case "$CMD" in
   init)      watchdog_ensure; exec lib/setup ;;
   check)     exec lib/setup check ;;
-  status)    lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true; stream_usage ;;
+  status)    lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true
+             tailscale ip -4 "$TS_NODE" >/dev/null 2>&1 \
+               && { echo; echo "game library"; box '/usr/local/bin/cg-library status' 2>/dev/null || true; }
+             stream_usage ;;
   cost)      exec lib/setup cost ;;
   clean)     exec lib/setup clean ;;
   destroy)   cmd_destroy "$@" ;;
   open|up)   ensure_moonlight_syskeys; exec lib/game up ;;
-  stop|down) steam_shutdown_for_cloud_sync; exec lib/game stop ;;
+  stop|down) cmd_stop "$@" ;;
   snapshot)  cmd_snapshot "$@" ;;
   games)     cmd_games "$@" ;;
+  library|lib) cmd_library "$@" ;;
   watchdog)  cmd_watchdog "$@" ;;
   log|logs)  cmd_log "$@" ;;
   ssh)       if [[ $# -gt 0 ]]; then box "$@"; else need_node; exec ssh -i "$KEY" \

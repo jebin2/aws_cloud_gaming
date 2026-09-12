@@ -68,9 +68,35 @@ Two disks, deliberately:
   caches. Free, local NVMe, much faster than EBS. **Wiped on every stop**, filesystem included,
   so it is reformatted at each boot.
 
+- **S3 bucket** (`cg-library-<hash>`) - the durable copy of the game library. Regional, so it
+  pins no availability zone, and ~INR 310/month for 140 GB against INR 1,284 for the EBS volume
+  it replaced.
+
 `/scratch/steam` is registered as a Steam **library folder**, so the client persists on the
-root volume while games do not.
-This is why the root volume stays clean no matter what you install.
+root volume while games do not. This is why the root volume stays clean no matter what you
+install.
+
+The instance store being wiped on stop is survivable only because of the S3 mirror, which is a
+fourth thing that has to be right:
+
+- `cg-library-restore.service` pulls at boot, started at the **top** of the build with
+  `--no-block` so a ~10 minute restore overlaps the ~10 minute NVIDIA driver install rather
+  than following it. The readiness marker is ordered after it.
+- The **explicit push** runs from `lib/game`'s `down()` - reached by `cg stop`, by the "stop
+  instance now?" prompt at the end of `cg open`, and by the pre-image stop in destroy - and from
+  `cg destroy`. Both gate on it: a failed push aborts the stop or the destroy rather than
+  warning beside it.
+- `cg-library-shutdown.service` pushes from `ExecStop`. This is the layer that makes the
+  **automatic** stops safe: layers 2, 3 and 4 all stop the box without anyone typing a command,
+  and all three end in a graceful OS shutdown, so all three arrive here.
+- There is **no periodic timer**, by choice - nothing uploads while you are playing. The
+  remaining exposure is a stop that is not graceful: a spot interruption gives about two minutes,
+  a hard power-off gives none.
+
+The box reaches S3 through an **EC2 instance role**, not an access key: it is the one machine
+here that can borrow an identity from AWS, so there is no secret to leak or rotate. The role is
+scoped to that single bucket. The off-site watchdog still uses a long-lived key because it runs
+outside AWS and has no role to borrow.
 
 ## Where cost control sits
 

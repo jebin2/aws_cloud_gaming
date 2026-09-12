@@ -11,18 +11,31 @@ TS_HOST="${GAME_TS_HOST:-gamevps}"
 TYPE="${GAME_INSTANCE_TYPE:-g6.xlarge}"
 DISK_GB="${GAME_DISK_GB:-100}"
 SPOT="${GAME_SPOT:-0}"
-# Persistent game library. Lives on its own EBS volume so the instance - and its
-# root disk - can be destroyed between sessions while the games stay. An EBS
-# volume is locked to one AZ, so once this exists its AZ decides where every
-# future instance launches.
-GAMES_GB="${GAME_GAMES_GB:-160}"
-GAMES_TAG="${TS_HOST}-games"
+# Persistent game library. Held in S3 and restored onto the instance store at
+# boot - see lib/library-aws.sh for why, and 16-library.sh for how. It used to
+# be a 160 GB EBS volume, which billed INR 1,284/month whether or not the box
+# existed and pinned every launch to the volume's AZ. Nothing pins the AZ now.
+GAMES_TAG="${TS_HOST}-games"   # the old volume, if one still exists: cg games
+INSTANCE_PROFILE="${TS_HOST}-box"
 KEY_NAME="$TS_HOST"
 KEY_FILE="$HOME/.ssh/${TS_HOST}.pem"
 SG_NAME="${TS_HOST}-sg"
 TS_AUTHKEY="${GAME_TS_AUTHKEY:?set GAME_TS_AUTHKEY (Tailscale pre-auth key)}"
 
 ec2() { aws ec2 "$@" --region "$REGION"; }
+
+# The bucket and the instance role the box needs, created before the launch that
+# references the profile. Idempotent, so this is also the repair path.
+echo "==> ensuring the S3 game library and the box's instance role"
+S3_BUCKET=$(GAME_REGION="$REGION" GAME_TS_HOST="$TS_HOST" bash lib/library-aws.sh) \
+  || { echo "could not set up the game library bucket/role"; exit 1; }
+# Checked, not trusted. This value is substituted into user-data by sed and then
+# into the box's config; anything unexpected in it either breaks the render with
+# a cryptic sed error or, worse, renders and points the box at the wrong place.
+[[ $S3_BUCKET =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] \
+  || { echo "library setup returned something that is not a bucket name:"; \
+       printf '%s\n' "$S3_BUCKET" | sed 's/^/    /'; exit 1; }
+echo "    s3://$S3_BUCKET"
 
 existing=$(ec2 describe-instances \
   --filters "Name=tag:Name,Values=$TS_HOST" \
@@ -101,11 +114,24 @@ else
     # watchdog is installed by the build itself rather than over ssh afterwards.
     # The remote watchdog runs on an always-on VPS, not on the box, so it must
     # not ride along in user-data - it cost ~2 KB of a 16 KB budget.
-    HOST_TGZ_B64=$(tar -cz -C host --exclude='remote-watchdog.*' . 2>/dev/null | base64 -w0)
+    # The same comment-stripping as above, for the same reason and with one
+    # extra: base64 of a gzip is incompressible, so every byte of host/ costs a
+    # full byte of the 16 KB budget while the modules around it cost ~40% of
+    # one. Stripping host/ is worth roughly four times as much per line.
+    HOST_SRC=$(mktemp -d)
+    tar -c -C host --exclude='remote-watchdog.*' -f - . | tar -x -C "$HOST_SRC"
+    for f in "$HOST_SRC"/*; do
+      [[ -f $f ]] || continue
+      grep -vE '^[[:space:]]*#([^!]|$)' "$f" > "$f.stripped" && mv "$f.stripped" "$f"
+    done
+    chmod 755 "$HOST_SRC"/*.sh "$HOST_SRC"/cg-library 2>/dev/null || true
+    HOST_TGZ_B64=$(tar -cz -C "$HOST_SRC" . 2>/dev/null | base64 -w0)
+    rm -rf "$HOST_SRC"
     cat "${parts[@]}" \
       | grep -vE '^[[:space:]]*#([^!]|$)' \
       | sed -e "s|__TS_AUTHKEY__|$TS_AUTHKEY|" -e "s|__TS_HOST__|$TS_HOST|" \
-            -e "s|__HOST_TGZ_B64__|$HOST_TGZ_B64|" > "$USERDATA"
+            -e "s|__HOST_TGZ_B64__|$HOST_TGZ_B64|" \
+            -e "s|__S3_BUCKET__|$S3_BUCKET|" > "$USERDATA"
     echo "    assembled ${#parts[@]} modules"
     # EC2 caps user-data at 16 KB, which bootstrap.sh outgrew. cloud-init
     # detects the gzip magic bytes and decompresses on its own, so shipping it
@@ -117,16 +143,10 @@ else
     UD=(--user-data "fileb://${USERDATA}.gz")
   fi
 
-  # A game volume, if it exists, dictates the AZ: EBS cannot cross one.
-  GAMES_VOL=$(ec2 describe-volumes --filters "Name=tag:Name,Values=$GAMES_TAG" \
-    --query 'Volumes[0].VolumeId' --output text 2>/dev/null || echo None)
+  # No AZ pinning. S3 is regional, so any zone will do - which materially
+  # improves the odds on a spot launch, since InsufficientInstanceCapacity is
+  # per-AZ and the old game volume used to force one specific zone.
   PLACE=()
-  if [[ -n $GAMES_VOL && $GAMES_VOL != None ]]; then
-    GAMES_AZ=$(ec2 describe-volumes --volume-ids "$GAMES_VOL" \
-      --query 'Volumes[0].AvailabilityZone' --output text)
-    echo "==> game volume $GAMES_VOL in $GAMES_AZ - pinning the instance there"
-    PLACE=(--placement "AvailabilityZone=$GAMES_AZ")
-  fi
 
   MARKET=()
   if [[ $SPOT == 1 ]]; then
@@ -142,20 +162,43 @@ else
   # shutdown-behaviour is set at launch, not after: the watchdog issues
   # `shutdown -h`, and a window where that means "terminate" would destroy
   # the machine and its disk.
-  INSTANCE_ID=$(ec2 run-instances \
-    --image-id "$AMI" \
-    --instance-type "$TYPE" \
-    --key-name "$KEY_NAME" \
-    --security-group-ids "$SG" \
-    --instance-initiated-shutdown-behavior stop \
-    --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=$DISK_GB,VolumeType=gp3,DeleteOnTermination=true}" \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$TS_HOST}]" \
-    ${UD[@]+"${UD[@]}"} \
-    ${MARKET[@]+"${MARKET[@]}"} \
-    ${PLACE[@]+"${PLACE[@]}"} \
-    --query 'Instances[0].InstanceId' --output text) || {
+  # A freshly created instance profile is not immediately usable by
+  # run-instances - IAM is eventually consistent, and the first call after
+  # creating one fails with "Invalid IAM Instance Profile name" for a few
+  # seconds. Retried here rather than left as an init that fails once and works
+  # when you run it again, which is the kind of thing that gets diagnosed as
+  # flakiness instead of propagation.
+  launch() {
+    ec2 run-instances \
+      --image-id "$AMI" \
+      --instance-type "$TYPE" \
+      --key-name "$KEY_NAME" \
+      --security-group-ids "$SG" \
+      --iam-instance-profile "Name=$INSTANCE_PROFILE" \
+      --instance-initiated-shutdown-behavior stop \
+      --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=$DISK_GB,VolumeType=gp3,DeleteOnTermination=true}" \
+      --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$TS_HOST}]" \
+      ${UD[@]+"${UD[@]}"} \
+      ${MARKET[@]+"${MARKET[@]}"} \
+      ${PLACE[@]+"${PLACE[@]}"} \
+      --query 'Instances[0].InstanceId' --output text
+  }
+  ERRF=$(mktemp); trap 'rm -f "$USERDATA" "${USERDATA}.gz" "$ERRF"' EXIT
+  INSTANCE_ID=""
+  for attempt in 1 2 3 4 5 6; do
+    if INSTANCE_ID=$(launch 2>"$ERRF"); then break; fi
+    INSTANCE_ID=""
+    if grep -q 'Invalid IAM Instance Profile' "$ERRF"; then
+      echo "    instance profile $INSTANCE_PROFILE not visible yet (attempt $attempt) - waiting"
+      sleep 5
+      continue
+    fi
+    break
+  done
+  if [[ -z $INSTANCE_ID ]]; then
+      cat "$ERRF" >&2
       echo ""
-      echo "launch failed. The three things this is usually:"
+      echo "launch failed. The things this is usually:"
       echo ""
       echo "  MaxSpotInstanceCountExceeded, right after a destroy"
       echo "    AWS releases the spot vCPU quota a minute or two AFTER the instance"
@@ -169,53 +212,46 @@ else
       echo "      GAME_SPOT=0 cg init"
       echo ""
       echo "  InsufficientInstanceCapacity"
-      echo "    The game volume pins the AZ - EBS cannot cross one - and that AZ is"
-      echo "    full right now. On-demand in the same AZ is far more likely to fit:"
+      echo "    No spare $TYPE capacity right now. Nothing pins the AZ any more, so"
+      echo "    this is the whole region being short. On-demand usually fits:"
       echo "      GAME_SPOT=0 cg init"
       echo ""
+      echo "  AccessDenied on iam:PassRole"
+      echo "    Launching with an instance profile needs iam:PassRole for"
+      echo "    $INSTANCE_PROFILE. Without it the box cannot reach S3 and the"
+      echo "    game library will not survive a stop."
+      echo ""
       exit 1
-    }
+  fi
   echo "    $INSTANCE_ID"
 fi
 
-# --- persistent game library volume -------------------------------------------
-# Created in the instance's own AZ the first time, then reused forever. Never
-# deleted by `cg destroy` - only by `cg games --delete`.
-INST_AZ=$(ec2 describe-instances --instance-ids "$INSTANCE_ID" \
-  --query 'Reservations[0].Instances[0].Placement.AvailabilityZone' --output text)
-GAMES_VOL=$(ec2 describe-volumes --filters "Name=tag:Name,Values=$GAMES_TAG" \
-  --query 'Volumes[0].VolumeId' --output text 2>/dev/null || echo None)
-if [[ -z $GAMES_VOL || $GAMES_VOL == None ]]; then
-  echo "==> creating the ${GAMES_GB}GB game library volume in $INST_AZ"
-  GAMES_VOL=$(ec2 create-volume --availability-zone "$INST_AZ" \
-    --size "$GAMES_GB" --volume-type gp3 \
-    --tag-specifications "ResourceType=volume,Tags=[{Key=Name,Value=$GAMES_TAG}]" \
-    --query VolumeId --output text)
-  echo "    $GAMES_VOL"
-  aws ec2 wait volume-available --region "$REGION" --volume-ids "$GAMES_VOL"
+# --- the instance role, on a reused instance -----------------------------------
+# A box launched before the library moved to S3 has no instance profile, and
+# without one the restore and the push both fail with a permission error 10
+# minutes into a download. Attaching it to a running instance is allowed, so
+# repair it here rather than requiring a rebuild.
+assoc=$(ec2 describe-iam-instance-profile-associations \
+  --filters "Name=instance-id,Values=$INSTANCE_ID" "Name=state,Values=associated,associating" \
+  --query 'IamInstanceProfileAssociations[0].AssociationId' --output text 2>/dev/null || echo None)
+if [[ -z $assoc || $assoc == None ]]; then
+  echo "==> attaching instance profile $INSTANCE_PROFILE to $INSTANCE_ID"
+  aws ec2 wait instance-running --region "$REGION" --instance-ids "$INSTANCE_ID" || true
+  ec2 associate-iam-instance-profile --instance-id "$INSTANCE_ID" \
+    --iam-instance-profile "Name=$INSTANCE_PROFILE" >/dev/null 2>&1 \
+    || echo "    could not attach it - the box will not reach S3 (needs iam:PassRole)"
 fi
 
-state=$(ec2 describe-volumes --volume-ids "$GAMES_VOL" \
-  --query 'Volumes[0].State' --output text)
-if [[ $state == available ]]; then
-  # AttachVolume refuses a pending instance: "IncorrectState: Instance is not
-  # 'running'". The first build never hit this only because resolving the AMI
-  # and creating the key and security group took long enough to hide it - a
-  # fast destroy-then-init exposes it immediately.
-  echo "==> waiting for $INSTANCE_ID to be running before attaching"
-  aws ec2 wait instance-running --region "$REGION" --instance-ids "$INSTANCE_ID" \
-    || { echo "instance never reached running - cannot attach the game volume"; exit 1; }
-  echo "==> attaching $GAMES_VOL"
-  ec2 attach-volume --volume-id "$GAMES_VOL" --instance-id "$INSTANCE_ID" \
-    --device /dev/sdf >/dev/null
-  aws ec2 wait volume-in-use --region "$REGION" --volume-ids "$GAMES_VOL"
-elif [[ $state == in-use ]]; then
-  echo "    $GAMES_VOL already attached"
+# The old EBS game volume is deliberately NOT attached any more: nothing mounts
+# it, and attaching it would re-pin the AZ for no benefit. It is not deleted
+# either - deleting storage that might hold the only copy of something is not a
+# thing to do silently. `cg games` shows what it still costs and removes it.
+old_vol=$(ec2 describe-volumes --filters "Name=tag:Name,Values=$GAMES_TAG" \
+  --query 'Volumes[0].VolumeId' --output text 2>/dev/null || echo None)
+if [[ -n $old_vol && $old_vol != None ]]; then
+  echo "==> note: the old EBS game volume $old_vol still exists and still bills"
+  echo "    it is no longer used or attached - reclaim it with: cg games --delete"
 fi
-# DeleteOnTermination must stay false, or terminating the box takes the games.
-ec2 modify-instance-attribute --instance-id "$INSTANCE_ID" \
-  --block-device-mappings "[{\"DeviceName\":\"/dev/sdf\",\"Ebs\":{\"DeleteOnTermination\":false}}]" \
-  2>/dev/null || true
 
 # Update our own keys in place. .env may hold values this script did not put
 # there (auth keys, for one), so it must never be truncated.

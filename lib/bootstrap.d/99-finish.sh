@@ -10,7 +10,11 @@ progress "finishing up"
 cat > /etc/systemd/system/cloud-gaming-ready.service <<'EOF'
 [Unit]
 Description=Signal that the streaming desktop is up
-After=graphical.target
+# Also after the library restore: the marker is what `cg init` waits for, and
+# reporting the box ready while 140 GB is still arriving would send you to a
+# Steam that thinks nothing is installed.
+After=graphical.target cg-library-restore.service
+Wants=cg-library-restore.service
 
 [Service]
 Type=oneshot

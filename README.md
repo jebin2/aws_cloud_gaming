@@ -130,13 +130,20 @@ reimplementing them.
 |---|---|
 | `cg init` | Build everything; reuses an existing box. **Costs money** |
 | `cg open` | Start, stream, stop on exit. **Costs money** |
-| `cg stop` | Stop the instance - ends hourly billing |
-| `cg status` | Instance, disks, guards, tailnet, local tools |
+| `cg stop` | Mirror the games to S3, then stop the instance - ends hourly billing |
+| `cg status` | Instance, disks, guards, tailnet, game library, local tools |
+| `cg library` | What is on the box vs in S3, and what the archive costs |
+| `cg library push` | Mirror the games to S3 now (`--verify` for a full comparison) |
+| `cg library pull` | Restore the games from S3 now |
+| `cg games` | The **old** EBS volume, if you still have one, and its monthly cost |
+| `cg games --delete` | Delete it and reclaim ~INR 1,284/month. **Permanent** |
 | `cg snapshot` | Save an AMI of the box. **Bills monthly** |
 | `cg snapshot --list` | What images exist and what they cost |
 | `cg snapshot --delete <id>` | Delete an image **and its backing snapshots** |
-| `cg clean` | Free space: apt caches, logs, `/scratch`. **Deletes installed games** |
-| `cg destroy` | Delete everything. No confirmation |
+| `cg clean` | Free space: apt caches, logs, `/scratch/tmp`. Games are not touched |
+| `cg destroy` | Mirror the games to S3, then delete the box. **Refuses if the mirror fails** |
+| `cg destroy --force` | Destroy even if the mirror failed - **loses the games** |
+| `cg destroy --all` | The box, the archive, **the bucket and the IAM role**. Asks you to type `DESTROY-ALL` |
 | `cg check` | Every preflight check, creates nothing |
 | `cg cost` | Month-to-date spend and what still bills |
 | `cg log [what] [--watch]` | `build` \| `steam` \| `watchdog` \| `disk` \| `sunshine` |
@@ -415,54 +422,154 @@ effects were not separated. The honest claim is narrow: it frees close to a core
 It persists across stop/start (it lives on the root volume) but is lost on `cg destroy`, so
 redo it after a rebuild. It cannot be scripted - Steam does not expose it as a config key.
 
-## Games live on their own volume
+## Where the games live
 
-The Steam library sits on a **separate EBS volume** mounted at `/games`, sized by
-`GAME_GAMES_GB` (default 160 GB). That volume is the only thing here worth keeping, and keeping
-it separate is what makes the rest disposable:
+On **local NVMe** (`/scratch/steam`), mirrored to **S3**. The instance store is the fastest disk
+on the box and costs nothing, and it is wiped on every *stop* - so the S3 archive is the durable
+copy, and the box restores from it at boot.
 
-- `cg destroy` deletes the instance, its root disk, the key, the security group and the budget -
-  and **keeps the game volume**. Rebuilding takes ~7 minutes and the games are already there.
-- The **Proton prefix lives there too**, so save games survive even without Steam Cloud.
-- So does the **shader cache**, which is minutes of saturated CPU to rebuild.
+The restore starts at the **top** of the build and runs in the background while everything else
+installs, so it overlaps the NVIDIA driver rather than being a wait of its own. The readiness
+marker waits for it, so `cg init` reports the box ready when the games are actually there.
 
-It bills whether or not the box exists: 160 GB is **$14.59/month (~INR 1,284)**. `cg games`
-shows the cost; `cg games --delete` removes it and every game on it.
+    cg library              what is local, what is archived, what it costs
+    cg library push         mirror now  (--verify for a full comparison)
+    cg library pull         restore now
+    cg library --bucket     the bucket name, answerable with the box gone
 
-**An EBS volume cannot cross availability zones.** Once the volume exists, its AZ decides where
-every future instance launches - `provision.sh` pins placement to it. If spot capacity in that
-AZ is exhausted the launch fails saying so, and `GAME_SPOT=0 cg init` gets you on-demand in the
-same zone.
+**The archive is the only copy.** It is written in three places, and not a fourth:
 
-### Why not the free instance store?
+1. **`cg stop`** - and the "stop instance now?" prompt at the end of `cg open`
+2. **`cg destroy`**
+3. **`cg-library-shutdown.service`**, from `ExecStop`, as the machine goes down
 
-The earlier design put games on the instance NVMe, which costs nothing - and it was the worst
-thing about this rig. `/scratch` is reformatted on every *stop*, so each session began with a
-**~75 minute re-download** of a 140 GB game, plus rebuilding the shader cache. `/scratch` still
-exists for temp files and browser downloads, where losing everything on stop is fine.
+(1) and (2) **refuse to proceed** if the push fails, rather than printing a warning next to the
+thing that just lost your games; `--force` overrides and says what it costs.
 
-The instance store is genuinely faster (measured **370 MB/s** against gp3's 125 MB/s baseline),
-so load screens are slower on EBS. You can buy throughput back at **$0.0456 per MB/s-month** -
-+125 MB/s is about INR 502/month - but try it first; it is adjustable on a live volume.
+(3) is not redundant cover. The box stops itself **three ways nobody typed** - the on-host idle
+watchdog's `shutdown -h`, the CloudWatch alarm, and the off-site watchdog - and the last two call
+`StopInstances`, which AWS turns into a graceful OS shutdown. All three arrive at `ExecStop`, so
+one unit covers all of them. Without it, every automatic stop would wipe the instance store and
+lose whatever was installed since the last explicit stop.
 
-**What `/scratch` is for now.** Very little, honestly: browser downloads and temp files. It used
-to hold the Steam library, which is why much of this project is about surviving its wipe - the
-library marker, the shader cache, the re-download every session. All of that moved to `/games`.
+There is deliberately **no periodic timer**. An earlier version pushed every 10 minutes; nothing
+should be uploading a game library, and propagating deletions while doing it, while you are
+playing. The remaining exposure is a stop that is not graceful - a **spot interruption** gives
+about two minutes, which will not upload a large library, and a hard power-off gives none.
+`cg library push` takes a checkpoint whenever you want one, and `cg library check` asks whether
+the disk matches the archive without uploading anything.
 
-What is left is 232 GB of free, fast, disposable space. Useful if you want it; nothing depends
-on it. `cg clean` wipes it and does not touch `/games`.
+The explicit push is wired into `lib/game`'s `down()`, not into `cg stop`, because the "stop
+instance now?" prompt at the end of `cg open` calls `down()` directly and never comes back
+through `cg`. Putting the gate in the CLI would have meant two pushes on `cg stop` and none on
+the path people actually use.
+
+### Measured numbers
+
+On a `g6.xlarge` in `ap-south-2`:
+
+| Shape | Direction | Rate |
+|---|---|---|
+| 10 GB in 10 x 1 GiB objects | archive | **508 MB/s** (4.1 Gbps) |
+| 10 GB in 10 x 1 GiB objects | restore | **235 MB/s** (1.9 Gbps) |
+| 2.9 GB in 13,271 real game files | archive | **140 MB/s** |
+
+**Object shape matters more than bandwidth.** The same code moves 1 GiB objects at 508 MB/s and
+a real game library at 140 MB/s, because 13,271 objects is 13,271 requests. Treat the big-object
+numbers as an upper bound you will not see; a 140 GB library of mixed file sizes should land
+somewhere between, which is why the restore is hidden inside the build rather than timed
+precisely. The first benchmark here reported only the 1 GiB figure, and it was misleading in
+both throughput *and* memory - see below.
+
+### Why not an EBS volume
+
+That is what this replaced. A 160 GB gp3 volume mounted at `/games` did survive a stop on its
+own, and it cost:
+
+- **$14.59/month (~INR 1,284)**, billed whether or not the box existed
+- **one availability zone, forever** - EBS cannot cross AZs, so the volume's zone decided where
+  every future instance launched, and `InsufficientInstanceCapacity` in that zone failed the
+  launch outright
+
+The same library in S3 Standard is **~INR 310/month** and pins nothing, which materially
+improves the odds on a spot launch. The cost is the ~10 minute restore, which is why it was
+worth the work to hide it inside the build.
+
+If you still have that volume, it is **not** attached or mounted any more, and it is **not**
+deleted either - `cg games` shows what it still costs and `cg games --delete` reclaims it.
+
+### Deleting all of it
+
+`cg destroy --all` removes the box, the archive, **the bucket and the `<host>-box` IAM role** -
+and asks you to type `DESTROY-ALL` first, because the archive is the only copy of the games and
+there is no versioning behind it. It skips the mirror entirely, since pushing games to S3 and
+then deleting the archive would be nonsense.
+
+It leaves nothing behind on purpose. An earlier version kept the empty bucket and the role,
+reasoning that both are free and the names are deterministic - but that is an argument for a
+leftover being harmless, not for a command called `--all` producing one. `cg init` recreates all
+of it, and because the bucket name is derived from your account id it comes back identical.
+
+One consequence of that identical name: S3 holds a deleted bucket name for a few minutes, and
+recreating it fails with `OperationAborted` in the meantime. `library-aws.sh` waits that out
+(8 attempts, 15s apart) rather than failing an init that would have worked on the second run.
+
+### The guards, and why they exist
+
+`push` propagates local deletions to S3 (`--delete`), and the local copy lives on a disk that
+vanishes on stop. A push against an empty `/scratch` would therefore delete the archive. So:
+
+- push **refuses** unless a restore completed on this boot. A failed restore writes no marker.
+- push **refuses** when the local library is less than half the archive.
+- pull **refuses** if `/scratch` is not a mountpoint, which would fill the root disk.
+- the restore marker records **which boot** restored the library, so a marker left on the root
+  volume by a previous boot cannot vouch for an instance store that has since been wiped.
+
+`./tests/library.sh` covers all of them - 41 assertions against a stubbed `s5cmd`. It is worth
+saying why that file is unusually paranoid: the first live test of this code **deleted a real
+250 MB archive**. The object count was parsed from `s5cmd du`, whose output ends `... in 2
+objects:` with a colon; the parser matched the bare word, read 0 forever, and the size guard was
+conditioned on that count. The unit test passed because the stub emitted a format I had assumed
+rather than the one s5cmd prints. Both were fixed: the guards key off *bytes*, and the stub is
+now byte-for-byte the real output.
+
+### Comparison is size-only
+
+`s5cmd sync` compares modification times by default, and a freshly restored file is always
+*newer* than the S3 object it came from - so the next push would re-upload the entire library,
+every session. Both directions use `--size-only`, which makes them idempotent (verified: a push
+straight after a pull transfers nothing).
+
+The trade-off is real: a game patch that rewrites a file to exactly the same length is not
+noticed. `cg library push --verify` does a full comparison; run it after a big game update if
+you want certainty.
+
+### What `/scratch` also holds
+
+Browser downloads and temp files, in `/scratch/tmp` and `/scratch/downloads`. `cg clean` clears
+**only those two directories** by name - it used to wipe everything directly under `/scratch`,
+which was safe when the games were on a separate volume and is now the fastest way to delete a
+140 GB library and have the mirror faithfully propagate the deletion.
+
+The NVIDIA and DXVK shader caches sit on the root volume (`~/.cache`), so they survive a reboot
+but not a destroy. The Fossilize cache that matters most is *inside* the library, at
+`steamapps/shadercache`, and is mirrored with it.
 
 ## Layout
 
     cg                 the front door - every command
     setup, game        what cg dispatches into
     lib/               provisioning and cloud-init internals
-    host/              units deployed to the instance (watchdog, disk monitor)
+    host/              units deployed to the instance (watchdog, disk monitor, S3 mirror)
     tests/             offline tests for the fiddly host-side logic
     docs/              architecture and troubleshooting
 
 `./tests/steam-library.sh` checks the Steam library registration - the part that has broken
 most often - against a faked Steam install, so it can be verified without spending a build.
+`./tests/library.sh` does the same for the S3 mirror's refusals, which is the code whose failure
+mode is losing every game rather than an error message. `./tests/destroy-all.sh` covers
+`cg destroy --all`, the one command that can delete the archive - proving that path with stubs
+rather than by performing it, which is a lesson learned the hard way.
 
 ## Further reading
 

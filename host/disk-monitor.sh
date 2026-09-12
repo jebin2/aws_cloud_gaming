@@ -33,6 +33,6 @@ if [[ -n $uid ]]; then
   sudo -u ubuntu \
     DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
     notify-send -u critical "Disk almost full" \
-    "Root volume is ${root_pct}% full (${root_use}). Games belong on /games." \
+    "Root volume is ${root_pct}% full (${root_use}). Games belong in /scratch/steam." \
     2>/dev/null || true
 fi

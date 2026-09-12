@@ -1,0 +1,27 @@
+[Unit]
+Description=Restore the Steam library from S3 onto the instance store
+# The instance store is empty on every boot, so this is not a first-run step -
+# it runs every time. Ordered after the mount it writes into, and after the
+# network it reads over.
+Requires=scratch-disk.service
+After=scratch-disk.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# As ubuntu, not root: the files have to be writable by the user Steam runs as,
+# and chowning 140 GB afterwards is work for nothing. Instance-profile
+# credentials come from the metadata service, which any local user can read.
+User=ubuntu
+Group=ubuntu
+ExecStart=/usr/local/bin/cg-library pull
+# ~140 GB at the measured 235 MB/s is about 10 minutes; allow for a slow day.
+TimeoutStartSec=3600
+# A hard backstop under the tuned s5cmd flags. A restore that grows its memory
+# use must die on its own rather than have the OOM killer pick a victim - which,
+# on a box whose whole purpose is the game running next to it, would not be this.
+MemoryMax=3G
+
+[Install]
+WantedBy=multi-user.target
