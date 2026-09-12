@@ -417,15 +417,15 @@ Sunshine runs the resolution prep command and starts **NvFBC capture the instant
 If X is still mid-modeset, capture fails outright - so the session connects, sends no video at
 all, and the client is dropped a second later.
 
-Worse, on this headless X server the mode change **can never succeed**. With
-`AllowEmptyInitialConfiguration` and a fixed `Virtual`, the NVIDIA driver refuses every CRTC
-reconfiguration:
+Mode changes also failed outright at that point, with:
 
     xrandr: Configure crtc 0 failed
     X Error of failed request: BadMatch
 
-- including setting the mode it is already in. The script was fighting a server that always
-says no, and every attempt was what put X in modeset in the first place.
+- including setting the mode X was already in. That looked like a limit of the headless config.
+It was not: **DRM KMS was holding the CRTCs** (see below). Turning it off fixed both symptoms at
+once - NvFBC can capture, and xrandr can reconfigure - so the display does follow whatever
+resolution the client asks for.
 
 `set-resolution.sh` now: returns immediately when the requested size already matches (the
 common case at 1080p); uses the mode X already advertises rather than creating a duplicate
@@ -433,8 +433,8 @@ modeline (`--newmode` on an existing name fails `BadName`, then `--addmode` fail
 and **gives up the moment the server refuses**, logging why to `/var/log/set-resolution.log`.
 Sunshine then captures at 1080p and the client scales, which costs nothing.
 
-**The display is effectively fixed at 1920x1080.** Set Moonlight to 1080p and no mode change is
-attempted at all.
+The defensive behaviour is still worth keeping: it costs nothing when the mode already matches,
+and it fails fast rather than stalling a session if a server ever does refuse.
 
 **But that was not the real cause.** The same failure happened on a session where
 `set-resolution.sh` was never called at all - no `Executing Do Cmd` line, nothing in its log.
@@ -454,3 +454,6 @@ reboot. Confirm with:
 
 Note that reading that file needs root - as a normal user it fails with "Permission denied" and
 an empty value, which looks exactly like "the parameter does not exist".
+
+With KMS off, `xrandr` mode changes work again, so the host follows the client's requested
+resolution. Set Moonlight to 1920x1080 to stream at the box's native mode.
