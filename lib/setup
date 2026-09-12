@@ -247,15 +247,46 @@ cost() {
   echo "credits remaining: \$$(aws freetier get-account-plan-state --region us-east-1 \
     --query 'accountPlanRemainingCredits.amount' --output text 2>/dev/null || echo '?')"
 
-  # Cost Explorer is authoritative but lags ~24h, and each call costs $0.01.
-  echo "billed so far (lags a day):"
+  # Cost Explorer is authoritative but lags ~24h, and each call costs $0.01 -
+  # so this is ONE call, grouped by usage type. Filtered to RECORD_TYPE=Usage
+  # because credits are booked as a matching negative line: without the filter
+  # every figure nets to zero and the bill looks free while you are spending.
+  #
+  # This also fixes what the estimate above cannot: the CloudWatch hours only
+  # cover the CURRENT instance, so across rebuilds they undercount badly - it
+  # once read 2.0 hrs against 10.6 actually billed. The quantity on the compute
+  # line below is the real number.
+  echo "billed so far (lags a day - these are the real charges):"
   aws ce get-cost-and-usage --region us-east-1 \
     --time-period "Start=$(date -u +%Y-%m-01),End=$(date -u -d tomorrow +%Y-%m-%d)" \
-    --granularity MONTHLY --metrics UnblendedCost \
-    --group-by Type=DIMENSION,Key=RECORD_TYPE \
-    --query 'ResultsByTime[0].Groups[].[Keys[0],Metrics.UnblendedCost.Amount]' \
-    --output text 2>/dev/null | awk '{printf "  %-8s $%.4f\n", $1, $2}' \
-    || echo "  (Cost Explorer unavailable)"
+    --granularity MONTHLY --metrics UnblendedCost UsageQuantity \
+    --filter '{"Dimensions":{"Key":"RECORD_TYPE","Values":["Usage"]}}' \
+    --group-by Type=DIMENSION,Key=USAGE_TYPE \
+    --query 'ResultsByTime[0].Groups[].{u:Keys[0],c:Metrics.UnblendedCost.Amount,q:Metrics.UsageQuantity.Amount}' \
+    --output json 2>/dev/null | python3 -c '
+import json,sys
+try: g=json.load(sys.stdin)
+except Exception: print("  (Cost Explorer unavailable)"); sys.exit()
+g=[x for x in g if float(x["c"])>0.004]
+if not g: print("  nothing billed yet this month"); sys.exit()
+g.sort(key=lambda x:-float(x["c"]))
+print("  %-32s%9s %8s %7s" % ("USAGE TYPE","QTY","USD","INR"))
+tot=0.0; hrs=0.0; spot=False
+for x in g:
+    c=float(x["c"]); q=float(x["q"]); tot+=c
+    u=x["u"].split("-",1)[-1]          # strip the region prefix
+    if "BoxUsage" in u or "SpotUsage" in u:
+        hrs+=q; spot = spot or "SpotUsage" in u
+    print("  %-32s%9.2f %8.2f %7.0f" % (u,q,c,c*88))
+print("  " + "-"*57)
+print("  %-32s%9s %8.2f %7.0f" % ("TOTAL","",tot,tot*88))
+if hrs:
+    kind = "spot" if spot else "on-demand"
+    print("")
+    print("  %.1f instance-hours this month (%s)" % (hrs,kind))
+    if not spot:
+        print("  the same hours on spot would be about $%.2f (INR %.0f)" % (hrs*0.23, hrs*0.23*88))
+' || echo "  (Cost Explorer unavailable)"
 
   if [[ -z $budget || $budget == None ]]; then
     echo
