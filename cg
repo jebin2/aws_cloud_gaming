@@ -276,13 +276,6 @@ watchdog_ensure() {
     log "off-site watchdog: $GAME_WATCHDOG_HOST unreachable - skipping"
     return 0
   fi
-  # Check the prerequisite here so the outcome is a plain statement rather than
-  # an error: an absent CLI on that box is a normal state, not a failure.
-  if ! "${rsh[@]}" 'command -v aws >/dev/null' 2>/dev/null; then
-    log "off-site watchdog: no aws CLI on $GAME_WATCHDOG_HOST - skipping layer 5"
-    log "  install it there, then: cg watchdog install"
-    return 0
-  fi
   watchdog_iam_ensure || true
 
   # Every call below goes through a SUBSHELL. cmd_watchdog uses die(), which
@@ -315,22 +308,21 @@ cmd_watchdog() {
   case "${1:-status}" in
     install)
       say "checking $host"
-      "${rsh[@]}" 'command -v aws >/dev/null' \
-        || die "the aws CLI is not installed on $host"
-      local remote_arn local_arn
-      remote_arn=$("${rsh[@]}" 'aws sts get-caller-identity --query Arn --output text' 2>/dev/null) \
-        || die "no working AWS credentials on $host - configure a SCOPED iam user there first"
-      local_arn=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null || echo "")
-      log "remote identity: $remote_arn"
-      # An internet-facing box holding the same credentials as your laptop is
-      # the worst outcome here, so say so plainly rather than let it pass.
-      if [[ -n $local_arn && $remote_arn == "$local_arn" ]]; then
-        log ""
-        log "WARNING: $host is using the SAME credentials as this machine."
-        log "  That gives an always-on, internet-facing host your full access."
-        log "  Create an IAM user limited to ec2:DescribeInstances,"
-        log "  ec2:StopInstances and cloudwatch:GetMetricStatistics - see the README."
-        log ""
+      # Install the CLI rather than complaining about it. Amazon's installer,
+      # not apt: this is an Oracle Ampere box where `awscli` is not in the
+      # enabled repos at all, and the installer covers both x86_64 and aarch64.
+      if ! "${rsh[@]}" 'command -v aws >/dev/null' 2>/dev/null; then
+        say "installing the aws CLI on $host"
+        "${rsh[@]}" '
+          set -e
+          command -v unzip >/dev/null || { sudo apt-get update -qq; sudo apt-get install -y -qq unzip; }
+          cd /tmp
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o awscliv2.zip
+          unzip -q -o awscliv2.zip
+          sudo ./aws/install --update >/dev/null
+          rm -rf /tmp/aws /tmp/awscliv2.zip
+        ' || die "could not install the aws CLI on $host"
+        log "installed $("${rsh[@]}" 'aws --version 2>&1 | cut -d" " -f1' 2>/dev/null)"
       fi
       # Credentials can come from .env, so the whole thing is one command. These
       # must be the SCOPED user's keys - see the IAM policy in the README. They
@@ -345,6 +337,26 @@ cmd_watchdog() {
           | "${rsh[@]}" 'set -e; mkdir -p ~/.aws; chmod 700 ~/.aws;
               cat > ~/.aws/credentials; chmod 600 ~/.aws/credentials' \
           || die "could not write credentials on $host"
+      fi
+
+      # Verify credentials AFTER writing them, not before: the check used to run
+      # first and failed on a box that was about to be configured correctly.
+      local remote_arn local_arn
+      remote_arn=$("${rsh[@]}" 'aws sts get-caller-identity --query Arn --output text' 2>/dev/null) \
+        || die "no working AWS credentials on $host.
+       Put the scoped user's keys in .env as GAME_WATCHDOG_AWS_KEY_ID and
+       GAME_WATCHDOG_AWS_SECRET (cg init creates that user), or configure
+       them on $host yourself."
+      log "remote identity: $remote_arn"
+      local_arn=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null || echo "")
+      # An always-on, internet-facing box holding the same credentials as your
+      # laptop is the worst outcome here, so say so plainly.
+      if [[ -n $local_arn && $remote_arn == "$local_arn" ]]; then
+        log ""
+        log "WARNING: $host is using the SAME credentials as this machine."
+        log "  That gives an always-on, internet-facing host your full access."
+        log "  cg init creates a scoped user; see the IAM policy in the README."
+        log ""
       fi
 
       say "installing the off-site watchdog on $host"
