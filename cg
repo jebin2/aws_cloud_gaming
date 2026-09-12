@@ -73,6 +73,43 @@ box() {
 # them is Steam Cloud, and Cloud only syncs when Steam shuts down cleanly.
 # Stopping the instance under a running Steam risks losing the last saves, so
 # ask Steam to exit and give it time to finish before pulling the floor away.
+# Streaming is the charge that can exceed the instance, and `cg cost` cannot
+# help in the moment: Cost Explorer lags about a day. The box has the counter
+# already, so read it live and for free. Since boot, not since the session -
+# the kernel keeps no per-session tally - and it includes ssh and Tailscale
+# keepalives, which is why it is labelled as tailnet traffic, not pure video.
+stream_usage() {
+  local node="${GAME_TS_NODE:-$TS_HOST}" ip
+  tailscale ip -4 "$node" >/dev/null 2>&1 || return 0
+  ip=$(tailscale ip -4 "$node")
+  local out
+  out=$(ssh -i "$KEY" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 \
+        -o BatchMode=yes "ubuntu@$ip" '
+    ts=$(cat /sys/class/net/tailscale0/statistics/tx_bytes 2>/dev/null || echo 0)
+    # What AWS bills is what leaves the real NIC: WireGuard encapsulation, ssh,
+    # apt, and - measured at ~2.4 GB against a 132 GB download - the TCP acks a
+    # big Steam download generates. None of that appears on tailscale0, so a
+    # status line reading only the tunnel understates the bill by about half.
+    nic=$(ip route show default 2>/dev/null | awk "{print \$5; exit}")
+    wan=$(cat "/sys/class/net/$nic/statistics/tx_bytes" 2>/dev/null || echo 0)
+    win=$(cat "/sys/class/net/$nic/statistics/rx_bytes" 2>/dev/null || echo 0)
+    up=$(cut -d. -f1 /proc/uptime)
+    printf "%s %s %s %s\n" "$ts" "$wan" "$win" "$up"' 2>/dev/null) || return 0
+  [[ -n $out ]] || return 0
+  echo
+  echo "TRAFFIC (this boot only - see cg cost for the billed month)"
+  awk -v o="$out" 'BEGIN{
+    split(o,f," "); ts=f[1]; wan=f[2]; win=f[3]; up=f[4];
+    printf "  stream out      %.2f GB", ts/1073741824;
+    if (up>0) printf "   avg %.1f Mbps over %.1f h", ts*8/up/1000000, up/3600;
+    printf "\n";
+    printf "  total out       %.2f GB   <- what AWS bills (adds wireguard overhead, ssh, apt)\n", wan/1073741824;
+    printf "  total in        %.2f GB   (free - game downloads land here)\n", win/1073741824;
+    left=100-wan/1073741824;
+    printf "  free egress     ~%.0f GB left of 100 GB/month\n", (left>0?left:0);
+  }'
+}
+
 steam_shutdown_for_cloud_sync() {
   local node="${GAME_TS_NODE:-$TS_HOST}"
   tailscale ip -4 "$node" >/dev/null 2>&1 || return 0
@@ -269,7 +306,7 @@ EOF
 case "$CMD" in
   init)      exec lib/setup ;;
   check)     exec lib/setup check ;;
-  status)    lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true ;;
+  status)    lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true; stream_usage ;;
   cost)      exec lib/setup cost ;;
   clean)     exec lib/setup clean ;;
   destroy)   exec lib/setup destroy ;;

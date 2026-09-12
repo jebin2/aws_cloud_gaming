@@ -232,6 +232,20 @@ The first 100 GB/month is free - about 11 hours - and after that it is $0.1093/G
 **~$0.98/hr, roughly doubling the hourly cost**. Lowering Moonlight's bitrate lowers this
 proportionally, and past a point saves more than any pricing plan will.
 
+`cg status` also shows traffic since the box booted, read straight off the interface counters -
+free, and immediate, where `cg cost` lags a day:
+
+    TRAFFIC (this boot only - see cg cost for the billed month)
+      stream out      2.59 GB   avg 2.2 Mbps over 2.8 h
+      total out       5.03 GB   <- what AWS bills
+      total in      132.31 GB   (free - game downloads land here)
+      free egress     ~95 GB left of 100 GB/month
+
+Note the gap between the two "out" figures. Billed egress is what leaves the real NIC, so it
+includes WireGuard overhead, ssh, and - measured at **~2.4 GB against a 132 GB download** - the
+TCP acknowledgements a large download generates. Inbound is free, but it is not quite true that
+downloading costs nothing.
+
 Check actual spend with `cg cost`, which measures runtime from CloudWatch datapoints
 rather than billing data, so it has no lag. It reports **every** volume and snapshot, not just
 the running instance's - orphaned volumes are the usual way people keep paying for a machine
