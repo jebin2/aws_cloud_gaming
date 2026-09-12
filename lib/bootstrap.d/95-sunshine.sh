@@ -87,7 +87,17 @@ ORIGINS="$ORIGINS,https://localhost:47990"
 cat > "/home/$USER_NAME/.config/sunshine/sunshine.conf" <<EOF
 # Tailscale's MTU is 1280; Sunshine's default 1392 fragments and reads as stutter.
 packet_size = 1024
-global_prep_cmd = [{"do":"/usr/local/bin/set-resolution.sh","undo":""}]
+# No resolution prep command, deliberately. Once xrandr changes the mode at
+# runtime, NvFBC reports the display server as permanently "in modeset" and
+# cannot create a capture session again until X restarts - so every session
+# after the first switch connects, sends no video, and is dropped. Verified:
+# a fresh X captures fine, and the first session that switches mode is the last
+# one that works.
+#
+# The box therefore stays at the xorg.conf mode (1920x1080) and the client
+# scales if it asked for something else. set-resolution.sh is still installed
+# for manual use, just not wired into a session.
+global_prep_cmd = []
 csrf_allowed_origins = $ORIGINS
 EOF
 chown -R "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.config/sunshine"

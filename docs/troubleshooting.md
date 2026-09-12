@@ -457,3 +457,29 @@ an empty value, which looks exactly like "the parameter does not exist".
 
 With KMS off, `xrandr` mode changes work again, so the host follows the client's requested
 resolution. Set Moonlight to 1920x1080 to stream at the box's native mode.
+
+### Changing resolution breaks NvFBC until X restarts
+
+The deeper version of the problem above, found after the KMS fix made mode changes actually
+work. Once `xrandr` changes the mode at runtime, NvFBC reports the display server as
+**permanently** "in modeset" and cannot create a capture session again - not for that session,
+and not for any later one:
+
+    CLIENT CONNECTED
+    Screencasting with NvFBC
+    Failed to start capture session: Cannot create capture session: the display server is in modeset
+
+No script needs to be involved. The evidence is stark: a freshly restarted X captures fine, the
+first session that switches mode works, and **every session after it fails** until lightdm is
+restarted. On the client that looks like a black window that closes after a few seconds.
+
+So `global_prep_cmd` is empty. The box stays at the `xorg.conf` mode (1920x1080) and the client
+scales if it asked for something else, which costs nothing - Sunshine encodes what it captures
+either way. `set-resolution.sh` is still installed for manual use, just not wired into a
+session.
+
+**Set Moonlight to 1920x1080** to match the host and avoid scaling entirely.
+
+If a stream ever goes black and drops, check for that error and restart the display stack:
+
+    sudo systemctl restart lightdm     # note: this kills the desktop session, so Steam too
