@@ -80,7 +80,19 @@ up() {
   echo "disk:"; disks
 
   local t0=$SECONDS
-  moonlight stream "$ip" "$APP" || true
+  # Stream settings come from .env as launch flags rather than by rewriting
+  # Moonlight's config: the flags win for this session and leave whatever you
+  # set in the GUI untouched. A variable left unset passes no flag at all, so
+  # Moonlight's own saved setting remains the default.
+  local mlf=()
+  [[ -n ${GAME_RES:-} ]]          && mlf+=(--resolution "$GAME_RES") || true
+  [[ -n ${GAME_FPS:-} ]]          && mlf+=(--fps "$GAME_FPS") || true
+  [[ -n ${GAME_BITRATE_KBPS:-} ]] && mlf+=(--bitrate "$GAME_BITRATE_KBPS") || true
+  [[ -n ${GAME_DISPLAY_MODE:-} ]] && mlf+=(--display-mode "$GAME_DISPLAY_MODE") || true
+  [[ -n ${GAME_VIDEO_CODEC:-} ]]  && mlf+=(--video-codec "$GAME_VIDEO_CODEC") || true
+  [[ ${GAME_PERF_OVERLAY:-0} == 1 ]] && mlf+=(--performance-overlay) || true
+  (( ${#mlf[@]} )) && echo "    stream: ${mlf[*]}" || true
+  moonlight stream ${mlf[@]+"${mlf[@]}"} "$ip" "$APP" || true
   printf 'session ended after %dm\n' $(( (SECONDS - t0) / 60 ))
 
   read -rp "stop instance now? [Y/n] " a
