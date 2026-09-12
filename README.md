@@ -39,15 +39,25 @@ a pairing URL. After that, `cg open` is the whole workflow.
 
 Use `cg check` to run every check and stop before anything is created.
 
-The build takes 10-20 minutes and streams its progress, so a slow step looks slow rather than
-hung:
+The build takes about 7 minutes and streams its progress, so a slow step looks slow rather than
+hung. Each step asserts its *effect* rather than merely running, because nearly every failure
+in this project has been something reporting success while broken:
 
-    ==> building the box - live progress below (10-20 min)
-        installing base packages
-        installing desktop (several minutes)
-        installing nvidia driver (the slowest step, ~10 min)
+    ==> building the box - live progress below
+        installing nvidia driver (the slowest step)
+          ok  nvidia driver packages installed
+        disabling nvidia DRM KMS (NvFBC cannot capture with it on)
+          ok  nvidia DRM KMS disabled
+        installing steam
+          ok  steam bootstrap shipped
+          ok  steamdeps cannot block a headless boot
+        setting up scratch disk
+          ok  /scratch mounted on the instance store
         (host rebooting - reconnecting)
-        build complete (17m)
+        build complete after 6m
+
+A failed `verify` stops the build. That is deliberate: a box that provisions cleanly and then
+cannot stream is a worse outcome than one that refuses to finish.
 
 Anything that looks like an error is surfaced with a `!` prefix; the thousands of shell-trace
 lines behind it are not. The full log lives at `/var/log/cloud-gaming-bootstrap.log` on the box.
@@ -62,12 +72,26 @@ Two of these take real time to obtain, so start them before anything else:
 - **An approved GPU quota** in your chosen region: `Running On-Demand G and VT instances`
   (`L-DB2E81BA`). Mine took three days. **File it from the console with a real use case** - a
   request submitted through the CLI carries no justification and is usually refused. Spot needs
-  a *separate* quota (`L-3819A6DF`); approval of one says nothing about the other.
+  a *separate* quota (`L-3819A6DF`), which is **0 by default**; approval of one says nothing
+  about the other, and spot is refused more often. Mine was denied first time and granted the
+  next day on a re-file, so a denial is worth appealing. `cg init` prefers spot and falls back
+  to on-demand when the quota cannot cover the instance.
+
+  Note that "Resolved" on a support case means the case was **closed**, not that you got the
+  quota. Compare the applied value against the default instead:
+
+      aws service-quotas get-service-quota --region <r> --service-code ec2 --quota-code <code>
+      aws service-quotas get-aws-default-service-quota --region <r> --service-code ec2 --quota-code <code>
 
 And locally:
 
 - **Tailscale**, installed and up (`sudo tailscale up`), plus a
   [pre-auth key](https://login.tailscale.com/admin/settings/keys)
+- optionally a **Tailscale API access token** (a different credential, from the same page) as
+  `TAILSCALE_API_KEY`. With it, `cg destroy` deletes the tailnet nodes it created, so rebuilds
+  keep the clean hostname instead of climbing `gamevps-1`, `-2`, `-3`. Only nodes named exactly
+  `<GAME_TS_HOST>` or `<GAME_TS_HOST>-<number>` are ever touched. These tokens expire after 90
+  days; when one does, `cg destroy` says so plainly rather than skipping the cleanup silently
 - **Moonlight** (`moonlight-qt`) - only needed to stream, so `setup` warns rather than stops
 - `aws` CLI v2 configured, `python3`, `curl`, and OpenSSH (`ssh`/`scp`)
 
@@ -91,7 +115,7 @@ does not help it sitting in `~/Downloads`.
 ### Configuration
 
 Everything lives in `.env` - see [.env.example](.env.example), which documents every variable.
-`setup` prompts for the Tailscale key and alert email if they are absent, so the minimum is a
+`cg init` prompts for the Tailscale key and alert email if they are absent, so the minimum is a
 working AWS profile and a Tailscale account.
 
 ## Commands
@@ -158,10 +182,16 @@ asks `stop instance now? [Y/n]` - pressing Enter is what actually stops the bill
 
 Run it from a real terminal; that prompt needs one. A cold start takes 1-2 minutes.
 
-Pairing is one-time and survives stop/start. On first run, open `https://<tailscale-ip>:47990`,
-set a Sunshine username and password, then enter the PIN Moonlight shows. The self-signed
+Pairing is automatic and needs no browser: `cg init` creates the Sunshine account and pairs
+Moonlight itself, then saves the credentials to `.env`. Pairing is certificate-based, so it
+survives stop/start and re-running `cg init`.
+
+The web UI at `https://<tailscale-ip>:47990` is there if you want it. Its self-signed
 certificate warning is expected - the traffic is already encrypted by WireGuard before TLS
 applies.
+
+**Resolution follows whatever Moonlight asks for.** The host switches to match at the start of
+each session, so set Moonlight to 1920x1080 for the box's native mode.
 
 ## Cost control
 
@@ -174,7 +204,7 @@ applies.
 
 Worst-case leak with all four armed is about 30 minutes of runtime.
 
-Layer 3 is armed by `game up` rather than at setup time, because a freshly created alarm is
+Layer 3 is armed by `cg open` rather than at build time, because a freshly created alarm is
 evaluated against the previous 30 minutes and would otherwise stop the box mid-build - see
 [docs/troubleshooting.md](docs/troubleshooting.md).
 
@@ -225,7 +255,7 @@ able to reclaim the instance with two minutes' notice. Since games live on ephem
 that a stop wipes anyway, a reclaim costs about what a normal stop does.
 
 Spot needs **its own quota** (`L-3819A6DF`), separate from on-demand and **0 on a new
-account** - so with `GAME_SPOT` unset, `setup` prefers spot and falls back to on-demand when
+account** - so with `GAME_SPOT` unset, `cg init` prefers spot and falls back to on-demand when
 the quota cannot cover the instance, logging that it did. Force either one explicitly:
 
     GAME_SPOT=0 cg init      # on-demand, whatever the quota says
@@ -240,6 +270,16 @@ The instance ships local NVMe (232 GB on `g6.xlarge`) that costs nothing extra a
 faster than EBS. `/scratch/steam` is registered as a **Steam library folder**, so the install
 dialog offers it alongside the root disk and reports its real free space. Firefox downloads
 there too, so the root volume stays clean whatever you install.
+
+Steam itself installs from **Valve's own `.deb`**, not Ubuntu's `steam-installer`, which ships
+no client and hides the download behind a dialog a headless boot cannot answer.
+
+The library registration is treated as an **invariant, not an install step**: a service
+re-checks it on every boot and repairs it if needed. It has to, because `/scratch` is
+reformatted at each start - taking the marker Steam uses as proof the library is real - and
+because Steam rewrites its own config on first sign-in and will drop a library it never
+adopted. Both cases used to lose the NVMe library silently, and games went back to filling the
+50 GB root disk.
 
 Pick the NVMe library the first time you install a game - Steam remembers the choice.
 
@@ -269,6 +309,24 @@ most often - against a faked Steam install, so it can be verified without spendi
 - [docs/architecture.md](docs/architecture.md) - how the three layers fit together
 - [docs/troubleshooting.md](docs/troubleshooting.md) - every failure hit while building this,
   and why the fix works. Read this before debugging anything.
+
+### The ones that cost the most time
+
+Nearly all of them share a shape: **something reported success while broken.** That is why each
+provisioning step now asserts its effect rather than its execution.
+
+| Symptom | Actual cause |
+|---|---|
+| Stream connects, then `No video traffic was ever received from the host!` | Ubuntu ships `nvidia_drm modeset=1`. **NvFBC cannot capture while DRM KMS owns the display** - and it also blocks every `xrandr` mode change |
+| `apt install steam` succeeds, no Steam exists | `steam-installer` is a stub; its first-run licence dialog cannot be answered headless. Use Valve's `.deb` |
+| Steam downloads 74 MB and stops | Valve's launcher runs `steamdeps`, which re-execs into a **terminal prompt** whenever `DISPLAY` is set |
+| Steam killed mid-update | "Size stopped growing" is not "finished" - Steam alternates downloading and installing. Gate on the unpacked client existing |
+| "Storage is showing internal only" | Steam writes `libraryfolders.vdf` only after a sign-in, so on a fresh client there was nothing to append to and registration silently wrote nothing |
+| NVMe library vanishes after a stop | `/scratch` is reformatted at every start, destroying the marker Steam uses as proof the library is real |
+| Build hangs with no output, then "host rebooting" | A rebuilt box reclaims its hostname, and `known_hosts` still held the old key. ssh's stderr was being discarded, so a refusal looked like silence |
+| Re-running `cg init` hangs 30 minutes | It waited for a *new* tailnet node against a box that joined long ago - gated on a 2s ping that a cold WireGuard path loses |
+| CloudWatch alarm stops the box mid-build | A new alarm is evaluated against the previous 30 minutes, so it fires immediately. It is created **disarmed** and armed by `cg open` |
+| Billing looks like zero while spending | Credits are booked as a matching negative line; without filtering to `RECORD_TYPE=Usage` every figure nets out |
 
 ## Caveats
 
