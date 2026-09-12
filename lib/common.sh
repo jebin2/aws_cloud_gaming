@@ -51,9 +51,11 @@ stream_build() {
   local ssh_opts=(-i "$key" -o StrictHostKeyChecking=accept-new
                   -o ConnectTimeout=8 -o BatchMode=yes)
 
+  local err
+  err=$(mktemp)
   while (( waited < timeout )); do
     if new=$(ssh "${ssh_opts[@]}" "$target" \
-             "tail -n +$((seen+1)) /var/log/cloud-gaming-bootstrap.log 2>/dev/null" 2>/dev/null); then
+             "tail -n +$((seen+1)) /var/log/cloud-gaming-bootstrap.log 2>/dev/null" 2>"$err"); then
       if [[ -n $new ]]; then
         count=$(wc -l <<<"$new")
         seen=$(( seen + count ))
@@ -73,8 +75,18 @@ stream_build() {
       fi
       if ssh "${ssh_opts[@]}" "$target" 'test -f /var/lib/cloud-gaming-ready' 2>/dev/null; then
         log "build complete after $(( waited / 60 ))m"
+        rm -f "$err"
         return 0
       fi
+    elif grep -q 'HOST IDENTIFICATION HAS CHANGED\|Host key verification failed' "$err" 2>/dev/null; then
+      # Distinguish "cannot connect" from "refused to connect". Reporting a
+      # reboot here was actively misleading: the box was building fine and only
+      # our view of it was broken, which is the hardest kind of failure to see.
+      log "ssh refused: the host key for this name changed"
+      log "  a rebuilt box reclaims the hostname, so the old key is stale:"
+      log "    ssh-keygen -R ${target#*@}"
+      rm -f "$err"
+      return 1
     elif (( rebooted == 0 && waited > 300 )); then
       # Only call it a reboot once the box has been reachable for a while -
       # ssh refusing in the first minutes is just sshd not up yet.

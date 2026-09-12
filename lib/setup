@@ -764,6 +764,18 @@ cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
 KEY="$HOME/.ssh/${TS_HOST}.pem"
 SSH="ssh -i $KEY -o StrictHostKeyChecking=accept-new ubuntu@$TS_NODE"
 
+# Now that destroy prunes stale tailnet nodes, a rebuilt box reclaims the same
+# hostname - and ssh refuses it, because known_hosts still holds the PREVIOUS
+# machine's key under that name. Before the pruning every rebuild got a fresh
+# suffixed name (gamevps-1, -2, ...) and this never happened.
+#
+# This is a genuinely new host that we created seconds ago, so the old entry is
+# stale rather than suspicious, and dropping it is correct. Left in place it
+# cost five minutes of a build looking hung with no output at all.
+ssh-keygen -R "$TS_NODE" >/dev/null 2>&1 || true
+node_ip=$(tailscale ip -4 "$TS_NODE" 2>/dev/null || true)
+[[ -n $node_ip ]] && { ssh-keygen -R "$node_ip" >/dev/null 2>&1 || true; }
+
 say "building the box - live progress below (10-20 min)"
 stream_build "ubuntu@$TS_NODE" "$KEY" \
   || die "the build did not finish. The instance is still running and still
