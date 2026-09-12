@@ -372,28 +372,32 @@ day you need it.
 
 ### Spot is the default
 
-`GAME_SPOT=1` is the default and saves roughly 70%. It comes with one rule that shapes how you
-use this rig:
+`GAME_SPOT=1` is the default and saves roughly 70%. It shapes how the rig is used, because a
+spot instance here is **use-once**: there is no stop, only destroy.
 
-**Never `cg stop` a spot instance - `cg destroy` it.**
+    cg open        build/start, stream
+    ...play...
+    cg open's exit prompt  ->  [d] destroy (recommended)   [n] leave it running
 
-Stopping a spot instance yourself moves its persistent request to `disabled`, and AWS refuses to
-start an instance whose request is not active. There is no API to re-enable it. The box is then
-permanently unusable *and* still billing for its root volume. `cg open` now checks the request
-state before calling start and explains this instead of surfacing:
+Why there is no stop. A **one-time** spot request cannot be stopped at all - AWS only allows
+stopping a *persistent* request's instance - and stopping a persistent one disables the request,
+after which the box can never start again while its root volume keeps billing. Neither is a
+useful "pause", so `cg stop` on a spot box offers destroy instead, and `cg open` refuses to
+start a stranded one and explains why.
 
-    IncorrectSpotRequestState ... the associated Spot Instance request is not in an
-    appropriate state to support start
+That is only acceptable because the games are in S3: destroying costs a ~6 minute rebuild and
+nothing else. Under the old EBS-volume design, `stop` was the only way to keep a library without
+paying for an instance, which is exactly why the old design used a persistent request.
 
-and the "stop instance now?" prompt at the end of `cg open` offers **destroy** as the default on
-a spot box, with stop as an explicit second choice.
-
-This is only acceptable because the games live in S3. Destroying costs a ~6 minute rebuild and
-nothing else - which is also why the old EBS-volume design made `stop` feel necessary and this
-one does not.
+**The guards terminate now, not stop.** All three - the on-host watchdog, the CloudWatch alarm,
+and the off-site watchdog - previously had to issue a stop, because a persistent request
+relaunches on termination and none of them can cancel a request first. Every guard firing
+therefore stranded a box at ~INR 400/month. A one-time request cannot relaunch, so they
+terminate, and `cg status` / `cg watcher` flag any stranded box left over from the old design
+with its monthly cost.
 
 If you want stop/start back, run on demand: `GAME_SPOT=0 cg init`. Dearer per hour, restartable
-as often as you like.
+as often as you like, and there the guards still stop rather than terminate.
 
 
 ### Moonlight client settings

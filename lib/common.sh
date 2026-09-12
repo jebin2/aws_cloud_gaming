@@ -188,3 +188,45 @@ wait_for_steam() {
   log "steam did not finish within $(( timeout / 60 ))m - check ~/steam-prewarm.log on the box"
   return 1
 }
+
+# A stopped SPOT instance is not a parked box - it is a dead one that still
+# bills. Stopping a spot instance disables its persistent request, and AWS
+# refuses to start an instance whose request is not active, so the machine can
+# never come back while its root volume keeps charging.
+#
+# Every cost guard produces exactly this state: the on-host watchdog's
+# `shutdown -h`, the CloudWatch alarm's ec2:stop action, and the off-site
+# watchdog's StopInstances. They cannot terminate instead - a persistent spot
+# request relaunches the moment its instance dies, and no guard can cancel the
+# request first (the on-host one holds no credentials at all). So stop is the
+# right action there, and this is the leak it leaves behind.
+#
+# Nothing reported it. `cg status` said "instance stopped", which reads as
+# normal and recoverable.
+stranded_spot_note() {  # stranded_spot_note <region> <instance-id>; prints nothing if fine
+  local region=$1 id=$2 out state life srs gb
+  [[ -n ${id:-} ]] || return 0
+  out=$(aws ec2 describe-instances --region "$region" --instance-ids "$id" \
+    --query 'Reservations[0].Instances[0].[State.Name,InstanceLifecycle]' \
+    --output text 2>/dev/null) || return 0
+  read -r state life <<<"$out"
+  [[ $state == stopped && $life == spot ]] || return 0
+  srs=$(aws ec2 describe-spot-instance-requests --region "$region" \
+    --filters "Name=instance-id,Values=$id" \
+    --query 'SpotInstanceRequests[0].State' --output text 2>/dev/null) || srs=unknown
+  [[ $srs == active ]] && return 0
+  # Charge the real volume size rather than GAME_DISK_GB, which only describes
+  # what the next build would ask for.
+  gb=$(aws ec2 describe-instances --region "$region" --instance-ids "$id" \
+        --query 'Reservations[0].Instances[0].BlockDeviceMappings[0].Ebs.VolumeId' \
+        --output text 2>/dev/null)
+  gb=$(aws ec2 describe-volumes --region "$region" --volume-ids "$gb" \
+        --query 'Volumes[0].Size' --output text 2>/dev/null)
+  [[ $gb =~ ^[0-9]+$ ]] || gb=0
+  awk -v g="$gb" -v s="$srs" 'BEGIN{
+    u=g*0.0912;
+    printf "  STRANDED       this stopped spot box can never start again (request: %s)\n", s;
+    printf "                 its %d GB root volume still bills $%.2f/mo (INR %.0f)\n", g, u, u*88;
+    printf "                 reclaim it: cg destroy\n";
+  }'
+}

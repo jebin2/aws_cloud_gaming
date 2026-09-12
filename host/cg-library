@@ -200,7 +200,10 @@ cmd_push() {
   if ! ( cd "$LIB" && find . -type l -printf '%P\t%l\n' > "$SYMLINKS" ) 2>/dev/null; then
     log "WARNING: could not record symlinks; a restored Proton prefix may not start"
   else
-    log "recorded $(grep -c . "$LIB/$SYMLINKS" 2>/dev/null || echo 0) symlinks"
+    # Not `|| echo 0`: grep -c prints its count AND exits non-zero on no match,
+    # so the fallback would be appended to a real "0" and logged as "0\n0".
+    local n; n=$(grep -c . "$LIB/$SYMLINKS" 2>/dev/null) || true
+    log "recorded ${n:-0} symlinks"
   fi
 
   local strategy=(--size-only)

@@ -37,11 +37,11 @@ aws_() { aws --region "$REGION" "$@"; }
 # so, not claim everything is fine.
 if ! out=$(aws_ ec2 describe-instances \
   --filters "Name=tag:Name,Values=$TS_HOST" "Name=instance-state-name,Values=running" \
-  --query 'Reservations[0].Instances[0].[InstanceId,LaunchTime]' --output text 2>&1); then
+  --query 'Reservations[0].Instances[0].[InstanceId,LaunchTime,InstanceLifecycle]' --output text 2>&1); then
   say "CANNOT QUERY AWS - this watchdog is blind: ${out//$'\n'/ }"
   exit 1
 fi
-read -r ID LAUNCH <<<"$out"
+read -r ID LAUNCH LIFECYCLE <<<"$out"
 
 if [[ -z ${ID:-} || $ID == None ]]; then
   echo 0 > "$STATE/idle"
@@ -95,12 +95,26 @@ fi
 echo "$idle" > "$STATE/idle"
 
 # --- act ----------------------------------------------------------------------
+# Which verb depends on the purchase model, and the wrong one is worse than
+# doing nothing:
+#
+#   on demand -> stop.      Reversible; you restart the box.
+#   spot      -> terminate. Stopping a spot instance disables its request, so
+#                           the box can never start again AND keeps billing for
+#                           its root volume. Terminating is safe because the
+#                           request is one-time and cannot relaunch, and the
+#                           games are mirrored to S3 as the machine shuts down.
+#
+# Read from the same describe-instances call that found the instance, so this
+# costs no extra API request and cannot disagree with it.
 if (( idle >= IDLE_LIMIT )); then
-  say "idle limit reached - stopping $ID"
-  if aws_ ec2 stop-instances --instance-ids "$ID" >/dev/null 2>&1; then
-    say "stop issued for $ID"
+  if [[ ${LIFECYCLE:-} == spot ]]; then VERB=terminate; else VERB=stop; fi
+  say "idle limit reached - ${VERB%e}ing $ID (lifecycle: ${LIFECYCLE:-on-demand})"
+  if aws_ ec2 "${VERB}-instances" --instance-ids "$ID" >/dev/null 2>&1; then
+    say "$VERB issued for $ID"
     echo 0 > "$STATE/idle"
   else
-    say "FAILED to stop $ID - check the IAM policy allows ec2:StopInstances"
+    say "FAILED to $VERB $ID - check the IAM policy allows ec2:$(
+      [[ $VERB == terminate ]] && echo TerminateInstances || echo StopInstances)"
   fi
 fi

@@ -148,20 +148,43 @@ else
   # per-AZ and the old game volume used to force one specific zone.
   PLACE=()
 
-  MARKET=()
+  # ONE-TIME spot, not persistent, and terminate rather than stop.
+  #
+  # The old design was persistent + InstanceInterruptionBehavior=stop, because
+  # the games lived on the instance store and terminating meant losing them.
+  # That constraint is gone - they are in S3 - and the old design had two costs:
+  #
+  #   - a persistent request RELAUNCHES the moment its instance is terminated,
+  #     so nothing may terminate the box without cancelling the request first.
+  #     No cost guard can do that (the on-host watchdog holds no credentials),
+  #     which is why all three had to stop instead.
+  #   - and stopping a spot instance disables its request permanently, leaving
+  #     a box that can never start again while its root volume keeps billing.
+  #
+  # So every guard firing produced a dead-but-billing instance. A one-time
+  # request never relaunches, which makes terminate safe, which lets the guards
+  # actually remove the thing they are guarding against.
+  #
+  # A one-time request only supports InstanceInterruptionBehavior=terminate, so
+  # an AWS interruption now terminates instead of stopping. No loss: a stop
+  # wipes the instance store anyway, and the S3 mirror is what preserves the
+  # games in either case.
+  MARKET=() SHUTDOWN_BEHAVIOR=stop
   if [[ $SPOT == 1 ]]; then
-    # 'stop' on interruption keeps the disk, and it requires a persistent
-    # request. Persistent means AWS may relaunch after an interruption - see
-    # the Spot section of the README for what that does and does not do.
     MARKET=(--instance-market-options
-      'MarketType=spot,SpotOptions={SpotInstanceType=persistent,InstanceInterruptionBehavior=stop}')
-    echo "==> launching $TYPE (spot)"
+      'MarketType=spot,SpotOptions={SpotInstanceType=one-time}')
+    # So the on-host watchdog's `shutdown -h` removes the box rather than
+    # stranding it. Safe only because nothing can relaunch a one-time request.
+    SHUTDOWN_BEHAVIOR=terminate
+    echo "==> launching $TYPE (spot, one-time - shutdown means terminate)"
   else
     echo "==> launching $TYPE"
   fi
   # shutdown-behaviour is set at launch, not after: the watchdog issues
-  # `shutdown -h`, and a window where that means "terminate" would destroy
-  # the machine and its disk.
+  # `shutdown -h`, and the window matters. On demand it must mean "stop", so a
+  # misfiring watchdog parks the box instead of deleting it. On one-time spot it
+  # must mean "terminate", because a stopped spot instance can never start again
+  # and would bill for its root volume forever.
   # A freshly created instance profile is not immediately usable by
   # run-instances - IAM is eventually consistent, and the first call after
   # creating one fails with "Invalid IAM Instance Profile name" for a few
@@ -175,7 +198,7 @@ else
       --key-name "$KEY_NAME" \
       --security-group-ids "$SG" \
       --iam-instance-profile "Name=$INSTANCE_PROFILE" \
-      --instance-initiated-shutdown-behavior stop \
+      --instance-initiated-shutdown-behavior "$SHUTDOWN_BEHAVIOR" \
       --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=$DISK_GB,VolumeType=gp3,DeleteOnTermination=true}" \
       --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$TS_HOST}]" \
       ${UD[@]+"${UD[@]}"} \

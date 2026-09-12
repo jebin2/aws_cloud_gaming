@@ -1070,3 +1070,54 @@ Two changes, and the second matters more:
 
 `tests/spot-restart.sh` covers both request states, an active request, an on-demand instance
 (which must not consult the spot API at all), and an already-running box.
+
+### Every cost guard produced a dead-but-billing box
+
+Stopping a spot instance disables its request, after which the box can never start again while
+its root volume keeps charging - 50 GB of gp3 is ~INR 400/month for a machine that cannot run.
+
+That was not an edge case. It was what **all three cost guards did**, every time they fired:
+
+| Layer | Action |
+|---|---|
+| on-host watchdog | `shutdown -h` with `instance-initiated-shutdown-behavior=stop` |
+| CloudWatch alarm | `arn:aws:automate:REGION:ec2:stop` |
+| off-site watchdog | `ec2 stop-instances` |
+
+And they could not simply terminate instead, because the spot request was **persistent**, and a
+persistent request relaunches the moment its instance dies. Terminating from a guard would have
+started a fresh instance immediately - an unbounded cost loop, the exact opposite of the guard's
+purpose. None of the three can cancel the request first: the on-host watchdog holds no AWS
+credentials by design, a CloudWatch alarm action cannot cancel a request, and the off-site user
+was scoped to `StopInstances` only.
+
+So stop was correct, and the leak was structural.
+
+**The fix was upstream of all of it.** The persistent request existed for one reason: the games
+lived on the instance store, so terminating meant losing them. That stopped being true when the
+library moved to S3, and nobody revisited the decision it had justified.
+
+A **one-time** request cannot relaunch, which makes terminate safe, which lets every guard
+actually remove the thing it is guarding against:
+
+- `SpotInstanceType=one-time`, and `InstanceInterruptionBehavior` dropped (one-time only supports
+  terminate, which is now fine - a stop wipes the instance store anyway)
+- `instance-initiated-shutdown-behavior=terminate` on spot, `stop` on demand
+- the alarm action and the off-site watchdog's verb both follow the instance lifecycle, read from
+  the same `describe-instances` call that found the instance
+- the off-site IAM user gained `ec2:TerminateInstances`, still tag-scoped. A real widening, and
+  a smaller blast radius than before: the worst an attacker on that VPS can now do is cost a
+  six-minute rebuild, where the same access under the old design would have destroyed a 140 GB
+  library.
+
+Two smaller things fell out of it. `lib/aws-setup.sh` demanded `stop` unconditionally and then
+excused spot with "set at launch, cannot be modified after" - so its FATAL check could never
+protect a spot instance at all; it now asserts the value that matches the lifecycle. And an
+unknown lifecycle falls back to `stop`, the reversible verb, so a response the parser does not
+understand cannot cause a guard to destroy something.
+
+**The general lesson.** A constraint was removed - games left the instance store - and the
+design that had been built around it stayed. The persistent request, the stop-on-interruption
+behaviour, the guards' inability to clean up, and the stranded volumes were all downstream of
+one assumption that had quietly stopped being true. It is worth asking, after any change of that
+size, which earlier decisions existed only to satisfy what just changed.

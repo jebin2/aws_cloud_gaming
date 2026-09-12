@@ -142,22 +142,34 @@ up() {
   moonlight stream ${mlf[@]+"${mlf[@]}"} "$ip" "$APP" || true
   printf 'session ended after %dm\n' $(( (SECONDS - t0) / 60 ))
 
-  # On spot, "stop" is almost always the wrong verb: it disables the request,
-  # the box can never start again, and its root volume goes on billing for a
-  # machine that is now useless. The games are mirrored to S3 either way, so
-  # destroying loses nothing - offer that here rather than letting the problem
-  # be discovered at the next `cg open`.
+  end_session
+}
+
+# How a session ends, for both `cg stop` and the prompt above - one function so
+# the two cannot drift apart.
+#
+# On spot there is no stop worth offering. A one-time request cannot be stopped
+# at all (AWS only allows it for persistent requests), and a persistent one that
+# is stopped becomes permanently unstartable while its root volume keeps
+# billing. Either way the answer is destroy, and that is free of consequence now
+# that the games are mirrored to S3 - which is exactly why the purchase model
+# could be changed to one-time in the first place.
+end_session() {
+  local a
   if [[ $(instance_lifecycle) == spot ]]; then
     echo
-    echo "This is a SPOT instance. Stopping it disables its spot request and the"
-    echo "box can NEVER be started again - while its root volume keeps billing."
-    echo "Your games are mirrored to S3 either way, so destroying loses nothing."
+    echo "This is a SPOT instance, so there is nothing useful to stop:"
+    echo "  - a one-time spot instance cannot be stopped at all"
+    echo "  - stopping a persistent one disables its request, and it can then"
+    echo "    NEVER start again while its root volume keeps billing"
     echo
-    read -rp "[d] destroy (recommended)  [s] stop anyway  [n] leave running: " a
+    echo "Your games are mirrored to S3, so destroying costs a ~6 min rebuild"
+    echo "and nothing else."
+    echo
+    read -rp "[d] destroy (recommended)  [n] leave it running: " a
     case "${a:-d}" in
       d|D|"") exec ./cg destroy ;;
-      s|S)    down ;;
-      *)      echo "left running - it is still billing by the hour" ;;
+      *)      echo "left running - it is STILL BILLING by the hour" ;;
     esac
     return
   fi
@@ -267,7 +279,7 @@ clean() {
 
 case "${1:-up}" in
   up)          up ;;
-  stop|down)   down ;;
+  stop|down)   end_session ;;
   status)      status ;;
   clean)       clean ;;
   destroy)     destroy ;;

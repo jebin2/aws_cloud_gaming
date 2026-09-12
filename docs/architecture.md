@@ -104,6 +104,28 @@ Four layers, described in the main README. They are deliberately independent: la
 `game` script, layer 2 runs on the box itself, layers 3 and 4 run in AWS. A failure in any one
 is caught by the next.
 
-The single most important setting is `instance-initiated-shutdown-behavior=stop`. The on-host
-watchdog stops the box by running `shutdown -h`; if that attribute said `terminate`, the
-watchdog would **delete the machine and its disk** instead of parking it.
+The single most important setting is `instance-initiated-shutdown-behavior`, and **its correct
+value depends on the purchase model.** The on-host watchdog acts by running `shutdown -h`, so
+this attribute decides what that means:
+
+| Purchase model | Value | Why |
+|---|---|---|
+| on demand | `stop` | A misfiring watchdog parks the box; you restart it. `terminate` would delete the machine and its root disk. |
+| spot (one-time) | `terminate` | A *stopped* spot instance can never start again - the stop disables its request - and would bill for its root volume forever. Terminating is safe because a one-time request cannot relaunch. |
+
+This inverted when the games moved to S3. The old design used a **persistent** spot request with
+`InstanceInterruptionBehavior=stop`, because the library lived on the instance store and
+terminating meant losing it. That had two consequences:
+
+- a persistent request **relaunches** the moment its instance is terminated, so nothing could
+  terminate the box without cancelling the request first - and no guard can do that (the on-host
+  watchdog holds no credentials at all, and a CloudWatch alarm action cannot cancel a request)
+- so all three guards had to *stop*, and every one of them therefore produced a box that could
+  never start again while its 50 GB root volume kept billing ~INR 400/month
+
+With the library in S3 there is nothing on the instance worth preserving, so the request is now
+**one-time** and every guard terminates. The alarm action, the off-site watchdog's verb, and the
+shutdown behaviour all follow the lifecycle rather than being fixed - and `lib/aws-setup.sh`
+asserts the one that matches, where it previously demanded `stop` unconditionally and then
+excused spot with "cannot be modified after", which meant that check could never protect a spot
+instance at all.

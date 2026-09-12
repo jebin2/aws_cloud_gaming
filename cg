@@ -431,9 +431,16 @@ destroy_everything() {
 # fatal: a missing watchdog must not stop you building a box.
 # Create the scoped IAM user the off-site watchdog needs, so none of this is a
 # manual step. Deliberately narrow: describe instances, read metrics, and stop
-# ONLY an instance tagged with this host name. It cannot terminate, launch, or
-# read anything else - so the worst case if that always-on box is compromised is
-# somebody stopping your game instance.
+# or terminate ONLY an instance tagged with this host name. It cannot launch
+# anything, touch the game archive, or read anything else.
+#
+# Terminate is new, and it is a deliberate widening. On a one-time spot instance
+# stopping is the destructive option - the box can never start again and bills
+# for its root volume forever - so the guard has to be able to terminate to do
+# its job at all. The blast radius is also smaller than it looks now that the
+# games live in S3: the worst an attacker on that VPS can do is cost you a
+# six-minute rebuild. Under the old design the same access would have destroyed
+# a 140 GB library.
 #
 # Long-lived access keys are the only option for a host outside AWS: there is no
 # instance role to borrow. They land in .env, which is gitignored, and are
@@ -477,7 +484,9 @@ watchdog_iam_ensure() {
   { "Effect": "Allow",
     "Action": ["ec2:DescribeInstances", "cloudwatch:GetMetricStatistics"],
     "Resource": "*" },
-  { "Effect": "Allow", "Action": "ec2:StopInstances", "Resource": "*",
+  { "Effect": "Allow",
+    "Action": ["ec2:StopInstances", "ec2:TerminateInstances"],
+    "Resource": "*",
     "Condition": { "StringEquals": { "ec2:ResourceTag/Name": "$TS_HOST" } } }
 ]}
 JSON
@@ -849,6 +858,7 @@ cmd_watcher() {
   s=$(ec2 describe-instances --instance-ids "${INSTANCE_ID:-x}" \
       --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "none")
   log "instance          $s"
+  stranded_spot_note "$REGION" "${INSTANCE_ID:-}"
   # Layer 2, on the box.
   if [[ $s == running ]] && box true 2>/dev/null; then
     # Same `|| echo` trap as documented in cmd_watchdog status: is-active prints

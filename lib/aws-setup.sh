@@ -36,13 +36,29 @@ if [[ $MODE == shutdown || $MODE == all ]]; then
 # does, see provision.sh. Skipping the call is therefore safe, but only if the
 # attribute really is 'stop', so check rather than assume: this is the single
 # setting that decides whether the idle watchdog stops the box or destroys it.
-echo "==> enforcing stop-on-shutdown"
+# What `shutdown -h` must mean differs by purchase model, so this checks the
+# right thing rather than one fixed value.
+#
+#   on demand  -> stop.      A misfiring watchdog parks the box; you restart it.
+#   spot       -> terminate. A stopped spot instance can NEVER start again (its
+#                            request is disabled by the stop) and would bill for
+#                            its root volume forever. Safe because the request
+#                            is one-time, so nothing relaunches, and because the
+#                            games are mirrored to S3 before shutdown completes.
+#
+# It used to demand 'stop' unconditionally and then excuse spot with "set at
+# launch, cannot be modified" - which was true, and meant the FATAL check below
+# could never protect a spot instance at all.
 lifecycle=$(aws ec2 describe-instances --region "$REGION" \
   --instance-ids "$INSTANCE_ID" \
   --query 'Reservations[0].Instances[0].InstanceLifecycle' --output text 2>/dev/null)
 if [[ $lifecycle == spot ]]; then
-  echo "    spot instance - set at launch, cannot be modified after"
+  WANT=terminate
+  echo "==> confirming shutdown means terminate (one-time spot)"
+  echo "    set at launch; a spot instance's shutdown behaviour cannot be modified after"
 else
+  WANT=stop
+  echo "==> enforcing stop-on-shutdown (on demand)"
   aws ec2 modify-instance-attribute --region "$REGION" \
     --instance-id "$INSTANCE_ID" \
     --instance-initiated-shutdown-behavior stop
@@ -52,9 +68,14 @@ behavior=$(aws ec2 describe-instance-attribute --region "$REGION" \
   --attribute instanceInitiatedShutdownBehavior \
   --query 'InstanceInitiatedShutdownBehavior.Value' --output text)
 echo "    $behavior"
-if [[ $behavior != stop ]]; then
-  echo "    FATAL: shutdown behaviour is '$behavior', not 'stop'." >&2
-  echo "    The idle watchdog would TERMINATE this instance and delete its disk." >&2
+if [[ $behavior != "$WANT" ]]; then
+  echo "    FATAL: shutdown behaviour is '$behavior', expected '$WANT'." >&2
+  if [[ $WANT == stop ]]; then
+    echo "    The idle watchdog would TERMINATE this instance and delete its disk." >&2
+  else
+    echo "    The idle watchdog would STOP this spot instance, which can then never" >&2
+    echo "    start again while its root volume keeps billing." >&2
+  fi
   echo "    Do not leave it running. Destroy and rebuild:  cg destroy && cg init" >&2
   exit 1
 fi
@@ -62,6 +83,13 @@ fi
 fi
 
 if [[ $MODE == all ]]; then
+# The alarm action must match the purchase model for the same reason as the
+# shutdown behaviour: ec2:stop on a spot instance strands it permanently.
+ALARM_LIFECYCLE=$(aws ec2 describe-instances --region "$REGION" \
+  --instance-ids "$INSTANCE_ID" \
+  --query 'Reservations[0].Instances[0].InstanceLifecycle' --output text 2>/dev/null)
+if [[ $ALARM_LIFECYCLE == spot ]]; then ALARM_VERB=terminate; else ALARM_VERB=stop; fi
+
 # --- Layer 3: stop the instance if it stops pushing video for 30 min.
 # Catches a hung OS, a dead watchdog, a wedged Sunshine.
 # Streaming at 20 Mbps moves ~750 MB per 5-min period; 10 MB is comfortably idle.
@@ -93,7 +121,7 @@ aws cloudwatch put-metric-alarm --region "$REGION" \
   --statistic Sum --period 300 --evaluation-periods 6 \
   --threshold 10000000 --comparison-operator LessThanThreshold \
   --treat-missing-data breaching \
-  --alarm-actions "arn:aws:automate:${REGION}:ec2:stop"
+  --alarm-actions "arn:aws:automate:${REGION}:ec2:${ALARM_VERB}"
 
 # Leave the stop action disarmed. A new alarm is judged against the *previous*
 # 30 minutes immediately, so arming it here stops the box mid-setup - the

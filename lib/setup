@@ -153,6 +153,7 @@ status() {
   else
     archive_line
     iam_lines
+    stranded_spot_note "$REGION" "${INSTANCE_ID:-}"
   fi
   if [[ $sgid != none ]]; then
     local ingress
@@ -272,6 +273,7 @@ cost() {
   else
     archive_line
     iam_lines
+    stranded_spot_note "$REGION" "${INSTANCE_ID:-}"
   fi
   printf '  idle alarm      %s\n' "$([[ ${alarms:-0} == 0 ]] && echo none || echo present)"
   printf '  budget          %s\n' "$([[ -z $budget || $budget == None ]] && echo none || printf '$%.0f/month' "$budget")"
