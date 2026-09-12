@@ -483,3 +483,50 @@ session.
 If a stream ever goes black and drops, check for that error and restart the display stack:
 
     sudo systemctl restart lightdm     # note: this kills the desktop session, so Steam too
+
+### NvFBC could not capture at all; X11 capture works
+
+After several wrong turns, this is the conclusion: **NvFBC does not work reliably on this
+setup.** The error is always the same -
+
+    Failed to start capture session: Cannot create capture session:
+    the display server is in modeset
+
+and it appeared under every condition that was supposed to rule it out: on a freshly built box
+with nothing touching the display, at the stock 1920x1080, immediately after a Sunshine
+restart, and with `global_prep_cmd` empty. Only the first session after a **full X restart**
+would capture; every session after it failed.
+
+Things that were wrong along the way, recorded because each one looked convincing:
+
+1. *The resolution prep command races capture.* A real race, worth fixing - but the failure
+   recurred on sessions where the script was never called.
+2. *DRM KMS is the cause.* Necessary (`nvidia_drm modeset=0`, see `40-nvidia.sh`) but not
+   sufficient - and it made mode changes start working, which made things worse.
+3. *Changing resolution breaks capture permanently.* Fitted the evidence, then was contradicted
+   by a failure at an unchanged 1920x1080.
+4. *NvFBC state leaks between sessions, so restart Sunshine.* Predicted the next session would
+   work. It did not.
+
+`capture = x11` was stable on the first attempt. The cost is real - the frame grab moves to the
+CPU, roughly one core at 1080p60 on 4 vCPUs - but NVENC still does the encoding, which is the
+expensive half. To retry NvFBC later, set `capture = nvfbc` and watch the **second** session.
+
+### A black screen is not always a capture failure
+
+Separately: a stream can connect, decode frames, and still show nothing, because the desktop
+itself is not painting. The two look identical from the client, and they are unrelated.
+
+Tell them apart without guessing - a uniform image compresses to almost nothing:
+
+    xwd -root | wc -c          # raw size
+    xwd -root | gzip -9 | wc -c
+
+Under ~0.2% of raw means the root window is genuinely flat (black) and capture is reporting the
+truth. A desktop that is drawing compresses far less well. Sunshine's keyframe size says the
+same thing: an 880-byte 1080p IDR frame is a flat image, not a desktop.
+
+The cause here was self-inflicted: restarting `lightdm` and then launching applications by hand
+over ssh leaves a session those applications cannot draw into. `xfdesktop` and `xfce4-panel`
+were running, and nothing was painting. The fix is to restart the display manager and let
+autologin build the whole session itself, launching nothing manually.

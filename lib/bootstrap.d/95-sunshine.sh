@@ -98,6 +98,23 @@ packet_size = 1024
 # scales if it asked for something else. set-resolution.sh is still installed
 # for manual use, just not wired into a session.
 global_prep_cmd = []
+
+# X11 capture, not NvFBC. NvFBC is the fast path on NVIDIA and it is what this
+# box should want - but it fails here, repeatedly and reproducibly:
+#   Failed to start capture session: Cannot create capture session:
+#   the display server is in modeset
+# It failed on a freshly built box with nothing touching the display, at the
+# stock 1920x1080, after a Sunshine restart, and with global_prep_cmd empty.
+# Only the first session after an X restart would capture. Disabling DRM KMS
+# (see 40-nvidia.sh) is necessary but not sufficient.
+#
+# X11 capture has no such failure mode and was stable immediately. The cost is
+# real: the frame grab moves to the CPU, roughly one core at 1080p60 on 4 vCPUs.
+# Encoding still runs on the GPU through NVENC, which is the expensive half.
+#
+# If NvFBC is ever worth retrying, set `capture = nvfbc` and watch for that
+# error on the SECOND session, not the first.
+capture = x11
 csrf_allowed_origins = $ORIGINS
 EOF
 chown -R "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.config/sunshine"
