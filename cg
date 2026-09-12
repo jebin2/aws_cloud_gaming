@@ -140,6 +140,48 @@ ensure_moonlight_syskeys() {
 }
 
 
+# `cg destroy` deliberately keeps the game volume. `--all` is the way to say
+# "no, everything" - and it has to be a real flag rather than a silently
+# ignored argument, or someone types it, sees "everything deleted", and keeps
+# paying INR 1,284/month for a volume they believe is gone.
+cmd_destroy() {
+  local all=0 a
+  for a in "$@"; do
+    case $a in
+      --all) all=1 ;;
+      # Refuse anything else rather than ignore it: a typo like --everything
+      # must not quietly behave as a plain destroy and leave the volume billing.
+      *) die "unknown option '$a' for destroy (only --all is accepted)" ;;
+    esac
+  done
+  if (( ! all )); then
+    lib/setup destroy
+    return
+  fi
+  local vol size
+  read -r vol size < <(ec2 describe-volumes --filters "Name=tag:Name,Values=${TS_HOST}-games" \
+    --query 'Volumes[0].[VolumeId,Size]' --output text 2>/dev/null)
+  echo "--all: the game library volume goes too, with every game on it."
+  [[ -n ${vol:-} && $vol != None ]] && echo "        $vol  ${size} GB" || echo "        (none exists)"
+  echo
+  lib/setup destroy
+  [[ -n ${vol:-} && $vol != None ]] || { log "no game volume to remove"; return 0; }
+  # Terminating the instance detaches it, but AWS takes a moment to let go.
+  say "deleting the game library volume $vol"
+  local i
+  for i in $(seq 1 40); do
+    [[ $(ec2 describe-volumes --volume-ids "$vol" --query 'Volumes[0].State' \
+         --output text 2>/dev/null) == available ]] && break
+    sleep 3
+  done
+  if ec2 delete-volume --volume-id "$vol" >/dev/null 2>&1; then
+    log "deleted $vol - storage charges stop now"
+  else
+    log "could not delete $vol; it may still be attaching/detaching"
+    log "  retry with: cg games --delete"
+  fi
+}
+
 cmd_games() {
   local vol az size state
   read -r vol az size state < <(ec2 describe-volumes \
@@ -321,6 +363,7 @@ build (changes things)
   cg snapshot --delete <id>  delete an image and its snapshots
   cg clean                   free space: apt caches, logs, /scratch
   cg destroy                 delete the box, no confirmation (game volume survives)
+  cg destroy --all           the box AND the game volume - nothing left billing
 
 info (read-only)
   cg check                   every preflight check, creates nothing
@@ -342,7 +385,7 @@ case "$CMD" in
   status)    lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true; stream_usage ;;
   cost)      exec lib/setup cost ;;
   clean)     exec lib/setup clean ;;
-  destroy)   exec lib/setup destroy ;;
+  destroy)   cmd_destroy "$@" ;;
   open|up)   ensure_moonlight_syskeys; exec lib/game up ;;
   stop|down) steam_shutdown_for_cloud_sync; exec lib/game stop ;;
   snapshot)  cmd_snapshot "$@" ;;
