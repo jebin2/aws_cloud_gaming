@@ -836,3 +836,29 @@ The lesson is about the diagnosis rather than the code: a guard printing reassur
 failure is such a familiar shape in this project that it was assumed rather than checked. One
 command (`run it again now`) separated propagation from a logic error, and it was available
 before any of the reasoning about why the branch might flip.
+
+### `--all` cleaned up AWS and left the other machine running
+
+`cg destroy --all` grew a block to remove the off-site watchdog's IAM user, because that user's
+long-lived key had survived "everything deleted". The block worked. It also reimplemented what
+`cg watchdog remove` already did - and reimplemented only half of it.
+
+`cg watchdog remove` handles the keys, the inline policy, the user, the `.env` entries, the
+units on the remote host, and the credentials file there. The new block covered the first four.
+So `--all` left a systemd timer running on an always-on VPS, firing every few minutes,
+authenticating with a key that no longer existed, appending `AuthFailure` to a log forever.
+
+Nothing detected it because nothing was looking at that machine. The destroy printed a line
+saying the units still existed and suggesting the command to remove them - true, accurate, and
+easy to read as housekeeping rather than as "a process is still running out there".
+
+`--all` now calls `cg watchdog remove` in a subshell (it uses `die()`), with the IAM-only path
+kept for the case where no host is configured but the user exists - an earlier setup, or an init
+interrupted after `watchdog_ensure` created the credential and before anything launched. That
+last case is not hypothetical: it is how a key with a different id turned up minutes after the
+previous one was revoked.
+
+The general point: when a destructive command grows to cover a new resource, the question is not
+only "does this remove it" but "does something already remove it, and more completely". Two
+places that delete the same thing will not stay in agreement, and the incomplete one wins
+whenever it is the one that runs.

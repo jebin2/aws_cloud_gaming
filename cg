@@ -347,33 +347,38 @@ destroy_everything() {
     log "role $prof was already gone"
   fi
 
-  # The off-site watchdog's user. This one is not about cost - it holds a
-  # long-lived access key that can call ec2:StopInstances, and it sits on an
-  # internet-facing VPS. "everything deleted" leaving a live AWS credential
-  # behind is the leftover that actually matters, and it survived --all until
-  # someone went looking for it.
-  local wd="${TS_HOST}-watchdog" k
-  if aws iam get-user --user-name "$wd" >/dev/null 2>&1; then
+  # The off-site watchdog. Not about cost: it holds a long-lived access key that
+  # can call ec2:StopInstances, on an internet-facing VPS. "everything deleted"
+  # leaving a live AWS credential behind is the leftover that actually matters,
+  # and it survived --all until someone audited IAM by hand.
+  #
+  # `cg watchdog remove` already does every part of this - keys, policy, user,
+  # .env, the units on the remote host and the credentials file there. This used
+  # to reimplement the IAM half and skip the remote half, which left a timer
+  # running every few minutes on the VPS forever, logging AuthFailure against a
+  # key that no longer existed. Subshelled because cmd_watchdog uses die().
+  local wd="${TS_HOST}-watchdog"
+  if [[ -n ${GAME_WATCHDOG_HOST:-} ]]; then
+    ( cmd_watchdog remove ) \
+      || log "off-site watchdog not fully removed - check: cg watchdog status"
+  elif aws iam get-user --user-name "$wd" >/dev/null 2>&1; then
+    # No host configured, but the IAM user exists - an earlier setup, or an init
+    # that created the credential before being interrupted. The key still works
+    # and still has to go.
     say "removing the off-site watchdog credential $wd"
+    local k
     for k in $(aws iam list-access-keys --user-name "$wd" \
                --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null); do
       [[ -n $k && $k != None ]] && aws iam delete-access-key --user-name "$wd" \
         --access-key-id "$k" >/dev/null 2>&1 && log "revoked key $k"
     done
     aws iam delete-user-policy --user-name "$wd" --policy-name idle-stop >/dev/null 2>&1 || true
-    if aws iam delete-user --user-name "$wd" >/dev/null 2>&1; then
-      log "deleted IAM user $wd - that key can no longer stop anything"
-    else
-      log "could not delete $wd; check: aws iam list-access-keys --user-name $wd"
-    fi
-    if [[ -f .env ]]; then
-      local t2; t2=$(mktemp)
-      grep -vE '^GAME_WATCHDOG_AWS_(KEY_ID|SECRET)=' .env > "$t2" 2>/dev/null || true
-      cat "$t2" > .env; rm -f "$t2"; chmod 600 .env
-      log "cleared the watchdog key from .env"
-    fi
-    [[ -n ${GAME_WATCHDOG_HOST:-} ]] && \
-      log "the units on ${GAME_WATCHDOG_HOST} still exist - remove them with: cg watchdog remove"
+    aws iam delete-user --user-name "$wd" >/dev/null 2>&1 \
+      && log "deleted IAM user $wd - that key can no longer stop anything" \
+      || log "could not delete $wd; check: aws iam list-access-keys --user-name $wd"
+    local t2; t2=$(mktemp)
+    grep -vE '^GAME_WATCHDOG_AWS_(KEY_ID|SECRET)=' .env > "$t2" 2>/dev/null || true
+    cat "$t2" > .env; rm -f "$t2"; chmod 600 .env
   fi
 
   [[ -n ${vol:-} && $vol != None ]] || return 0

@@ -62,6 +62,17 @@ cat > "$T/bin/tailscale" <<'FAKE'
 exit 1      # box unreachable: no push path is exercised here
 FAKE
 chmod +x "$T/bin/tailscale"
+# Lets the remote-removal path be asserted without a remote host.
+cat > "$T/bin/ssh" <<'FAKE'
+#!/usr/bin/env bash
+echo "ssh $*" >> "$LOG"
+FAKE
+chmod +x "$T/bin/ssh"
+cat > "$T/bin/scp" <<'FAKE'
+#!/usr/bin/env bash
+echo "scp $*" >> "$LOG"
+FAKE
+chmod +x "$T/bin/scp"
 
 run() { # run <stdin> <args...>
   local input=$1; shift
@@ -121,7 +132,17 @@ check "bucket kept in .env"   "$(grep -c GAME_S3_BUCKET "$T/.env")" "1"
 check "watchdog key kept in .env" "$(grep -c GAME_WATCHDOG_AWS "$T/.env")" "2"
 check "no prompt was shown"   "$(grep -c 'DESTROY-ALL' <<<"$out")" "0"
 
-echo "6. an unknown flag destroys nothing at all"
+echo "6. with an off-site host configured, --all removes the REMOTE units too"
+# This used to reimplement the IAM half and skip the remote half, leaving a
+# timer running on the VPS every few minutes against a key that no longer
+# existed. It now calls `cg watchdog remove`, which does both.
+seed_env; printf 'GAME_WATCHDOG_HOST=ubuntu@10.0.0.1\n' >> "$T/.env"
+out=$(run "" --all --force)
+check "watchdog user deleted"   "$(did 'delete-user --user-name')" "yes"
+check "remote units removed"    "$(did 'remote-watchdog.timer')" "yes"
+check "remote conf removed"     "$(did 'cloud-gaming-watchdog.conf')" "yes"
+
+echo "7. an unknown flag destroys nothing at all"
 out=$(run "" --everything)
 check "refused"               "$(grep -c "unknown option" <<<"$out")" "1"
 check "box NOT destroyed"     "$(did SETUP-DESTROY-CALLED)" "no"
