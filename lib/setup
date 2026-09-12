@@ -1013,10 +1013,10 @@ $STEP1
 
 That is it. From now on:
 
-       $C_OPEN            start, stream, stop on exit
-       $C_STOP       stop now (this is what stops the billing)
-       $C_STATUS    what exists and whether the guards are armed
-       $C_COST      what you have spent this month
+       $(printf '%-14s' "$C_OPEN")start, stream, stop on exit
+       $(printf '%-14s' "$C_STOP")stop now (this is what stops the billing)
+       $(printf '%-14s' "$C_STATUS")what exists and whether the guards are armed
+       $(printf '%-14s' "$C_COST")what you have spent this month
 
 The box is RUNNING right now and billing by the hour. Stop it when you
 are done: $C_STOP
