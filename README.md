@@ -271,14 +271,18 @@ spend whether you use it or not, and only pay off above roughly 15 hours of use 
 Two settings on the **client**, both easy to miss:
 
 - **Input Settings → Capture system keyboard shortcuts** → on. Without it Alt+Tab and Super are
-  swallowed by your own desktop and never reach the stream.
-- **Basic Settings → Display Mode → Fullscreen** - *not* "Borderless windowed". On Wayland a
-  client can only take the keyboard from the compositor via `keyboard-shortcuts-inhibit`, and
-  KWin only honours that for a true fullscreen surface. Borderless looks identical and silently
-  breaks key capture.
+  swallowed by your own desktop and never reach the stream. This is the setting that matters -
+  verified working on KDE Wayland in **borderless windowed**, so true fullscreen is not
+  required, at least there. On a compositor that refuses the `keyboard-shortcuts-inhibit`
+  request, try Fullscreen, and failing that an X11 session, where grabs are unconditional.
+
+Two ways to trip over this:
 
 `cg open` runs `moonlight stream <ip> Desktop`, which streams and exits without ever showing the
 GUI - so there is no settings page to reach from it. Run `moonlight` on its own to change these.
+
+And a running Moonlight does not notice config edits; it also rewrites the file on exit,
+discarding them. Change the setting in the GUI, or close Moonlight before editing the file.
 
 ### One thing to turn off in Steam
 
