@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Layer 5: an off-site dead-man's switch. Runs on an always-on host - a VPS, a
+# Layer 4: an off-site dead-man's switch. Runs on an always-on host - a VPS, a
 # home server, anything with a systemd timer - and stops the game instance when
 # it looks abandoned.
 #

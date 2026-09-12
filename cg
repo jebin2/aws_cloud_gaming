@@ -182,7 +182,7 @@ cmd_destroy() {
   fi
 }
 
-# Layer 5: the same watchdog logic, on a host that is always on. The on-host
+# Layer 4: the same watchdog logic, on a host that is always on. The on-host
 # watchdog dies with the box it protects, and the CloudWatch alarm can be
 # deleted, disarmed or misconfigured - and has stopped a box once here with no
 # visible reasoning. This layer writes down every decision and the numbers
@@ -217,7 +217,7 @@ watchdog_iam_ensure() {
   aws iam get-user --user-name "$user" >/dev/null 2>&1 || {
     say "creating the scoped IAM user $user"
     aws iam create-user --user-name "$user" >/dev/null 2>&1 || {
-      log "could not create $user (needs iam:CreateUser) - skipping layer 5"
+      log "could not create $user (needs iam:CreateUser) - skipping the off-site watchdog"
       return 1
     }
   }
@@ -235,7 +235,7 @@ watchdog_iam_ensure() {
 JSON
   aws iam put-user-policy --user-name "$user" --policy-name idle-stop \
     --policy-document "file://$pol" >/dev/null 2>&1 \
-    || { log "could not attach the policy to $user - skipping layer 5"; return 1; }
+    || { log "could not attach the policy to $user - skipping the off-site watchdog"; return 1; }
 
   # AWS allows two keys per user and shows a secret exactly once, so an existing
   # key whose secret we do not have is useless - clear the way and reissue.
@@ -291,7 +291,7 @@ watchdog_ensure() {
     return 0
   fi
   say "arming the off-site watchdog before anything launches"
-  ( cmd_watchdog install ) || log "off-site watchdog not installed - the other four layers still apply"
+  ( cmd_watchdog install ) || log "off-site watchdog not installed - the other three layers still apply"
   return 0
 }
 
@@ -614,7 +614,7 @@ info (read-only)
   cg ssh [cmd]               shell on the box
   cg watcher [--watch]       all four guards, and whether each is armed
   cg watchdog [install|status|logs|remove]
-                             layer 5: the same watchdog on an always-on host
+                             layer 4: the same watchdog, on an always-on host
   cg ping [--watch]          latency, and direct vs DERP relay
 
 flags

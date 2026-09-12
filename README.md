@@ -197,18 +197,23 @@ each session, so set Moonlight to 1920x1080 for the box's native mode.
 
 ## Cost control
 
-| # | Mechanism | Catches | Reaction |
-|---|-----------|---------|----------|
-| 1 | `game` script | normal use | on Moonlight exit |
-| 2 | on-host watchdog | forgotten disconnect, client crash | 15 min idle |
-| 3 | CloudWatch alarm on NetworkIn+**Out** | hung OS, dead watchdog, closed laptop | 30 min idle |
-| 4 | AWS budget | everything else | email |
-| 5 | off-site watchdog (optional) | a wedged box, a deleted or disarmed alarm | 30 min idle |
+Numbered by **independence** - how likely each one is to survive the failure it exists to catch.
+Layer 1 is the fastest and the least reliable; layer 4 is the slowest to write but the hardest
+to take down.
 
-Numbered by how fast each reacts, not by importance - and **armed in the opposite order**. The
-budget and the off-site watchdog go up *before anything launches*, the on-host watchdog during
-the build, and the CloudWatch alarm at the end of `cg init`. A guard that only exists after the
-build cannot protect the build.
+| # | Mechanism | Dies with | Catches | Reaction |
+|---|-----------|-----------|---------|----------|
+| 1 | `cg open` | your laptop, your network | normal use | on Moonlight exit |
+| 2 | on-host watchdog | the box it protects | forgotten disconnect, client crash | 15 min idle |
+| 3 | CloudWatch alarm on NetworkIn+**Out** | a wrong metric, a disarmed action | hung OS, dead watchdog, closed laptop | 30 min idle |
+| 4 | off-site watchdog (optional) | only that third machine | a wedged box, a deleted or disarmed alarm | 30 min idle |
+
+The **AWS budget is not in that list**, because it stops nothing - it emails you. It is the
+backstop for everything the four layers miss, not a layer.
+
+They are **armed in roughly the reverse order**: the budget and the off-site watchdog before
+anything launches, the on-host watchdog during the build, the CloudWatch alarm at the end of
+`cg init`. A guard that only exists after the build cannot protect the build.
 
 Worst-case leak with all four armed is about 30 minutes of runtime.
 

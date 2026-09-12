@@ -112,7 +112,7 @@ echo "    idle-stop action stays disarmed until 'game up' arms it"
 fi
 
 if [[ $MODE == budget || $MODE == all ]]; then
-# --- Layer 4: budget. ---------------------------------------------------------
+# --- The budget. Not a layer: it stops nothing, it tells you. ------------------
 # AWS Budgets rather than a CloudWatch EstimatedCharges alarm. That alarm needs
 # two things a fresh account does not have: "Receive Billing Alerts" switched on
 # by the *root* user (no API for it), and an SNS subscription each recipient has
