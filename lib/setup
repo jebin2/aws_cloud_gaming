@@ -849,6 +849,10 @@ grep -v '^GAME_TS_NODE=' .env 2>/dev/null > "$tmp" || true
 echo "GAME_TS_NODE=$TS_NODE" >> "$tmp"
 cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
 
+# The Steam library lives on the persistent volume (see 86-games.sh). Defined
+# once: when this path moved from /scratch/steam, three hardcoded copies went
+# stale and reported a correctly registered library as "NOT registered".
+GAMES_LIB="${GAME_LIB_DIR:-/games/steam}"
 KEY="$HOME/.ssh/${TS_HOST}.pem"
 SSH="ssh -i $KEY -o StrictHostKeyChecking=accept-new ubuntu@$TS_NODE"
 
@@ -1013,15 +1017,15 @@ if wait_for_steam "ubuntu@$TS_NODE" "$KEY" 1500; then
   # Report what actually happened rather than assuming the three sub-steps
   # (client, library registration, dock pin) all succeeded.
   $SSH 'echo "    client:  $(du -shcL ~/.steam ~/.local/share/Steam 2>/dev/null | tail -1 | cut -f1)"
-        echo "    library: $(grep -q /scratch/steam ~/.steam/steam/config/libraryfolders.vdf 2>/dev/null && echo "/scratch registered" || echo "NOT registered")"
+        echo "    library: $(grep -q '"$GAMES_LIB"' ~/.steam/steam/config/libraryfolders.vdf 2>/dev/null && echo "'"$GAMES_LIB"' registered" || echo "NOT registered")"
         echo "    dock:    $(test -f ~/.config/xfce4/.steam-pinned && echo pinned || echo "not pinned")"' 2>/dev/null || true
   # Report the library separately - it fails independently of the client, and
   # claiming "ready" when games would land on the 50 GB root disk is worse than
   # saying nothing.
-  if $SSH 'grep -q /scratch/steam ~/.steam/steam/config/libraryfolders.vdf' 2>/dev/null; then
-    STEAM_MSG="installed, NVMe library registered, pinned to the dock. Log in and it is ready."
+  if $SSH "grep -q '$GAMES_LIB' ~/.steam/steam/config/libraryfolders.vdf" 2>/dev/null; then
+    STEAM_MSG="installed, game library on $GAMES_LIB registered, pinned to the dock. Log in and it is ready."
   else
-    STEAM_MSG="installed and pinned, but the NVMe library is NOT registered - games would fill the root disk. Add /scratch/steam in Steam > Settings > Storage."
+    STEAM_MSG="installed and pinned, but the game library is NOT registered - games would fill the 50 GB root disk. Add $GAMES_LIB in Steam > Settings > Storage."
   fi
 fi
 
