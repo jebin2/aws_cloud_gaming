@@ -17,6 +17,16 @@ mountpoint -q /scratch || mount -o discard,noatime "$DEV" /scratch
 mkdir -p /scratch/nvidia-shader-cache /scratch/dxvk-cache /scratch/tmp \
          /scratch/steam/steamapps /scratch/downloads
 
+# Steam's own shader cache (Fossilize pipeline caches) lives INSIDE the library
+# at steamapps/shadercache, so it dies with /scratch on every stop - and for a
+# Vulkan game under Proton that is the cache that matters, not the GL one below.
+# Rebuilding it is minutes of a saturated CPU at launch, so point it at the root
+# volume instead. Steam follows the symlink and never notices.
+mkdir -p /home/ubuntu/.cache/steam-shadercache
+chown -R ubuntu:ubuntu /home/ubuntu/.cache/steam-shadercache
+rm -rf /scratch/steam/steamapps/shadercache
+ln -sfn /home/ubuntu/.cache/steam-shadercache /scratch/steam/steamapps/shadercache
+
 # Recreate the Steam library marker on every boot. This disk is reformatted at
 # each start, so the marker that proves to Steam the library is real dies with
 # it - while the *entry* in libraryfolders.vdf survives on the root volume.
