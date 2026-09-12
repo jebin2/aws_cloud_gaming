@@ -607,3 +607,40 @@ Selection now prefers a device already labelled `games`, and otherwise takes the
 that is neither the root nor carrying any filesystem or partition. Verified on a real box with
 all three device types present, and verified idempotent: 50 MB written, volume unmounted,
 script re-run, checksum unchanged.
+
+### The screen goes black after about 15 idle minutes and never comes back
+
+The hardest one in this project to see, because every component reports success.
+Sunshine logs **zero capture errors**, Moonlight receives and decodes frames, the desktop
+processes are all running and correctly sized - and the picture is black.
+
+The tell is in `xset q`:
+
+    Standby: 600    Suspend: 0    Off: 900
+    DPMS is Enabled
+    Monitor is Off          <- here
+
+X blanked the virtual display. On a headless box there is no monitor to wake, so **the
+framebuffer never comes back**: `xset dpms force on` restores the state but not the picture, and
+`xrefresh` cannot repaint it. Nothing recovers it except restarting the session - which is
+exactly why it looked like an intermittent capture bug that "fixed itself" on any restart.
+
+Confirm it with a compression test rather than by eye, since a uniform image compresses to
+almost nothing:
+
+    xwd -root | wc -c ; xwd -root | gzip -9 | wc -c     # under ~0.2% means flat
+
+**`xorg.conf` alone does not fix this.** ServerFlags `BlankTime`/`OffTime`/`NoPM` are parsed -
+the X log proves it - and then **xfce4-power-manager re-enables DPMS** once the session starts.
+`light-locker` will also blank and lock, and a locked screen on a box with no keyboard cannot be
+recovered over a stream.
+
+So three places, all of them needed:
+
+1. `xorg.conf` ServerFlags: `BlankTime 0`, `StandbyTime 0`, `SuspendTime 0`, `OffTime 0`, `NoPM`
+2. `xfce4-power-manager.xml`: `dpms-enabled=false`, `blank-on-ac=0`, both `dpms-on-ac-*=0`
+3. `light-locker` autostart set to `Hidden=true`, plus an `xset s off -dpms` autostart
+
+Recovering a box that has already blanked:
+
+    sudo systemctl restart lightdm     # kills the desktop session, so Steam too

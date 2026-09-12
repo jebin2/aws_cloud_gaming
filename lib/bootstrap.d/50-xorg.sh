@@ -32,6 +32,21 @@ Section "Device"
     Option         "ModeValidation" "NoDFPNativeResolutionCheck,NoVirtualSizeCheck,NoMaxPClkCheck,AllowNonEdidModes"
 EndSection
 
+# A headless virtual display must never blank. X defaults to DPMS off at 900s
+# and a screensaver blank before that - and with no physical monitor there is
+# nothing to wake: once it blanks, the framebuffer stays black. Capture then
+# records black faithfully, `xset dpms force on` restores the state but not the
+# picture, and xrefresh cannot repaint it. The only recovery is restarting the
+# session, which is how this hid for a whole evening: it looked like a capture
+# bug, appeared only after ~15 idle minutes, and "fixed itself" on any restart.
+Section "ServerFlags"
+    Option         "BlankTime"   "0"
+    Option         "StandbyTime" "0"
+    Option         "SuspendTime" "0"
+    Option         "OffTime"     "0"
+    Option         "NoPM"        "true"
+EndSection
+
 Section "Screen"
     Identifier     "nvidia"
     Device         "nvidia"
