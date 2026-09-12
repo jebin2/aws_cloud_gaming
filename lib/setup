@@ -1046,7 +1046,7 @@ if (( ${PAIRED:-0} )); then
   REMAINING="One step remains - it is a Tailscale setting, not an AWS one."
   STEP1="  STEP 1 - pair Moonlight   [DONE automatically]
   ------------------------------------------------------------------
-  Already done - the Sunshine account was created and Moonlight paired
+  Nothing to do - Sunshine has an account and Moonlight is paired, both
   without a browser. Credentials are in .env if you ever want the web UI:
 
        https://$IP:47990
