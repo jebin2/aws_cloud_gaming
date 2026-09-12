@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+# One front door for the whole rig. A dispatcher, deliberately: `setup` and
+# `game` keep working, and almost every odd-looking line in them is a scar from
+# a real failure. Re-implementing that logic here would quietly lose it, so this
+# calls into them and only implements what they never had - snapshot listing,
+# logs, ssh, ping and the guard view.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+source lib/common.sh
+
+# --- global flags, before the subcommand ---------------------------------------
+JSON=0; WATCH=0
+while [[ ${1:-} == -* ]]; do
+  case $1 in
+    --json)    JSON=1; shift ;;
+    --watch)   WATCH=1; shift ;;
+    --region)  export GAME_REGION="$2"; shift 2 ;;
+    --host)    export GAME_TS_HOST="$2"; shift 2 ;;
+    -h|--help) set -- help; break ;;
+    *) die "unknown flag '$1' (see: cg help)" ;;
+  esac
+done
+CMD="${1:-help}"; shift || true
+# Flags are also accepted after the subcommand, which is how people actually
+# type them.
+for a in "$@"; do
+  case $a in --watch) WATCH=1 ;; --json) JSON=1 ;; esac
+done
+
+# .env, parsed rather than sourced: a malformed line in a sourced file executes
+# as a command. Anything already exported wins, so --region/--host stick.
+if [[ -f .env ]]; then
+  while IFS= read -r line; do
+    [[ $line =~ ^[[:space:]]*# ]] && continue
+    [[ $line =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+    k="${line%%=*}"; [[ -n ${!k:-} ]] && continue
+    export "$k=${line#*=}"
+  done < .env
+fi
+
+REGION="${GAME_REGION:-ap-south-2}"
+TS_HOST="${GAME_TS_HOST:-gamevps}"
+TS_NODE="${GAME_TS_NODE:-$TS_HOST}"
+INSTANCE_ID="${GAME_INSTANCE_ID:-}"
+KEY="$HOME/.ssh/${TS_HOST}.pem"
+ec2() { aws ec2 "$@" --region "$REGION"; }
+
+need_node() {
+  tailscale ip -4 "$TS_NODE" >/dev/null 2>&1 \
+    || die "'$TS_NODE' is not on the tailnet. Is the box running? Try: cg status"
+}
+box() {
+  need_node
+  ssh -i "$KEY" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
+      -o BatchMode=yes "ubuntu@$(tailscale ip -4 "$TS_NODE")" "$@"
+}
+
+# --- commands ------------------------------------------------------------------
+
+cmd_snapshot() {
+  case "${1:-create}" in
+    --list|list)
+      # Images bill every month, forever, and nothing else here lists them -
+      # a create-only snapshot command is a slow leak.
+      local imgs
+      imgs=$(ec2 describe-images --owners self \
+        --query 'reverse(sort_by(Images,&CreationDate))[].{id:ImageId,name:Name,created:CreationDate,state:State,gb:BlockDeviceMappings[0].Ebs.VolumeSize}' \
+        --output json)
+      if (( JSON )); then printf '%s\n' "$imgs"; return; fi
+      python3 - <<PY
+import json,sys
+imgs=json.loads('''$imgs''')
+if not imgs: print("no saved images - nothing billing"); sys.exit()
+print(f"{'IMAGE':<24}{'CREATED':<22}{'GB':>4}  {'~USD/mo':>8}  NAME")
+tot=0.0
+for i in imgs:
+    gb=i.get('gb') or 0
+    mo=gb*0.05          # EBS snapshot storage, approx
+    tot+=mo
+    print(f"{i['id']:<24}{i['created'][:19]:<22}{gb:>4}  {mo:>8.2f}  {i['name']}")
+print(f"\nestimated {tot:.2f} USD/month (~INR {tot*88:.0f}) for {len(imgs)} image(s)")
+print("delete one with:  cg snapshot --delete <image-id>")
+PY
+      ;;
+    --delete|delete)
+      local id="${2:-}"
+      [[ -n $id ]] || die "which image? see: cg snapshot --list"
+      # Deregistering leaves the backing snapshots behind, still billing - that
+      # is the classic way to believe you deleted something and keep paying.
+      local snaps
+      snaps=$(ec2 describe-images --image-ids "$id" \
+        --query 'Images[0].BlockDeviceMappings[].Ebs.SnapshotId' --output text 2>/dev/null || true)
+      ec2 deregister-image --image-id "$id" && log "deregistered $id"
+      for s in $snaps; do
+        [[ $s == None || -z $s ]] && continue
+        ec2 delete-snapshot --snapshot-id "$s" 2>/dev/null && log "deleted snapshot $s" \
+          || log "could not delete snapshot $s (in use by another image?)"
+      done
+      ;;
+    create|"")
+      [[ -n $INSTANCE_ID ]] || die "no instance in .env - nothing to snapshot"
+      local s name ami
+      s=$(ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+          --query 'Reservations[0].Instances[0].State.Name' --output text)
+      [[ $s == stopped ]] || say "note: imaging a $s instance; stop it first for a consistent image"
+      name="${TS_HOST}-$(date -u +%Y%m%d-%H%M%S)"
+      say "creating image $name (several minutes)"
+      ami=$(ec2 create-image --instance-id "$INSTANCE_ID" --name "$name" \
+        --description "cloud_gaming saved desktop" \
+        --tag-specifications "ResourceType=image,Tags=[{Key=Name,Value=${TS_HOST}-image}]" \
+        --query ImageId --output text)
+      log "$ami"
+      wait_image_available "$REGION" "$ami"
+      log "ready - cg init will restore from it instead of rebuilding"
+      ;;
+    *) die "usage: cg snapshot [create|--list|--delete <id>]" ;;
+  esac
+}
+
+cmd_log() {
+  local what="${1:-build}"
+  case $what in
+    build)    if (( WATCH )); then box 'sudo tail -f /var/log/cloud-gaming-bootstrap.log'
+              else box 'sudo tail -n 200 /var/log/cloud-gaming-bootstrap.log'; fi ;;
+    steam)    if (( WATCH )); then box 'tail -f ~/steam-prewarm.log'
+              else box 'tail -n 200 ~/steam-prewarm.log'; fi ;;
+    watchdog) if (( WATCH )); then box 'journalctl -t idle-watchdog -f'
+              else box 'journalctl -t idle-watchdog -n 50 --no-pager'; fi ;;
+    disk)     if (( WATCH )); then box 'journalctl -t disk-monitor -f'
+              else box 'journalctl -t disk-monitor -n 50 --no-pager'; fi ;;
+    sunshine) if (( WATCH )); then box 'journalctl --user -u app-dev.lizardbyte.app.Sunshine -f'
+              else box 'journalctl --user -u app-dev.lizardbyte.app.Sunshine -n 80 --no-pager'; fi ;;
+    *) die "usage: cg log [build|steam|watchdog|disk|sunshine] [--watch]" ;;
+  esac
+}
+
+cmd_ping() {
+  need_node
+  # Latency alone does not explain a bad session; whether the path is direct or
+  # relayed through DERP usually does, and nothing else surfaces it.
+  local out
+  if (( WATCH )); then
+    exec tailscale ping --until-direct=false "$TS_NODE"
+  fi
+  out=$(tailscale ping -c 5 --timeout 3s "$TS_NODE" 2>&1 || true)
+  local path="unknown" ms=""
+  # `|| true` on every one of these: the whole script runs under `set -e`, and a
+  # grep that simply does not match is the normal case here, not an error. Without
+  # it `cg ping` exited silently and printed nothing at all.
+  grep -q 'via DERP' <<<"$out" && path="DERP relay (slower - UDP 41641 may be blocked)" || true
+  grep -qE 'via [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' <<<"$out" && path="direct" || true
+  ms=$(grep -oE 'in [0-9]+ms' <<<"$out" | grep -oE '[0-9]+' | sort -n \
+       | awk '{a[NR]=$1} END{if(NR)printf "%d", a[int((NR+1)/2)]}' || true)
+  if (( JSON )); then
+    printf '{"node":"%s","path":"%s","median_ms":%s}\n' "$TS_NODE" "${path%% *}" "${ms:-null}"
+  else
+    printf '\n  node    %s (%s)\n' "$TS_NODE" "$(tailscale ip -4 "$TS_NODE" 2>/dev/null)"
+    printf '  path    %s\n' "$path"
+    printf '  latency %s\n\n' "${ms:+${ms}ms median}${ms:-no reply}"
+    [[ $path == DERP* ]] && printf '  A relayed path adds latency and costs bandwidth both ways.\n  Check the security group still allows inbound UDP 41641.\n\n' || true
+  fi
+}
+
+cmd_watcher() {
+  if (( WATCH )); then box 'journalctl -t idle-watchdog -f'; return; fi
+  say "guards"
+  local s
+  s=$(ec2 describe-instances --instance-ids "${INSTANCE_ID:-x}" \
+      --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "none")
+  log "instance          $s"
+  # Layer 2, on the box.
+  if [[ $s == running ]] && box true 2>/dev/null; then
+    log "on-host watchdog  $(box 'systemctl is-active idle-watchdog.timer' 2>/dev/null || echo unreachable)"
+    log "shutdown action   $(ec2 describe-instance-attribute --instance-id "$INSTANCE_ID" \
+         --attribute instanceInitiatedShutdownBehavior \
+         --query 'InstanceInitiatedShutdownBehavior.Value' --output text 2>/dev/null)  <- must be 'stop'"
+    echo
+    box 'journalctl -t idle-watchdog -n 8 --no-pager -o cat 2>/dev/null | sed "s/^/      /"' || true
+  else
+    log "on-host watchdog  (box not reachable)"
+  fi
+  # Layers 3 and 4 live in AWS and survive the box being gone.
+  echo
+  log "idle alarm        $(aws cloudwatch describe-alarms --region "$REGION" \
+        --alarm-names "${TS_HOST}-idle-stop" \
+        --query 'MetricAlarms[0].[StateValue,ActionsEnabled]' \
+        --output text 2>/dev/null | tr '\t' ' ' || echo absent)  <- state, actions-enabled"
+  log "budget            $(aws budgets describe-budgets --account-id \
+        "$(aws sts get-caller-identity --query Account --output text)" \
+        --query "Budgets[?BudgetName=='${TS_HOST}-monthly'].BudgetLimit.Amount" \
+        --output text 2>/dev/null || echo absent)"
+}
+
+cmd_help() {
+  cat <<'EOF'
+cg - cloud gaming rig
+
+build (changes things)
+  cg init                    build everything; reuses an existing box   [costs money]
+  cg open                    start, stream, stop on exit                [costs money]
+  cg stop                    stop the instance - this ends hourly billing
+  cg status                  instance, disks, guards, tailnet, ping
+  cg snapshot                save an AMI of the current box             [bills monthly]
+  cg snapshot --list         what images exist and what they cost
+  cg snapshot --delete <id>  delete an image and its snapshots
+  cg clean                   free space: apt caches, logs, /scratch     [DELETES GAMES]
+  cg destroy                 delete everything, no confirmation
+
+info (read-only)
+  cg check                   every preflight check, creates nothing
+  cg cost                    month-to-date spend and what still bills
+  cg log [what] [--watch]    build | steam | watchdog | disk | sunshine
+  cg ssh [cmd]               shell on the box
+  cg watcher [--watch]       all four guards, and whether each is armed
+  cg ping [--watch]          latency, and direct vs DERP relay
+
+flags
+  --region <r>  --host <name>   override .env without editing it
+  --json                        ping, snapshot --list
+EOF
+}
+
+case "$CMD" in
+  init)      exec ./setup ;;
+  check)     exec ./setup check ;;
+  status)    ./setup status; [[ -n $INSTANCE_ID ]] && ./game status || true ;;
+  cost)      exec ./setup cost ;;
+  clean)     exec ./setup clean ;;
+  destroy)   exec ./setup destroy ;;
+  open|up)   exec ./game up ;;
+  stop|down) exec ./game stop ;;
+  snapshot)  cmd_snapshot "$@" ;;
+  log|logs)  cmd_log "$@" ;;
+  ssh)       if [[ $# -gt 0 ]]; then box "$@"; else need_node; exec ssh -i "$KEY" \
+               -o StrictHostKeyChecking=accept-new "ubuntu@$(tailscale ip -4 "$TS_NODE")"; fi ;;
+  ping)      cmd_ping ;;
+  watcher|guards) cmd_watcher ;;
+  help|"")   cmd_help ;;
+  *) echo "unknown command '$CMD'" >&2; cmd_help >&2; exit 1 ;;
+esac

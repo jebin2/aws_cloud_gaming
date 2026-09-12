@@ -3,8 +3,9 @@
 Your own Linux desktop on an AWS GPU instance, streamed to any device over Tailscale, that runs
 only while you are using it and is guaranteed to go back down.
 
-    ./setup      # once: build the box and arm every guard
-    ./game       # start, stream, stop on exit
+    ./cg init    # once: build the box and arm every guard
+    ./cg open    # start, stream, stop on exit
+    ./cg stop    # stop - this is what ends the hourly billing
 
 ---
 
@@ -30,7 +31,7 @@ only while you are using it and is guaranteed to go back down.
     git clone git@github.com:jebin2/aws_cloud_gaming.git
     cd aws_cloud_gaming
     cp .env.example .env      # edit: Tailscale key, alert email, region
-    ./setup
+    ./cg init
 
 `./setup` checks every prerequisite before it spends a cent and tells you exactly what is
 missing. It provisions the instance, arms the cost guards, installs the watchdog, and hands you
@@ -94,6 +95,36 @@ Everything lives in `.env` - see [.env.example](.env.example), which documents e
 working AWS profile and a Tailscale account.
 
 ## Commands
+
+`cg` is the front door. It dispatches into `setup` and `game`, which both keep working - the
+odd-looking lines in those scripts are scars from real failures, so `cg` calls them rather than
+reimplementing them.
+
+| Command | What it does |
+|---|---|
+| `cg init` | Build everything; reuses an existing box. **Costs money** |
+| `cg open` | Start, stream, stop on exit. **Costs money** |
+| `cg stop` | Stop the instance - ends hourly billing |
+| `cg status` | Instance, disks, guards, tailnet, local tools |
+| `cg snapshot` | Save an AMI of the box. **Bills monthly** |
+| `cg snapshot --list` | What images exist and what they cost |
+| `cg snapshot --delete <id>` | Delete an image **and its backing snapshots** |
+| `cg clean` | Free space: apt caches, logs, `/scratch`. **Deletes installed games** |
+| `cg destroy` | Delete everything. No confirmation |
+| `cg check` | Every preflight check, creates nothing |
+| `cg cost` | Month-to-date spend and what still bills |
+| `cg log [what] [--watch]` | `build` \| `steam` \| `watchdog` \| `disk` \| `sunshine` |
+| `cg ssh [cmd]` | Shell on the box - resolves the suffixed tailnet name for you |
+| `cg watcher [--watch]` | All four guards, and whether each is genuinely armed |
+| `cg ping [--watch]` | Latency, and **direct vs DERP relay** - the usual cause of a bad session |
+
+`--region` and `--host` override `.env` without editing it; `--json` works on `ping` and
+`snapshot --list`.
+
+Deleting an image deregisters it **and** deletes its backing snapshots. Deregistering alone
+leaves those billing - the usual way to believe you deleted something and keep paying for it.
+
+### The underlying scripts
 
 | Command | What it does | Run it twice? |
 |---|---|---|
@@ -223,7 +254,8 @@ play. If you would rather not wait, attach a persistent EBS volume for a game li
 
 ## Layout
 
-    setup, game        what you run
+    cg                 the front door - every command
+    setup, game        what cg dispatches into
     lib/               provisioning and cloud-init internals
     host/              units deployed to the instance (watchdog, disk monitor)
     tests/             offline tests for the fiddly host-side logic
