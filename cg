@@ -182,6 +182,76 @@ cmd_destroy() {
   fi
 }
 
+# Layer 5: the same watchdog logic, on a host that is always on. The on-host
+# watchdog dies with the box it protects, and the CloudWatch alarm can be
+# deleted, disarmed or misconfigured - and has stopped a box once here with no
+# visible reasoning. This layer writes down every decision and the numbers
+# behind it, which is most of its value.
+cmd_watchdog() {
+  local host="${GAME_WATCHDOG_HOST:-}"
+  [[ -n $host ]] || die "set GAME_WATCHDOG_HOST=user@host in .env (an always-on box with the aws CLI)"
+  local rsh=(ssh -o ConnectTimeout=10 -o BatchMode=yes "$host")
+  case "${1:-status}" in
+    install)
+      say "checking $host"
+      "${rsh[@]}" 'command -v aws >/dev/null' \
+        || die "the aws CLI is not installed on $host"
+      local remote_arn local_arn
+      remote_arn=$("${rsh[@]}" 'aws sts get-caller-identity --query Arn --output text' 2>/dev/null) \
+        || die "no working AWS credentials on $host - configure a SCOPED iam user there first"
+      local_arn=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null || echo "")
+      log "remote identity: $remote_arn"
+      # An internet-facing box holding the same credentials as your laptop is
+      # the worst outcome here, so say so plainly rather than let it pass.
+      if [[ -n $local_arn && $remote_arn == "$local_arn" ]]; then
+        log ""
+        log "WARNING: $host is using the SAME credentials as this machine."
+        log "  That gives an always-on, internet-facing host your full access."
+        log "  Create an IAM user limited to ec2:DescribeInstances,"
+        log "  ec2:StopInstances and cloudwatch:GetMetricStatistics - see the README."
+        log ""
+      fi
+      say "installing the off-site watchdog on $host"
+      "${rsh[@]}" 'sudo install -d -m 755 /var/lib/cloud-gaming-watchdog' 2>/dev/null || true
+      scp -q -o BatchMode=yes host/remote-watchdog.sh host/remote-watchdog.service \
+        host/remote-watchdog.timer "$host:/tmp/" || die "copy to $host failed"
+      "${rsh[@]}" "
+        set -e
+        sudo install -m 755 /tmp/remote-watchdog.sh /usr/local/bin/remote-watchdog.sh
+        sudo install -m 644 /tmp/remote-watchdog.service /tmp/remote-watchdog.timer /etc/systemd/system/
+        printf 'GAME_REGION=%s\nGAME_TS_HOST=%s\nIDLE_LIMIT=%s\n' \
+          '$REGION' '$TS_HOST' '${GAME_WATCHDOG_IDLE:-6}' | sudo tee /etc/cloud-gaming-watchdog.conf >/dev/null
+        sudo chmod 600 /etc/cloud-gaming-watchdog.conf
+        sudo systemctl daemon-reload
+        sudo systemctl enable --now remote-watchdog.timer
+        rm -f /tmp/remote-watchdog.*
+      " || die "install on $host failed"
+      log "installed and enabled - it survives a reboot of $host (OnBootSec + Persistent)"
+      "${rsh[@]}" 'systemctl list-timers remote-watchdog.timer --no-pager' 2>/dev/null | sed 's/^/      /'
+      log "it stops the box after $(( ${GAME_WATCHDOG_IDLE:-6} * 5 )) min with no traffic in or out"
+      ;;
+    status)
+      printf '  host    %s\n' "$host"
+      printf '  timer   %s\n' "$("${rsh[@]}" 'systemctl is-enabled remote-watchdog.timer 2>/dev/null || echo not-installed' 2>/dev/null)"
+      "${rsh[@]}" 'systemctl list-timers remote-watchdog.timer --no-pager 2>/dev/null | sed -n 2p' 2>/dev/null | sed 's/^/  next    /'
+      echo "  recent decisions:"
+      "${rsh[@]}" 'sudo tail -n 8 /var/log/cloud-gaming-watchdog.log 2>/dev/null' 2>/dev/null | sed 's/^/    /' \
+        || echo "    (no log yet)"
+      ;;
+    logs)
+      if (( WATCH )); then "${rsh[@]}" 'sudo tail -f /var/log/cloud-gaming-watchdog.log'
+      else "${rsh[@]}" 'sudo tail -n 40 /var/log/cloud-gaming-watchdog.log' 2>/dev/null | sed 's/^/  /'; fi ;;
+    remove)
+      say "removing the off-site watchdog from $host"
+      "${rsh[@]}" 'sudo systemctl disable --now remote-watchdog.timer 2>/dev/null;
+        sudo rm -f /etc/systemd/system/remote-watchdog.{service,timer} \
+          /usr/local/bin/remote-watchdog.sh /etc/cloud-gaming-watchdog.conf;
+        sudo systemctl daemon-reload' 2>/dev/null
+      log "removed" ;;
+    *) die "usage: cg watchdog [install|status|logs [--watch]|remove]" ;;
+  esac
+}
+
 cmd_games() {
   local vol az size state
   read -r vol az size state < <(ec2 describe-volumes \
@@ -371,6 +441,8 @@ info (read-only)
   cg log [what] [--watch]    build | steam | watchdog | disk | sunshine
   cg ssh [cmd]               shell on the box
   cg watcher [--watch]       all four guards, and whether each is armed
+  cg watchdog [install|status|logs|remove]
+                             layer 5: the same watchdog on an always-on host
   cg ping [--watch]          latency, and direct vs DERP relay
 
 flags
@@ -390,6 +462,7 @@ case "$CMD" in
   stop|down) steam_shutdown_for_cloud_sync; exec lib/game stop ;;
   snapshot)  cmd_snapshot "$@" ;;
   games)     cmd_games "$@" ;;
+  watchdog)  cmd_watchdog "$@" ;;
   log|logs)  cmd_log "$@" ;;
   ssh)       if [[ $# -gt 0 ]]; then box "$@"; else need_node; exec ssh -i "$KEY" \
                -o StrictHostKeyChecking=accept-new "ubuntu@$(tailscale ip -4 "$TS_NODE")"; fi ;;

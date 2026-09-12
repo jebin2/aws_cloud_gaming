@@ -203,8 +203,52 @@ each session, so set Moonlight to 1920x1080 for the box's native mode.
 | 2 | on-host watchdog | forgotten disconnect, client crash | 15 min idle |
 | 3 | CloudWatch alarm on NetworkIn+**Out** | hung OS, dead watchdog, closed laptop | 30 min idle |
 | 4 | AWS budget | everything else | email |
+| 5 | off-site watchdog (optional) | a wedged box, a deleted or disarmed alarm | 30 min idle |
 
 Worst-case leak with all four armed is about 30 minutes of runtime.
+
+### Layer 5: a watchdog somewhere that is always on
+
+Optional, and it covers what the others structurally cannot:
+
+- **layer 2 dies with the box it protects.** A wedged instance takes its own watchdog with it.
+- **layer 3 can be wrong or absent.** The alarm can be deleted, disarmed, or pointed at the
+  wrong metric - it watched egress only until recently, which read a download as idleness.
+- **neither explains itself.** The CloudWatch alarm stopped a box mid-build early in this
+  project and said nothing about why; that had to be inferred.
+
+So layer 5 runs the same idea on a host that is always on, and **writes down every decision with
+the numbers behind it**:
+
+    2026-09-12T18:40:02+05:30 i-0abc quiet: in=41232B out=9112B total=50344B < 10485760B idle=4/6
+    2026-09-12T18:45:02+05:30 i-0abc idle limit reached - stopping i-0abc
+
+    GAME_WATCHDOG_HOST=ubuntu@my-vps      # in .env
+    cg watchdog install                   # systemd timer, survives a reboot
+    cg watchdog status                    # timer state and recent decisions
+    cg watchdog logs --watch              # follow it live
+
+**Give that host its own scoped IAM user.** It is always on and probably internet-facing, so it
+should be able to do only this and nothing else:
+
+```json
+{ "Version": "2012-10-17", "Statement": [
+  { "Effect": "Allow",
+    "Action": ["ec2:DescribeInstances", "cloudwatch:GetMetricStatistics"],
+    "Resource": "*" },
+  { "Effect": "Allow", "Action": "ec2:StopInstances",
+    "Resource": "*",
+    "Condition": { "StringEquals": { "ec2:ResourceTag/Name": "gamevps" } } }
+]}
+```
+
+`cg watchdog install` compares that host's caller identity against your own and **warns loudly
+if they match** - handing an always-on box your full access would be the worst decision in this
+design. It cannot detect an over-broad policy, only an identical one, so check the policy
+yourself.
+
+Two watchdogs may both issue a stop. That is harmless: stopping an already-stopping instance is
+a no-op.
 
 The guards are armed as early as each one can be: the **budget before anything launches** (it
 is account-level and needs no instance), and the **on-host watchdog during the build** rather

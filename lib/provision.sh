@@ -99,7 +99,9 @@ else
     # 409 bytes left.
     # host/ is injected as a tarball so those scripts have one home, and so the
     # watchdog is installed by the build itself rather than over ssh afterwards.
-    HOST_TGZ_B64=$(tar -cz -C host . 2>/dev/null | base64 -w0)
+    # The remote watchdog runs on an always-on VPS, not on the box, so it must
+    # not ride along in user-data - it cost ~2 KB of a 16 KB budget.
+    HOST_TGZ_B64=$(tar -cz -C host --exclude='remote-watchdog.*' . 2>/dev/null | base64 -w0)
     cat "${parts[@]}" \
       | grep -vE '^[[:space:]]*#([^!]|$)' \
       | sed -e "s|__TS_AUTHKEY__|$TS_AUTHKEY|" -e "s|__TS_HOST__|$TS_HOST|" \

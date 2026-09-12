@@ -1,0 +1,7 @@
+[Unit]
+Description=Off-site idle watchdog for the cloud gaming instance
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/remote-watchdog.sh
