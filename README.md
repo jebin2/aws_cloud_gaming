@@ -387,7 +387,10 @@ provisioning step now asserts its effect rather than its execution.
   to run on Linux or in virtualised environments. Single-player and Proton-friendly titles are
   generally fine; check ProtonDB for specific games.
 - **The L4 is a datacenter GPU**, not a gaming card. It runs games well but has lower clocks
-  than a comparable GeForce part.
+  than a comparable GeForce part. Measured with Black Myth: Wukong at 1080p: **High preset plays
+  smoothly** (GPU 83%, 67 W of its 72 W TDP, 81°C), Very High starts to judder. NVENC encoding
+  costs almost nothing - the encoder sat at **2%** while the stream ran - and the CPU was a third
+  idle, so the GPU is the limit, which is the right shape.
 - **Tested on one setup only**: Ubuntu 24.04 on `g6.xlarge` in `ap-south-2`, streamed to an
   Arch-based Linux client. Other regions, instance types and clients should work but are
   unverified.
