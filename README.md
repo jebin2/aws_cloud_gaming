@@ -205,6 +205,11 @@ each session, so set Moonlight to 1920x1080 for the box's native mode.
 | 4 | AWS budget | everything else | email |
 | 5 | off-site watchdog (optional) | a wedged box, a deleted or disarmed alarm | 30 min idle |
 
+Numbered by how fast each reacts, not by importance - and **armed in the opposite order**. The
+budget and the off-site watchdog go up *before anything launches*, the on-host watchdog during
+the build, and the CloudWatch alarm at the end of `cg init`. A guard that only exists after the
+build cannot protect the build.
+
 Worst-case leak with all four armed is about 30 minutes of runtime.
 
 ### Layer 5: a watchdog somewhere that is always on
@@ -223,7 +228,14 @@ the numbers behind it**:
     2026-09-12T18:40:02+05:30 i-0abc quiet: in=41232B out=9112B total=50344B < 10485760B idle=4/6
     2026-09-12T18:45:02+05:30 i-0abc idle limit reached - stopping i-0abc
 
-    GAME_WATCHDOG_HOST=ubuntu@my-vps      # in .env
+    GAME_WATCHDOG_HOST=ubuntu@my-vps      # in .env - cg init does the rest
+    GAME_WATCHDOG_KEY=~/oci.key
+    GAME_WATCHDOG_AWS_KEY_ID=AKIA...      # the scoped user, not yours
+    GAME_WATCHDOG_AWS_SECRET=...
+
+`cg init` arms it **before it launches anything**, and refreshes it on later runs, so there is
+no manual step. The commands are there for when you want them:
+
     cg watchdog install                   # systemd timer, survives a reboot
     cg watchdog status                    # timer state and recent decisions
     cg watchdog logs --watch              # follow it live

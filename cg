@@ -187,6 +187,33 @@ cmd_destroy() {
 # deleted, disarmed or misconfigured - and has stopped a box once here with no
 # visible reasoning. This layer writes down every decision and the numbers
 # behind it, which is most of its value.
+# Called by `cg init` before anything launches. The off-site watchdog polls by
+# TAG, so it does not need the instance to exist - and the whole point of an
+# independent guard is that it is already watching when the box appears, not
+# installed afterwards by hand. Quiet when it is already in place, and never
+# fatal: a missing watchdog must not stop you building a box.
+watchdog_ensure() {
+  [[ -n ${GAME_WATCHDOG_HOST:-} ]] || return 0
+  local kf="${GAME_WATCHDOG_KEY:-}" ident=()
+  [[ -n $kf ]] && ident=(-i "${kf/#\~/$HOME}")
+  local rsh=(ssh "${ident[@]}" -o ConnectTimeout=8 -o BatchMode=yes
+             -o StrictHostKeyChecking=accept-new "$GAME_WATCHDOG_HOST")
+  if ! "${rsh[@]}" true 2>/dev/null; then
+    log "off-site watchdog: $GAME_WATCHDOG_HOST unreachable - skipping"
+    return 0
+  fi
+  if [[ $("${rsh[@]}" 'systemctl is-enabled remote-watchdog.timer 2>/dev/null | head -1' 2>/dev/null) == enabled ]]; then
+    # Already armed. Refresh the script anyway - it is cheap, and a box built
+    # from older code otherwise keeps running an older watchdog.
+    cmd_watchdog install >/dev/null 2>&1 \
+      && log "off-site watchdog: refreshed on $GAME_WATCHDOG_HOST" \
+      || log "off-site watchdog: refresh failed (still armed)"
+    return 0
+  fi
+  say "arming the off-site watchdog before anything launches"
+  cmd_watchdog install || log "off-site watchdog not installed - the other layers still apply"
+}
+
 cmd_watchdog() {
   local host="${GAME_WATCHDOG_HOST:-}"
   [[ -n $host ]] || die "set GAME_WATCHDOG_HOST=user@host in .env (an always-on box with the aws CLI)"
@@ -217,6 +244,21 @@ cmd_watchdog() {
         log "  ec2:StopInstances and cloudwatch:GetMetricStatistics - see the README."
         log ""
       fi
+      # Credentials can come from .env, so the whole thing is one command. These
+      # must be the SCOPED user's keys - see the IAM policy in the README. They
+      # are written 600 and owned by the remote user.
+      if [[ -n ${GAME_WATCHDOG_AWS_KEY_ID:-} && -n ${GAME_WATCHDOG_AWS_SECRET:-} ]]; then
+        log "installing scoped AWS credentials on $host"
+        # Piped over stdin, never passed as an argument: anything on the remote
+        # command line is visible to every user on that box via `ps` while it
+        # runs, and a secret has no business being there.
+        printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\nregion=%s\n' \
+          "$GAME_WATCHDOG_AWS_KEY_ID" "$GAME_WATCHDOG_AWS_SECRET" "$REGION" \
+          | "${rsh[@]}" 'set -e; mkdir -p ~/.aws; chmod 700 ~/.aws;
+              cat > ~/.aws/credentials; chmod 600 ~/.aws/credentials' \
+          || die "could not write credentials on $host"
+      fi
+
       say "installing the off-site watchdog on $host"
       "${rsh[@]}" 'sudo install -d -m 755 /var/lib/cloud-gaming-watchdog' 2>/dev/null || true
       scp -q "${scpid[@]}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
@@ -463,7 +505,7 @@ EOF
 }
 
 case "$CMD" in
-  init)      exec lib/setup ;;
+  init)      watchdog_ensure; exec lib/setup ;;
   check)     exec lib/setup check ;;
   status)    lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true; stream_usage ;;
   cost)      exec lib/setup cost ;;
