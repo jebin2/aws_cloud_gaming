@@ -764,9 +764,35 @@ The failure is loud but arbitrary: it depends on where the interpreter happened 
 equally resume mid-word, skip a cleanup step, or run a branch that was never reachable. Every
 step here had already completed, which was luck rather than design.
 
-Two ways out. Edit a copy and move it into place - `mv` is atomic and swaps the inode, so the
-running process keeps reading the file it started with. Or simply do not edit while a long
-command is in flight. `cg destroy`, `cg init` and `cg open` all run for minutes.
+Three ways out, and the third is the one that actually holds.
+
+Edit a copy and `mv` it into place - atomic, and it swaps the inode, so the running process keeps
+reading the file it started with. Or do not edit while a long command is in flight. Both depend
+on discipline, and discipline failed twice more in the same session, producing:
+
+    ./cg: line 944: syntax error near unexpected token `;;'
+    ./cg: line 956: syntax error near unexpected token `;'
+
+Note the differing line numbers for the same edit - the signature of a shifting offset rather
+than a real syntax error. Both landed *after* every step of the destroy had completed.
+
+The structural fix: **end the script with an explicit `exit`.** Bash returns to read more input
+once the final command finishes, and with a dispatch as the last construct that read happens
+after a five-minute `cg destroy`. An `exit` means it never reads again. Measured, with a script
+rewritten during its last command:
+
+    no trailing exit     ->  syntax error near unexpected token ';;'   exit=2
+    trailing 'exit 0'    ->  exit=0
+
+This also explains why only some commands broke. `cg init` and `cg check` end in `exec`, which
+replaces the process outright - those were never vulnerable. `destroy) cmd_destroy "$@" ;;`
+returns to the dispatch, and to bash's next read.
+
+One caveat found while applying it: `lib/setup`'s `case` is *not* its last construct. The
+`check)` and `rebuild)` branches deliberately fall through past `esac` into the build flow, so
+an `exit` after `esac` would have broken `cg init` entirely. It goes at the end of the file, not
+the end of the dispatch. `tests/tail-exit.sh` checks all eight scripts and re-verifies the
+underlying bash behaviour, so the rule carries its own evidence.
 
 ### `cg destroy --all` left a live access key behind, and status could not show it
 

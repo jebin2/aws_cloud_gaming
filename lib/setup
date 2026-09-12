@@ -1226,3 +1226,8 @@ The box is RUNNING right now and billing by the hour. Stop it when you
 are done: $C_STOP
 
 EOF
+
+# See the note at the end of cg: bash reads a script incrementally and returns
+# for more input after the last command, so a file edited while this runs can
+# resume at a stale offset. An explicit exit ends the read.
+exit 0

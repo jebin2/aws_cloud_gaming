@@ -267,3 +267,8 @@ cat "$tmp" > .env
 rm -f "$tmp"
 chmod 600 .env
 echo "updated .env"
+
+# See the note at the end of cg: bash reads a script incrementally and returns
+# for more input after the last command, so a file edited while this runs can
+# resume at a stale offset. An explicit exit ends the read.
+exit 0

@@ -208,3 +208,17 @@ case "${1:-up}" in
   destroy)     destroy ;;
   *) echo "usage: game [up|stop|status|clean|destroy]" >&2; exit 1 ;;
 esac
+
+# Explicit exit, and not decoration. Bash does not load a script - it reads a
+# command, runs it, then SEEKS BACK to read the next one. After the final
+# command completes it returns to read again, and if the file changed in the
+# meantime (an edit, a git pull, a git checkout) that read lands at a stale byte
+# offset, mid-statement:
+#
+#     ./lib/game: line N: syntax error near unexpected token `;;'
+#
+# which is what a 5-minute `game destroy` did when the file was edited underneath
+# it. Every real step had already completed; the error came from bash looking
+# for more input after the dispatch finished. `exit` means it never looks.
+# (The `exec` branches were always immune - exec replaces the process.)
+exit
