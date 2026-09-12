@@ -709,7 +709,18 @@ fi
 NODES_BEFORE=$(mktemp); trap 'rm -f "$NODES_BEFORE"' EXIT
 tailnet_nodes > "$NODES_BEFORE"
 stale=$(grep -cx "$TS_HOST" "$NODES_BEFORE" || true)
-(( stale )) && log "note: a node named '$TS_HOST' already exists; the new box will join under a suffixed name and that is handled"
+(( stale )) && log "note: a node named '$TS_HOST' already exists; if a new box is launched it joins under a suffixed name, which is handled"
+
+# Whether provision.sh will reuse an instance or launch one decides how to find
+# the box on the tailnet afterwards, and it has to be known BEFORE it runs.
+REUSED=0
+if [[ -n $(aws ec2 describe-instances --region "$REGION" \
+      --filters "Name=tag:Name,Values=$TS_HOST" \
+        "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+      --query 'Reservations[0].Instances[0].InstanceId' --output text 2>/dev/null \
+      | grep -v '^None$' || true) ]]; then
+  REUSED=1
+fi
 
 say "provisioning instance"
 lib/provision.sh
@@ -732,7 +743,20 @@ fi
 # Reusing an existing instance means its node is already on the tailnet and was
 # in the snapshot - so waiting for a *new* one would wait forever. Adopt the
 # known-good node instead.
-if [[ -n ${GAME_TS_NODE:-} ]] && tailscale ping -c 1 --timeout 2s "${GAME_TS_NODE}" &>/dev/null; then
+# Decide on the durable fact - this instance already existed, and a node of that
+# name is registered - not on whether a probe answers in time. This used to gate
+# on a single 2s `tailscale ping`, and a cold WireGuard path routinely needs
+# longer than that: DERP handshake first, direct upgrade after. Losing that race
+# sent a perfectly healthy rebuild into wait_new_node, where no *new* node can
+# ever appear, for the full 30-minute timeout.
+if (( REUSED )) && [[ -n ${GAME_TS_NODE:-} ]] && tailnet_nodes | grep -qxF "$GAME_TS_NODE"; then
+  TS_NODE="$GAME_TS_NODE"
+  say "reusing the existing box, already on the tailnet as '$TS_NODE'"
+  # Nice to have, not a gate: give the path a realistic budget and carry on
+  # either way, since ssh will establish it soon enough regardless.
+  tailscale ping -c 3 --timeout 5s "$TS_NODE" >/dev/null 2>&1 \
+    && log "path up" || log "path not up yet - continuing, ssh will establish it"
+elif [[ -n ${GAME_TS_NODE:-} ]] && tailscale ping -c 3 --timeout 5s "${GAME_TS_NODE}" &>/dev/null; then
   TS_NODE="$GAME_TS_NODE"
   say "box already on the tailnet as '$TS_NODE'"
 else
