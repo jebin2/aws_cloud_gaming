@@ -266,6 +266,19 @@ the quota cannot cover the instance, logging that it did. Force either one expli
 Savings Plans and Reserved Instances are the wrong tool here: they commit you to a yearly $/hr
 spend whether you use it or not, and only pay off above roughly 15 hours of use *per day*.
 
+### One thing to turn off in Steam
+
+**Steam → Settings → Downloads → Shader Pre-Caching → turn off "Allow background processing of
+Vulkan shaders".**
+
+On 4 vCPUs this is the single biggest tuning win. Left on, Steam compiles shaders in the
+background at ~90% of a core while a game compiles its own at launch - measured load average
+**7.5 on 4 cores**, and a first launch that crawls. Off, the same launch ran at **3.4** with the
+game getting a full 150%.
+
+It persists across stop/start (it lives on the root volume) but is lost on `cg destroy`, so
+redo it after a rebuild. It cannot be scripted - Steam does not expose it as a config key.
+
 ## Games live on ephemeral storage, on purpose
 
 The instance ships local NVMe (232 GB on `g6.xlarge`) that costs nothing extra and is far

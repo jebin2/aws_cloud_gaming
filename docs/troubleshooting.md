@@ -548,3 +548,28 @@ active output, which hid the mismatch until capture moved to X11.
     xrandr --fb 1920x1080
 
 Sunshine reads the geometry at session start, so reconnect for it to take effect.
+
+### Shader compilation crawls on 4 vCPUs
+
+Two separate causes, and both matter on a `g6.xlarge`:
+
+**Steam compiles shaders in the background** while the game compiles its own at launch. Two
+CPU-bound jobs plus a core for capture, on four cores:
+
+    load 7.50, steam 87-95%, GameThread 144%     <- background processing ON
+    load 3.38, steam 56%,    GameThread 150%     <- OFF
+
+Turn it off: Steam > Settings > Downloads > Shader Pre-Caching > "Allow background processing of
+Vulkan shaders". Valve's pre-built caches still download; only local background compilation
+stops. Not scriptable - Steam exposes no config key for it.
+
+**The cache that matters was on ephemeral disk.** For a Vulkan game under Proton it is Steam's
+Fossilize cache at `<library>/steamapps/shadercache`, *inside* the library - so on `/scratch`,
+wiped every stop. The GL cache (`__GL_SHADER_DISK_CACHE_PATH`) is irrelevant to such games: it
+sat at 1 MB while the Fossilize cache passed 490 MB.
+
+`mount-scratch.sh` now symlinks it to `~/.cache/steam-shadercache` on the root volume, so the
+minutes of saturated CPU are paid once rather than every session.
+
+The quota ceiling is worth knowing: shader compilation is CPU-bound, `g6.2xlarge` would halve
+it, and a 4 vCPU GPU quota cannot launch one. There is no tuning around that.
