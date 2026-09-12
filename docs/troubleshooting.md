@@ -644,3 +644,24 @@ So three places, all of them needed:
 Recovering a box that has already blanked:
 
     sudo systemctl restart lightdm     # kills the desktop session, so Steam too
+
+### NVMe device names are not stable across reboots
+
+Observed on one box, across a single session restart:
+
+    before:  nvme1n1 = instance store (/scratch)   nvme2n1 = EBS games volume
+    after:   nvme1n1 = EBS games volume (/games)   nvme2n1 = instance store (/scratch)
+
+Nothing broke, because the mount scripts never look at device names: `mount-games.sh` finds its
+volume by filesystem **LABEL** and falls back to "an EBS disk that is not the root and carries no
+data", and `mount-scratch.sh` matches the **model string** "Amazon EC2 NVMe Instance Storage".
+
+This is worth recording because it turns an earlier precaution into a demonstrated necessity.
+Had `/games` been identified by device name, that reboot would have pointed it at the instance
+store - and the only thing standing between that and a wiped 140 GB game library would have
+been the `mkfs` guard. Which, incidentally, is the same guard that a device-selection bug had
+already bypassed once.
+
+An ad-hoc measurement written during the same session *did* hardcode `nvme2n1` and reported
+nonsense (zero disk writes during an active download). Convenience scripts deserve the same
+identification discipline as the real ones.
