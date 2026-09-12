@@ -533,6 +533,18 @@ conditioned on that count. The unit test passed because the stub emitted a forma
 rather than the one s5cmd prints. Both were fixed: the guards key off *bytes*, and the stub is
 now byte-for-byte the real output.
 
+### Symlinks
+
+S3 cannot store a symlink, and `--no-follow-symlinks` is what keeps the uploader from recursing
+into `/` through a Proton prefix's `dosdevices/z:`. So `push` records every symlink in the
+library into `.cg-symlinks.tsv` (`path<TAB>target`) before the sync, and `pull` recreates them
+afterwards - additively, never overwriting anything already there.
+
+This is not cosmetic. A restored game whose `dosdevices` is empty passes every check - manifest
+`StateFlags 4`, nothing re-downloaded, library registered - and **will not launch**, because Wine
+resolves every Windows path through those links. Steam rebuilds its own trees, so the Proton
+runtime recovers on its own; a *game's* prefix has no such owner and never self-repairs.
+
 ### Comparison is size-only
 
 `s5cmd sync` compares modification times by default, and a freshly restored file is always

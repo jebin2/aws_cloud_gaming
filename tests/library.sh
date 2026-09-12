@@ -23,7 +23,13 @@ echo "boot-aaaa" > "$T/bootid"
 
 # A stub that records what it was asked to do and reports a remote size we set.
 # REMOTE_BYTES/REMOTE_OBJECTS stand in for the archive.
-cat > "$T/bin/s5cmd" <<'FAKE'
+#
+# A FUNCTION, not a one-off write: cases that need different s5cmd behaviour
+# overwrite this file, and the overwrite used to leak into every case after
+# them - four later cases "failed" against an empty archive one of them had
+# hard-coded. reset() restores it, so each case starts from the default.
+mkstub() {
+  cat > "$T/bin/s5cmd" <<'FAKE'
 #!/usr/bin/env bash
 args="$*"
 echo "$args" >> "$S5LOG"
@@ -37,7 +43,9 @@ case "$args" in
   *)       echo "None" ;;
 esac
 FAKE
-chmod +x "$T/bin/s5cmd"
+  chmod +x "$T/bin/s5cmd"
+}
+mkstub
 
 # /scratch is a mountpoint on the box; here it cannot be, so the mountpoint
 # guard is exercised separately and stubbed out for the rest.
@@ -65,7 +73,7 @@ fill() { # fill <megabytes>  - give the local library a size
 # prefix assignment for a real command, not a function. Without this, MOUNTED=0
 # from the one test that wants an unmounted /scratch leaked into every test
 # after it, and nine cases "failed" for a reason none of them was testing.
-reset() { unset MOUNTED SYNC_FAILS REMOTE_BYTES REMOTE_OBJECTS; : > "$T/s5.log"; }
+reset() { unset MOUNTED SYNC_FAILS REMOTE_BYTES REMOTE_OBJECTS; : > "$T/s5.log"; mkstub; }
 
 echo "1. pull: an empty archive is a first run, not a failure"
 reset; rm -f "$T/state/restored"
@@ -216,5 +224,43 @@ chmod +x "$T/bin/s5cmd"
 out=$(run check); rc=$?
 check "exits non-zero" "$rc" "1"
 contains "counts what differs" "$out" "NOT mirrored"
+
+echo "18. push records the library's symlinks as an ordinary file"
+# S3 cannot hold a symlink, and --no-follow-symlinks skips them. A game's Proton
+# prefix is the one place nothing else repairs: Proton sees a current version
+# file and never rebuilds dosdevices/c: or z:, and a prefix with an empty
+# dosdevices cannot resolve any Windows path - the game just does not start.
+reset; echo "boot-aaaa" > "$T/state/restored"; fill 40
+mkdir -p "$T/scratch/steam/steamapps/compatdata/438040/pfx/dosdevices"
+ln -sfn ../drive_c "$T/scratch/steam/steamapps/compatdata/438040/pfx/dosdevices/c:"
+ln -sfn / "$T/scratch/steam/steamapps/compatdata/438040/pfx/dosdevices/z:"
+REMOTE_OBJECTS=10 REMOTE_BYTES=41000000 out=$(run push)
+man="$T/scratch/steam/.cg-symlinks.tsv"
+check "manifest written"     "$(test -s "$man" && echo yes || echo no)" "yes"
+contains "records c:"        "$(cat "$man")" "dosdevices/c:	../drive_c"
+contains "records z:"        "$(cat "$man")" "dosdevices/z:	/"
+contains "says how many"     "$out" "recorded 2 symlinks"
+
+echo "19. pull recreates the symlinks S3 could not carry"
+# Simulates the real failure: every file back, every symlink gone.
+reset; rm -f "$T/state/restored"
+find "$T/scratch/steam" -type l -delete
+check "links really gone"    "$(find "$T/scratch/steam" -type l | wc -l)" "0"
+REMOTE_OBJECTS=10 REMOTE_BYTES=41000000 out=$(run pull)
+check "c: recreated" \
+  "$(readlink "$T/scratch/steam/steamapps/compatdata/438040/pfx/dosdevices/c:")" "../drive_c"
+check "z: recreated" \
+  "$(readlink "$T/scratch/steam/steamapps/compatdata/438040/pfx/dosdevices/z:")" "/"
+contains "reports what it did" "$out" "2 recreated"
+
+echo "20. pull never overwrites something that is already there"
+reset; rm -f "$T/state/restored"
+REMOTE_OBJECTS=10 REMOTE_BYTES=41000000 out=$(run pull)
+contains "leaves existing links alone" "$out" "0 recreated, 2 already present"
+
+echo "21. an archive with no manifest says so rather than restoring silently"
+reset; rm -f "$T/state/restored" "$T/scratch/steam/.cg-symlinks.tsv"
+REMOTE_OBJECTS=10 REMOTE_BYTES=41000000 out=$(run pull)
+contains "warns the prefix may not start" "$out" "may not start"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

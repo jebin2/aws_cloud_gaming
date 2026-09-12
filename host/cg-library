@@ -60,6 +60,20 @@ MIN_FRACTION="${CG_MIN_FRACTION:-0.5}"
 # are large, worthless once the download finishes, and change constantly.
 EXCLUDES=(--exclude "steamapps/downloading/*" --exclude "steamapps/temp/*")
 
+# S3 has no symlinks, and --no-follow-symlinks skips them rather than uploading
+# a copy of the target. That is right for the Proton runtime - Steam rebuilds
+# its trees - but WRONG for a game's Proton prefix, which nothing else repairs:
+# Proton sees .update-timestamp and a current version file, decides the prefix
+# is fine, and never recreates dosdevices/c: or z:. A prefix with an empty
+# dosdevices cannot resolve a single Windows path, so the game silently will
+# not start.
+#
+# So the links are recorded as one small text file inside the library, synced
+# like any other file, and recreated after a restore. Cheaper than tarring the
+# prefix (which would re-upload all of it every push) and it covers symlinks
+# anywhere in the tree, not just the case that was found.
+SYMLINKS=".cg-symlinks.tsv"
+
 log() { echo "$(date -Iseconds) cg-library: $*"; }
 die() { log "error: $*" >&2; exit 1; }
 hb()  { numfmt --to=iec --suffix=B "${1:-0}" 2>/dev/null || echo "${1:-0}B"; }
@@ -127,8 +141,26 @@ cmd_pull() {
     die "restore failed - NOT marking the library as restored (push will refuse)"
   fi
   dt=$(( $(date +%s) - t0 )); (( dt > 0 )) || dt=1
+  restore_symlinks
   mark_restored
   log "restored in ${dt}s ($(( rb / dt / 1048576 )) MB/s)"
+}
+
+# Recreate what S3 could not hold. Only ever ADDS: anything already present -
+# a real file, or a link Steam rebuilt itself - is left alone.
+restore_symlinks() {
+  local f="$LIB/$SYMLINKS" link target made=0 skipped=0
+  if [[ ! -s $f ]]; then
+    log "no symlink manifest in the archive - a Proton prefix restored from it may not start"
+    return 0
+  fi
+  while IFS=$'\t' read -r link target; do
+    [[ -n ${link:-} && -n ${target:-} ]] || continue
+    if [[ -e "$LIB/$link" || -L "$LIB/$link" ]]; then skipped=$((skipped+1)); continue; fi
+    mkdir -p "$(dirname "$LIB/$link")" 2>/dev/null
+    ln -sfn "$target" "$LIB/$link" 2>/dev/null && made=$((made+1))
+  done < "$f"
+  log "symlinks: $made recreated, $skipped already present"
 }
 
 # --- push ----------------------------------------------------------------------
@@ -161,6 +193,14 @@ cmd_push() {
       die "local library $(hb "$lb") is far smaller than the archive $(hb "$rb") - refusing (--force overrides)"
     fi
     log "WARNING: local $(hb "$lb") << archive $(hb "$rb"), pushing anyway (--force)"
+  fi
+
+  # Written BEFORE the sync so it travels as an ordinary file - no extra upload
+  # step, and --delete cannot strip it as something that exists only remotely.
+  if ! ( cd "$LIB" && find . -type l -printf '%P\t%l\n' > "$SYMLINKS" ) 2>/dev/null; then
+    log "WARNING: could not record symlinks; a restored Proton prefix may not start"
+  else
+    log "recorded $(grep -c . "$LIB/$SYMLINKS" 2>/dev/null || echo 0) symlinks"
   fi
 
   local strategy=(--size-only)

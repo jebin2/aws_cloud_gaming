@@ -995,3 +995,45 @@ empty output as failure.
     wst=$(ssh host 'systemctl is-active x.timer' 2>/dev/null) || true
     wst=${wst//[$'\r\n']/}
     echo "${wst:-unreachable}"
+
+### The restored game would not start: S3 cannot hold a symlink
+
+A full round trip worked on paper. 13,295 objects restored in 3s, `appmanifest_438040.acf` said
+`StateFlags 4`, `BytesDownloaded` was 494 KB against 2.6 GB on disk - Steam accepted the library
+and re-downloaded nothing. The game still would not launch.
+
+    $ ls compatdata/438040/pfx/dosdevices/
+    (empty)
+
+A Wine prefix maps drive letters as symlinks, and with `dosdevices` empty nothing can resolve a
+single Windows path. `--no-follow-symlinks` - added to stop the uploader recursing into `/` via
+`dosdevices/z:` - had done its job: the links were skipped, and S3 has no way to represent them
+anyway.
+
+Restoring `c: -> ../drive_c` and `z: -> /` by hand was enough; Proton then rebuilt `s:` and
+`com1`-`com4` itself and the game started.
+
+**Why only that one directory.** Counting symlinks after the restore:
+
+    2446  common/SteamLinuxRuntime_4     Steam rebuilt these
+    1892  common/Proton - Experimental   Steam rebuilt these
+    1348  compatdata/1493710             Proton's own prefix, created fresh
+       1  compatdata/438040              the game's prefix - nobody rebuilt this
+
+Steam repairs its own trees, so the runtime and Proton recovered on their own and hid the
+problem. A *game's* prefix has no such owner: Proton reads `.update-timestamp` and `version`,
+concludes the prefix is current, and never touches `dosdevices` again. The one place with no
+repair mechanism was the one place the loss mattered.
+
+**The fix.** `push` writes `.cg-symlinks.tsv` - every symlink in the library as `path<TAB>target`
+- before the sync, so it travels as an ordinary file with no extra upload step and `--delete`
+cannot strip it. `pull` recreates from it afterwards, and only ever *adds*: anything already
+present, real file or link Steam rebuilt, is left alone. 5,815 links, 913 KB, one object.
+
+Tarring `compatdata` instead would also preserve the links, but would re-upload the whole prefix
+on every push and would only cover the case that happened to be found.
+
+The pattern worth keeping: **every verification passed.** Object counts, manifest state,
+`BytesDownloaded`, the registered library path, the restore rate. All true, all green, and the
+game did not run. The checks measured the transfer, and the transfer was never the thing that
+was broken - the archive format simply could not represent part of what was being stored.
