@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers. Sourced by ./setup and ./game - not run directly.
+# Shared helpers. Sourced by lib/setup and lib/game - not run directly.
 
 # ISO 8601 with offset, so a saved log is unambiguous about when things ran and
 # how long each step took. Local time rather than UTC: these are read by the

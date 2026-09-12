@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Layer 1: local control. Start, stream, and stop the instance as one action.
+# Reached through `cg`, not run directly. Layer 1: local control. Start, stream, and stop the instance as one action.
 set -euo pipefail
 
+cd "$(dirname "$0")/.."   # repo root: every path below is relative to it
+
 # .env is written by provision.sh. Anything already exported wins over it.
-if [[ -f "$(dirname "$0")/.env" ]]; then
+if [[ -f .env ]]; then
   while IFS='=' read -r k v; do
     [[ $k == GAME_* && -z ${!k:-} ]] && export "$k=$v"
-  done < "$(dirname "$0")/.env"
+  done < .env
 fi
 
 INSTANCE_ID="${GAME_INSTANCE_ID:-i-CHANGEME}"
@@ -20,7 +22,7 @@ APP="${GAME_APP:-Desktop}"
 ec2() { aws ec2 "$@" --region "$REGION"; }
 
 # shellcheck source=lib/common.sh
-source "$(dirname "$0")/lib/common.sh"
+source lib/common.sh
 
 state() {
   ec2 describe-instances --instance-ids "$INSTANCE_ID" \
@@ -109,7 +111,7 @@ destroy() {
   # not worth it for a scratch box or a build you intend to redo from scratch.
   # An image costs roughly a tenth of the live volume per month.
   echo
-  echo "An image keeps the installed desktop so ./setup can restore it in minutes"
+  echo "An image keeps the installed desktop so `cg init` can restore it in minutes"
   echo "instead of rebuilding (~20 min). It costs ~10% of the volume's monthly price."
   read -rp "save an image first? [Y/n] " snap
   if [[ ! ${snap:-Y} =~ ^[Nn]$ ]]; then
@@ -124,7 +126,7 @@ destroy() {
       --query ImageId --output text)
     echo "  $ami"
     wait_image_available "$REGION" "$ami"
-    echo "  image ready; ./setup will restore from it"
+    echo "  image ready; cg init will restore from it"
   fi
 
   # A persistent spot request launches a replacement the moment its instance
@@ -141,7 +143,7 @@ destroy() {
   echo "terminating ..."
   ec2 terminate-instances --instance-ids "$INSTANCE_ID" >/dev/null
   wait_instance_state "$REGION" "$INSTANCE_ID" terminated
-  sed -i '/^GAME_INSTANCE_ID=/d' "$(dirname "$0")/.env" 2>/dev/null || true
+  sed -i '/^GAME_INSTANCE_ID=/d' .env 2>/dev/null || true
   echo "terminated; disk deleted. Only the saved image (if any) still bills."
 }
 

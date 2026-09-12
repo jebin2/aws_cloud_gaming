@@ -7,7 +7,7 @@ set -euxo pipefail
 exec > >(tee /var/log/cloud-gaming-bootstrap.log) 2>&1
 
 # Progress markers. `set -x` traces every command, which is far too noisy to
-# watch remotely, so these give ./setup a clean line to stream instead.
+# watch remotely, so these give cg init a clean line to stream instead.
 progress() { set +x; echo ">>> $*"; set -x; }
 
 # Assert that a step achieved its effect, not merely that it ran. Nearly every

@@ -261,7 +261,7 @@ by email**. An unconfirmed subscription delivers nothing, silently.
 
 Both problems disappear with **AWS Budgets**, which emails subscribers directly - no root
 toggle, no confirmation, effective immediately, and the first two budgets are free. That is
-what `lib/aws-setup.sh` now creates. Check it with `./setup status`.
+what `lib/aws-setup.sh` now creates. Check it with `cg status`.
 
 ### Zero inbound rules silently costs half your latency
 

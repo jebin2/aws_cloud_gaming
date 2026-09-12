@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # One-time setup. Everything from an empty account to a pairable desktop.
-# Day-to-day use is ./game, not this.
+# Reached through `cg`, not run directly.
 set -euo pipefail
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."   # repo root: every path below is relative to it
 
 # say/die/log and the live-progress waits live here.
 # shellcheck source=lib/common.sh
@@ -18,16 +18,9 @@ TYPE="${GAME_INSTANCE_TYPE:-g6.xlarge}"
 # stray line as a command, so one malformed entry turns a config file into a
 # script. A corrupted value once left a bare hostname on its own line and every
 # run died with "gamevps: command not found".
-# `cg` exports CG_FRONT so messages name the command the user actually typed.
-# Both entry points stay supported, so telling someone who ran ./setup to run
-# `cg init` would be wrong - and vice versa.
-if [[ ${CG_FRONT:-0} == 1 ]]; then
-  C_INIT="cg init"; C_OPEN="cg open"; C_STOP="cg stop"
-  C_STATUS="cg status"; C_COST="cg cost"
-else
-  C_INIT="./setup"; C_OPEN="./game"; C_STOP="./game stop"
-  C_STATUS="./setup status"; C_COST="./setup cost"
-fi
+# cg is the only entry point; these keep the wording in one place.
+C_INIT="cg init"; C_OPEN="cg open"; C_STOP="cg stop"
+C_STATUS="cg status"; C_COST="cg cost"
 
 if [[ -f .env ]]; then
   while IFS= read -r line; do
@@ -277,7 +270,7 @@ clean() {
   [[ $(aws ec2 describe-instances --region "$REGION" \
         --instance-ids "${GAME_INSTANCE_ID:?no instance in .env}" \
         --query 'Reservations[0].Instances[0].State.Name' --output text) == running ]] \
-    || die "box is not running; ./game up first, or use ./setup rebuild"
+    || die "box is not running; $C_OPEN first, or use: cg destroy && cg init"
 
   say "before"
   box 'df -h --output=target,used,size,pcent / /scratch 2>/dev/null | sed "s/^/  /"'
@@ -307,7 +300,7 @@ rebuild() {
   [[ ${a:-N} =~ ^[Yy]$ ]] || { echo "cancelled"; exit 0; }
 
   say "destroying the current box"
-  printf 'y\nn\n' | ./game destroy || die "destroy failed; nothing rebuilt"
+  printf 'y\nn\n' | lib/game destroy || die "destroy failed; nothing rebuilt"
 
   say "building a new one"
   exec "$0"
@@ -579,7 +572,7 @@ if ! aws sts get-caller-identity >/dev/null 2>&1; then
 
   aws sts get-caller-identity >/dev/null 2>&1 || die "AWS credentials are not working.
        Configure them with:  aws configure
-       Or point at the .csv AWS gave you:  AWS_KEY_CSV=/path/to/CLI_accessKeys.csv ./setup"
+       Or point at the .csv AWS gave you:  AWS_KEY_CSV=/path/to/CLI_accessKeys.csv cg init"
 fi
 
 # The account plan is a separate gate from service quotas, and it is invisible
@@ -743,7 +736,7 @@ SSH="ssh -i $KEY -o StrictHostKeyChecking=accept-new ubuntu@$TS_NODE"
 say "building the box - live progress below (10-20 min)"
 stream_build "ubuntu@$TS_NODE" "$KEY" \
   || die "the build did not finish. The instance is still running and still
-       billing - stop it with ./game stop once you have looked at the log."
+       billing - stop it with $C_STOP once you have looked at the log."
 
 say "arming cloud-side backstops"
 lib/aws-setup.sh
@@ -936,7 +929,7 @@ $STEP1
   STEP 2 - stop the Tailscale key expiring
   ------------------------------------------------------------------
   Tailscale keys expire after ~180 days by default. When this one does,
-  the node drops off the tailnet and ./game hangs waiting for it.
+  the node drops off the tailnet and $C_OPEN hangs waiting for it.
 
        https://login.tailscale.com/admin/machines
 
@@ -947,7 +940,7 @@ $STEP1
   expire at all, so this step disappears permanently.
 
   Budget alerts are already configured and need no confirmation - see
-  ./setup status. AWS Budgets emails you directly, which is why this no
+  $C_STATUS. AWS Budgets emails you directly, which is why this no
   longer needs the root-only "Receive Billing Alerts" toggle or an SNS
   subscription you have to confirm.
 

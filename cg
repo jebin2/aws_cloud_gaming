@@ -46,9 +46,8 @@ INSTANCE_ID="${GAME_INSTANCE_ID:-}"
 KEY="$HOME/.ssh/${TS_HOST}.pem"
 ec2() { aws ec2 "$@" --region "$REGION"; }
 
-# So setup/game name the command the user actually typed, rather than telling
-# someone who ran `cg` to go and run ./setup.
-export CG_FRONT=1
+# lib/setup and lib/game are dispatch targets, not commands - see lib/README
+# is not needed, their headers say so.
 
 need_node() {
   tailscale ip -4 "$TS_NODE" >/dev/null 2>&1 \
@@ -226,14 +225,14 @@ EOF
 }
 
 case "$CMD" in
-  init)      exec ./setup ;;
-  check)     exec ./setup check ;;
-  status)    ./setup status; [[ -n $INSTANCE_ID ]] && ./game status || true ;;
-  cost)      exec ./setup cost ;;
-  clean)     exec ./setup clean ;;
-  destroy)   exec ./setup destroy ;;
-  open|up)   exec ./game up ;;
-  stop|down) exec ./game stop ;;
+  init)      exec lib/setup ;;
+  check)     exec lib/setup check ;;
+  status)    lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true ;;
+  cost)      exec lib/setup cost ;;
+  clean)     exec lib/setup clean ;;
+  destroy)   exec lib/setup destroy ;;
+  open|up)   exec lib/game up ;;
+  stop|down) exec lib/game stop ;;
   snapshot)  cmd_snapshot "$@" ;;
   log|logs)  cmd_log "$@" ;;
   ssh)       if [[ $# -gt 0 ]]; then box "$@"; else need_node; exec ssh -i "$KEY" \

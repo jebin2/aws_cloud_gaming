@@ -16,13 +16,13 @@ only while you are using it and is guaranteed to go back down.
 > forgotten day is around **$25**.
 >
 > The whole point of this repo is the four independent guards that stop that happening, but
-> they are software and software fails. `./setup` creates an **AWS Budget** that emails you,
-> and `./setup cost` shows what you have actually spent - check it. No warranty, see
+> they are software and software fails. `cg init` creates an **AWS Budget** that emails you,
+> and `cg cost` shows what you have actually spent - check it. No warranty, see
 > [LICENSE](LICENSE).
 >
 > Two things the guards do *not* catch. The root volume bills **even while the instance is
-> stopped**, so stopping is not free - only `./setup destroy` reaches zero. And **egress is
-> billed but not counted** by `./setup cost`; streaming can cost as much again as the instance.
+> stopped**, so stopping is not free - only `cg destroy` reaches zero. And **egress is
+> billed but not counted** by `cg cost`; streaming can cost as much again as the instance.
 
 ---
 
@@ -33,11 +33,11 @@ only while you are using it and is guaranteed to go back down.
     cp .env.example .env      # edit: Tailscale key, alert email, region
     ./cg init
 
-`./setup` checks every prerequisite before it spends a cent and tells you exactly what is
+`cg init` checks every prerequisite before it spends a cent and tells you exactly what is
 missing. It provisions the instance, arms the cost guards, installs the watchdog, and hands you
-a pairing URL. After that, `./game` is the whole workflow.
+a pairing URL. After that, `cg open` is the whole workflow.
 
-Use `./setup check` to run every check and stop before anything is created.
+Use `cg check` to run every check and stop before anything is created.
 
 The build takes 10-20 minutes and streams its progress, so a slow step looks slow rather than
 hung:
@@ -77,7 +77,7 @@ If `aws configure` has already been run, nothing to do. Otherwise the console ha
 access key as a **`.csv` download** rather than something you can paste, so `setup` accepts it
 directly:
 
-    AWS_KEY_CSV=~/Downloads/CLI_accessKeys.csv ./setup
+    AWS_KEY_CSV=~/Downloads/CLI_accessKeys.csv cg init
 
 With no path given it looks for one in your home directory and offers to import it. It picks
 the first file that actually *parses* rather than the first matching name - the console also
@@ -124,35 +124,35 @@ reimplementing them.
 Deleting an image deregisters it **and** deletes its backing snapshots. Deregistering alone
 leaves those billing - the usual way to believe you deleted something and keep paying for it.
 
-### The underlying scripts
+### Running a command twice
 
-| Command | What it does | Run it twice? |
-|---|---|---|
-| `./setup` | Build everything: instance, desktop, guards, watchdog, Sunshine account, Moonlight pairing | Safe. Reuses the instance, skips what is done. **But it starts a stopped box, so it costs money.** |
-| `./setup check` | Every preflight check, creates nothing | Safe, free, read-only |
-| `./setup status` | Account, quotas, resources, guards, local tools | Safe, free, read-only |
-| `./setup cost` | Month-to-date spend and what is still billing | Safe. Each run makes one Cost Explorer call ($0.01) |
-| `./setup clean` | Frees space: apt caches, logs, `/scratch` | Safe. Needs the box **running**; frees less each time |
-| `./setup rebuild` | Destroy and build fresh (~20 min) | Asks first. Each run is another full rebuild |
-| `./setup destroy` | Delete **everything** - instance, disk, images, key, budget | **No confirmation, runs immediately.** Second run is a no-op |
-| `./game` | Start if stopped, stream, offer to stop on exit | Safe. Connects again if already running |
-| `./game stop` | Stop the instance - this is what ends the billing | Safe. Says "already stopped" |
-| `./game status` | Instance state plus OS and NVMe usage | Safe, free, read-only |
-| `./game clean` | Wipe `/scratch` - removes every installed game | Asks first. Needs the box running |
-| `./game destroy` | Terminate the machine, optionally saving an image | Asks twice. Second run says "already terminated" |
+Everything is safe to run again. The ones worth knowing:
 
-`game` is for playing; `setup` is for administering the machine and its bill.
+| Command | Second run |
+|---|---|
+| `cg init` | Reuses the instance and skips what is done - **but it starts a stopped box, so it costs money** |
+| `cg open` | Connects again if already running |
+| `cg stop` | Says "already stopped" |
+| `cg clean` | Frees less each time; needs the box running |
+| `cg destroy` | No-op. The first run keeps nothing and asks nothing |
+| `cg cost` | Each run makes one Cost Explorer call ($0.01) |
 
-**The two that cost you money unprompted:** `./setup` starts a stopped instance, and `./game`
+**The two that cost money unprompted** are `cg init` and `cg open` - both start a stopped
+instance. Everything else is read-only or asks first.
+
+**The one that cannot be undone** is `cg destroy`: it runs immediately, with no confirmation,
+and keeps nothing. To keep the installed desktop, `cg snapshot` first.
+
+**The two that cost you money unprompted:** `cg init` starts a stopped instance, and `cg open`
 starts one too. Everything else is either read-only or asks first.
 
-**The one that cannot be undone:** `./setup destroy` runs immediately with no confirmation and
-keeps nothing. `./game destroy` is the gentler version - it asks, and offers to save an image
+**The one that cannot be undone:** `cg destroy` runs immediately with no confirmation and
+keeps nothing. `cg destroy` is the gentler version - it asks, and offers to save an image
 first.
 
 ## Everyday use
 
-Run `./game`. It starts the instance if stopped, waits for Tailscale and Sunshine, arms the
+Run `cg open`. It starts the instance if stopped, waits for Tailscale and Sunshine, arms the
 idle alarm, and opens the stream. When you quit Moonlight it prints the session length and
 asks `stop instance now? [Y/n]` - pressing Enter is what actually stops the billing.
 
@@ -200,12 +200,12 @@ The first 100 GB/month is free - about 11 hours - and after that it is $0.1093/G
 **~$0.98/hr, roughly doubling the hourly cost**. Lowering Moonlight's bitrate lowers this
 proportionally, and past a point saves more than any pricing plan will.
 
-Check actual spend with `./setup cost`, which measures runtime from CloudWatch datapoints
+Check actual spend with `cg cost`, which measures runtime from CloudWatch datapoints
 rather than billing data, so it has no lag. It reports **every** volume and snapshot, not just
 the running instance's - orphaned volumes are the usual way people keep paying for a machine
 they believe they deleted.
 
-`./setup status` answers the other question - what state everything is in:
+`cg status` answers the other question - what state everything is in:
 
     ACCOUNT      account id, plan type (a FREE plan cannot launch GPUs), credits
     QUOTAS       on-demand and spot GPU quota against what your instance type needs
@@ -228,8 +228,8 @@ Spot needs **its own quota** (`L-3819A6DF`), separate from on-demand and **0 on 
 account** - so with `GAME_SPOT` unset, `setup` prefers spot and falls back to on-demand when
 the quota cannot cover the instance, logging that it did. Force either one explicitly:
 
-    GAME_SPOT=0 ./setup      # on-demand, whatever the quota says
-    GAME_SPOT=1 ./setup      # spot, fail loudly if the quota is short
+    GAME_SPOT=0 cg init      # on-demand, whatever the quota says
+    GAME_SPOT=1 cg init      # spot, fail loudly if the quota is short
 
 Savings Plans and Reserved Instances are the wrong tool here: they commit you to a yearly $/hr
 spend whether you use it or not, and only pay off above roughly 15 hours of use *per day*.

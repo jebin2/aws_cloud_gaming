@@ -43,7 +43,7 @@ echo "    $behavior"
 if [[ $behavior != stop ]]; then
   echo "    FATAL: shutdown behaviour is '$behavior', not 'stop'." >&2
   echo "    The idle watchdog would TERMINATE this instance and delete its disk." >&2
-  echo "    Do not leave it running. Destroy and rebuild:  ./setup destroy && ./setup" >&2
+  echo "    Do not leave it running. Destroy and rebuild:  cg destroy && cg init" >&2
   exit 1
 fi
 
