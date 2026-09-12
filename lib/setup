@@ -813,8 +813,27 @@ fi
 # longer than that: DERP handshake first, direct upgrade after. Losing that race
 # sent a perfectly healthy rebuild into wait_new_node, where no *new* node can
 # ever appear, for the full 30-minute timeout.
-if (( REUSED )) && [[ -n ${GAME_TS_NODE:-} ]] && tailnet_nodes | grep -qxF "$GAME_TS_NODE"; then
-  TS_NODE="$GAME_TS_NODE"
+# Work out the node name for a reused box. .env is the first source but it is
+# not reliable: `cg destroy` clears GAME_TS_NODE, and an init that aborts before
+# writing it leaves nothing behind - while the box itself joined the tailnet
+# minutes ago. That combination waited 9 minutes for a "new" node that already
+# existed, so fall back to finding a node named after this host.
+reused_node=""
+if (( REUSED )); then
+  if [[ -n ${GAME_TS_NODE:-} ]] && tailnet_nodes | grep -qxF "$GAME_TS_NODE"; then
+    reused_node="$GAME_TS_NODE"
+  else
+    # Prefer a candidate that actually answers; fall back to the first match.
+    for c in $(tailnet_nodes | grep -E "^${TS_HOST}(-[0-9]+)?$" || true); do
+      [[ -z $reused_node ]] && reused_node="$c"
+      if tailscale ping -c 2 --timeout 5s "$c" >/dev/null 2>&1; then reused_node="$c"; break; fi
+    done
+    [[ -n $reused_node ]] && log "found '$reused_node' on the tailnet (not recorded in .env)"
+  fi
+fi
+
+if [[ -n $reused_node ]]; then
+  TS_NODE="$reused_node"
   say "reusing the existing box, already on the tailnet as '$TS_NODE'"
   # Nice to have, not a gate: give the path a realistic budget and carry on
   # either way, since ssh will establish it soon enough regardless.
