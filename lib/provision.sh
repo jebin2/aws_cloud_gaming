@@ -198,6 +198,13 @@ fi
 state=$(ec2 describe-volumes --volume-ids "$GAMES_VOL" \
   --query 'Volumes[0].State' --output text)
 if [[ $state == available ]]; then
+  # AttachVolume refuses a pending instance: "IncorrectState: Instance is not
+  # 'running'". The first build never hit this only because resolving the AMI
+  # and creating the key and security group took long enough to hide it - a
+  # fast destroy-then-init exposes it immediately.
+  echo "==> waiting for $INSTANCE_ID to be running before attaching"
+  aws ec2 wait instance-running --region "$REGION" --instance-ids "$INSTANCE_ID" \
+    || { echo "instance never reached running - cannot attach the game volume"; exit 1; }
   echo "==> attaching $GAMES_VOL"
   ec2 attach-volume --volume-id "$GAMES_VOL" --instance-id "$INSTANCE_ID" \
     --device /dev/sdf >/dev/null
