@@ -950,7 +950,10 @@ except Exception:
   return 1
 }
 
-say "creating the Sunshine account"
+# Neutral heading: this block may create an account or find one already
+  # there, and announcing "creating" before knowing which is how a rerun
+  # came to look like it was regenerating credentials every time.
+  say "Sunshine account"
 # Wait for Sunshine to answer before deciding anything. A connection failure
 # used to fall through to "already configured", which on a fresh box meant no
 # account was ever created and pairing then failed with stale credentials.
@@ -992,7 +995,7 @@ else
   log "already configured (not first run)"
 fi
 
-say "pairing moonlight"
+say "moonlight pairing"
 PAIRED=0
 if command -v moonlight >/dev/null && timeout 45 moonlight list "$IP" 2>/dev/null | grep -q .; then
   log "already paired"

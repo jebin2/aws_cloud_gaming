@@ -351,29 +351,11 @@ cmd_watchdog() {
       # must be the SCOPED user's keys - see the IAM policy in the README. They
       # are written 600 and owned by the remote user.
       if [[ -n ${GAME_WATCHDOG_AWS_KEY_ID:-} && -n ${GAME_WATCHDOG_AWS_SECRET:-} ]]; then
-        log "credentials will go into the root-owned watchdog config"
+        log "scoped credentials go into the root-owned watchdog config"
       fi
 
       # Verify credentials AFTER writing them, not before: the check used to run
       # first and failed on a box that was about to be configured correctly.
-      local remote_arn local_arn
-      remote_arn=$("${rsh[@]}" 'aws sts get-caller-identity --query Arn --output text' 2>/dev/null) \
-        || die "no working AWS credentials on $host.
-       Put the scoped user's keys in .env as GAME_WATCHDOG_AWS_KEY_ID and
-       GAME_WATCHDOG_AWS_SECRET (cg init creates that user), or configure
-       them on $host yourself."
-      log "remote identity: $remote_arn"
-      local_arn=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null || echo "")
-      # An always-on, internet-facing box holding the same credentials as your
-      # laptop is the worst outcome here, so say so plainly.
-      if [[ -n $local_arn && $remote_arn == "$local_arn" ]]; then
-        log ""
-        log "WARNING: $host is using the SAME credentials as this machine."
-        log "  That gives an always-on, internet-facing host your full access."
-        log "  cg init creates a scoped user; see the IAM policy in the README."
-        log ""
-      fi
-
       say "installing the off-site watchdog on $host"
       "${rsh[@]}" 'sudo install -d -m 755 /var/lib/cloud-gaming-watchdog' 2>/dev/null || true
       scp -q "${scpid[@]}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
@@ -398,6 +380,27 @@ cmd_watchdog() {
         sudo systemctl enable --now remote-watchdog.timer
         rm -f /tmp/remote-watchdog.*
       " || die "install on $host failed"
+      # Verify the credentials the WATCHDOG will actually use: root, reading the
+      # config just written. Checking as the login user was wrong twice - first
+      # before the keys existed, then after they moved somewhere only root can
+      # read. Verify the thing that runs, not something adjacent to it.
+      local remote_arn local_arn
+      remote_arn=$("${rsh[@]}" 'sudo bash -c "set -a; . /etc/cloud-gaming-watchdog.conf; aws sts get-caller-identity --query Arn --output text"' 2>/dev/null) \
+        || die "the watchdog cannot authenticate to AWS on $host.
+       Put the scoped user's keys in .env as GAME_WATCHDOG_AWS_KEY_ID and
+       GAME_WATCHDOG_AWS_SECRET - cg init creates that user for you."
+      log "watchdog identity: $remote_arn"
+      local_arn=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null || echo "")
+      # An always-on, internet-facing box holding the same credentials as your
+      # laptop is the worst outcome here, so say so plainly.
+      if [[ -n $local_arn && $remote_arn == "$local_arn" ]]; then
+        log ""
+        log "WARNING: $host is using the SAME credentials as this machine."
+        log "  That gives an always-on, internet-facing host your full access."
+        log "  cg init creates a scoped user; see the IAM policy in the README."
+        log ""
+      fi
+
       log "installed and enabled - it survives a reboot of $host (OnBootSec + Persistent)"
       "${rsh[@]}" 'systemctl list-timers remote-watchdog.timer --no-pager' 2>/dev/null | sed 's/^/      /'
       log "it stops the box after $(( ${GAME_WATCHDOG_IDLE:-6} * 5 )) min with no traffic in or out"
