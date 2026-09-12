@@ -783,6 +783,14 @@ lib/provision.sh
 # shellcheck disable=SC1091
 set -a; source .env; set +a
 
+# Confirm this BEFORE the build, not after. The watchdog arms on the box
+# within a minute and its only action is `shutdown -h`; whether that stops
+# the instance or TERMINATES it - deleting the root volume - is decided at
+# launch. The 20-minute boot grace usually covers the gap, but builds have
+# taken 10-20 minutes, so the check belongs ahead of the thing relying on it.
+say "confirming shutdown means stop, not terminate"
+lib/aws-setup.sh shutdown 2>&1 | sed 's/^/    /'
+
 # A reused instance may be stopped, in which case nothing will ever join the
 # tailnet until it is started.
 inst_state=$(aws ec2 describe-instances --region "$REGION" \

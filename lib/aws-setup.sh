@@ -20,7 +20,14 @@ BUDGET_INR="${GAME_BUDGET_INR:-5000}"
 TS_HOST="${GAME_TS_HOST:-gamevps}"
 EMAIL="${GAME_ALERT_EMAIL:?set GAME_ALERT_EMAIL}"
 
-if [[ $MODE != budget ]]; then
+# Each guard runs as early as it can, which is why this takes a mode:
+#   shutdown  right after launch. The watchdog arms on the box within a minute
+#             and its only action is `shutdown -h`, so whether that stops the
+#             instance or TERMINATES it must be confirmed before it can fire.
+#   budget    before anything launches - account-level, needs no instance.
+#   all       after the build, for the parts that need a running box.
+
+if [[ $MODE == shutdown || $MODE == all ]]; then
 # --- CRITICAL: make an in-guest `shutdown -h` STOP the instance, not destroy it.
 # If this is left as 'terminate', the watchdog deletes your machine and its disk.
 #
@@ -52,6 +59,9 @@ if [[ $behavior != stop ]]; then
   exit 1
 fi
 
+fi
+
+if [[ $MODE == all ]]; then
 # --- Layer 3: stop the instance if it stops pushing video for 30 min.
 # Catches a hung OS, a dead watchdog, a wedged Sunshine.
 # Streaming at 20 Mbps moves ~750 MB per 5-min period; 10 MB is comfortably idle.
@@ -75,8 +85,10 @@ aws cloudwatch put-metric-alarm --region "$REGION" \
 aws cloudwatch disable-alarm-actions --region "$REGION" --alarm-name "${TS_HOST}-idle-stop"
 echo "    idle-stop action stays disarmed until 'game up' arms it"
 
-fi   # end of the instance-dependent guards
 
+fi
+
+if [[ $MODE == budget || $MODE == all ]]; then
 # --- Layer 4: budget. ---------------------------------------------------------
 # AWS Budgets rather than a CloudWatch EstimatedCharges alarm. That alarm needs
 # two things a fresh account does not have: "Receive Billing Alerts" switched on
@@ -125,3 +137,5 @@ else
 fi
 
 echo "done. budget at \$${USD} (~INR ${BUDGET_INR}); warns at 80% actual and 100% forecast"
+
+fi
