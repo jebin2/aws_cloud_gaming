@@ -276,17 +276,30 @@ watchdog_ensure() {
     log "off-site watchdog: $GAME_WATCHDOG_HOST unreachable - skipping"
     return 0
   fi
+  # Check the prerequisite here so the outcome is a plain statement rather than
+  # an error: an absent CLI on that box is a normal state, not a failure.
+  if ! "${rsh[@]}" 'command -v aws >/dev/null' 2>/dev/null; then
+    log "off-site watchdog: no aws CLI on $GAME_WATCHDOG_HOST - skipping layer 5"
+    log "  install it there, then: cg watchdog install"
+    return 0
+  fi
   watchdog_iam_ensure || true
+
+  # Every call below goes through a SUBSHELL. cmd_watchdog uses die(), which
+  # exits the process - so a plain `cmd_watchdog install || log ...` cannot
+  # catch it and a missing watchdog killed `cg init` outright. This function
+  # promises never to be fatal; a subshell is what makes that true.
   if [[ $("${rsh[@]}" 'systemctl is-enabled remote-watchdog.timer 2>/dev/null | head -1' 2>/dev/null) == enabled ]]; then
-    # Already armed. Refresh the script anyway - it is cheap, and a box built
-    # from older code otherwise keeps running an older watchdog.
-    cmd_watchdog install >/dev/null 2>&1 \
-      && log "off-site watchdog: refreshed on $GAME_WATCHDOG_HOST" \
-      || log "off-site watchdog: refresh failed (still armed)"
+    if ( cmd_watchdog install ) >/dev/null 2>&1; then
+      log "off-site watchdog: refreshed on $GAME_WATCHDOG_HOST"
+    else
+      log "off-site watchdog: refresh failed (the existing one is still armed)"
+    fi
     return 0
   fi
   say "arming the off-site watchdog before anything launches"
-  cmd_watchdog install || log "off-site watchdog not installed - the other layers still apply"
+  ( cmd_watchdog install ) || log "off-site watchdog not installed - the other four layers still apply"
+  return 0
 }
 
 cmd_watchdog() {
