@@ -140,6 +140,37 @@ ensure_moonlight_syskeys() {
 }
 
 
+cmd_games() {
+  local vol az size state
+  read -r vol az size state < <(ec2 describe-volumes \
+    --filters "Name=tag:Name,Values=${TS_HOST}-games" \
+    --query 'Volumes[0].[VolumeId,AvailabilityZone,Size,State]' --output text 2>/dev/null)
+  if [[ -z ${vol:-} || $vol == None ]]; then
+    echo "no game library volume exists yet - cg init creates one"
+    echo "size it with GAME_GAMES_GB in .env (default 160)"
+    return 0
+  fi
+  case "${1:-show}" in
+    show|"")
+      awk -v v="$vol" -v a="$az" -v s="$size" -v st="$state" 'BEGIN{
+        m=s*0.0912;
+        printf "  volume   %s  (%s)\n", v, st;
+        printf "  zone     %s   <- every instance is pinned here; EBS cannot cross AZs\n", a;
+        printf "  size     %s GB\n", s;
+        printf "  cost     $%.2f/month (INR %.0f) - billed whether or not the box exists\n", m, m*88;
+      }'
+      echo "  delete   cg games --delete   (permanent; the games go with it)" ;;
+    --delete|delete)
+      [[ $state == available ]] || die "volume is $state - stop or destroy the instance first"
+      echo "This permanently deletes $vol and every game on it."
+      read -r -p "type DELETE to confirm: " a
+      [[ $a == DELETE ]] || { echo "aborted"; return 1; }
+      ec2 delete-volume --volume-id "$vol" >/dev/null && log "deleted $vol"
+      log "storage charges stop now" ;;
+    *) die "usage: cg games [show|--delete]" ;;
+  esac
+}
+
 cmd_snapshot() {
   case "${1:-create}" in
     --list|list)
@@ -283,11 +314,13 @@ build (changes things)
   cg open                    start, stream, stop on exit                [costs money]
   cg stop                    stop the instance - this ends hourly billing
   cg status                  instance, disks, guards, tailnet, ping
+  cg games                   the persistent game library volume and its cost
+  cg games --delete          delete it and every game on it            [permanent]
   cg snapshot                save an AMI of the current box             [bills monthly]
   cg snapshot --list         what images exist and what they cost
   cg snapshot --delete <id>  delete an image and its snapshots
-  cg clean                   free space: apt caches, logs, /scratch     [DELETES GAMES]
-  cg destroy                 delete everything, no confirmation
+  cg clean                   free space: apt caches, logs, /scratch
+  cg destroy                 delete the box, no confirmation (game volume survives)
 
 info (read-only)
   cg check                   every preflight check, creates nothing
@@ -313,6 +346,7 @@ case "$CMD" in
   open|up)   ensure_moonlight_syskeys; exec lib/game up ;;
   stop|down) steam_shutdown_for_cloud_sync; exec lib/game stop ;;
   snapshot)  cmd_snapshot "$@" ;;
+  games)     cmd_games "$@" ;;
   log|logs)  cmd_log "$@" ;;
   ssh)       if [[ $# -gt 0 ]]; then box "$@"; else need_node; exec ssh -i "$KEY" \
                -o StrictHostKeyChecking=accept-new "ubuntu@$(tailscale ip -4 "$TS_NODE")"; fi ;;

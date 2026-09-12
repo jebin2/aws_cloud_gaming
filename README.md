@@ -316,48 +316,37 @@ effects were not separated. The honest claim is narrow: it frees close to a core
 It persists across stop/start (it lives on the root volume) but is lost on `cg destroy`, so
 redo it after a rebuild. It cannot be scripted - Steam does not expose it as a config key.
 
-## Games live on ephemeral storage, on purpose
+## Games live on their own volume
 
-The instance ships local NVMe (232 GB on `g6.xlarge`) that costs nothing extra and is far
-faster than EBS. `/scratch/steam` is registered as a **Steam library folder**, so the install
-dialog offers it alongside the root disk and reports its real free space. Firefox downloads
-there too, so the root volume stays clean whatever you install.
+The Steam library sits on a **separate EBS volume** mounted at `/games`, sized by
+`GAME_GAMES_GB` (default 160 GB). That volume is the only thing here worth keeping, and keeping
+it separate is what makes the rest disposable:
 
-Steam itself installs from **Valve's own `.deb`**, not Ubuntu's `steam-installer`, which ships
-no client and hides the download behind a dialog a headless boot cannot answer.
+- `cg destroy` deletes the instance, its root disk, the key, the security group and the budget -
+  and **keeps the game volume**. Rebuilding takes ~7 minutes and the games are already there.
+- The **Proton prefix lives there too**, so save games survive even without Steam Cloud.
+- So does the **shader cache**, which is minutes of saturated CPU to rebuild.
 
-The library registration is treated as an **invariant, not an install step**: a service
-re-checks it on every boot and repairs it if needed. It has to, because `/scratch` is
-reformatted at each start - taking the marker Steam uses as proof the library is real - and
-because Steam rewrites its own config on first sign-in and will drop a library it never
-adopted. Both cases used to lose the NVMe library silently, and games went back to filling the
-50 GB root disk.
+It bills whether or not the box exists: 160 GB is **$14.59/month (~INR 1,284)**. `cg games`
+shows the cost; `cg games --delete` removes it and every game on it.
 
-Pick the NVMe library the first time you install a game - Steam remembers the choice.
+**An EBS volume cannot cross availability zones.** Once the volume exists, its AZ decides where
+every future instance launches - `provision.sh` pins placement to it. If spot capacity in that
+AZ is exhausted the launch fails saying so, and `GAME_SPOT=0 cg init` gets you on-demand in the
+same zone.
 
-The trade: `/scratch` is wiped on every *stop*, filesystem included. Every session starts with
-no games installed. Re-downloading is not slow - Steam's CDN measured **62 MB/s** from the
-instance, so about 8 minutes for a 30 GB game and 35 for a 130 GB one.
+### Why not the free instance store?
 
-Game storage therefore costs **nothing, ever**, at the price of a wait when you sit down to
-play. If you would rather not wait, attach a persistent EBS volume for a game library instead.
+The earlier design put games on the instance NVMe, which costs nothing - and it was the worst
+thing about this rig. `/scratch` is reformatted on every *stop*, so each session began with a
+**~75 minute re-download** of a 140 GB game, plus rebuilding the shader cache. `/scratch` still
+exists for temp files and browser downloads, where losing everything on stop is fine.
 
-**Anything you want to keep must live outside `/scratch`, including Firefox downloads.**
+The instance store is genuinely faster (measured **370 MB/s** against gp3's 125 MB/s baseline),
+so load screens are slower on EBS. You can buy throughput back at **$0.0456 per MB/s-month** -
++125 MB/s is about INR 502/month - but try it first; it is adjustable on a live volume.
 
-**Save games are the exception you do not control.** They live inside the Proton prefix, which
-Steam keeps in the library - so on `/scratch`, wiped on every stop. What protects them is
-**Steam Cloud**, and Cloud only syncs when Steam exits cleanly. `cg stop` therefore asks Steam
-to shut down (`steam -shutdown`) and waits up to 60s before stopping the instance. Killing the
-box under a running Steam can lose the last saves.
-
-Check a game actually supports Cloud before relying on this. For a game that does not, copy the
-save directory off `/scratch` yourself, or keep the library on a persistent EBS volume.
-
-Shader caches are the exception that proves the rule: they live on the **root** volume
-(`~/.cache`), not `/scratch`. They regenerate, so `/scratch` looks like the right home - but
-regenerating them is minutes of 100% CPU on 4 vCPUs, which is exactly what makes a first launch
-crawl. Keeping them on a disk that survives a stop means paying that once instead of every
-session, and they are only a few GB.
+**What is still ephemeral:** `/scratch`, and anything you leave in it.
 
 ## Layout
 

@@ -378,7 +378,9 @@ destroy_all() {
   echo "  alarms          ${TS_HOST}-idle-stop"
   echo "  budget          ${TS_HOST}-monthly"
   echo
-  echo "The desktop, its configuration and any installed games all go."
+  echo "The desktop and its configuration go. The game library volume is KEPT -
+it is separate on purpose, so games survive a destroy. Remove it with
+cg games --delete (and check cg games first to see what it costs)."
   echo "There is no undo and no image is kept."
   echo
 
@@ -410,12 +412,20 @@ destroy_all() {
     done
   done
 
-  # Any volume left detached after termination still bills.
-  for v in $(ec2 describe-volumes --filters Name=status,Values=available \
-               --query 'Volumes[].VolumeId' --output text); do
+  # Any volume left detached after termination still bills - except the game
+  # library, which is the entire point of keeping it on its own volume. AWS
+  # filters cannot express "not this tag", so filter here and skip by name.
+  # Deleting it needs an explicit `cg games --delete`.
+  while read -r v name; do
+    [[ -z ${v:-} || $v == None ]] && continue
+    if [[ $name == "${TS_HOST}-games" ]]; then
+      log "keeping the game library volume $v ($name) - cg games --delete removes it"
+      continue
+    fi
     say "deleting orphaned volume $v"
     ec2 delete-volume --volume-id "$v" >/dev/null || true
-  done
+  done < <(ec2 describe-volumes --filters Name=status,Values=available \
+             --query 'Volumes[].[VolumeId,Tags[?Key==`Name`]|[0].Value]' --output text)
 
   say "removing alarms and notifications"
   aws cloudwatch delete-alarms --region "$REGION" --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null || true

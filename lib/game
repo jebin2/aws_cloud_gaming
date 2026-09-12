@@ -37,7 +37,7 @@ box() { # run a command on the host over the tailnet
 disks() {
   # Root cannot be shrunk once grown, so its usage is the number worth watching;
   # /scratch is ephemeral and expected to fill.
-  box 'df -h --output=target,used,size,pcent / /scratch 2>/dev/null | sed "s/^/  /"' \
+  box 'df -h --output=target,used,size,pcent / /games /scratch 2>/dev/null | sed "s/^/  /"' \
     2>/dev/null || echo "  (host unreachable - box stopped?)"
 }
 
