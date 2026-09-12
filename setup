@@ -1,0 +1,953 @@
+#!/usr/bin/env bash
+# One-time setup. Everything from an empty account to a pairable desktop.
+# Day-to-day use is ./game, not this.
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+# say/die/log and the live-progress waits live here.
+# shellcheck source=lib/common.sh
+source lib/common.sh
+
+REGION="${GAME_REGION:-ap-south-2}"
+TS_HOST="${GAME_TS_HOST:-gamevps}"
+TYPE="${GAME_INSTANCE_TYPE:-g6.xlarge}"
+
+# Pick up a local .env first, so keys kept there are not prompted for again.
+# Read KEY=VALUE lines rather than sourcing the file: `source` executes any
+# stray line as a command, so one malformed entry turns a config file into a
+# script. A corrupted value once left a bare hostname on its own line and every
+# run died with "gamevps: command not found".
+if [[ -f .env ]]; then
+  while IFS= read -r line; do
+    [[ $line =~ ^[[:space:]]*# ]] && continue
+    [[ $line =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+    export "${line%%=*}=${line#*=}"
+  done < .env
+fi
+
+box() {
+  ssh -i "$HOME/.ssh/${TS_HOST}.pem" -o StrictHostKeyChecking=accept-new \
+      -o ConnectTimeout=10 -o BatchMode=yes "ubuntu@$(tailscale ip -4 "${GAME_TS_NODE:-$TS_HOST}")" "$@"
+}
+
+status() {
+  local id state itype ip launched plan credits q_od q_spot vcpus
+  ec2() { aws ec2 "$@" --region "$REGION"; }
+  mark() { [[ $1 == ok ]] && printf '  [ok]   ' || printf '  [--]   '; }
+
+  echo "ACCOUNT"
+  printf '  id              %s\n' "$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo 'NO CREDENTIALS')"
+  plan=$(aws freetier get-account-plan-state --region us-east-1 --query accountPlanType --output text 2>/dev/null || echo '?')
+  credits=$(aws freetier get-account-plan-state --region us-east-1 --query accountPlanRemainingCredits.amount --output text 2>/dev/null || echo '?')
+  printf '  plan            %s%s\n' "$plan" \
+    "$([[ $plan == FREE ]] && echo '   <- cannot launch GPU instances at all' || true)"
+  printf '  credits         $%s\n' "$credits"
+
+  echo
+  echo "QUOTAS in $REGION"
+  vcpus=$(ec2 describe-instance-types --instance-types "$TYPE" \
+    --query 'InstanceTypes[0].VCpuInfo.DefaultVCpus' --output text 2>/dev/null || echo '?')
+  q_od=$(aws service-quotas get-service-quota --region "$REGION" --service-code ec2 \
+    --quota-code L-DB2E81BA --query Quota.Value --output text 2>/dev/null || echo 0)
+  q_spot=$(aws service-quotas get-service-quota --region "$REGION" --service-code ec2 \
+    --quota-code L-3819A6DF --query Quota.Value --output text 2>/dev/null || echo 0)
+  printf '  %s needs %s vCPU\n' "$TYPE" "$vcpus"
+  awk -v q="$q_od" -v v="$vcpus" 'BEGIN{s=(q>=v?"":"  <- too low to launch"); printf "  on-demand G/VT  %.0f vCPU%s\n", q, s}'
+  awk -v q="$q_spot" -v v="$vcpus" 'BEGIN{s=(q>=v?"":"  <- GAME_SPOT=1 will fail"); printf "  spot G/VT       %.0f vCPU%s\n", q, s}'
+
+  echo
+  echo "RESOURCES in $REGION"
+  id=$(ec2 describe-instances --filters "Name=tag:Name,Values=$TS_HOST" \
+        "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+        --query 'Reservations[0].Instances[0].InstanceId' --output text 2>/dev/null)
+  [[ $id == None ]] && id=""
+  if [[ -n $id ]]; then
+    read -r state itype ip launched < <(ec2 describe-instances --instance-ids "$id" \
+      --query 'Reservations[0].Instances[0].[State.Name,InstanceType,PublicIpAddress,LaunchTime]' --output text)
+    printf '  instance        %s  %s  %s\n' "$id" "$itype" "$state"
+    printf '  public ip       %s\n' "$ip"
+    printf '  launched        %s\n' "$launched"
+  else
+    printf '  instance        none\n'
+  fi
+  printf '  volumes         %s GB total\n' "$(ec2 describe-volumes --query 'sum(Volumes[].Size)' --output text 2>/dev/null)"
+  printf '  snapshots       %s\n' "$(ec2 describe-snapshots --owner-ids self --query 'length(Snapshots)' --output text 2>/dev/null)"
+  printf '  saved images    %s\n' "$(ec2 describe-images --owners self --query 'length(Images)' --output text 2>/dev/null)"
+  printf '  elastic ips     %s%s\n' "$(ec2 describe-addresses --query 'length(Addresses)' --output text 2>/dev/null)" \
+    "$([[ $(ec2 describe-addresses --query 'length(Addresses)' --output text 2>/dev/null) != 0 ]] && echo '   <- these bill while idle' || true)"
+  local kp sgid
+  kp=$(ec2 describe-key-pairs --key-names "$TS_HOST" --query 'KeyPairs[0].KeyName' --output text 2>/dev/null || echo "")
+  sgid=$(ec2 describe-security-groups --filters "Name=group-name,Values=${TS_HOST}-sg" \
+    --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
+  # The AWS CLI prints the string "None" for an absent value; normalise it so
+  # the report does not read as if something is broken.
+  [[ $kp   == None || -z $kp   ]] && kp=none
+  [[ $sgid == None || -z $sgid ]] && sgid=none
+  printf '  key pair        %s\n' "$kp"
+  printf '  security group  %s\n' "$sgid"
+  if [[ $sgid != none ]]; then
+    local ingress
+    ingress=$(ec2 describe-security-groups --group-ids "$sgid" \
+      --query 'SecurityGroups[0].IpPermissions[].[IpProtocol,FromPort,IpRanges[0].CidrIp]' --output text 2>/dev/null)
+    while read -r p f c; do
+      [[ -n ${p:-} && $p != None ]] && printf '    inbound       %s/%s from %s\n' "$p" "$f" "$c"
+    done <<< "$ingress"
+  fi
+
+  echo
+  echo "COST GUARDS"
+  local a3 a4
+  a3=$(aws cloudwatch describe-alarms --region "$REGION" --alarm-names "${TS_HOST}-idle-stop" \
+    --query 'MetricAlarms[0].[StateValue,ActionsEnabled]' --output text 2>/dev/null || echo "missing -")
+  # a3 is "STATE\tActionsEnabled"; printing it raw reads like "ALARM False",
+  # which looks broken when it is exactly right - in ALARM because the box is
+  # idle, disarmed because no session is running.
+  local a3_state a3_armed
+  a3_state=$(awk '{print $1}' <<<"$a3")
+  a3_armed=$(awk '{print $2}' <<<"$a3")
+  if [[ $a3_state == None || -z $a3_state || $a3_state == missing ]]; then
+    printf '  idle-stop alarm missing\n'
+  else
+    printf '  idle-stop alarm %s, %s   (./game up arms it for a session)\n' \
+      "$a3_state" "$([[ $a3_armed == True ]] && echo armed || echo disarmed)"
+  fi
+
+  local acct budget limit
+  acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
+  budget=$(aws budgets describe-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" \
+    --query 'Budget.BudgetLimit.Amount' --output text 2>/dev/null || echo "")
+  if [[ -n $budget && $budget != None ]]; then
+    limit=$(aws budgets describe-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" \
+      --query 'Budget.CalculatedSpend.ActualSpend.Amount' --output text 2>/dev/null || echo 0)
+    printf '  budget          $%.0f limit, $%.2f spent so far\n' "$budget" "${limit:-0}"
+  else
+    printf '  budget          missing\n'
+  fi
+  local acct2 nsubs
+  acct2=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
+  nsubs=$(aws budgets describe-notifications-for-budget --account-id "$acct2" \
+    --budget-name "${TS_HOST}-monthly" --query 'length(Notifications)' --output text 2>/dev/null || echo 0)
+  # Budget notifications go straight to the address - there is no confirmation
+  # step to get stuck on, which is the whole reason for using them.
+  printf '  budget alerts   %s configured\n' "${nsubs:-0}"
+
+  echo
+  echo "LOCAL"
+  command -v tailscale >/dev/null && tailscale status >/dev/null 2>&1 \
+    && { mark ok; echo "tailscale up"; } || { mark no; echo "tailscale not running"; }
+  command -v moonlight >/dev/null && { mark ok; echo "moonlight installed"; } \
+    || { mark no; echo "moonlight missing (pacman -S moonlight-qt)"; }
+  [[ -f "$HOME/.ssh/${TS_HOST}.pem" ]] && { mark ok; echo "ssh key ~/.ssh/${TS_HOST}.pem"; } \
+    || { mark no; echo "no ssh key ~/.ssh/${TS_HOST}.pem"; }
+  [[ -n ${TAILSCALE_AUTH_KEY:-${GAME_TS_AUTHKEY:-}} ]] && { mark ok; echo "tailscale auth key in .env"; } \
+    || { mark no; echo "no tailscale auth key (setup will prompt)"; }
+  local node tsn="${GAME_TS_NODE:-$TS_HOST}"
+  node=$(tailscale status 2>/dev/null | grep "[[:space:]]${tsn}[[:space:]]" | head -1)
+  if [[ -n $node ]]; then
+    # A node registered but offline is the normal state while the box is
+    # stopped; it is only a problem if it lingers after a destroy, because the
+    # name then collides and a rebuild joins as <host>-1.
+    if [[ $node == *offline* ]]; then
+      mark no; echo "tailnet node $(awk '{print $1}' <<<"$node") registered but offline"
+    else
+      mark ok; echo "tailnet node $(awk '{print $1}' <<<"$node") online"
+    fi
+  else
+    mark no; echo "no '${tsn}' node on the tailnet"
+  fi
+}
+
+cost() {
+  local id state rate hours disk_gb snap_gb imgs alarms budget key sg
+  ec2() { aws ec2 "$@" --region "$REGION"; }
+
+  # Find the instance by tag rather than trusting .env: after a destroy the
+  # variable is gone, and after a manual launch it may be stale. Either way
+  # `cost` must still report, because the point is finding what still bills.
+  id=$(ec2 describe-instances --filters "Name=tag:Name,Values=$TS_HOST" \
+        "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+        --query 'Reservations[0].Instances[0].InstanceId' --output text 2>/dev/null)
+  [[ $id == None ]] && id=""
+  state=$([[ -n $id ]] && ec2 describe-instances --instance-ids "$id" \
+        --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "-")
+
+  # Every volume and snapshot bills, attached or not - orphans are the classic
+  # way to keep paying for a machine you think you deleted.
+  disk_gb=$(ec2 describe-volumes --query 'sum(Volumes[].Size)' --output text 2>/dev/null || echo 0)
+  snap_gb=$(ec2 describe-snapshots --owner-ids self --query 'sum(Snapshots[].VolumeSize)' --output text 2>/dev/null || echo 0)
+  imgs=$(ec2 describe-images --owners self --query 'length(Images)' --output text 2>/dev/null || echo 0)
+  key=$(ec2 describe-key-pairs --key-names "$TS_HOST" --query 'length(KeyPairs)' --output text 2>/dev/null || echo 0)
+  sg=$(ec2 describe-security-groups --filters "Name=group-name,Values=${TS_HOST}-sg" \
+        --query 'length(SecurityGroups)' --output text 2>/dev/null || echo 0)
+  alarms=$(aws cloudwatch describe-alarms --region "$REGION" --alarm-names "${TS_HOST}-idle-stop" \
+    --query 'length(MetricAlarms)' --output text 2>/dev/null || echo 0)
+  budget=$(aws budgets describe-budget \
+    --account-id "$(aws sts get-caller-identity --query Account --output text 2>/dev/null)" \
+    --budget-name "${TS_HOST}-monthly" --query 'Budget.BudgetLimit.Amount' --output text 2>/dev/null || echo "")
+
+  echo "resources in $REGION:"
+  printf '  instance        %s\n' "${id:-none}${id:+  ($state)}"
+  printf '  volumes         %s GB %s\n' "${disk_gb:-0}" "$([[ ${disk_gb:-0} != 0 && -z $id ]] && echo '  <- ORPHANED, still billing')"
+  printf '  snapshots       %s GB\n' "${snap_gb:-0}"
+  printf '  images          %s\n' "$imgs"
+  printf '  key pair        %s\n' "$([[ $key == 0 ]] && echo none || echo "$TS_HOST")"
+  printf '  security group  %s\n' "$([[ $sg == 0 ]] && echo none || echo "${TS_HOST}-sg")"
+  printf '  idle alarm      %s\n' "$([[ ${alarms:-0} == 0 ]] && echo none || echo present)"
+  printf '  budget          %s\n' "$([[ -z $budget || $budget == None ]] && echo none || printf '$%.0f/month' "$budget")"
+
+  if [[ -z $id && ${disk_gb:-0} == 0 && ${snap_gb:-0} == 0 && $imgs == 0 ]]; then
+    echo
+    echo "nothing is billing - no instance, volumes, snapshots or images."
+    echo
+  fi
+
+  # Prices are per-region and change; read them rather than hard-coding.
+  rate=$(aws pricing get-products --region us-east-1 --service-code AmazonEC2 \
+    --filters "Type=TERM_MATCH,Field=instanceType,Value=$TYPE" \
+              "Type=TERM_MATCH,Field=regionCode,Value=$REGION" \
+              "Type=TERM_MATCH,Field=operatingSystem,Value=Linux" \
+              "Type=TERM_MATCH,Field=tenancy,Value=Shared" \
+              "Type=TERM_MATCH,Field=preInstalledSw,Value=NA" \
+              "Type=TERM_MATCH,Field=capacitystatus,Value=Used" \
+    --query 'PriceList[0]' --output text 2>/dev/null \
+    | python3 -c 'import json,sys;d=json.load(sys.stdin);print([x["pricePerUnit"]["USD"] for t in d["terms"]["OnDemand"].values() for x in t["priceDimensions"].values()][0])' 2>/dev/null || echo 0.9664)
+
+  # An hourly CPU datapoint exists only for hours the instance was up, so
+  # counting them measures runtime with none of the ~24h billing-data lag.
+  # A terminated instance keeps its metrics, so this still reports the month.
+  hours=0
+  if [[ -n ${GAME_INSTANCE_ID:-}$id ]]; then
+    hours=$(aws cloudwatch get-metric-statistics --region "$REGION" --namespace AWS/EC2 \
+      --metric-name CPUUtilization --dimensions "Name=InstanceId,Value=${id:-$GAME_INSTANCE_ID}" \
+      --start-time "$(date -u +%Y-%m-01)T00:00:00" --end-time "$(date -u +%Y-%m-%dT%H:%M:%S)" \
+      --period 3600 --statistics Average --query 'length(Datapoints)' --output text 2>/dev/null || echo 0)
+  fi
+
+  echo "month to date ($(date -u +%B)):"
+  awk -v h="${hours:-0}" -v r="$rate" -v g="${disk_gb:-0}" -v sg="${snap_gb:-0}" -v day="$(date -u +%d)" 'BEGIN{
+    c=h*r; s=g*0.0912*(day/30.0); n=sg*0.0125*(day/30.0);
+    printf "  compute   %6.1f hrs  $%6.2f  (INR %5.0f)\n", h, c, c*88;
+    printf "  storage   %6d GB   $%6.2f  (INR %5.0f)  accrues while stopped\n", g, s, s*88;
+    if (sg>0) printf "  snapshots %6d GB   $%6.2f  (INR %5.0f)\n", sg, n, n*88;
+    printf "  ---------------------------------------\n";
+    printf "  estimate              $%6.2f  (INR %5.0f)\n", c+s+n, (c+s+n)*88;
+  }'
+  echo "  (egress not included - see README; it can rival compute)"
+  if [[ -z $id ]]; then
+    echo "  NOTE: no instance exists, so runtime from any earlier one this month is"
+    echo "  not counted above. 'billed so far' below is the figure to trust."
+  fi
+
+  echo
+  echo "credits remaining: \$$(aws freetier get-account-plan-state --region us-east-1 \
+    --query 'accountPlanRemainingCredits.amount' --output text 2>/dev/null || echo '?')"
+
+  # Cost Explorer is authoritative but lags ~24h, and each call costs $0.01.
+  echo "billed so far (lags a day):"
+  aws ce get-cost-and-usage --region us-east-1 \
+    --time-period "Start=$(date -u +%Y-%m-01),End=$(date -u -d tomorrow +%Y-%m-%d)" \
+    --granularity MONTHLY --metrics UnblendedCost \
+    --group-by Type=DIMENSION,Key=RECORD_TYPE \
+    --query 'ResultsByTime[0].Groups[].[Keys[0],Metrics.UnblendedCost.Amount]' \
+    --output text 2>/dev/null | awk '{printf "  %-8s $%.4f\n", $1, $2}' \
+    || echo "  (Cost Explorer unavailable)"
+
+  if [[ -z $budget || $budget == None ]]; then
+    echo
+    echo "  WARNING: no budget exists - nothing will alert you about spend."
+    echo "  Run ./setup to create it."
+  fi
+}
+
+# Reclaim space without destroying anything. Nothing here touches pairing,
+# Tailscale identity or installed software.
+clean() {
+  [[ $(aws ec2 describe-instances --region "$REGION" \
+        --instance-ids "${GAME_INSTANCE_ID:?no instance in .env}" \
+        --query 'Reservations[0].Instances[0].State.Name' --output text) == running ]] \
+    || die "box is not running; ./game up first, or use ./setup rebuild"
+
+  say "before"
+  box 'df -h --output=target,used,size,pcent / /scratch 2>/dev/null | sed "s/^/  /"'
+
+  say "reclaiming"
+  box 'set -e
+    sudo apt-get clean
+    sudo apt-get autoremove --purge -y >/dev/null 2>&1 || true
+    sudo journalctl --vacuum-size=100M 2>&1 | tail -1
+    rm -rf ~/.steam/steam/appcache/httpcache 2>/dev/null || true
+    sudo find /scratch -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+    sudo /usr/local/bin/mount-scratch.sh 2>/dev/null || true
+    echo "  caches, logs, games and downloads cleared"'
+
+  say "after"
+  box 'df -h --output=target,used,size,pcent / /scratch 2>/dev/null | sed "s/^/  /"'
+}
+
+# The nuclear option. Kept separate from `clean` so it can never be a surprise.
+rebuild() {
+  echo "This destroys the instance and its disk, then builds a new one (~20 min)."
+  echo "You will have to pair Moonlight again. No image is saved - the point is"
+  echo "a clean 50 GB baseline."
+  echo
+  echo "Note: the unattended build has not yet completed end-to-end in one run."
+  read -rp "rebuild from scratch? [y/N] " a
+  [[ ${a:-N} =~ ^[Yy]$ ]] || { echo "cancelled"; exit 0; }
+
+  say "destroying the current box"
+  printf 'y\nn\n' | ./game destroy || die "destroy failed; nothing rebuilt"
+
+  say "building a new one"
+  exec "$0"
+}
+
+# Remove every trace: instance, disk, images, alarms, topic, security group,
+# key pair, local key and .env entries. Nothing is kept, nothing is saved.
+destroy_all() {
+  ec2() { aws ec2 "$@" --region "$REGION"; }
+  local inst img snap sg key
+  inst=$(ec2 describe-instances \
+    --filters "Name=tag:Name,Values=$TS_HOST" \
+              "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+    --query 'Reservations[].Instances[].InstanceId' --output text)
+  img=$(ec2 describe-images --owners self --query 'Images[].ImageId' --output text)
+  sg=$(ec2 describe-security-groups --filters "Name=group-name,Values=${TS_HOST}-sg" \
+    --query 'SecurityGroups[].GroupId' --output text 2>/dev/null || true)
+  key=$(ec2 describe-key-pairs --key-names "$TS_HOST" --query 'KeyPairs[].KeyName' \
+    --output text 2>/dev/null || true)
+
+  echo "This permanently deletes EVERYTHING, saving nothing:"
+  echo "  instances       ${inst:-none}"
+  echo "  images          ${img:-none}"
+  echo "  security group  ${sg:-none}"
+  echo "  key pair        ${key:-none}  (and ~/.ssh/${TS_HOST}.pem)"
+  echo "  alarms          ${TS_HOST}-idle-stop"
+  echo "  budget          ${TS_HOST}-monthly"
+  echo
+  echo "The desktop, its configuration and any installed games all go."
+  echo "There is no undo and no image is kept."
+  echo
+
+  # A persistent spot request relaunches the moment its instance dies.
+  local req
+  for i in $inst; do
+    req=$(ec2 describe-spot-instance-requests --filters "Name=instance-id,Values=$i" \
+      --query 'SpotInstanceRequests[].SpotInstanceRequestId' --output text 2>/dev/null || true)
+    [[ -n $req && $req != None ]] && \
+      ec2 cancel-spot-instance-requests --spot-instance-request-ids $req >/dev/null
+  done
+
+  if [[ -n $inst ]]; then
+    say "terminating $inst"
+    ec2 terminate-instances --instance-ids $inst >/dev/null
+    for i in $inst; do wait_instance_state "$REGION" "$i" terminated; done
+  fi
+
+  for i in $img; do
+    say "deregistering image $i"
+    # Capture the backing snapshots first; they are unreachable afterwards and
+    # would keep billing silently.
+    local snaps
+    snaps=$(ec2 describe-images --image-ids "$i" \
+      --query 'Images[].BlockDeviceMappings[].Ebs.SnapshotId' --output text)
+    ec2 deregister-image --image-id "$i" >/dev/null
+    for s in $snaps; do
+      [[ -n $s && $s != None ]] && ec2 delete-snapshot --snapshot-id "$s" >/dev/null || true
+    done
+  done
+
+  # Any volume left detached after termination still bills.
+  for v in $(ec2 describe-volumes --filters Name=status,Values=available \
+               --query 'Volumes[].VolumeId' --output text); do
+    say "deleting orphaned volume $v"
+    ec2 delete-volume --volume-id "$v" >/dev/null || true
+  done
+
+  say "removing alarms and notifications"
+  aws cloudwatch delete-alarms --region "$REGION" --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null || true
+  local acct
+  acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
+  aws budgets delete-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" 2>/dev/null || true
+  # Older versions used an SNS topic and a second alarm; clean those up too.
+  aws cloudwatch delete-alarms --region us-east-1 --alarm-names "${TS_HOST}-monthly-spend" 2>/dev/null || true
+  local topic
+  topic=$(aws sns list-topics --region us-east-1 \
+    --query "Topics[?contains(TopicArn,'${TS_HOST}-billing')].TopicArn | [0]" --output text 2>/dev/null || true)
+  [[ -n $topic && $topic != None ]] && aws sns delete-topic --region us-east-1 --topic-arn "$topic" || true
+
+  # The security group cannot go until the instance's ENI is fully released.
+  if [[ -n $sg && $sg != None ]]; then
+    say "deleting security group $sg"
+    # The group cannot go until the terminated instance's network interface is
+    # released, which takes a little while - so retry rather than fail, and say
+    # so rather than sitting silent.
+    printf '    waiting for the network interface to be released'
+    for i in $(seq 1 12); do
+      if ec2 delete-security-group --group-id "$sg" >/dev/null 2>&1; then
+        printf ' deleted (%ds)\n' $(( (i - 1) * 5 )); break
+      fi
+      printf '.'; sleep 5
+      (( i == 12 )) && printf '\n    still in use - delete it manually later: %s\n' "$sg"
+    done
+  fi
+
+  [[ -n $key && $key != None ]] && { say "deleting key pair"; ec2 delete-key-pair --key-name "$key" >/dev/null; }
+  rm -f "$HOME/.ssh/${TS_HOST}.pem"
+  # Sunshine credentials and the tailnet node belong to the box being deleted;
+  # leaving them behind makes the next build authenticate against nothing.
+  sed -i '/^GAME_INSTANCE_ID=/d;/^GAME_REGION=/d;/^GAME_TS_HOST=/d;/^GAME_TS_NODE=/d;/^SUNSHINE_USER=/d;/^SUNSHINE_PASS=/d' .env 2>/dev/null || true
+
+  say "everything deleted"
+  # The tailnet node is left in place on purpose. Note that its identity lives on
+  # the disk just deleted, so a rebuild cannot actually reclaim it: Tailscale will
+  # see the name taken and register the new box as ${TS_HOST}-1, which `game`
+  # will not find. Delete the stale node then, or set GAME_TS_HOST to match.
+  # A node's identity lives on the disk just deleted, so the entry left behind
+  # can never be reused - it only pushes the next build onto a suffixed name.
+  # Deleting devices needs an API access token (NOT the auth key); the CLI has
+  # no device management at all.
+  if [[ -n ${TAILSCALE_API_KEY:-} ]]; then
+    say "removing tailnet nodes"
+    local devs body code
+    # Capture the status separately. Without this an expired token just yields
+    # empty output and the run reports "no matching tailnet nodes found" - an
+    # expired key and a clean tailnet look identical, so the cleanup silently
+    # stops happening and nothing ever says why.
+    body=$(curl -sS --max-time 20 -w $'\n%{http_code}' \
+      -H "Authorization: Bearer $TAILSCALE_API_KEY" \
+      "https://api.tailscale.com/api/v2/tailnet/-/devices" 2>/dev/null)
+    code=$(tail -n1 <<<"$body")
+    body=$(sed '$d' <<<"$body")
+    case $code in
+      401|403)
+        log "TAILSCALE_API_KEY rejected (HTTP $code) - it has expired or lacks scope"
+        log "  Tailscale access tokens expire after 90 days at most."
+        log "  Generate a new one and replace TAILSCALE_API_KEY in .env:"
+        log "    https://login.tailscale.com/admin/settings/keys"
+        log "  (needs write scope on devices; this is NOT the auth key)"
+        log "  Until then, prune by hand: https://login.tailscale.com/admin/machines"
+        body="" ;;
+      200) ;;
+      000|"")
+        log "could not reach api.tailscale.com - tailnet nodes left in place"
+        log "  (the instance is already deleted; only the tailnet entries remain)"
+        body="" ;;
+      *)
+        log "tailscale API returned HTTP $code - tailnet nodes left in place"
+        body="" ;;
+    esac
+    devs=$(printf '%s' "$body" \
+      | TS_HOST="$TS_HOST" python3 -c '
+import json,sys,re,os
+host = os.environ["TS_HOST"]
+try:
+    devs = json.load(sys.stdin).get("devices", [])
+except Exception:
+    sys.exit(0)
+# Only this project name and its numeric suffixes - never anything else on the
+# tailnet, which may include machines that matter.
+pat = re.compile(r"^%s(-\d+)?$" % re.escape(host))
+for d in devs:
+    name = (d.get("hostname") or "").split(".")[0]
+    if pat.match(name):
+        print(d["nodeId"], name)
+' 2>/dev/null)
+    if [[ -n $devs ]]; then
+      while read -r id name; do
+        [[ -z ${id:-} ]] && continue
+        if curl -sS -X DELETE --max-time 20 -o /dev/null -w '%{http_code}' \
+             -H "Authorization: Bearer $TAILSCALE_API_KEY" \
+             "https://api.tailscale.com/api/v2/device/$id" 2>/dev/null | grep -q '^2'; then
+          log "deleted tailnet node '$name'"
+        else
+          log "could not delete '$name' - check the token has write scope"
+        fi
+      done <<< "$devs"
+    elif [[ -n $body ]]; then
+      log "no ${TS_HOST} nodes on the tailnet - nothing to remove"
+    fi
+  else
+    echo "  Tailnet nodes were left alone - a node's identity lives on the disk"
+    echo "  just deleted, so it cannot be reused. A rebuild joins under the next"
+    echo "  free name (${TS_HOST}-1, -2, ...) and everything adapts to that."
+    echo
+    echo "  To have this cleaned up automatically, put a Tailscale API access"
+    echo "  token in .env as TAILSCALE_API_KEY (this is NOT the auth key):"
+    echo "  https://login.tailscale.com/admin/settings/keys"
+    echo "  Or prune them by hand: https://login.tailscale.com/admin/machines"
+  fi
+}
+
+CHECK_ONLY=0
+case "${1:-}" in
+  check)   CHECK_ONLY=1 ;;
+  status)  status; exit 0 ;;
+  cost)    cost; exit 0 ;;
+  clean)   clean; exit 0 ;;
+  rebuild) rebuild ;;
+  destroy) destroy_all; exit 0 ;;
+  "")      ;;
+  *) echo "usage: setup [check|status|cost|clean|rebuild|destroy]" >&2; exit 1 ;;
+esac
+
+say "preflight"
+
+# --- local tools --------------------------------------------------------------
+# Checked by name, because a missing binary otherwise surfaces as a confusing
+# downstream error - a missing `aws` reads as "credentials not configured".
+need() { command -v "$1" >/dev/null || die "$1 is not installed. $2"; }
+need aws     "Install the AWS CLI v2: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+need python3 "Install python3 - used to parse AWS pricing responses."
+need ssh     "Install OpenSSH (openssh-client) - the watchdog is installed over ssh."
+need scp     "Install OpenSSH (openssh-client) - host files are copied with scp."
+need curl    "Install curl."
+need tailscale "Install Tailscale: https://tailscale.com/download"
+tailscale status >/dev/null 2>&1 || die "tailscale is installed but not up. Run: sudo tailscale up"
+
+# Streaming needs it, building the box does not - so warn rather than stop, and
+# do not assume a package manager.
+if ! command -v moonlight >/dev/null; then
+  log "WARNING: moonlight not found. You will need it to stream:"
+  log "  Arch/CachyOS  sudo pacman -S moonlight-qt"
+  log "  Debian/Ubuntu sudo apt install moonlight-qt   (or the Flatpak)"
+  log "  Flatpak       flatpak install flathub com.moonlight_stream.Moonlight"
+fi
+
+# --- aws access ---------------------------------------------------------------
+# The console gives you an access key as a .csv download rather than something
+# you can paste, so accept it directly instead of making people transcribe it.
+import_key_csv() {
+  local csv="$1"
+  python3 - "$csv" <<'PY'
+import csv, sys
+# utf-8-sig: AWS's download carries a BOM, which utf-8 would leave glued to the
+# first header name and break the lookup.
+with open(sys.argv[1], newline="", encoding="utf-8-sig") as f:
+    rows = list(csv.DictReader(f))
+if not rows:
+    sys.exit("empty csv")
+row = {k.strip().lower(): (v or "").strip() for k, v in rows[0].items() if k}
+key = row.get("access key id")
+sec = row.get("secret access key")
+if not key or not sec:
+    sys.exit("csv has no 'Access key ID' / 'Secret access key' columns")
+print(key); print(sec)
+PY
+}
+
+if ! aws sts get-caller-identity >/dev/null 2>&1; then
+  CSV="${AWS_KEY_CSV:-}"
+  if [[ -z $CSV ]]; then
+    # Pick the first candidate that actually parses, not the first that matches
+    # the name. The console also hands out a *_credentials.csv containing a
+    # sign-in password and no access key at all - matching on filename alone
+    # would grab that and fail confusingly.
+    while IFS= read -r cand; do
+      [[ -f $cand ]] || continue
+      if import_key_csv "$cand" >/dev/null 2>&1; then CSV="$cand"; break; fi
+    done < <(find "$HOME" -maxdepth 3 \( -iname '*accessKeys*.csv' -o -iname '*credentials*.csv' \) 2>/dev/null)
+  fi
+
+  if [[ -n $CSV && -f $CSV ]]; then
+    log "AWS credentials are not configured, but found: $CSV"
+    read -rp "    import it? [Y/n] " a
+    if [[ ! ${a:-Y} =~ ^[Nn]$ ]]; then
+      mapfile -t creds < <(import_key_csv "$CSV") \
+        || die "could not read $CSV - check it is the .csv AWS gave you"
+      [[ ${#creds[@]} -eq 2 ]] || die "unexpected format in $CSV"
+      aws configure set aws_access_key_id     "${creds[0]}"
+      aws configure set aws_secret_access_key "${creds[1]}"
+      aws configure set region "$REGION"
+      aws sts get-caller-identity >/dev/null 2>&1 \
+        || die "those credentials were rejected by AWS. Check the key is active."
+      log "imported; credentials work"
+      log "now delete $CSV - it is a plaintext secret sitting in your home directory"
+    fi
+  fi
+
+  aws sts get-caller-identity >/dev/null 2>&1 || die "AWS credentials are not working.
+       Configure them with:  aws configure
+       Or point at the .csv AWS gave you:  AWS_KEY_CSV=/path/to/CLI_accessKeys.csv ./setup"
+fi
+
+# The account plan is a separate gate from service quotas, and it is invisible
+# until RunInstances fails. A Free Plan account cannot launch GPU instances at
+# all, whatever the quota says - so check it before doing any work.
+plan=$(aws freetier get-account-plan-state --region us-east-1 \
+  --query accountPlanType --output text 2>/dev/null || echo UNKNOWN)
+if [[ $plan == FREE ]]; then
+  die "this AWS account is on the Free Plan, which can only launch free-tier-eligible
+       instance types - no GPU instances at all, regardless of your quota.
+       Upgrade to a paid plan: https://console.aws.amazon.com/billing/
+       (root user; the upgrade is not reversible)"
+fi
+log "account plan: $plan"
+
+# --- region, instance type, quota ---------------------------------------------
+aws ec2 describe-regions --region-names "$REGION" >/dev/null 2>&1 \
+  || die "'$REGION' is not a region you can use. Set GAME_REGION to a valid one."
+
+vcpus=$(aws ec2 describe-instance-types --region "$REGION" --instance-types "$TYPE" \
+  --query 'InstanceTypes[0].VCpuInfo.DefaultVCpus' --output text 2>/dev/null) \
+  || die "$TYPE is not offered in $REGION.
+       Not every region has every GPU type - ap-south-2 has no g4dn at all, for one.
+       List what is available:
+         aws ec2 describe-instance-type-offerings --region $REGION \\
+           --filters Name=instance-type,Values='g*' --query 'InstanceTypeOfferings[].InstanceType'"
+# Spot is the default: roughly a quarter of the on-demand price, and games live
+# on ephemeral storage anyway, so a reclaim costs about what a normal stop does.
+#
+# But spot has its OWN quota, which is 0 on a new account and is refused more
+# often than the on-demand one - so defaulting to it blindly would make a fresh
+# clone fail its first run. When GAME_SPOT is not set at all, pick spot only if
+# the quota can actually cover the instance, and say so when falling back.
+# An explicit GAME_SPOT=0 or =1 is always honoured as written.
+if [[ -z ${GAME_SPOT:-} ]]; then
+  spot_q=$(aws service-quotas get-service-quota --region "$REGION" \
+    --service-code ec2 --quota-code L-3819A6DF --query 'Quota.Value' --output text 2>/dev/null || echo 0)
+  if awk -v q="$spot_q" -v v="$vcpus" 'BEGIN{exit !(q>=v)}'; then
+    GAME_SPOT=1
+  else
+    GAME_SPOT=0
+    log "spot quota ${spot_q%.*} vCPU cannot cover $TYPE ($vcpus) - using on-demand"
+    log "  spot is ~4x cheaper; request quota L-3819A6DF to enable it"
+  fi
+fi
+export GAME_SPOT
+
+# Spot and on-demand are governed by different quotas. Checking only the
+# on-demand one lets a spot launch fail at RunInstances with
+# MaxSpotInstanceCountExceeded.
+if [[ ${GAME_SPOT:-0} == 1 ]]; then
+  QUOTA_CODE=L-3819A6DF; QUOTA_KIND="spot"
+else
+  QUOTA_CODE=L-DB2E81BA; QUOTA_KIND="on-demand"
+fi
+quota=$(aws service-quotas get-service-quota --region "$REGION" \
+  --service-code ec2 --quota-code "$QUOTA_CODE" --query 'Quota.Value' --output text 2>/dev/null || echo 0)
+awk -v q="$quota" -v v="$vcpus" 'BEGIN{exit !(q>=v)}' \
+  || die "$QUOTA_KIND GPU quota in $REGION is ${quota%.*} vCPU; $TYPE needs $vcpus.
+
+       Request an increase for quota $QUOTA_CODE in the AWS console, with a real
+       use case - a request filed from the CLI carries no justification and is
+       usually refused. It can take days.
+
+       https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas/$QUOTA_CODE
+
+       Note spot and on-demand have separate quotas; approval of one says nothing
+       about the other. Drop GAME_SPOT to use the on-demand pool instead."
+log "$QUOTA_KIND quota ${quota%.*} vCPU covers $TYPE (${vcpus})"
+
+# Accept the names these are commonly already exported under.
+: "${GAME_TS_AUTHKEY:=${TAILSCALE_AUTH_KEY:-}}"
+: "${GAME_ALERT_EMAIL:=${EMAIL_ALERTS:-}}"
+export GAME_TS_AUTHKEY GAME_ALERT_EMAIL
+
+if [[ -z ${GAME_TS_AUTHKEY:-} ]]; then
+  echo
+  echo "A Tailscale pre-auth key is needed to join the box to your tailnet."
+  echo "Generate one at: https://login.tailscale.com/admin/settings/keys"
+  echo "  Reusable: on  - a retry needs a key that has not been spent."
+  echo "  Ephemeral: OFF - ephemeral nodes are purged when they go offline, and"
+  echo "             this box goes offline every time the watchdog stops it."
+  read -rsp "  paste auth key: " GAME_TS_AUTHKEY; echo
+  [[ -n $GAME_TS_AUTHKEY ]] || die "no auth key given"
+  export GAME_TS_AUTHKEY
+fi
+
+if [[ -z ${GAME_ALERT_EMAIL:-} ]]; then
+  read -rp "  email for billing alerts (comma-separated for several): " GAME_ALERT_EMAIL
+  [[ -n $GAME_ALERT_EMAIL ]] || die "no email given"
+  export GAME_ALERT_EMAIL
+fi
+
+if (( CHECK_ONLY )); then
+  echo
+  echo "preflight passed - nothing was created."
+  echo "Run ./setup with no arguments to actually build the box."
+  exit 0
+fi
+
+# Snapshot the tailnet before anything launches, so the new node can be
+# identified by *being new* rather than by having an expected name.
+NODES_BEFORE=$(mktemp); trap 'rm -f "$NODES_BEFORE"' EXIT
+tailnet_nodes > "$NODES_BEFORE"
+stale=$(grep -cx "$TS_HOST" "$NODES_BEFORE" || true)
+(( stale )) && log "note: a node named '$TS_HOST' already exists; the new box will join under a suffixed name and that is handled"
+
+say "provisioning instance"
+lib/provision.sh
+# shellcheck disable=SC1091
+set -a; source .env; set +a
+
+# A reused instance may be stopped, in which case nothing will ever join the
+# tailnet until it is started.
+inst_state=$(aws ec2 describe-instances --region "$REGION" \
+  --instance-ids "$GAME_INSTANCE_ID" \
+  --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo unknown)
+if [[ $inst_state == stopped ]]; then
+  say "starting the existing instance"
+  aws ec2 start-instances --region "$REGION" --instance-ids "$GAME_INSTANCE_ID" >/dev/null
+  wait_instance_state "$REGION" "$GAME_INSTANCE_ID" running
+fi
+
+# Tailscale is installed first on the box precisely so this happens early -
+# it is the point from which the build becomes observable.
+# Reusing an existing instance means its node is already on the tailnet and was
+# in the snapshot - so waiting for a *new* one would wait forever. Adopt the
+# known-good node instead.
+if [[ -n ${GAME_TS_NODE:-} ]] && tailscale ping -c 1 --timeout 2s "${GAME_TS_NODE}" &>/dev/null; then
+  TS_NODE="$GAME_TS_NODE"
+  say "box already on the tailnet as '$TS_NODE'"
+else
+  say "waiting for the box to join the tailnet"
+  TS_NODE=$(wait_new_node "$NODES_BEFORE" 1800) \
+    || die "no new node joined after 30 min.
+       The box may have failed before installing tailscale. Check its console:
+       aws ec2 get-console-output --region $REGION --instance-id ${GAME_INSTANCE_ID:-<id>} --output text | tail -40"
+fi
+
+# The AWS resources stay named after TS_HOST; only the tailnet name may differ,
+# so record it separately rather than letting a suffix rename everything.
+if [[ $TS_NODE != "$TS_HOST" ]]; then
+  log "this box is '$TS_NODE' on the tailnet, not '$TS_HOST' - a node held the"
+  log "name when it first joined. Everything uses the real name, so this is fine."
+  log "To reclaim '$TS_HOST', delete stale nodes then rebuild the box."
+fi
+# Refuse to write anything that is not a plain hostname. A multi-line value
+# once landed here and left a bare word on its own line in .env, which every
+# later run then tried to execute.
+if [[ ! $TS_NODE =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]; then
+  die "refusing to record a malformed tailnet node name: '$TS_NODE'"
+fi
+tmp=$(mktemp)
+grep -v '^GAME_TS_NODE=' .env 2>/dev/null > "$tmp" || true
+echo "GAME_TS_NODE=$TS_NODE" >> "$tmp"
+cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
+
+KEY="$HOME/.ssh/${TS_HOST}.pem"
+SSH="ssh -i $KEY -o StrictHostKeyChecking=accept-new ubuntu@$TS_NODE"
+
+say "building the box - live progress below (10-20 min)"
+stream_build "ubuntu@$TS_NODE" "$KEY" \
+  || die "the build did not finish. The instance is still running and still
+       billing - stop it with ./game stop once you have looked at the log."
+
+say "arming cloud-side backstops"
+lib/aws-setup.sh
+
+say "installing the on-host watchdog"
+log "copying host/ ..."
+scp -q -i "$KEY" -o StrictHostKeyChecking=accept-new -r host "ubuntu@$TS_NODE:"
+log "installing units ..."
+$SSH 'cd host && sudo ./install-watchdog.sh' 2>&1 | sed 's/^/    /'
+
+IP=$(tailscale ip -4 "$TS_NODE")
+
+# Sunshine's first-run account can be created over its API, which removes the
+# "open a browser and invent a password" step. The PIN exchange cannot:
+# POST /api/pin needs a 32-hex pairing_id whose origin Sunshine does not
+# document and exposes no endpoint for, so that half stays manual.
+# Pair Moonlight without a browser. The one undocumented piece is GET /api/pin,
+# which lists pending pairing requests and their ids - found by reading the web
+# UI's own JS bundle, since the API reference documents only the POST. Without
+# it there is no way to learn the pairing_id that POST /api/pin demands.
+pair_moonlight() {
+  local ip=$1 su=$2 sp=$3 pin pid tries=0
+  pin=$(python3 -c 'import secrets;print(f"{secrets.randbelow(10000):04d}")')
+
+  # An abandoned pairing process makes Sunshine reject the next attempt with
+  # 409 "a pairing session with this uniqueid already exists". Match on the
+  # actual moonlight binary and inspect its argv - `pkill -f "moonlight pair"`
+  # also matches any shell whose command line merely contains that text,
+  # including this script's own invocation.
+  local p
+  for p in $(pgrep -x moonlight 2>/dev/null || true); do
+    if tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q ' pair '; then
+      kill "$p" 2>/dev/null || true
+    fi
+  done
+  sleep 2
+
+  # Moonlight must be waiting before Sunshine has a request to approve.
+  ( moonlight pair --pin "$pin" "$ip" >/dev/null 2>&1 ) &
+  local mlpid=$!
+
+  while (( tries < 20 )); do
+    pid=$(curl -sk -u "$su:$sp" --max-time 10 "https://$ip:47990/api/pin" 2>/dev/null \
+      | python3 -c 'import json,sys
+try:
+    p = json.load(sys.stdin).get("pairings") or []
+    print(p[0]["id"] if p else "")
+except Exception:
+    print("")' 2>/dev/null)
+    [[ -n $pid ]] && break
+    sleep 2; tries=$(( tries + 1 ))
+  done
+  [[ -n $pid ]] || { kill "$mlpid" 2>/dev/null; log "moonlight never registered a pairing request"; return 1; }
+
+  if curl -sk -u "$su:$sp" --max-time 20 -X POST -H 'Content-Type: application/json' \
+       -d "{\"pairing_id\":\"$pid\",\"pin\":\"$pin\",\"name\":\"$(hostname)\"}" \
+       "https://$ip:47990/api/pin" 2>/dev/null | grep -q '"status":true'; then
+    # `moonlight pair` runs the full Qt GUI and does not always close itself
+    # once the handshake completes, so it sits there looking hung. Give it a
+    # few seconds to exit cleanly, then close it.
+    local w=0
+    while (( w < 15 )) && kill -0 "$mlpid" 2>/dev/null; do sleep 1; w=$(( w + 1 )); done
+    if kill -0 "$mlpid" 2>/dev/null; then
+      kill "$mlpid" 2>/dev/null
+      sleep 1
+      kill -9 "$mlpid" 2>/dev/null || true
+      log "closed the moonlight pairing window"
+    fi
+    wait "$mlpid" 2>/dev/null || true
+    return 0
+  fi
+  kill "$mlpid" 2>/dev/null; wait "$mlpid" 2>/dev/null || true
+  return 1
+}
+
+say "creating the Sunshine account"
+# Wait for Sunshine to answer before deciding anything. A connection failure
+# used to fall through to "already configured", which on a fresh box meant no
+# account was ever created and pairing then failed with stale credentials.
+# Poll /welcome itself, not /. Sunshine answers on / before /welcome is ready,
+# so checking / raced ahead and a not-yet-200 /welcome was misread as
+# "already configured" - which then skipped account creation and pairing.
+SUN_UP=0; WELCOME=0
+for _ in $(seq 1 40); do
+  code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "https://$IP:47990/welcome" 2>/dev/null || echo 000)
+  case $code in
+    200) SUN_UP=1; WELCOME=1; break ;;          # first run, no account yet
+    000) : ;;                                   # not listening yet
+    *)   SUN_UP=1 ;;                            # answering, but not first run
+  esac
+  # Keep polling briefly even after a non-200: Sunshine serves / and redirects
+  # before /welcome settles.
+  (( SUN_UP && ! WELCOME )) && { sleep 3; code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "https://$IP:47990/welcome" 2>/dev/null || echo 000); [[ $code == 200 ]] && { WELCOME=1; break; }; }
+  sleep 5
+done
+
+if (( ! SUN_UP )); then
+  log "Sunshine is not answering on $IP:47990 - skipping account and pairing"
+  log "check on the box: systemctl --user status app-dev.lizardbyte.app.Sunshine.service"
+elif (( WELCOME )); then
+  SUNSHINE_USER="${SUNSHINE_USER:-admin}"
+  SUNSHINE_PASS="$(python3 -c 'import secrets;print(secrets.token_urlsafe(18))')"
+  if curl -sk --max-time 15 -X POST -H 'Content-Type: application/json' \
+       -d "{\"newUsername\":\"$SUNSHINE_USER\",\"newPassword\":\"$SUNSHINE_PASS\",\"confirmNewPassword\":\"$SUNSHINE_PASS\"}" \
+       "https://$IP:47990/api/password" 2>/dev/null | grep -q '"status":true'; then
+    tmp=$(mktemp)
+    grep -vE '^SUNSHINE_(USER|PASS)=' .env 2>/dev/null > "$tmp" || true
+    { echo "SUNSHINE_USER=$SUNSHINE_USER"; echo "SUNSHINE_PASS=$SUNSHINE_PASS"; } >> "$tmp"
+    cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
+    log "created; credentials saved to .env"
+  else
+    log "could not create it automatically - do it in the browser at step 1"
+  fi
+else
+  log "already configured (not first run)"
+fi
+
+say "pairing moonlight"
+PAIRED=0
+if command -v moonlight >/dev/null && timeout 45 moonlight list "$IP" 2>/dev/null | grep -q .; then
+  log "already paired"
+  PAIRED=1
+elif command -v moonlight >/dev/null && [[ -n ${SUNSHINE_USER:-} && -n ${SUNSHINE_PASS:-} ]]; then
+  if pair_moonlight "$IP" "$SUNSHINE_USER" "$SUNSHINE_PASS"; then
+    log "paired"
+    PAIRED=1
+  else
+    log "automatic pairing failed - pair by hand, see below"
+    PAIRED=0
+  fi
+else
+  log "skipped (moonlight or credentials missing) - pair by hand, see below"
+  PAIRED=0
+fi
+say "waiting for Steam to finish installing"
+STEAM_OK=0
+STEAM_MSG="still installing - check ~/steam-prewarm.log on the box."
+if wait_for_steam "ubuntu@$TS_NODE" "$KEY" 1500; then
+  STEAM_OK=1
+  # Report what actually happened rather than assuming the three sub-steps
+  # (client, library registration, dock pin) all succeeded.
+  $SSH 'echo "    client:  $(du -shcL ~/.steam ~/.local/share/Steam 2>/dev/null | tail -1 | cut -f1)"
+        echo "    library: $(grep -q /scratch/steam ~/.steam/steam/config/libraryfolders.vdf 2>/dev/null && echo "/scratch registered" || echo "NOT registered")"
+        echo "    dock:    $(test -f ~/.config/xfce4/.steam-pinned && echo pinned || echo "not pinned")"' 2>/dev/null || true
+  # Report the library separately - it fails independently of the client, and
+  # claiming "ready" when games would land on the 50 GB root disk is worse than
+  # saying nothing.
+  if $SSH 'grep -q /scratch/steam ~/.steam/steam/config/libraryfolders.vdf' 2>/dev/null; then
+    STEAM_MSG="installed, NVMe library registered, pinned to the dock. Log in and it is ready."
+  else
+    STEAM_MSG="installed and pinned, but the NVMe library is NOT registered - games would fill the root disk. Add /scratch/steam in Steam > Settings > Storage."
+  fi
+fi
+
+if (( ${PAIRED:-0} )); then
+  REMAINING="One step remains - it is a Tailscale setting, not an AWS one."
+  STEP1="  STEP 1 - pair Moonlight   [DONE automatically]
+  ------------------------------------------------------------------
+  Already done - the Sunshine account was created and Moonlight paired
+  without a browser. Credentials are in .env if you ever want the web UI:
+
+       https://$IP:47990
+
+  Steam: $STEAM_MSG
+"
+else
+  REMAINING="Two steps remain."
+  STEP1="  STEP 1 - pair Moonlight   [ACTION NEEDED]
+  ------------------------------------------------------------------
+  a) Run this. It prints a 4-digit PIN and waits:
+
+       moonlight pair $IP
+
+  b) Open this, log in with SUNSHINE_USER / SUNSHINE_PASS from .env,
+     go to 'PIN', and enter that PIN. Accept the certificate warning.
+
+       https://$IP:47990
+
+  c) Confirm - this should list Desktop:
+
+       moonlight list $IP
+"
+fi
+
+cat <<EOF
+
+setup complete. $REMAINING
+
+$STEP1
+  STEP 2 - stop the Tailscale key expiring
+  ------------------------------------------------------------------
+  Tailscale keys expire after ~180 days by default. When this one does,
+  the node drops off the tailnet and ./game hangs waiting for it.
+
+       https://login.tailscale.com/admin/machines
+
+  Find "$TS_NODE" -> the "..." menu -> Disable key expiry.
+
+  To skip this on every future rebuild: define a tag in your tailnet
+  ACL policy and generate the auth key with it. Tagged nodes do not
+  expire at all, so this step disappears permanently.
+
+  Budget alerts are already configured and need no confirmation - see
+  ./setup status. AWS Budgets emails you directly, which is why this no
+  longer needs the root-only "Receive Billing Alerts" toggle or an SNS
+  subscription you have to confirm.
+
+That is it. From now on:
+
+       ./game            start, stream, stop on exit
+       ./game stop       stop now (this is what stops the billing)
+       ./setup status    what exists and whether the guards are armed
+       ./setup cost      what you have spent this month
+
+The box is RUNNING right now and billing by the hour. Stop it when you
+are done: ./game stop
+
+EOF

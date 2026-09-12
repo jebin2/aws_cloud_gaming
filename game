@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# Layer 1: local control. Start, stream, and stop the instance as one action.
+set -euo pipefail
+
+# .env is written by provision.sh. Anything already exported wins over it.
+if [[ -f "$(dirname "$0")/.env" ]]; then
+  while IFS='=' read -r k v; do
+    [[ $k == GAME_* && -z ${!k:-} ]] && export "$k=$v"
+  done < "$(dirname "$0")/.env"
+fi
+
+INSTANCE_ID="${GAME_INSTANCE_ID:-i-CHANGEME}"
+REGION="${GAME_REGION:-ap-south-2}"
+TS_HOST="${GAME_TS_HOST:-gamevps}"
+# The tailnet name can differ from the AWS resource name when a stale node held
+# the hostname; setup records the real one. AWS resources still use TS_HOST.
+TS_NODE="${GAME_TS_NODE:-$TS_HOST}"
+APP="${GAME_APP:-Desktop}"
+
+ec2() { aws ec2 "$@" --region "$REGION"; }
+
+# shellcheck source=lib/common.sh
+source "$(dirname "$0")/lib/common.sh"
+
+state() {
+  ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+    --query 'Reservations[0].Instances[0].State.Name' --output text
+}
+
+box() { # run a command on the host over the tailnet
+  ssh -i "$HOME/.ssh/${TS_HOST}.pem" -o StrictHostKeyChecking=accept-new \
+      -o ConnectTimeout=10 -o BatchMode=yes "ubuntu@$(tailscale ip -4 "$TS_NODE")" "$@"
+}
+
+disks() {
+  # Root cannot be shrunk once grown, so its usage is the number worth watching;
+  # /scratch is ephemeral and expected to fill.
+  box 'df -h --output=target,used,size,pcent / /scratch 2>/dev/null | sed "s/^/  /"' \
+    2>/dev/null || echo "  (host unreachable - box stopped?)"
+}
+
+wait_for() { # wait_for <desc> <tries> <cmd...>
+  local desc=$1 tries=$2; shift 2
+  printf '%s' "$desc"
+  for _ in $(seq 1 "$tries"); do
+    if "$@" &>/dev/null; then printf ' ok\n'; return 0; fi
+    printf '.'; sleep 2
+  done
+  printf ' TIMEOUT\n'; return 1
+}
+
+up() {
+  if [[ $(state) == running ]]; then
+    echo "instance already running"
+  else
+    echo "starting $INSTANCE_ID ..."
+    ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
+    wait_instance_state "$REGION" "$INSTANCE_ID" running
+  fi
+
+  # Arm layer 3 only now. Outside a session the box is idle for legitimate
+  # reasons (setup, updates) and an armed alarm would stop it mid-task.
+  ec2_cw() { aws cloudwatch "$@" --region "$REGION"; }
+  ec2_cw enable-alarm-actions --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null || true
+
+  wait_for "waiting for tailscale" 60 tailscale ping -c 1 --timeout 2s "$TS_NODE"
+
+  # Confirm the path is direct. A relayed path adds tens of ms.
+  local path
+  path=$(tailscale ping -c 1 "$TS_NODE" 2>/dev/null | tail -1)
+  echo "  $path"
+  [[ $path == *relay* ]] && echo "  WARNING: relayed, not direct - latency will suffer"
+
+  local ip; ip=$(tailscale ip -4 "$TS_NODE")
+  wait_for "waiting for sunshine" 60 \
+    timeout 2 bash -c ">/dev/tcp/$ip/47989"
+
+  echo "disk:"; disks
+
+  local t0=$SECONDS
+  moonlight stream "$ip" "$APP" || true
+  printf 'session ended after %dm\n' $(( (SECONDS - t0) / 60 ))
+
+  read -rp "stop instance now? [Y/n] " a
+  [[ ${a:-Y} =~ ^[Nn]$ ]] || down
+}
+
+down() {
+  [[ $(state) == stopped ]] && { echo "already stopped"; return; }
+  ec2 stop-instances --instance-ids "$INSTANCE_ID" >/dev/null
+  wait_instance_state "$REGION" "$INSTANCE_ID" stopped
+  log "billing has ended"
+}
+
+destroy() {
+  local s; s=$(state)
+  [[ $s == terminated ]] && { echo "already terminated"; return; }
+
+  local vol_gb
+  vol_gb=$(ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+    --query 'Reservations[0].Instances[0].BlockDeviceMappings[0].Ebs.VolumeId' --output text)
+  vol_gb=$(ec2 describe-volumes --volume-ids "$vol_gb" --query 'Volumes[0].Size' --output text 2>/dev/null || echo "?")
+
+  echo "This deletes $INSTANCE_ID and its ${vol_gb} GB disk. Everything on it goes."
+  read -rp "terminate? [y/N] " a
+  [[ ${a:-N} =~ ^[Yy]$ ]] || { echo "cancelled"; return; }
+
+  # Worth saving when the box holds a working setup you would rather not rebuild;
+  # not worth it for a scratch box or a build you intend to redo from scratch.
+  # An image costs roughly a tenth of the live volume per month.
+  echo
+  echo "An image keeps the installed desktop so ./setup can restore it in minutes"
+  echo "instead of rebuilding (~20 min). It costs ~10% of the volume's monthly price."
+  read -rp "save an image first? [Y/n] " snap
+  if [[ ! ${snap:-Y} =~ ^[Nn]$ ]]; then
+    # A stopped instance gives a consistent image without --no-reboot games.
+    [[ $s == running ]] && down
+    local name ami
+    name="${TS_HOST}-$(date -u +%Y%m%d-%H%M%S)"
+    echo "creating image $name (several minutes) ..."
+    ami=$(ec2 create-image --instance-id "$INSTANCE_ID" --name "$name" \
+      --description "cloud_gaming saved desktop" \
+      --tag-specifications "ResourceType=image,Tags=[{Key=Name,Value=${TS_HOST}-image}]" \
+      --query ImageId --output text)
+    echo "  $ami"
+    wait_image_available "$REGION" "$ami"
+    echo "  image ready; ./setup will restore from it"
+  fi
+
+  # A persistent spot request launches a replacement the moment its instance
+  # is terminated, so it has to go first.
+  local req
+  req=$(ec2 describe-spot-instance-requests \
+    --filters "Name=instance-id,Values=$INSTANCE_ID" \
+    --query 'SpotInstanceRequests[0].SpotInstanceRequestId' --output text 2>/dev/null || echo None)
+  if [[ -n $req && $req != None ]]; then
+    echo "cancelling spot request $req"
+    ec2 cancel-spot-instance-requests --spot-instance-request-ids "$req" >/dev/null
+  fi
+
+  echo "terminating ..."
+  ec2 terminate-instances --instance-ids "$INSTANCE_ID" >/dev/null
+  wait_instance_state "$REGION" "$INSTANCE_ID" terminated
+  sed -i '/^GAME_INSTANCE_ID=/d' "$(dirname "$0")/.env" 2>/dev/null || true
+  echo "terminated; disk deleted. Only the saved image (if any) still bills."
+}
+
+status() {
+  echo "instance: $(state)"
+  echo "disk:"; disks
+}
+
+clean() {
+  [[ $(state) == running ]] || { echo "box is not running; start it first"; return 1; }
+  echo "This removes every installed game and download from /scratch."
+  read -rp "continue? [y/N] " a
+  [[ ${a:-N} =~ ^[Yy]$ ]] || { echo "cancelled"; return; }
+  # Clear contents, not the mount: mount-scratch.sh owns the directory layout
+  # and Steam's steamapps symlink points into it.
+  box 'sudo find /scratch -mindepth 1 -maxdepth 1 -exec rm -rf {} + && \
+       sudo /usr/local/bin/mount-scratch.sh && echo "  /scratch cleared"'
+  echo "after:"; disks
+}
+
+case "${1:-up}" in
+  up)          up ;;
+  stop|down)   down ;;
+  status)      status ;;
+  clean)       clean ;;
+  destroy)     destroy ;;
+  *) echo "usage: game [up|stop|status|clean|destroy]" >&2; exit 1 ;;
+esac

@@ -1,0 +1,7 @@
+[Unit]
+Description=Shut down the host when no stream traffic is flowing
+After=tailscaled.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/idle-watchdog.sh

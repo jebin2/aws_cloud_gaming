@@ -1,0 +1,17 @@
+# Holds a Tailscale auth key and your alert addresses. Never commit it.
+# The wildcards matter: setup writes .env.bak-<timestamp> backups, and a plain
+# ".env" rule does not match those - they carry exactly the same secrets.
+.env
+.env.*
+!.env.example
+
+# EC2 private keys.
+*.pem
+
+# AWS hands you credentials as a .csv download (CLI_accessKeys.csv,
+# *_credentials.csv). If one is ever dropped in here, do not let it be
+# committed - a leaked access key is an open door to the whole account.
+*.csv
+
+# Personal scratch.
+clauderesumeid.txt

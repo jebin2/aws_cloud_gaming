@@ -1,0 +1,6 @@
+[Unit]
+Description=Log disk usage and warn before the root volume fills
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/disk-monitor.sh

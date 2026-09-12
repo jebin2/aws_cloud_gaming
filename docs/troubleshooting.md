@@ -1,0 +1,399 @@
+# Everything that went wrong, and why
+
+Real failures from building this, with the reasoning behind each fix. They are recorded because
+the fix is rarely obvious from the code alone, and because most of them cost real money or
+hours to diagnose.
+
+## Getting a GPU instance to launch at all
+
+### There are three independent gates, not one
+
+1. **Service quota** - `Running On-Demand G and VT instances` (`L-DB2E81BA`), per region. Took
+   three days to approve.
+2. **Account plan** - a new-style AWS **Free Plan** account cannot launch GPU instances *at
+   all*, whatever the quota says. `RunInstances` fails with `not eligible for Free Tier`,
+   because the plan permits only free-tier-eligible *instance types*. Credits are irrelevant:
+   they decide who pays, not what you may run. Check with
+   `aws freetier get-account-plan-state`; it needs a Paid Plan.
+3. **Spot quota** - `All G and VT Spot Instance Requests` (`L-3819A6DF`) is a *separate* quota
+   that defaults to 0. Having on-demand approved tells you nothing; the launch fails with
+   `MaxSpotInstanceCountExceeded`.
+
+### `--dry-run` catches none of them
+
+`run-instances --dry-run` validates permissions only. It reported "Request would have
+succeeded" immediately before two different real failures. **A passing dry-run is not evidence
+a launch will work.**
+
+### Quota requests filed from the CLI are auto-denied
+
+`aws service-quotas request-service-quota-increase` has no use-case parameter, so Service
+Quotas files the case with the placeholder `This support case was created by Service Quotas`
+and no justification. The spot request was refused on exactly that basis.
+
+File quota requests through the console with a real use case. The strongest argument for a
+spot increase is that on-demand quota is *already approved*, so it does not raise maximum
+concurrent capacity - it only changes the purchase model.
+
+### Region and instance type are not free choices
+
+`ap-south-2` offers no `g4dn` at all, only `g6`/`g6e`, and `g6.xlarge` is the only one that
+fits a 4 vCPU quota. Check `describe-instance-type-offerings` before assuming a type exists in
+your region.
+
+## Building the box
+
+### Install Tailscale first, not last
+
+Originally Tailscale was installed at the end of `bootstrap.sh`, after the driver and desktop.
+When the script died partway there was no route in at all - and because the security group has
+no SSH rule, recovering meant temporarily opening port 22 from the console.
+
+Tailscale now installs **first**, so a failed build is still reachable.
+
+### `--ssh` makes Tailscale worse, not better
+
+`tailscale up --ssh` makes tailscaled **intercept port 22** on the tailnet interface. Without
+an `ssh` section in the tailnet ACL those connections just hang - so the flag that looks like
+it grants access actually removes it.
+
+Dropped. Plain `sshd` over the tailnet works with the EC2 key and needs **no inbound rule at
+all**, because tunnelled traffic is decapsulated inside the host and never passes the security
+group. Recover an existing box with `sudo tailscale set --ssh=false`.
+
+### Do not infer a dead script from CPU metrics
+
+A near-zero CPU reading looked like a hang in the driver install. The driver had installed
+fine; the script had died later, at the Sunshine download. Read the actual log
+(`/var/log/cloud-gaming-bootstrap.log`) before concluding anything.
+
+### Sunshine's release asset name embeds the version
+
+There is no stable `latest/download/sunshine-ubuntu-24.04-amd64.deb`; the real name is
+`sunshine_<version>-1+ubuntu24.04_amd64.deb`. Guessing it 404s. Resolve the URL from the
+GitHub release API.
+
+### Sunshine's systemd unit is not called `sunshine.service`
+
+It is `app-dev.lizardbyte.app.Sunshine.service`. Glob for it rather than assuming, and enable
+it by symlinking into `default.target.wants` - there is no user session to talk to at
+cloud-init time, so `systemctl --user enable` does not work.
+
+### Sunshine's CSRF protection blocks the tailnet
+
+The web UI trusts only `localhost` and rejects every request arriving over Tailscale with a
+CSRF error. Both the MagicDNS name and the raw IP must be listed, since the check is against
+whatever you typed in the browser.
+
+### `gamescope` does not exist on Ubuntu 24.04
+
+It has no installation candidate, and apt fails the **entire transaction** over one missing
+package - so it silently took `steam-installer` down with it and nothing installed. Steam's own
+Big Picture covers the console UI.
+
+Steam also prompts for EULA acceptance, which hangs cloud-init forever. Preseed it with
+`debconf-set-selections`.
+
+### `apt install steam` installs no Steam
+
+Ubuntu's `steam-installer` is a **stub**. It ships no client: on first run its launcher puts up
+a zenity licence dialog, and only after you click Install does it download the bootstrap. A
+headless first boot cannot answer that dialog, so the launcher reported `Installation
+cancelled` and left nothing behind - while `apt` had reported success and
+`test -x /usr/games/steam` passed. Another case of a step that verifies its own execution
+rather than its effect.
+
+The first fix was to do by hand what the dialog does: read `version=` and `sha256=` out of
+`/usr/games/steam`, download `steam_${VER}.tar.gz` from Valve's archive, check the digest,
+unpack `bootstraplinux_ubuntu12_32.tar.xz`, and copy the icons out of the tarball. It worked,
+but it was ~60 lines reimplementing a package.
+
+**Use Valve's own `.deb` instead** -
+`https://repo.steampowered.com/steam/archive/stable/steam_latest.deb`:
+
+- it **ships** `/usr/lib/steam/bootstraplinux_ubuntu12_32.tar.xz` inside the package, and its
+  launcher extracts it with no prompt
+- it has **no debconf templates at all**, so there is no EULA question to preseed
+- it installs the real `hicolor` icons (16/24/32/48/256) system-wide, which is what makes the
+  dock launcher show the Steam logo instead of a generic package icon
+- it `Provides`/`Replaces` `steam-installer`, so it is a drop-in
+
+One trap: Valve only **Recommends** `steam-libs-i386` / `steam-libs-amd64`, and on Valve's own
+repo at that. Installing the bare `.deb` therefore leaves the 32-bit runtime out - and the
+bootstrap client is 32-bit, so it will not start. Ubuntu carries the same package names in
+multiverse; install them explicitly.
+
+Install with `apt-get install -y ./steam_latest.deb`, not `dpkg -i` - the latter does not
+resolve the package's dependency tree.
+
+### `steamdeps` blocks the build on a dialog nobody can see
+
+Swapping to Valve's `.deb` removed the zenity licence dialog and replaced it with a different
+one. The launcher runs `steamdeps` unconditionally on every start, and `steamdeps` re-execs
+itself into a terminal whenever `DISPLAY` is set:
+
+    gnome-terminal --wait -t "Package Install" -- sh -c '...
+      printf "\nPress return to continue: "; read line'
+
+On a headless desktop nobody presses return, so the build froze at 74 MB with no error - the
+same shape of failure, one layer further in.
+
+Two fixes, both needed. Install the deps it asks for (`libc6:i386`, `libegl1:i386`,
+`libgbm1:i386`, `libgl1-mesa-dri:i386`, `libgl1:i386`, `steam-libs-amd64`, `steam-libs-i386`,
+and `libnvidia-gl-<driver>:i386` - derive that version from the installed driver, do not pin
+it). Then `chmod -x /usr/bin/steamdeps`, because the launcher only logs and carries on when it
+fails:
+
+    if ! "$STEAMDEPS"; then log "Unable to install Steam dependencies ..."; fi
+
+Removing the exec bit is therefore a clean permanent opt-out. Note the bootstrap runs under
+`set -e`, so write it as `[[ -e X ]] && chmod -x X || true` - the bare form aborts the whole
+build when the file is absent.
+
+### The library was never registered on a fresh client
+
+The real cause of "storage is showing internal only", and it outlived two earlier fixes.
+
+Steam writes `config/libraryfolders.vdf` only after a user signs in. On a never-signed-in
+client the file does not exist - and the registration loop guarded each file with
+`[[ -f $F ]] || continue`, so it skipped both, wrote nothing, and the adoption pass then
+adopted nothing. Every step "succeeded".
+
+Seed the skeleton first, with the default library as entry `"0"`, then append `/scratch/steam`
+as entry `"1"`.
+
+### The library vanishes on the first stop/start
+
+`/scratch` is reformatted at every start, which destroys
+`/scratch/steam/steamapps/libraryfolder.vdf` - the marker Steam uses as proof a library is
+real. The *entry* survives on the root volume, so Steam finds an entry with no marker and
+prunes it: the NVMe library disappears silently and games go back to the 50 GB root disk.
+
+`mount-scratch.sh` therefore recreates the marker on every boot, reusing the `contentid`
+already recorded in `libraryfolders.vdf` so Steam sees the same library it adopted.
+
+Verify without stopping the box:
+
+    rm -f /scratch/steam/steamapps/libraryfolder.vdf
+    sudo /usr/local/bin/mount-scratch.sh
+    cat /scratch/steam/steamapps/libraryfolder.vdf   # same contentid as the vdf entry
+
+### Why the library registration is an invariant, not an install step
+
+It lived inside `steam-prewarm.sh`, behind the one-shot `~/.steam-prewarmed` marker. That was
+wrong in a way that only shows up later: the registration has to keep holding after **every**
+stop (which reformats `/scratch` and destroys the marker) and after the **first sign-in** (when
+Steam rewrites `libraryfolders.vdf` from its own state and can drop an entry it does not
+believe in). Behind a one-shot marker, a library that broke could never repair itself - and the
+marker was set even when registration had failed, which nailed the door shut.
+
+So it is now `steam-ensure-library.sh`, run by `steam-library.service` on every graphical boot,
+and idempotent:
+
+- if the vdf entry and the in-library marker exist **and their contentids agree**, it exits
+  without starting Steam at all - the normal case costs nothing
+- otherwise it repairs whatever is missing, reusing whichever contentid already exists so Steam
+  sees the library it adopted rather than a competing new one
+- it then proves the repair the only way that means anything: run Steam, stop it, and check the
+  entry *survived*. Up to three attempts.
+
+It refuses to touch the config while Steam is running, because Steam rewrites that file on exit
+and would throw the edit away.
+
+Test it without spending a build:
+
+    ./tests/steam-library.sh
+
+That extracts the script straight out of `lib/bootstrap.d/90-steam-prewarm.sh` and runs it
+against a faked Steam install - including a fake client that prunes any library whose marker is
+missing, which is the behaviour the whole design defends against.
+
+### A desktop with no browser
+
+XFCE reports "failed to execute default browser" the first time anything opens a link. Setting
+`xdg-settings` alone does not fix it: `exo-open` reads its own `~/.config/xfce4/helpers.rc`.
+Set the `x-www-browser` alternative, `helpers.rc`, and the xdg defaults.
+
+## Cost control
+
+### Arming an idle alarm stops the box instantly
+
+A new CloudWatch alarm is evaluated against the **previous** 30 minutes immediately. During
+setup that window is the software install, which looks exactly like an idle one - so the alarm
+fired its stop action seconds after creation and killed the box mid-setup.
+
+`set-alarm-state --state-value OK` does **not** fix this: CloudWatch re-evaluates the same
+history and returns to `ALARM`. The stop action is therefore left disarmed by `aws-setup.sh`
+and armed by `game up`, when a session actually starts - the only time this layer is meant to
+be watching.
+
+### The idle watchdog must watch downloads too, not just the stream
+
+The watchdog originally measured only **outbound** bytes on `tailscale0` - streaming traffic.
+That is correct while games live on a persistent disk, but wrong once they live on ephemeral
+storage:
+
+> Connect, start a 35-minute game download, disconnect Moonlight to do something else. Fifteen
+> minutes later the watchdog sees no outbound stream traffic, calls the machine idle, and shuts
+> it down mid-download. Because `/scratch` is wiped on stop, the partial download is **lost, not
+> resumed** - so the next attempt starts from zero and dies the same way.
+
+A download is *inbound* traffic on the *public* interface, which the original check could not
+see at all. The watchdog now treats the machine as busy if either is true:
+
+- outbound on the tunnel above `THRESHOLD` (200 KB/min) - someone is streaming
+- inbound on the default-route interface above `RX_THRESHOLD` (10 MB/min) - something is
+  downloading
+
+The inbound threshold is deliberately high. Idle Linux chatter is a few hundred KB/min, so a
+low threshold would keep the box alive forever and defeat the whole layer.
+
+### Use an AWS Budget, not a CloudWatch billing alarm
+
+`AWS/Billing EstimatedCharges` **publishes nothing** unless "Receive Billing Alerts" is
+switched on, which is off by default and settable only by the root user at
+<https://console.aws.amazon.com/billing/home#/preferences>.
+
+Until then the alarm sits in `INSUFFICIENT_DATA` forever and the layer is decorative.
+
+There is also a second trap: the alarm needs an SNS topic, and **every subscriber must confirm
+by email**. An unconfirmed subscription delivers nothing, silently.
+
+Both problems disappear with **AWS Budgets**, which emails subscribers directly - no root
+toggle, no confirmation, effective immediately, and the first two budgets are free. That is
+what `lib/aws-setup.sh` now creates. Check it with `./setup status`.
+
+### Zero inbound rules silently costs half your latency
+
+Covered in [architecture.md](architecture.md): without UDP 41641 open, Tailscale falls back to
+a relay at 43-71 ms instead of 16 ms, and never reports an error. Check with
+`tailscale ping <host>` - it must say *direct*, not *via DERP*.
+
+### Persistent spot requests are safe with this design
+
+`InstanceInterruptionBehavior=stop` preserves the disk on reclaim but requires a *persistent*
+request, which raises the question of whether AWS will relaunch a box the watchdog deliberately
+stopped. Tested: **it will not.** A user-initiated stop moves the request to `disabled`, and it
+only re-arms when you start the instance yourself.
+
+    active/marked-for-stop -> active/instance-stopped-by-user -> disabled/instance-stopped-by-user
+
+When tearing down a spot instance, **cancel the request before terminating** - otherwise AWS
+launches a replacement.
+
+### Measure bandwidth against the source that matters
+
+An early conclusion that games could not be re-downloaded per session came from measuring
+against GitHub and Ubuntu's archive (~10 MB/s). Steam's CDN measured **62 MB/s** from the same
+instance - six times faster, and enough to change the design. Measure the actual source.
+
+## Rebuilding
+
+### A destroyed box cannot reclaim its Tailscale node
+
+A node's identity lives in `/var/lib/tailscale`, on the disk that gets deleted. A rebuild
+authenticates as a *new* node, finds the name taken, and registers as `<host>-1` - which
+`game` will not find, hanging at "waiting for tailscale".
+
+Delete the stale node at <https://login.tailscale.com/admin/machines> before rebuilding, or set
+`GAME_TS_HOST` to match the new name.
+
+### Sunshine reports "active" but nothing is listening
+
+On a headless cloud instance there is no sound card, and Sunshine's Ubuntu build
+initialises audio through PipeWire. With PipeWire absent it spins forever:
+
+    pw.thread-loop: 0x...: iterate error -22 (Invalid argument)
+
+and never binds 47984/47989/47990 - while `systemctl --user is-active` still reports
+`active`, because the process is running, just stuck. The web UI simply refuses the
+connection with no clue why.
+
+The fix is `pipewire`, `pipewire-pulse`, `wireplumber`, plus a **null audio sink** so there
+is a device to capture on a machine with no `/dev/snd`. Diagnose with:
+
+    ss -tlnp | grep 479          # nothing listening = this bug
+    journalctl --user -u app-dev.lizardbyte.app.Sunshine.service -n 20
+
+### `~/.config` ends up owned by root
+
+`install -d -o user -g user ~/.config/sunshine` applies ownership to the **leaf only** -
+`~/.config` itself is created as root. Anything later writing a per-user config into it
+fails with "Permission denied", including the PipeWire fix above.
+
+`bootstrap.sh` now chowns the whole tree at the end.
+
+### CSRF blocks the web UI after a name collision
+
+`csrf_allowed_origins` was written from the hostname `bootstrap.sh` *requested*, not the one
+the node actually got. When the name was already taken and Tailscale joined as `<host>-1`,
+browsing to that real name was rejected - with a CSRF error that says nothing about hostnames.
+
+`bootstrap.sh` now asks Tailscale what the node is called
+(`tailscale status --json` -> `.Self.DNSName`) and lists the short name, the full MagicDNS
+name, the tailnet IP and localhost. Fix an existing box by rewriting that line and restarting
+Sunshine.
+
+### 409 "A pairing session with this uniqueid already exists"
+
+An abandoned pairing attempt leaves a session open, and Sunshine refuses a second one from the
+same client. Restart Sunshine to clear it:
+
+    systemctl --user restart app-dev.lizardbyte.app.Sunshine.service
+
+### Black screen: Sunshine silently falls back to software encoding
+
+The stream connects, audio may work, and the picture is black. The cause is in Sunshine's log:
+
+    Driver does not support the required nvenc API version. Required: 13.1 Found: 13.0
+    The minimum required Nvidia driver for nvenc is 610.00 or newer
+    ...
+    Found H.264 encoder: libx264 [software]
+
+Sunshine's bundled ffmpeg needs **NVENC API 13.1, i.e. driver 610 or newer**. When the driver
+is older it works down the list - nvenc, vulkan, vaapi - and lands on **libx264**, which four
+vCPUs cannot sustain at desktop resolutions. Nothing errors; the picture is just black.
+
+`ubuntu-drivers install` chooses the distro's *recommended* driver, which lagged at 595 even
+though `nvidia-driver-610-open` was sitting in the same repos. `bootstrap.sh` now picks the
+highest `nvidia-driver-NNN-open` apt offers instead of trusting "recommended".
+
+Check which encoder is actually in use:
+
+    journalctl --user -u app-dev.lizardbyte.app.Sunshine.service | grep 'Found H.264 encoder'
+
+`[software]` means this bug. It should say `h264_nvenc`.
+
+The virtual display also defaults to 1920x1080 rather than the full virtual size, so a
+software fallback degrades to "slow" instead of "black", and `set-resolution.sh` still raises
+it when a client asks for more.
+
+### Games were installing to the root disk, not the NVMe
+
+Two mistakes here, and the second is subtler than the first.
+
+**Wrong path.** The first attempt linked `~/.local/share/Steam/steamapps` to `/scratch`. That is
+the Valve/Flatpak layout; the Debian-packaged client uses `~/.steam/steam` ->
+`~/.steam/debian-installation` and never creates that directory at all. The link was silently
+never made, `/scratch` sat empty, and games would have filled the 50 GB root volume.
+
+**Symlinking steamapps does not work anyway.** Steam calculates a library's free space from the
+library's `path`, not from `path/steamapps`. With the symlink in place Steam still reported the
+*root disk's* 36 GB and would refuse a game that fits comfortably on the 217 GB NVMe.
+
+The fix is to register `/scratch/steam` as a genuine **library folder** - a directory containing
+`steamapps/` - by adding an entry to `config/libraryfolders.vdf`. Steam then shows both
+libraries with correct sizes and installs where you choose. Verified the entry survives a full
+Steam start/quit cycle, which is worth checking because Steam rewrites that file on exit.
+
+Confirm what Steam believes:
+
+    grep '"path"' ~/.steam/steam/config/libraryfolders.vdf
+    df -h /scratch/steam        # should be the NVMe, with the space Steam reports
+
+### user-data outgrew the 16 KB EC2 limit
+
+`bootstrap.sh` reached 17 KB and `RunInstances` rejects anything larger. cloud-init detects
+gzip magic bytes and decompresses automatically, so `provision.sh` now ships it compressed -
+17378 bytes becomes 6869, which restores plenty of headroom. Note this needs `fileb://`
+(binary) rather than `file://`.
