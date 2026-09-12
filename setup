@@ -18,6 +18,17 @@ TYPE="${GAME_INSTANCE_TYPE:-g6.xlarge}"
 # stray line as a command, so one malformed entry turns a config file into a
 # script. A corrupted value once left a bare hostname on its own line and every
 # run died with "gamevps: command not found".
+# `cg` exports CG_FRONT so messages name the command the user actually typed.
+# Both entry points stay supported, so telling someone who ran ./setup to run
+# `cg init` would be wrong - and vice versa.
+if [[ ${CG_FRONT:-0} == 1 ]]; then
+  C_INIT="cg init"; C_OPEN="cg open"; C_STOP="cg stop"
+  C_STATUS="cg status"; C_COST="cg cost"
+else
+  C_INIT="./setup"; C_OPEN="./game"; C_STOP="./game stop"
+  C_STATUS="./setup status"; C_COST="./setup cost"
+fi
+
 if [[ -f .env ]]; then
   while IFS= read -r line; do
     [[ $line =~ ^[[:space:]]*# ]] && continue
@@ -109,8 +120,8 @@ status() {
   if [[ $a3_state == None || -z $a3_state || $a3_state == missing ]]; then
     printf '  idle-stop alarm missing\n'
   else
-    printf '  idle-stop alarm %s, %s   (./game up arms it for a session)\n' \
-      "$a3_state" "$([[ $a3_armed == True ]] && echo armed || echo disarmed)"
+    printf '  idle-stop alarm %s, %s   (%s arms it for a session)\n' \
+      "$a3_state" "$([[ $a3_armed == True ]] && echo armed || echo disarmed)" "$C_OPEN"
   fi
 
   local acct budget limit
@@ -256,7 +267,7 @@ cost() {
   if [[ -z $budget || $budget == None ]]; then
     echo
     echo "  WARNING: no budget exists - nothing will alert you about spend."
-    echo "  Run ./setup to create it."
+    echo "  Run $C_INIT to create it."
   fi
 }
 
@@ -665,7 +676,7 @@ fi
 if (( CHECK_ONLY )); then
   echo
   echo "preflight passed - nothing was created."
-  echo "Run ./setup with no arguments to actually build the box."
+  echo "Run $C_INIT to actually build the box."
   exit 0
 fi
 
@@ -942,12 +953,12 @@ $STEP1
 
 That is it. From now on:
 
-       ./game            start, stream, stop on exit
-       ./game stop       stop now (this is what stops the billing)
-       ./setup status    what exists and whether the guards are armed
-       ./setup cost      what you have spent this month
+       $C_OPEN            start, stream, stop on exit
+       $C_STOP       stop now (this is what stops the billing)
+       $C_STATUS    what exists and whether the guards are armed
+       $C_COST      what you have spent this month
 
 The box is RUNNING right now and billing by the hour. Stop it when you
-are done: ./game stop
+are done: $C_STOP
 
 EOF

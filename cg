@@ -46,6 +46,10 @@ INSTANCE_ID="${GAME_INSTANCE_ID:-}"
 KEY="$HOME/.ssh/${TS_HOST}.pem"
 ec2() { aws ec2 "$@" --region "$REGION"; }
 
+# So setup/game name the command the user actually typed, rather than telling
+# someone who ran `cg` to go and run ./setup.
+export CG_FRONT=1
+
 need_node() {
   tailscale ip -4 "$TS_NODE" >/dev/null 2>&1 \
     || die "'$TS_NODE' is not on the tailnet. Is the box running? Try: cg status"
