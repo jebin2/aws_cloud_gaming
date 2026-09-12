@@ -271,10 +271,13 @@ spend whether you use it or not, and only pay off above roughly 15 hours of use 
 **Steam → Settings → Downloads → Shader Pre-Caching → turn off "Allow background processing of
 Vulkan shaders".**
 
-On 4 vCPUs this is the single biggest tuning win. Left on, Steam compiles shaders in the
-background at ~90% of a core while a game compiles its own at launch - measured load average
-**7.5 on 4 cores**, and a first launch that crawls. Off, the same launch ran at **3.4** with the
-game getting a full 150%.
+On 4 vCPUs Steam otherwise compiles shaders in the background at ~90% of a core while a game
+compiles its own at launch. Measured: `steam` dropped from 87-95% to ~55% of a core with it
+off, and load average from 7.5 to ~3.4 on 4 cores, giving the game a clean 150%.
+
+That is a real CPU saving, but do not read it as "launches twice as fast" - the launch after
+turning it off was also replaying shaders already compiled by the previous attempt, so the two
+effects were not separated. The honest claim is narrow: it frees close to a core.
 
 It persists across stop/start (it lives on the root volume) but is lost on `cg destroy`, so
 redo it after a rebuild. It cannot be scripted - Steam does not expose it as a config key.

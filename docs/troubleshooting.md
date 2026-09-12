@@ -559,6 +559,11 @@ CPU-bound jobs plus a core for capture, on four cores:
     load 7.50, steam 87-95%, GameThread 144%     <- background processing ON
     load 3.38, steam 56%,    GameThread 150%     <- OFF
 
+Those numbers are a CPU measurement, not a launch-time one. The run after switching it off was
+also replaying shaders the previous run had already compiled - `/scratch` survives a game
+restart, only a *stop* wipes it - so the two effects were confounded. What is established is
+that it frees close to a core; the launch-time share is unmeasured.
+
 Turn it off: Steam > Settings > Downloads > Shader Pre-Caching > "Allow background processing of
 Vulkan shaders". Valve's pre-built caches still download; only local background compilation
 stops. Not scriptable - Steam exposes no config key for it.
