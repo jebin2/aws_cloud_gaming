@@ -52,6 +52,7 @@ case "$args" in
   *describe-instances*) echo "${BOX_STATE:-stopped}" ;;
   *describe-volumes*)   echo "None	None" ;;
   *"iam get-user"*)     [[ ${WD_USER:-1} == 1 ]] || exit 1; echo "gamevps-watchdog" ;;
+  *"iam get-role"*)     [[ ${ROLE_EXISTS:-1} == 1 ]] || exit 1; echo "gamevps-box" ;;
   *list-access-keys*)   echo "AKIAFAKE" ;;
   *)                    echo "None" ;;
 esac
@@ -78,7 +79,8 @@ run() { # run <stdin> <args...>
   local input=$1; shift
   LOG="$T/log" rm -f "$T/log"
   printf '%s\n' "$input" | ( cd "$T" && LOG="$T/log" PATH="$T/bin:$PATH" \
-    BOX_STATE="${BOX_STATE:-stopped}" bash ./cg destroy "$@" 2>&1 )
+    BOX_STATE="${BOX_STATE:-stopped}" WD_USER="${WD_USER:-1}" \
+    ROLE_EXISTS="${ROLE_EXISTS:-1}" bash ./cg destroy "$@" 2>&1 )
 }
 did()   { grep -q "$1" "$T/log" 2>/dev/null && echo yes || echo no; }
 
@@ -142,7 +144,32 @@ check "watchdog user deleted"   "$(did 'delete-user --user-name')" "yes"
 check "remote units removed"    "$(did 'remote-watchdog.timer')" "yes"
 check "remote conf removed"     "$(did 'cloud-gaming-watchdog.conf')" "yes"
 
-echo "7. an unknown flag destroys nothing at all"
+echo "8. the summary lists only IAM objects that actually exist"
+# It used to announce the role and the watchdog user unconditionally, so a run
+# with neither present read as though both were about to be deleted - and then
+# said nothing more about the watchdog.
+seed_env
+out=$(WD_USER=0 ROLE_EXISTS=0 run "no" --all)
+check "says there is no IAM to remove" "$(grep -c 'IAM             nothing' <<<"$out")" "1"
+lacks_out=$(grep -c 'watchdog key    gamevps-watchdog' <<<"$out" || true)
+check "does not list a watchdog that is absent" "$lacks_out" "0"
+
+echo "9. every step reports an outcome, including doing nothing"
+# A step listed in the summary that then prints nothing is indistinguishable
+# from a step that silently failed.
+seed_env
+out=$(WD_USER=0 ROLE_EXISTS=0 run "" --all --force)
+check "says why the watchdog was skipped" \
+  "$(grep -c 'nothing to remove' <<<"$out")" "1"
+
+echo "10. an existing watchdog IS listed, with what its key can do"
+seed_env
+out=$(WD_USER=1 ROLE_EXISTS=1 run "no" --all)
+check "lists the role"     "$(grep -c 'instance role   gamevps-box' <<<"$out")" "1"
+check "lists the key"      "$(grep -c 'watchdog key    gamevps-watchdog' <<<"$out")" "1"
+check "says what it can do" "$(grep -c 'can stop' <<<"$out")" "1"
+
+echo "11. an unknown flag destroys nothing at all"
 out=$(run "" --everything)
 check "refused"               "$(grep -c "unknown option" <<<"$out")" "1"
 check "box NOT destroyed"     "$(did SETUP-DESTROY-CALLED)" "no"

@@ -862,3 +862,41 @@ The general point: when a destructive command grows to cover a new resource, the
 only "does this remove it" but "does something already remove it, and more completely". Two
 places that delete the same thing will not stay in agreement, and the incomplete one wins
 whenever it is the one that runs.
+
+### A destroy that listed a resource and then never mentioned it again
+
+    type DESTROY-ALL to confirm: DESTROY-ALL
+    ...
+      IAM            gamevps-box role, and the gamevps-watchdog user
+                      (a long-lived key that can stop instances - it lives
+                       in .env and on the off-site watchdog host)
+    ...
+    ==> removing the instance role gamevps-box
+          role gamevps-box was already gone
+
+The watchdog user is announced before the confirmation and never appears again. Nothing is
+wrong: it had been deleted by an earlier run, so the removal block found nothing and printed
+nothing. But that output cannot be told apart from three different situations:
+
+- it was removed, quietly
+- it was never there
+- the step was skipped by a bug
+
+The role line is the contrast. `role gamevps-box was already gone` is the same do-nothing
+outcome, stated. That is all the difference between an audit trail and a guess.
+
+Two fixes, and they are separate:
+
+**List only what exists.** The summary printed the role and the watchdog user unconditionally,
+including the parenthetical about a long-lived key on a remote host - when neither the user nor
+the host existed. A confirmation prompt that overstates what it is about to delete trains people
+to stop reading it, which is the one thing it cannot afford.
+
+**Report an outcome on every path, including the empty one.** `nothing to remove` is a result. A
+step that appears in the plan and produces no line in the log is a gap in the record, not
+brevity.
+
+This is the same shape as the empty-archive line in `cg status`, which printed a bucket name
+whether it held 13,000 objects or nothing, and as `cg watcher` claiming to cover a layer it
+never printed. Three separate places where the output described the intent rather than the
+result.

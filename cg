@@ -297,9 +297,26 @@ destroy_everything() {
   if [[ -n $b ]]; then
     echo "  the bucket      s3://$b itself"
   fi
-  echo "  IAM            ${TS_HOST}-box role, and the ${TS_HOST}-watchdog user"
-  echo "                  (a long-lived key that can stop instances - it lives"
-  echo "                   in .env and on the off-site watchdog host)"
+  # Only list what actually EXISTS. This used to announce the role and the
+  # watchdog user unconditionally, so a run with neither of them present read as
+  # though both were about to be deleted - and then said nothing more about the
+  # watchdog, leaving no way to tell "removed" from "was never there" from
+  # "skipped by a bug".
+  local role_x=0 wd_x=0
+  aws iam get-role --role-name "${TS_HOST}-box" >/dev/null 2>&1 && role_x=1
+  aws iam get-user --user-name "${TS_HOST}-watchdog" >/dev/null 2>&1 && wd_x=1
+  if (( role_x )); then
+    echo "  instance role   ${TS_HOST}-box, and its instance profile"
+  fi
+  if (( wd_x )); then
+    echo "  watchdog key    ${TS_HOST}-watchdog - a long-lived key that can stop"
+    echo "                  instances. Held in .env${GAME_WATCHDOG_HOST:+ and on ${GAME_WATCHDOG_HOST#*@}}"
+  fi
+  if [[ -n ${GAME_WATCHDOG_HOST:-} ]]; then
+    echo "  off-site units  the watchdog timer and config on ${GAME_WATCHDOG_HOST#*@}"
+  fi
+  (( role_x || wd_x )) || [[ -n ${GAME_WATCHDOG_HOST:-} ]] \
+    || echo "  IAM             nothing - no role or watchdog credential exists"
   echo
   echo "Nothing is left behind. cg init recreates all of it - the bucket name is"
   echo "derived from your account, so it comes back identical."
@@ -357,8 +374,12 @@ destroy_everything() {
   # to reimplement the IAM half and skip the remote half, which left a timer
   # running every few minutes on the VPS forever, logging AuthFailure against a
   # key that no longer existed. Subshelled because cmd_watchdog uses die().
+  # An outcome is logged on every path, including the do-nothing one. A step
+  # that is listed as part of the deletion and then prints nothing is
+  # indistinguishable from a step that silently failed.
   local wd="${TS_HOST}-watchdog"
   if [[ -n ${GAME_WATCHDOG_HOST:-} ]]; then
+    say "removing the off-site watchdog: IAM user and the units on ${GAME_WATCHDOG_HOST#*@}"
     ( cmd_watchdog remove ) \
       || log "off-site watchdog not fully removed - check: cg watchdog status"
   elif aws iam get-user --user-name "$wd" >/dev/null 2>&1; then
@@ -379,6 +400,8 @@ destroy_everything() {
     local t2; t2=$(mktemp)
     grep -vE '^GAME_WATCHDOG_AWS_(KEY_ID|SECRET)=' .env > "$t2" 2>/dev/null || true
     cat "$t2" > .env; rm -f "$t2"; chmod 600 .env
+  else
+    log "off-site watchdog: no credential and no host configured - nothing to remove"
   fi
 
   [[ -n ${vol:-} && $vol != None ]] || return 0
