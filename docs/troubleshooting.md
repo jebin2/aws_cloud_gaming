@@ -935,3 +935,37 @@ passes even with the bug present, which is the whole reason nobody noticed.
 
 If a RETURN trap is genuinely wanted, `local -` inside the function restores `set` options and
 traps on return; but the simpler answer is almost always to avoid the temp file.
+
+### `|| echo` after a command that prints on failure, three times
+
+    off-site watchdog inactive
+    unreachable  on 203.0.113.10
+
+One field, two values. `systemctl is-active` **prints** `inactive` and **exits non-zero**, so:
+
+    wst=$(ssh host 'systemctl is-active x.timer' || echo unreachable)
+
+appends the fallback to a perfectly good answer instead of replacing a missing one. `|| echo` is
+only correct after a command that prints *nothing* when it fails - `aws ... 2>/dev/null || echo
+'?'` is fine, because a failed aws call with stderr suppressed produces no stdout.
+
+Commands in this repo that print AND exit non-zero: `systemctl is-active`, `systemctl
+is-enabled` (`not-found`, `disabled`), `grep -c` (`0`).
+
+This was already documented in `cmd_watchdog status`:
+
+    # is-enabled prints "not-found" AND exits non-zero, so a `|| echo` prints
+    # both. Take the first word and normalise it.
+
+and it was still written three more times in one sitting - `grep -c` in `iam_lines`, then
+`is-active` in the off-site line of `cg watcher`, then `is-active` in the on-host line right
+above it, the last two *after* fixing the first. A comment at the one site that got it right
+does not generalise; the knowledge has to be attached to the pattern, not to a location.
+
+The shape to look for is a substitution whose fallback could be *appended* rather than
+substituted. The fix is always the same: tolerate the exit status, keep the text, and treat only
+empty output as failure.
+
+    wst=$(ssh host 'systemctl is-active x.timer' 2>/dev/null) || true
+    wst=${wst//[$'\r\n']/}
+    echo "${wst:-unreachable}"

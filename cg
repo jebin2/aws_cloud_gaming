@@ -851,7 +851,13 @@ cmd_watcher() {
   log "instance          $s"
   # Layer 2, on the box.
   if [[ $s == running ]] && box true 2>/dev/null; then
-    log "on-host watchdog  $(box 'systemctl is-active idle-watchdog.timer' 2>/dev/null || echo unreachable)"
+    # Same `|| echo` trap as documented in cmd_watchdog status: is-active prints
+    # "inactive" and exits non-zero, so the fallback gets appended to a real
+    # answer instead of replacing a missing one.
+    local ohw
+    ohw=$(box 'systemctl is-active idle-watchdog.timer 2>/dev/null' 2>/dev/null) || true
+    ohw=${ohw//[$'\r\n']/}
+    log "on-host watchdog  ${ohw:-unreachable}"
     log "shutdown action   $(ec2 describe-instance-attribute --instance-id "$INSTANCE_ID" \
          --attribute instanceInitiatedShutdownBehavior \
          --query 'InstanceInitiatedShutdownBehavior.Value' --output text 2>/dev/null)  <- must be 'stop'"
@@ -869,7 +875,14 @@ cmd_watcher() {
   if [[ -n ${GAME_WATCHDOG_HOST:-} ]]; then
     wd_rsh_init
     local wst wline
-    wst=$("${WD_RSH[@]}" 'systemctl is-active remote-watchdog.timer 2>/dev/null' 2>/dev/null || echo unreachable)
+    # `systemctl is-active` PRINTS its answer and EXITS non-zero when the unit
+    # is not active, so `$(ssh ... || echo unreachable)` yields "inactive" AND
+    # "unreachable" on two lines. This is the same shape as `$(grep -c ... ||
+    # echo 0)` producing "0\n0" - fixed in lib/setup one commit earlier and
+    # then written again here. Tolerate the exit status, read the text, and
+    # treat only EMPTY output as "could not reach the host".
+    wst=$("${WD_RSH[@]}" 'systemctl is-active remote-watchdog.timer 2>/dev/null' 2>/dev/null) || true
+    wst=${wst//[$'\r\n']/}
     log "off-site watchdog ${wst:-unreachable}  on ${GAME_WATCHDOG_HOST#*@}"
     wline=$("${WD_RSH[@]}" 'sudo tail -1 /var/log/cloud-gaming-watchdog.log 2>/dev/null' 2>/dev/null)
     [[ -n ${wline:-} ]] && log "  last            ${wline#* }"
