@@ -530,3 +530,21 @@ The cause here was self-inflicted: restarting `lightdm` and then launching appli
 over ssh leaves a session those applications cannot draw into. `xfdesktop` and `xfce4-panel`
 were running, and nothing was painting. The fix is to restart the display manager and let
 autologin build the whole session itself, launching nothing manually.
+
+### The desktop appears in the top-left corner, black elsewhere
+
+X11 capture grabs the **whole X screen**, so a screen larger than the active mode puts the
+desktop in the top-left of the frame and fills the rest with black:
+
+    Screen 0:  current 2560 x 1600     <- captured
+    DVI-D-0:   1920x1080+0+0           <- where the desktop draws
+
+`xorg.conf` asked for `Virtual 3840 2160`, and the NVIDIA driver silently clamped it to its own
+mode pool maximum, 2560x1600 - against a 1920x1080 mode. NvFBC had been capturing only the
+active output, which hid the mismatch until capture moved to X11.
+
+`Virtual` and `Modes` must match. Fix live without restarting X (a game survives this):
+
+    xrandr --fb 1920x1080
+
+Sunshine reads the geometry at session start, so reconnect for it to take effect.
