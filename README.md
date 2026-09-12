@@ -270,6 +270,8 @@ spend whether you use it or not, and only pay off above roughly 15 hours of use 
 
 Two settings on the **client**, both easy to miss:
 
+`cg open` now sets the first of these for you, so Alt+Tab works out of the box:
+
 - **Input Settings → Capture system keyboard shortcuts** → on. Without it Alt+Tab and Super are
   swallowed by your own desktop and never reach the stream. This is the setting that matters -
   verified working on KDE Wayland in **borderless windowed**, so true fullscreen is not

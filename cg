@@ -61,6 +61,25 @@ box() {
 
 # --- commands ------------------------------------------------------------------
 
+# Alt+Tab, Super and friends are swallowed by the *client* desktop unless
+# Moonlight is told to capture them, and nothing about the remote box can change
+# that - so set it here, once, rather than leaving it as a step to remember.
+#
+# Only ever ADDS the key when absent: someone who deliberately set it to 0 keeps
+# that. And never while Moonlight runs - it does not re-read its config, and it
+# rewrites the file on exit, discarding anything changed underneath it.
+ensure_moonlight_syskeys() {
+  local conf="$HOME/.config/Moonlight Game Streaming Project/Moonlight.conf"
+  [[ -f $conf ]] || return 0
+  pgrep -x moonlight >/dev/null 2>&1 && return 0
+  grep -q '^capturesyskeys=' "$conf" && return 0
+  if grep -q '^\[General\]' "$conf"; then
+    sed -i '0,/^\[General\]/s//[General]\ncapturesyskeys=2/' "$conf" \
+      && log "enabled Moonlight system-key capture (Alt+Tab, Super)"
+  fi
+}
+
+
 cmd_snapshot() {
   case "${1:-create}" in
     --list|list)
@@ -231,7 +250,7 @@ case "$CMD" in
   cost)      exec lib/setup cost ;;
   clean)     exec lib/setup clean ;;
   destroy)   exec lib/setup destroy ;;
-  open|up)   exec lib/game up ;;
+  open|up)   ensure_moonlight_syskeys; exec lib/game up ;;
   stop|down) exec lib/game stop ;;
   snapshot)  cmd_snapshot "$@" ;;
   log|logs)  cmd_log "$@" ;;
