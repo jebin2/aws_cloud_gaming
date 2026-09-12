@@ -90,6 +90,17 @@ status() {
   [[ $sgid == None || -z $sgid ]] && sgid=none
   printf '  key pair        %s\n' "$kp"
   printf '  security group  %s\n' "$sgid"
+  # The game volume outlives every destroy, so its presence - and its monthly
+  # cost - is the one resource state people most need to see at a glance.
+  local gv gsz gaz
+  read -r gv gsz gaz < <(ec2 describe-volumes --filters "Name=tag:Name,Values=${TS_HOST}-games" \
+    --query 'Volumes[0].[VolumeId,Size,AvailabilityZone]' --output text 2>/dev/null)
+  if [[ -n ${gv:-} && $gv != None ]]; then
+    printf '  game volume     %s  %s GB in %s  (~$%.2f/mo, survives destroy)\n' \
+      "$gv" "$gsz" "$gaz" "$(awk -v s="$gsz" 'BEGIN{printf "%.2f", s*0.0912}')"
+  else
+    printf '  game volume     none yet - cg init creates one (GAME_GAMES_GB)\n'
+  fi
   if [[ $sgid != none ]]; then
     local ingress
     ingress=$(ec2 describe-security-groups --group-ids "$sgid" \
@@ -197,6 +208,17 @@ cost() {
   printf '  images          %s\n' "$imgs"
   printf '  key pair        %s\n' "$([[ $key == 0 ]] && echo none || echo "$TS_HOST")"
   printf '  security group  %s\n' "$([[ $sg == 0 ]] && echo none || echo "${TS_HOST}-sg")"
+  # The game volume outlives every destroy, so it is the one resource whose
+  # absence or presence people most need to see.
+  local gv gsz gaz
+  read -r gv gsz gaz < <(ec2 describe-volumes --filters "Name=tag:Name,Values=${TS_HOST}-games" \
+    --query 'Volumes[0].[VolumeId,Size,AvailabilityZone]' --output text 2>/dev/null)
+  if [[ -n ${gv:-} && $gv != None ]]; then
+    printf '  game volume     %s  %s GB in %s  (~$%.2f/mo, survives destroy)\n' \
+      "$gv" "$gsz" "$gaz" "$(awk -v s="$gsz" 'BEGIN{printf "%.2f", s*0.0912}')"
+  else
+    printf '  game volume     none yet - cg init creates one (GAME_GAMES_GB)\n'
+  fi
   printf '  idle alarm      %s\n' "$([[ ${alarms:-0} == 0 ]] && echo none || echo present)"
   printf '  budget          %s\n' "$([[ -z $budget || $budget == None ]] && echo none || printf '$%.0f/month' "$budget")"
 
@@ -370,7 +392,7 @@ destroy_all() {
   key=$(ec2 describe-key-pairs --key-names "$TS_HOST" --query 'KeyPairs[].KeyName' \
     --output text 2>/dev/null || true)
 
-  echo "This permanently deletes EVERYTHING, saving nothing:"
+  echo "This permanently deletes the box and everything listed here:"
   echo "  instances       ${inst:-none}"
   echo "  images          ${img:-none}"
   echo "  security group  ${sg:-none}"
@@ -381,7 +403,8 @@ destroy_all() {
   echo "The desktop and its configuration go. The game library volume is KEPT -
 it is separate on purpose, so games survive a destroy. Remove it with
 cg games --delete (and check cg games first to see what it costs)."
-  echo "There is no undo and no image is kept."
+  echo "There is no undo and no image is kept. The game volume, if one exists,
+is the single exception."
   echo
 
   # A persistent spot request relaunches the moment its instance dies.
