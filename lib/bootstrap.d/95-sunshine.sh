@@ -21,11 +21,49 @@ H=${SUNSHINE_CLIENT_HEIGHT:-1080}
 R=${SUNSHINE_CLIENT_FPS:-60}
 export DISPLAY=:0
 OUT=$(xrandr --query | awk '/ connected/{print $1; exit}')
-MODE="${W}x${H}_${R}"
-xrandr --newmode "$MODE" $(cvt "$W" "$H" "$R" | sed -n '2s/^Modeline "[^"]*" //p') 2>/dev/null || true
-xrandr --addmode "$OUT" "$MODE" 2>/dev/null || true
-xrandr --output "$OUT" --mode "$MODE" 2>/dev/null || \
-  xrandr --output "$OUT" --mode "${W}x${H}" 2>/dev/null || true
+
+# What is on screen right now: the mode marked '*' under this output.
+current() { xrandr --query | awk -v o="$OUT" '$1==o{f=1;next} f&&/\*/{print $1; exit}'; }
+
+# Changing mode at all is what creates the risk below, so do not change it when
+# the client already matches. This is the common case at the default 1080p.
+[[ $(current) == "${W}x${H}" ]] && exit 0
+
+# X already advertises a long mode list, so use the existing entry whenever the
+# size is offered. Creating a duplicate modeline fails with BadName ("a mode of
+# that name exists"), --addmode then fails BadMatch, and nothing says why.
+if xrandr --query | sed -n "/^$OUT/,/^[^ ]/p" | grep -qE "^ +${W}x${H}[ +]"; then
+  err=$(xrandr --output "$OUT" --mode "${W}x${H}" 2>&1) || true
+else
+  MODE="${W}x${H}_${R}"
+  xrandr --newmode "$MODE" $(cvt "$W" "$H" "$R" | sed -n '2s/^Modeline "[^"]*" //p') 2>/dev/null || true
+  xrandr --addmode "$OUT" "$MODE" 2>/dev/null || true
+  err=$(xrandr --output "$OUT" --mode "$MODE" 2>&1) || true
+fi
+
+# This headless X server will not reconfigure its CRTC at all - every mode
+# change fails with "Configure crtc 0 failed / BadMatch", including setting the
+# mode it is already in. Stop immediately when it refuses, because each attempt
+# puts the server in modeset, and NvFBC capture fails outright while it is:
+#   Failed to start capture session: the display server is in modeset
+# The session then connects, sends no video, and the client is dropped a second
+# later - which looks like a network fault and is not one. Sunshine simply
+# captures at 1080p instead and the client scales, which costs nothing.
+if grep -q 'Configure crtc\|BadMatch\|cannot find mode' <<<"${err:-}"; then
+  echo "$(date -Iseconds) cannot switch to ${W}x${H}: display is fixed at $(current)" \
+    >> /var/log/set-resolution.log 2>/dev/null || true
+  exit 0
+fi
+
+# It was accepted, so wait for it to actually be current before returning -
+# Sunshine starts capture the instant this exits.
+for _ in $(seq 1 15); do                 # ~3s
+  if [[ $(current) == "${W}x${H}" ]]; then
+    sleep 0.4                            # let the server settle once it reports
+    break
+  fi
+  sleep 0.2
+done
 EOF
 chmod 755 /usr/local/bin/set-resolution.sh
 

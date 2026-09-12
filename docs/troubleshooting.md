@@ -397,3 +397,41 @@ Confirm what Steam believes:
 gzip magic bytes and decompresses automatically, so `provision.sh` now ships it compressed -
 17378 bytes becomes 6869, which restores plenty of headroom. Note this needs `fileb://`
 (binary) rather than `file://`.
+
+### The stream connects, decodes one frame, then dies
+
+Moonlight negotiates fine, reports `Video stream is 1280x720x60`, decodes a single frame and
+then:
+
+    Control stream received unexpected disconnect event
+    Connection terminated: -1
+    No video traffic was ever received from the host!
+
+It looks like a network fault. It is not. Sunshine's side says:
+
+    Info:  Executing Do Cmd: [/usr/local/bin/set-resolution.sh]
+    Error: Failed to start capture session: Cannot create capture session:
+           the display server is in modeset
+
+Sunshine runs the resolution prep command and starts **NvFBC capture the instant it exits**.
+If X is still mid-modeset, capture fails outright - so the session connects, sends no video at
+all, and the client is dropped a second later.
+
+Worse, on this headless X server the mode change **can never succeed**. With
+`AllowEmptyInitialConfiguration` and a fixed `Virtual`, the NVIDIA driver refuses every CRTC
+reconfiguration:
+
+    xrandr: Configure crtc 0 failed
+    X Error of failed request: BadMatch
+
+- including setting the mode it is already in. The script was fighting a server that always
+says no, and every attempt was what put X in modeset in the first place.
+
+`set-resolution.sh` now: returns immediately when the requested size already matches (the
+common case at 1080p); uses the mode X already advertises rather than creating a duplicate
+modeline (`--newmode` on an existing name fails `BadName`, then `--addmode` fails `BadMatch`);
+and **gives up the moment the server refuses**, logging why to `/var/log/set-resolution.log`.
+Sunshine then captures at 1080p and the client scales, which costs nothing.
+
+**The display is effectively fixed at 1920x1080.** Set Moonlight to 1080p and no mode change is
+attempted at all.
