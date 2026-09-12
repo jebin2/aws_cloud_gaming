@@ -372,19 +372,29 @@ day you need it.
 
 ### Spot is the default
 
-Roughly a quarter of the price ($0.23/hr against $0.97 when measured), at the cost of AWS being
-able to reclaim the instance with two minutes' notice. Since games live on ephemeral storage
-that a stop wipes anyway, a reclaim costs about what a normal stop does.
+`GAME_SPOT=1` is the default and saves roughly 70%. It comes with one rule that shapes how you
+use this rig:
 
-Spot needs **its own quota** (`L-3819A6DF`), separate from on-demand and **0 on a new
-account** - so with `GAME_SPOT` unset, `cg init` prefers spot and falls back to on-demand when
-the quota cannot cover the instance, logging that it did. Force either one explicitly:
+**Never `cg stop` a spot instance - `cg destroy` it.**
 
-    GAME_SPOT=0 cg init      # on-demand, whatever the quota says
-    GAME_SPOT=1 cg init      # spot, fail loudly if the quota is short
+Stopping a spot instance yourself moves its persistent request to `disabled`, and AWS refuses to
+start an instance whose request is not active. There is no API to re-enable it. The box is then
+permanently unusable *and* still billing for its root volume. `cg open` now checks the request
+state before calling start and explains this instead of surfacing:
 
-Savings Plans and Reserved Instances are the wrong tool here: they commit you to a yearly $/hr
-spend whether you use it or not, and only pay off above roughly 15 hours of use *per day*.
+    IncorrectSpotRequestState ... the associated Spot Instance request is not in an
+    appropriate state to support start
+
+and the "stop instance now?" prompt at the end of `cg open` offers **destroy** as the default on
+a spot box, with stop as an explicit second choice.
+
+This is only acceptable because the games live in S3. Destroying costs a ~6 minute rebuild and
+nothing else - which is also why the old EBS-volume design made `stop` feel necessary and this
+one does not.
+
+If you want stop/start back, run on demand: `GAME_SPOT=0 cg init`. Dearer per hour, restartable
+as often as you like.
+
 
 ### Moonlight client settings
 

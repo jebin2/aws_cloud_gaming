@@ -1037,3 +1037,36 @@ The pattern worth keeping: **every verification passed.** Object counts, manifes
 `BytesDownloaded`, the registered library path, the restore rate. All true, all green, and the
 game did not run. The checks measured the transfer, and the transfer was never the thing that
 was broken - the archive format simply could not represent part of what was being stored.
+
+### Documented for weeks, unhandled in code
+
+    $ ./cg open
+    starting i-0405e5236b1f9ca12 ...
+    aws: [ERROR]: An error occurred (IncorrectSpotRequestState) when calling the
+    StartInstances operation: You can't start the Spot Instance ... because the
+    associated Spot Instance request is not in an appropriate state to support start
+
+The cause was already in this file, several sections up: stopping a spot instance yourself moves
+its persistent request to `disabled`, and AWS will not start an instance whose request is not
+active. That had been tested deliberately and written down.
+
+And `cg open` still met it as a raw API error. The message names no cause, offers no way
+forward, and says nothing about the part that costs money - the box is now permanently
+unstartable while its root volume keeps billing, so the worst outcome is not the failed command
+but the resource left behind by it.
+
+**Knowing a behaviour and handling it are different things, and a note in a document is not a
+handled case.** The distance between them here was one `describe-spot-instance-requests` call
+before `start-instances`.
+
+Two changes, and the second matters more:
+
+- `cg open` checks the request state first and prints the cause, the cost, and both routes out
+  (`cg destroy && cg init`, or `GAME_SPOT=0 cg init` for a restartable box).
+- the "stop instance now?" prompt at the end of `cg open` now offers **destroy as the default**
+  on a spot instance. Handling the error well still leaves you with a wasted box; not creating
+  one is better. This is only reasonable because the games are in S3 - under the old EBS design,
+  stop was the only way to keep them without paying for an instance.
+
+`tests/spot-restart.sh` covers both request states, an active request, an on-demand instance
+(which must not consult the spot API at all), and an already-running box.

@@ -52,10 +52,56 @@ wait_for() { # wait_for <desc> <tries> <cmd...>
   printf ' TIMEOUT\n'; return 1
 }
 
+# A persistent spot request goes to `disabled` when YOU stop its instance, and
+# AWS refuses to start a stopped spot instance from there. This was tested and
+# written up in docs/troubleshooting.md long before it was handled here, so
+# `cg open` met it as a raw API error:
+#
+#   IncorrectSpotRequestState ... the associated Spot Instance request is not
+#   in an appropriate state to support start
+#
+# which says nothing about what to do, nor that the now-unusable box keeps
+# billing for its root volume.
+spot_request_state() {
+  aws ec2 describe-spot-instance-requests --region "$REGION" \
+    --filters "Name=instance-id,Values=$INSTANCE_ID" \
+    --query 'SpotInstanceRequests[0].State' --output text 2>/dev/null || echo unknown
+}
+instance_lifecycle() {
+  ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+    --query 'Reservations[0].Instances[0].InstanceLifecycle' --output text 2>/dev/null || echo none
+}
+
 up() {
   if [[ $(state) == running ]]; then
     echo "instance already running"
   else
+    # Checked BEFORE calling start, so the explanation replaces the API error
+    # rather than following it.
+    if [[ $(instance_lifecycle) == spot ]]; then
+      local srs; srs=$(spot_request_state)
+      if [[ $srs != active ]]; then
+        echo
+        echo "This box cannot be started again."
+        echo
+        echo "  It is a SPOT instance and its spot request is '$srs'. Stopping a spot"
+        echo "  instance yourself disables its request, and AWS refuses to start an"
+        echo "  instance whose request is not active. There is no way to re-enable it."
+        echo
+        echo "  Meanwhile the stopped box still bills for its root volume."
+        echo
+        echo "  Your games are in S3, so throwing this box away costs nothing:"
+        echo
+        echo "      cg destroy && cg init          # rebuild, ~6 min, games restored"
+        echo
+        echo "  To get stop/start back, build on demand instead - dearer per hour,"
+        echo "  but it can be stopped and restarted as often as you like:"
+        echo
+        echo "      cg destroy && GAME_SPOT=0 cg init"
+        echo
+        die "spot request is '$srs'"
+      fi
+    fi
     echo "starting $INSTANCE_ID ..."
     ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
     wait_instance_state "$REGION" "$INSTANCE_ID" running
@@ -96,6 +142,25 @@ up() {
   moonlight stream ${mlf[@]+"${mlf[@]}"} "$ip" "$APP" || true
   printf 'session ended after %dm\n' $(( (SECONDS - t0) / 60 ))
 
+  # On spot, "stop" is almost always the wrong verb: it disables the request,
+  # the box can never start again, and its root volume goes on billing for a
+  # machine that is now useless. The games are mirrored to S3 either way, so
+  # destroying loses nothing - offer that here rather than letting the problem
+  # be discovered at the next `cg open`.
+  if [[ $(instance_lifecycle) == spot ]]; then
+    echo
+    echo "This is a SPOT instance. Stopping it disables its spot request and the"
+    echo "box can NEVER be started again - while its root volume keeps billing."
+    echo "Your games are mirrored to S3 either way, so destroying loses nothing."
+    echo
+    read -rp "[d] destroy (recommended)  [s] stop anyway  [n] leave running: " a
+    case "${a:-d}" in
+      d|D|"") exec ./cg destroy ;;
+      s|S)    down ;;
+      *)      echo "left running - it is still billing by the hour" ;;
+    esac
+    return
+  fi
   read -rp "stop instance now? [Y/n] " a
   [[ ${a:-Y} =~ ^[Nn]$ ]] || down
 }
