@@ -900,3 +900,38 @@ This is the same shape as the empty-archive line in `cg status`, which printed a
 whether it held 13,000 objects or nothing, and as `cg watcher` claiming to cover a layer it
 never printed. Three separate places where the output described the intent rather than the
 result.
+
+### A RETURN trap is not scoped to the function that set it
+
+    2026-09-13T01:08:19  off-site watchdog: no running instance tagged gamevps - nothing to do
+    ./cg: line 540: pol: unbound variable
+
+`cg init` armed the off-site watchdog, reported it working, and then died - before launching
+anything. Line 540 is the closing `}` of `watchdog_ensure`, which has no variable called `pol`.
+
+The cause is 80 lines earlier, in `watchdog_iam_ensure`:
+
+    local pol; pol=$(mktemp); trap 'rm -f "$pol"' RETURN
+
+A RETURN trap fires "each time a shell function finishes executing" - **any** function, not the
+one that installed it. So the trap outlived `watchdog_iam_ensure`, fired when
+`watchdog_ensure` returned, and evaluated `$pol` in a scope where the local no longer existed.
+Under `set -u` an unset variable is fatal, so the script exited. The trap was doing its cleanup
+job correctly and then doing it again forever.
+
+The fix is to not need the file: `aws iam put-user-policy --policy-document` takes JSON inline,
+so the temp file, the trap and the whole class of problem go away together.
+
+**Why it survived so long.** That branch only runs when the scoped IAM user does not exist - a
+first-ever `cg init`, or the first one after `cg destroy --all`. Every init in between found the
+user, took an early `return 0` before the trap was ever installed, and worked perfectly. The bug
+was introduced with the function and became reachable again only when `--all` started deleting
+that user.
+
+That is the shape worth remembering: a latent fault on a rarely-taken branch, exposed by an
+unrelated change that made the branch ordinary. `tests/init-watchdog.sh` now covers it, and was
+checked against the reverted code to confirm it actually fails - its "existing credential" case
+passes even with the bug present, which is the whole reason nobody noticed.
+
+If a RETURN trap is genuinely wanted, `local -` inside the function restores `set` options and
+traps on return; but the simpler answer is almost always to avoid the temp file.

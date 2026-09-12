@@ -460,8 +460,19 @@ watchdog_iam_ensure() {
   }
 
   # put-user-policy overwrites, so this also repairs a policy edited by hand.
-  local pol; pol=$(mktemp); trap 'rm -f "$pol"' RETURN
-  cat > "$pol" <<JSON
+  #
+  # Passed inline rather than through a temp file. The temp file came with
+  # `trap 'rm -f "$pol"' RETURN`, and a RETURN trap set inside a function is NOT
+  # scoped to it: it stays installed and fires on every later function return,
+  # by which point $pol is out of scope. Under `set -u` that is fatal, so
+  # `cg init` died with "pol: unbound variable" after the watchdog was armed and
+  # before anything launched.
+  #
+  # It only ever ran on the branch where the IAM user does not exist - a first
+  # init, or the first one after `cg destroy --all` - which is why it sat here
+  # unnoticed until --all started deleting that user.
+  local pol
+  pol=$(cat <<JSON
 { "Version": "2012-10-17", "Statement": [
   { "Effect": "Allow",
     "Action": ["ec2:DescribeInstances", "cloudwatch:GetMetricStatistics"],
@@ -470,8 +481,9 @@ watchdog_iam_ensure() {
     "Condition": { "StringEquals": { "ec2:ResourceTag/Name": "$TS_HOST" } } }
 ]}
 JSON
+)
   aws iam put-user-policy --user-name "$user" --policy-name idle-stop \
-    --policy-document "file://$pol" >/dev/null 2>&1 \
+    --policy-document "$pol" >/dev/null 2>&1 \
     || { log "could not attach the policy to $user - skipping the off-site watchdog"; return 1; }
 
   # AWS allows two keys per user and shows a secret exactly once, so an existing
