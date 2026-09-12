@@ -283,15 +283,39 @@ watchdog_ensure() {
   # catch it and a missing watchdog killed `cg init` outright. This function
   # promises never to be fatal; a subshell is what makes that true.
   if [[ $("${rsh[@]}" 'systemctl is-enabled remote-watchdog.timer 2>/dev/null | head -1' 2>/dev/null) == enabled ]]; then
-    if ( cmd_watchdog install ) >/dev/null 2>&1; then
-      log "off-site watchdog: refreshed on $GAME_WATCHDOG_HOST"
-    else
-      log "off-site watchdog: refresh failed (the existing one is still armed)"
-    fi
+    ( cmd_watchdog install ) >/dev/null 2>&1 \
+      || log "off-site watchdog: refresh failed (the existing one is still armed)"
+  else
+    say "arming the off-site watchdog before anything launches"
+    ( cmd_watchdog install ) || {
+      log "off-site watchdog not installed - the other three layers still apply"
+      return 0
+    }
+  fi
+  watchdog_prove
+  return 0
+}
+
+# "refreshed" used to mean "the install command exited 0" - and it printed that
+# while the watchdog was blind, because the units run as root and the credentials
+# were not readable by root. Exit codes are not evidence. Make it run once and
+# report what it actually decided, which is the only thing worth printing.
+watchdog_prove() {
+  local kf="${GAME_WATCHDOG_KEY:-}" ident=()
+  [[ -n $kf ]] && ident=(-i "${kf/#\~/$HOME}")
+  local rsh=(ssh "${ident[@]}" -o ConnectTimeout=8 -o BatchMode=yes
+             -o StrictHostKeyChecking=accept-new "$GAME_WATCHDOG_HOST")
+  local line
+  line=$("${rsh[@]}" 'sudo systemctl start remote-watchdog.service 2>/dev/null;
+                      sleep 2; sudo tail -1 /var/log/cloud-gaming-watchdog.log' 2>/dev/null)
+  if [[ -z ${line:-} ]]; then
+    log "off-site watchdog: armed, but it logged nothing - check: cg watchdog logs"
     return 0
   fi
-  say "arming the off-site watchdog before anything launches"
-  ( cmd_watchdog install ) || log "off-site watchdog not installed - the other three layers still apply"
+  # Strip the timestamp; the line already reads as a sentence.
+  log "off-site watchdog: ${line#* }"
+  [[ $line == *"CANNOT QUERY AWS"* ]] \
+    && log "  ^ it cannot see your account - fix this or layer 4 is decoration"
   return 0
 }
 
