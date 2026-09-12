@@ -445,7 +445,12 @@ The instance store is genuinely faster (measured **370 MB/s** against gp3's 125 
 so load screens are slower on EBS. You can buy throughput back at **$0.0456 per MB/s-month** -
 +125 MB/s is about INR 502/month - but try it first; it is adjustable on a live volume.
 
-**What is still ephemeral:** `/scratch`, and anything you leave in it.
+**What `/scratch` is for now.** Very little, honestly: browser downloads and temp files. It used
+to hold the Steam library, which is why much of this project is about surviving its wipe - the
+library marker, the shader cache, the re-download every session. All of that moved to `/games`.
+
+What is left is 232 GB of free, fast, disposable space. Useful if you want it; nothing depends
+on it. `cg clean` wipes it and does not touch `/games`.
 
 ## Layout
 

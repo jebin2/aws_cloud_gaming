@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Logs disk usage and warns before the root volume fills. Games and downloads
-# are redirected to /scratch, so root growing is a sign something escaped that
+# and downloads live on other disks, so root growing is a sign something escaped
 # - worth knowing early, because an EBS volume cannot be shrunk afterwards.
 set -euo pipefail
 
@@ -33,6 +33,6 @@ if [[ -n $uid ]]; then
   sudo -u ubuntu \
     DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
     notify-send -u critical "Disk almost full" \
-    "Root volume is ${root_pct}% full (${root_use}). Games belong in /scratch." \
+    "Root volume is ${root_pct}% full (${root_use}). Games belong on /games." \
     2>/dev/null || true
 fi

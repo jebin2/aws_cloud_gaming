@@ -36,7 +36,7 @@ box() { # run a command on the host over the tailnet
 
 disks() {
   # Root cannot be shrunk once grown, so its usage is the number worth watching;
-  # /scratch is ephemeral and expected to fill.
+  # /games holds the games and persists; /scratch is ephemeral scratch space.
   box 'df -h --output=target,used,size,pcent / /games /scratch 2>/dev/null | sed "s/^/  /"' \
     2>/dev/null || echo "  (host unreachable - box stopped?)"
 }
@@ -166,7 +166,8 @@ status() {
 
 clean() {
   [[ $(state) == running ]] || { echo "box is not running; start it first"; return 1; }
-  echo "This removes every installed game and download from /scratch."
+  echo "This clears /scratch - browser downloads and temp files."
+  echo "Installed games are on /games and are NOT affected."
   read -rp "continue? [y/N] " a
   [[ ${a:-N} =~ ^[Yy]$ ]] || { echo "cancelled"; return; }
   # Clear contents, not the mount: mount-scratch.sh owns the directory layout

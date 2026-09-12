@@ -68,11 +68,10 @@ box() {
 # Only ever ADDS the key when absent: someone who deliberately set it to 0 keeps
 # that. And never while Moonlight runs - it does not re-read its config, and it
 # rewrites the file on exit, discarding anything changed underneath it.
-# Save games live inside the Proton prefix, which sits in the Steam library on
-# /scratch - and /scratch is reformatted on every stop. What actually protects
-# them is Steam Cloud, and Cloud only syncs when Steam shuts down cleanly.
-# Stopping the instance under a running Steam risks losing the last saves, so
-# ask Steam to exit and give it time to finish before pulling the floor away.
+# Save games live inside the Proton prefix, in the Steam library on /games - so
+# they now survive a stop. Steam Cloud is still the thing that protects them
+# against a destroy, and Cloud only syncs when Steam shuts down cleanly, so ask
+# it to exit and give it time before stopping the box.
 # Streaming is the charge that can exceed the instance, and `cg cost` cannot
 # help in the moment: Cost Explorer lags about a day. The box has the counter
 # already, so read it live and for free. Since boot, not since the session -
@@ -627,7 +626,7 @@ build (changes things)
   cg snapshot                save an AMI of the current box             [bills monthly]
   cg snapshot --list         what images exist and what they cost
   cg snapshot --delete <id>  delete an image and its snapshots
-  cg clean                   free space: apt caches, logs, /scratch
+  cg clean                   free space: apt caches, logs, /scratch (not /games)
   cg destroy                 delete the box, no confirmation (game volume survives)
   cg destroy --all           the box AND the game volume - nothing left billing
 

@@ -2,9 +2,13 @@
 # g6 instances ship a local NVMe instance store (232 GB on g6.xlarge) that costs
 # nothing extra and is far faster than network-attached EBS. It is wiped on every
 # *stop*, filesystem included - so it is formatted at each boot, and only holds
-# things that genuinely do not matter: temp files and browser downloads. The
-# Steam library moved to a persistent volume (/games, see 86-games.sh) because
-# re-downloading 140 GB per session was the single worst thing about this rig.
+# things that genuinely do not matter: temp files and browser downloads.
+#
+# It used to hold the Steam library, which is why so much of this project is
+# about surviving its wipe. That moved to a persistent volume (/games, see
+# 86-games.sh) because re-downloading 140 GB per session was the single worst
+# thing about this rig. What is left here is 232 GB of free, fast, disposable
+# space - useful, but nothing depends on it any more.
 progress "setting up scratch disk"
 cat > /usr/local/bin/mount-scratch.sh <<'EOF'
 #!/usr/bin/env bash

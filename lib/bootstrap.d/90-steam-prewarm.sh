@@ -35,7 +35,7 @@ chmod 755 /usr/local/bin/pin-steam-to-dock.sh
 
 # A separate, idempotent script rather than a step inside the prewarm: the
 # library registration is an *invariant*, not a one-time install. It has to hold
-# after every stop (which reformats /scratch and destroys the in-library marker)
+# after a sign-in, when Steam rewrites libraryfolders.vdf from its own state
 # and after the first sign-in (when Steam rewrites libraryfolders.vdf from its
 # own state and can drop an entry it does not believe in). The prewarm marker
 # used to gate this, so once set, a broken library could never repair itself.
@@ -172,7 +172,7 @@ chmod 755 /usr/local/bin/steam-ensure-library.sh
 # so the two never drive Steam at the same time.
 cat > /etc/systemd/system/steam-library.service <<'EOF'
 [Unit]
-Description=Keep /scratch/steam registered as a Steam library
+Description=Keep the game library registered with Steam
 After=graphical.target steam-prewarm.service games-disk.service
 
 [Service]
