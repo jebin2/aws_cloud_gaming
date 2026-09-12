@@ -60,12 +60,20 @@ WantedBy=multi-user.target
 EOF
 systemctl enable scratch-disk.service
 
+# Shader caches go on the ROOT volume, not /scratch. They were here originally
+# because /scratch is fast and they regenerate - but "regenerates" hides the
+# cost: compiling them is minutes of 100% CPU on 4 vCPUs, which is exactly what
+# makes a first launch crawl. /scratch is reformatted on every stop, so keeping
+# them there means paying that price every single session. They are small (a few
+# GB at most) and the root volume has room.
 cat > /etc/profile.d/shader-cache.sh <<'EOF'
 export __GL_SHADER_DISK_CACHE=1
-export __GL_SHADER_DISK_CACHE_PATH=/scratch/nvidia-shader-cache
+export __GL_SHADER_DISK_CACHE_PATH="$HOME/.cache/nvidia-shader-cache"
 export __GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1
-export DXVK_STATE_CACHE_PATH=/scratch/dxvk-cache
+export DXVK_STATE_CACHE_PATH="$HOME/.cache/dxvk-cache"
 EOF
+mkdir -p "/home/$USER_NAME/.cache/nvidia-shader-cache" "/home/$USER_NAME/.cache/dxvk-cache"
+chown -R "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.cache"
 
 # Start it now rather than waiting for the next boot, and check the *mount*, not
 # just that the script exists - "installed the thing that does X" has been a

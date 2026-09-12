@@ -294,6 +294,12 @@ play. If you would rather not wait, attach a persistent EBS volume for a game li
 
 **Anything you want to keep must live outside `/scratch`, including Firefox downloads.**
 
+Shader caches are the exception that proves the rule: they live on the **root** volume
+(`~/.cache`), not `/scratch`. They regenerate, so `/scratch` looks like the right home - but
+regenerating them is minutes of 100% CPU on 4 vCPUs, which is exactly what makes a first launch
+crawl. Keeping them on a disk that survives a stop means paying that once instead of every
+session, and they are only a few GB.
+
 ## Layout
 
     cg                 the front door - every command
