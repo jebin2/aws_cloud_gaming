@@ -11,6 +11,7 @@
 # So the point of this layer is not just redundancy: every decision it makes is
 # written down, with the numbers behind it.
 set -uo pipefail
+out=""
 
 CFG=${CFG:-/etc/cloud-gaming-watchdog.conf}
 [[ -r $CFG ]] && . "$CFG"
@@ -29,9 +30,18 @@ say() { printf '%s %s\n' "$(date -Iseconds)" "$*" >> "$LOG"; logger -t cg-watchd
 aws_() { aws --region "$REGION" "$@"; }
 
 # --- find the instance --------------------------------------------------------
-read -r ID LAUNCH < <(aws_ ec2 describe-instances \
+# Distinguish "no instance" from "could not ask". Swallowing the error made a
+# blind watchdog report "nothing to do" for half an hour while an instance was
+# running: the units run as root and the credentials had been written to a
+# user's home, so every call failed silently. A guard that cannot see must say
+# so, not claim everything is fine.
+if ! out=$(aws_ ec2 describe-instances \
   --filters "Name=tag:Name,Values=$TS_HOST" "Name=instance-state-name,Values=running" \
-  --query 'Reservations[0].Instances[0].[InstanceId,LaunchTime]' --output text 2>/dev/null)
+  --query 'Reservations[0].Instances[0].[InstanceId,LaunchTime]' --output text 2>&1); then
+  say "CANNOT QUERY AWS - this watchdog is blind: ${out//$'\n'/ }"
+  exit 1
+fi
+read -r ID LAUNCH <<<"$out"
 
 if [[ -z ${ID:-} || $ID == None ]]; then
   echo 0 > "$STATE/idle"
