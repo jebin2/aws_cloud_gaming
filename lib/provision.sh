@@ -154,9 +154,25 @@ else
     ${MARKET[@]+"${MARKET[@]}"} \
     ${PLACE[@]+"${PLACE[@]}"} \
     --query 'Instances[0].InstanceId' --output text) || {
-      echo "launch failed. If this says there is no spot capacity, the game volume"
-      echo "pins the AZ and that AZ is full right now. Retry, or use on-demand in"
-      echo "the same AZ:  GAME_SPOT=0 cg init"
+      echo ""
+      echo "launch failed. The three things this is usually:"
+      echo ""
+      echo "  MaxSpotInstanceCountExceeded, right after a destroy"
+      echo "    AWS releases the spot vCPU quota a minute or two AFTER the instance"
+      echo "    terminates, so an immediate rebuild hits your own old allocation."
+      echo "    Nothing is wrong - wait ~2 minutes and run it again."
+      echo "    Check with: aws ec2 describe-spot-instance-requests --region $REGION"
+      echo ""
+      echo "  MaxSpotInstanceCountExceeded, persistently"
+      echo "    Your spot quota (L-3819A6DF) is smaller than this instance needs,"
+      echo "    or an older request still holds it. On-demand instead:"
+      echo "      GAME_SPOT=0 cg init"
+      echo ""
+      echo "  InsufficientInstanceCapacity"
+      echo "    The game volume pins the AZ - EBS cannot cross one - and that AZ is"
+      echo "    full right now. On-demand in the same AZ is far more likely to fit:"
+      echo "      GAME_SPOT=0 cg init"
+      echo ""
       exit 1
     }
   echo "    $INSTANCE_ID"
