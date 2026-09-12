@@ -330,6 +330,15 @@ play. If you would rather not wait, attach a persistent EBS volume for a game li
 
 **Anything you want to keep must live outside `/scratch`, including Firefox downloads.**
 
+**Save games are the exception you do not control.** They live inside the Proton prefix, which
+Steam keeps in the library - so on `/scratch`, wiped on every stop. What protects them is
+**Steam Cloud**, and Cloud only syncs when Steam exits cleanly. `cg stop` therefore asks Steam
+to shut down (`steam -shutdown`) and waits up to 60s before stopping the instance. Killing the
+box under a running Steam can lose the last saves.
+
+Check a game actually supports Cloud before relying on this. For a game that does not, copy the
+save directory off `/scratch` yourself, or keep the library on a persistent EBS volume.
+
 Shader caches are the exception that proves the rule: they live on the **root** volume
 (`~/.cache`), not `/scratch`. They regenerate, so `/scratch` looks like the right home - but
 regenerating them is minutes of 100% CPU on 4 vCPUs, which is exactly what makes a first launch

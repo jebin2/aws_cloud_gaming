@@ -68,6 +68,29 @@ box() {
 # Only ever ADDS the key when absent: someone who deliberately set it to 0 keeps
 # that. And never while Moonlight runs - it does not re-read its config, and it
 # rewrites the file on exit, discarding anything changed underneath it.
+# Save games live inside the Proton prefix, which sits in the Steam library on
+# /scratch - and /scratch is reformatted on every stop. What actually protects
+# them is Steam Cloud, and Cloud only syncs when Steam shuts down cleanly.
+# Stopping the instance under a running Steam risks losing the last saves, so
+# ask Steam to exit and give it time to finish before pulling the floor away.
+steam_shutdown_for_cloud_sync() {
+  local node="${GAME_TS_NODE:-$TS_HOST}"
+  tailscale ip -4 "$node" >/dev/null 2>&1 || return 0
+  local ip; ip=$(tailscale ip -4 "$node")
+  local sshopts=(-i "$KEY" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 -o BatchMode=yes)
+  ssh "${sshopts[@]}" "ubuntu@$ip" 'pgrep -x steam >/dev/null' 2>/dev/null || return 0
+  say "closing Steam so cloud saves finish syncing"
+  # `steam -shutdown` is the supported way to ask it to exit and sync; a plain
+  # kill skips the sync entirely.
+  ssh "${sshopts[@]}" "ubuntu@$ip" '
+    export DISPLAY=:0 XAUTHORITY="$HOME/.Xauthority"
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+    /usr/bin/steam -shutdown >/dev/null 2>&1 || true
+    for i in $(seq 1 30); do pgrep -x steam >/dev/null || break; sleep 2; done
+    pgrep -x steam >/dev/null && echo "still running after 60s" || echo "closed"
+  ' 2>/dev/null | sed 's/^/      steam: /'
+}
+
 ensure_moonlight_syskeys() {
   local conf="$HOME/.config/Moonlight Game Streaming Project/Moonlight.conf"
   [[ -f $conf ]] || return 0
@@ -251,7 +274,7 @@ case "$CMD" in
   clean)     exec lib/setup clean ;;
   destroy)   exec lib/setup destroy ;;
   open|up)   ensure_moonlight_syskeys; exec lib/game up ;;
-  stop|down) exec lib/game stop ;;
+  stop|down) steam_shutdown_for_cloud_sync; exec lib/game stop ;;
   snapshot)  cmd_snapshot "$@" ;;
   log|logs)  cmd_log "$@" ;;
   ssh)       if [[ $# -gt 0 ]]; then box "$@"; else need_node; exec ssh -i "$KEY" \
