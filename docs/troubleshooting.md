@@ -435,3 +435,22 @@ Sunshine then captures at 1080p and the client scales, which costs nothing.
 
 **The display is effectively fixed at 1920x1080.** Set Moonlight to 1080p and no mode change is
 attempted at all.
+
+**But that was not the real cause.** The same failure happened on a session where
+`set-resolution.sh` was never called at all - no `Executing Do Cmd` line, nothing in its log.
+The actual culprit:
+
+    /etc/modprobe.d/nvidia-graphics-drivers-kms.conf:  options nvidia_drm modeset=1
+
+Ubuntu's driver package enables NVIDIA DRM kernel modesetting, and **NvFBC cannot create a
+capture session while DRM KMS owns the display** - it reports the display server as permanently
+"in modeset". Nothing has to be changing for this to happen; it is the steady state.
+
+The box has no physical display and needs nothing KMS provides, so `40-nvidia.sh` writes
+`options nvidia_drm modeset=0 fbdev=0` and rewrites Ubuntu's file, before the build's final
+reboot. Confirm with:
+
+    sudo cat /sys/module/nvidia_drm/parameters/modeset    # must be N
+
+Note that reading that file needs root - as a normal user it fails with "Permission denied" and
+an empty value, which looks exactly like "the parameter does not exist".
