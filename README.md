@@ -201,7 +201,7 @@ each session, so set Moonlight to 1920x1080 for the box's native mode.
 |---|-----------|---------|----------|
 | 1 | `game` script | normal use | on Moonlight exit |
 | 2 | on-host watchdog | forgotten disconnect, client crash | 15 min idle |
-| 3 | CloudWatch NetworkOut alarm | hung OS, dead watchdog | 30 min idle |
+| 3 | CloudWatch alarm on NetworkIn+**Out** | hung OS, dead watchdog, closed laptop | 30 min idle |
 | 4 | AWS budget | everything else | email |
 
 Worst-case leak with all four armed is about 30 minutes of runtime.
@@ -213,7 +213,20 @@ stalled build left a GPU instance running with nothing to stop it. The watchdog 
 early because it has a 20-minute boot grace and counts inbound bytes as activity, so it cannot
 shut down a build in progress.
 
-Layer 3 is armed by `cg open` rather than at build time, because a freshly created alarm is
+Layer 3 watches **NetworkIn + NetworkOut** together, via CloudWatch metric math. Watching only
+egress was wrong in a way that matters: streaming is outbound, but a Steam download is almost
+entirely **inbound**, so an egress-only alarm reads a 140 GB download as an idle box and stops
+it mid-download. The on-host watchdog had the same bug and was fixed the same way.
+
+It also uses `treat-missing-data breaching`, deliberately. An instance wedged hard enough to
+stop publishing metrics is invisible to the default `notBreaching` - every guard stays green
+while it bills indefinitely. A false positive costs a two-minute restart; a miss costs money.
+
+It is armed at the **end of `cg init`**, not left for `cg open`. Until then the build itself
+looks idle to CloudWatch; afterwards, the commonest way to abandon a running box is to close the
+laptop once setup finishes.
+
+Layer 3 is not armed *during* the build, because a freshly created alarm is
 evaluated against the previous 30 minutes and would otherwise stop the box mid-build - see
 [docs/troubleshooting.md](docs/troubleshooting.md).
 

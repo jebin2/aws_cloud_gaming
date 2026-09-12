@@ -1055,6 +1055,18 @@ else
 "
 fi
 
+# Arm layer 3 here, not at `cg open`. Until this point the build itself looked
+# idle to CloudWatch; from here on an abandoned box is exactly what this layer
+# exists to stop - and the commonest way to abandon one is to close the laptop
+# after cg init. `cg open` re-arms it anyway, harmlessly.
+say "arming the idle alarm"
+if aws cloudwatch enable-alarm-actions --region "$REGION" \
+     --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null; then
+  log "armed - the box stops itself after 30 min with no traffic in or out"
+else
+  log "could not arm the idle alarm; the on-host watchdog still covers this"
+fi
+
 cat <<EOF
 
 setup complete. $REMAINING
