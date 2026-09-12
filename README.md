@@ -240,7 +240,22 @@ no manual step. The commands are there for when you want them:
     cg watchdog status                    # timer state and recent decisions
     cg watchdog logs --watch              # follow it live
 
-**Give that host its own scoped IAM user.** It is always on and probably internet-facing, so it
+**`cg init` creates that IAM user for you.** It makes `<host>-watchdog` with the policy below,
+issues a key, saves it to `.env` (gitignored, chmod 600) and pushes it to the box over stdin.
+`cg watchdog remove` deletes the user, its keys, and the copy on that host. If your own
+credentials cannot manage IAM, it says so and skips layer 5 rather than failing the build.
+
+The scope is verified with AWS's own policy simulator, not by reading the JSON:
+
+    ec2:DescribeInstances            allowed
+    cloudwatch:GetMetricStatistics   allowed
+    ec2:StopInstances (tag=gamevps)  allowed
+    ec2:StopInstances (other tag)    implicitDeny
+    ec2:TerminateInstances           implicitDeny
+    ec2:RunInstances                 implicitDeny
+    iam:CreateUser                   implicitDeny
+
+**The policy it attaches.** It is always on and probably internet-facing, so it
 should be able to do only this and nothing else:
 
 ```json

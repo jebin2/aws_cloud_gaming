@@ -192,6 +192,80 @@ cmd_destroy() {
 # independent guard is that it is already watching when the box appears, not
 # installed afterwards by hand. Quiet when it is already in place, and never
 # fatal: a missing watchdog must not stop you building a box.
+# Create the scoped IAM user the off-site watchdog needs, so none of this is a
+# manual step. Deliberately narrow: describe instances, read metrics, and stop
+# ONLY an instance tagged with this host name. It cannot terminate, launch, or
+# read anything else - so the worst case if that always-on box is compromised is
+# somebody stopping your game instance.
+#
+# Long-lived access keys are the only option for a host outside AWS: there is no
+# instance role to borrow. They land in .env, which is gitignored, and are
+# pushed to the box over stdin.
+watchdog_iam_ensure() {
+  local user="${TS_HOST}-watchdog"
+  # Already have working credentials? Then there is nothing to do. Checked by
+  # using them, not by assuming the variables are still valid.
+  if [[ -n ${GAME_WATCHDOG_AWS_KEY_ID:-} && -n ${GAME_WATCHDOG_AWS_SECRET:-} ]]; then
+    if AWS_ACCESS_KEY_ID="$GAME_WATCHDOG_AWS_KEY_ID" \
+       AWS_SECRET_ACCESS_KEY="$GAME_WATCHDOG_AWS_SECRET" \
+       aws sts get-caller-identity >/dev/null 2>&1; then
+      return 0
+    fi
+    log "the watchdog credentials in .env no longer work - reissuing"
+  fi
+
+  aws iam get-user --user-name "$user" >/dev/null 2>&1 || {
+    say "creating the scoped IAM user $user"
+    aws iam create-user --user-name "$user" >/dev/null 2>&1 || {
+      log "could not create $user (needs iam:CreateUser) - skipping layer 5"
+      return 1
+    }
+  }
+
+  # put-user-policy overwrites, so this also repairs a policy edited by hand.
+  local pol; pol=$(mktemp); trap 'rm -f "$pol"' RETURN
+  cat > "$pol" <<JSON
+{ "Version": "2012-10-17", "Statement": [
+  { "Effect": "Allow",
+    "Action": ["ec2:DescribeInstances", "cloudwatch:GetMetricStatistics"],
+    "Resource": "*" },
+  { "Effect": "Allow", "Action": "ec2:StopInstances", "Resource": "*",
+    "Condition": { "StringEquals": { "ec2:ResourceTag/Name": "$TS_HOST" } } }
+]}
+JSON
+  aws iam put-user-policy --user-name "$user" --policy-name idle-stop \
+    --policy-document "file://$pol" >/dev/null 2>&1 \
+    || { log "could not attach the policy to $user - skipping layer 5"; return 1; }
+
+  # AWS allows two keys per user and shows a secret exactly once, so an existing
+  # key whose secret we do not have is useless - clear the way and reissue.
+  local k
+  for k in $(aws iam list-access-keys --user-name "$user" \
+             --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null); do
+    [[ -n $k && $k != None ]] && aws iam delete-access-key --user-name "$user" --access-key-id "$k" >/dev/null 2>&1
+  done
+  local kid sec
+  read -r kid sec < <(aws iam create-access-key --user-name "$user" \
+    --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text 2>/dev/null)
+  [[ -n ${kid:-} && $kid != None ]] || { log "could not create an access key for $user"; return 1; }
+
+  # New keys are eventually consistent; using one immediately can fail.
+  local i
+  for i in $(seq 1 10); do
+    AWS_ACCESS_KEY_ID="$kid" AWS_SECRET_ACCESS_KEY="$sec" \
+      aws sts get-caller-identity >/dev/null 2>&1 && break
+    sleep 3
+  done
+
+  local tmp; tmp=$(mktemp)
+  grep -vE '^GAME_WATCHDOG_AWS_(KEY_ID|SECRET)=' .env 2>/dev/null > "$tmp" || true
+  printf 'GAME_WATCHDOG_AWS_KEY_ID=%s\nGAME_WATCHDOG_AWS_SECRET=%s\n' "$kid" "$sec" >> "$tmp"
+  cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
+  export GAME_WATCHDOG_AWS_KEY_ID="$kid" GAME_WATCHDOG_AWS_SECRET="$sec"
+  log "issued a scoped key for $user and saved it to .env"
+  return 0
+}
+
 watchdog_ensure() {
   [[ -n ${GAME_WATCHDOG_HOST:-} ]] || return 0
   local kf="${GAME_WATCHDOG_KEY:-}" ident=()
@@ -202,6 +276,7 @@ watchdog_ensure() {
     log "off-site watchdog: $GAME_WATCHDOG_HOST unreachable - skipping"
     return 0
   fi
+  watchdog_iam_ensure || true
   if [[ $("${rsh[@]}" 'systemctl is-enabled remote-watchdog.timer 2>/dev/null | head -1' 2>/dev/null) == enabled ]]; then
     # Already armed. Refresh the script anyway - it is cheap, and a box built
     # from older code otherwise keeps running an older watchdog.
@@ -295,11 +370,30 @@ cmd_watchdog() {
       if (( WATCH )); then "${rsh[@]}" 'sudo tail -f /var/log/cloud-gaming-watchdog.log'
       else "${rsh[@]}" 'sudo tail -n 40 /var/log/cloud-gaming-watchdog.log' 2>/dev/null | sed 's/^/  /'; fi ;;
     remove)
+      # Also removes the IAM user, since cg created it. Keys first: a user with
+      # keys cannot be deleted, and leaving a stray key is worse than leaving a
+      # stray user.
+      local u="${TS_HOST}-watchdog" k
+      if aws iam get-user --user-name "$u" >/dev/null 2>&1; then
+        say "removing the scoped IAM user $u"
+        for k in $(aws iam list-access-keys --user-name "$u" \
+                   --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null); do
+          [[ -n $k && $k != None ]] && aws iam delete-access-key --user-name "$u" --access-key-id "$k" >/dev/null 2>&1 \
+            && log "deleted key $k"
+        done
+        aws iam delete-user-policy --user-name "$u" --policy-name idle-stop >/dev/null 2>&1 || true
+        aws iam delete-user --user-name "$u" >/dev/null 2>&1 && log "deleted $u" \
+          || log "could not delete $u"
+      fi
+      local tmp; tmp=$(mktemp)
+      grep -vE '^GAME_WATCHDOG_AWS_(KEY_ID|SECRET)=' .env 2>/dev/null > "$tmp" || true
+      cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
       say "removing the off-site watchdog from $host"
       "${rsh[@]}" 'sudo systemctl disable --now remote-watchdog.timer 2>/dev/null;
         sudo rm -f /etc/systemd/system/remote-watchdog.{service,timer} \
           /usr/local/bin/remote-watchdog.sh /etc/cloud-gaming-watchdog.conf;
-        sudo systemctl daemon-reload' 2>/dev/null
+        sudo systemctl daemon-reload;
+        shred -u ~/.aws/credentials 2>/dev/null || rm -f ~/.aws/credentials' 2>/dev/null
       log "removed" ;;
     *) die "usage: cg watchdog [install|status|logs [--watch]|remove]" ;;
   esac
