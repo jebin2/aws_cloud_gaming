@@ -66,35 +66,31 @@ if [[ $MODE == all ]]; then
 # Catches a hung OS, a dead watchdog, a wedged Sunshine.
 # Streaming at 20 Mbps moves ~750 MB per 5-min period; 10 MB is comfortably idle.
 echo "==> idle-stop alarm"
-# NetworkIn + NetworkOut, via metric math - not NetworkOut alone. Streaming is
-# outbound, but a Steam download is almost entirely INBOUND, and an alarm
-# watching only egress reads a 140 GB download as an idle box and stops it
-# mid-download. The on-host watchdog had exactly this bug and was fixed the same
-# way; this layer had kept it.
-METRICS=$(mktemp); trap 'rm -f "$METRICS"' EXIT
-cat > "$METRICS" <<JSON
-[
-  {"Id":"nin","ReturnData":false,
-   "MetricStat":{"Metric":{"Namespace":"AWS/EC2","MetricName":"NetworkIn",
-     "Dimensions":[{"Name":"InstanceId","Value":"$INSTANCE_ID"}]},
-     "Period":300,"Stat":"Sum"}},
-  {"Id":"nout","ReturnData":false,
-   "MetricStat":{"Metric":{"Namespace":"AWS/EC2","MetricName":"NetworkOut",
-     "Dimensions":[{"Name":"InstanceId","Value":"$INSTANCE_ID"}]},
-     "Period":300,"Stat":"Sum"}},
-  {"Id":"total","Expression":"nin+nout","Label":"NetworkIn+NetworkOut","ReturnData":true}
-]
-JSON
-
-# treat-missing-data breaching, deliberately. An instance wedged hard enough to
-# stop publishing metrics is invisible to `notBreaching` - all four guards stay
-# green while it bills forever. Counting silence as idle catches that. The cost
-# of a false positive is a two-minute restart; the cost of a miss is money.
+# NetworkOut only, and NOT because that is the right measure - it is not. A
+# Steam download is almost entirely INBOUND, so this metric reads a 140 GB
+# download as an idle box. The obvious fix, a metric-math alarm on
+# NetworkIn+NetworkOut, is impossible:
+#
+#   ValidationError: EC2 actions are not available for Metric Math monitors
+#
+# CloudWatch will not attach the ec2:stop action to a math expression, and
+# composite alarms cannot take EC2 actions either. So this layer is stuck
+# watching one direction.
+#
+# That is survivable because it is not the layer that covers downloads:
+#   layer 2 (on-host)  counts in AND out, and is armed the whole time
+#   layer 4 (off-site) counts in AND out, via its own API calls
+# and this alarm is armed only for the duration of a session - see game up -
+# precisely because outside one, low egress is a normal state.
+#
+# treat-missing-data breaching is kept deliberately: an instance wedged hard
+# enough to stop publishing metrics is otherwise invisible to every layer.
 aws cloudwatch put-metric-alarm --region "$REGION" \
   --alarm-name "${TS_HOST}-idle-stop" \
-  --alarm-description "Stop the game host after 30 minutes with no traffic in or out" \
-  --metrics "file://$METRICS" \
-  --evaluation-periods 6 \
+  --alarm-description "Stop the game host when it stops pushing video for 30 minutes" \
+  --namespace AWS/EC2 --metric-name NetworkOut \
+  --dimensions "Name=InstanceId,Value=$INSTANCE_ID" \
+  --statistic Sum --period 300 --evaluation-periods 6 \
   --threshold 10000000 --comparison-operator LessThanThreshold \
   --treat-missing-data breaching \
   --alarm-actions "arn:aws:automate:${REGION}:ec2:stop"

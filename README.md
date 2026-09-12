@@ -289,20 +289,23 @@ stalled build left a GPU instance running with nothing to stop it. The watchdog 
 early because it has a 20-minute boot grace and counts inbound bytes as activity, so it cannot
 shut down a build in progress.
 
-Layer 3 watches **NetworkIn + NetworkOut** together, via CloudWatch metric math. Watching only
-egress was wrong in a way that matters: streaming is outbound, but a Steam download is almost
-entirely **inbound**, so an egress-only alarm reads a 140 GB download as an idle box and stops
-it mid-download. The on-host watchdog had the same bug and was fixed the same way.
+Layer 3 can only watch **NetworkOut**, and that is a CloudWatch limitation rather than a choice.
+An alarm on `NetworkIn + NetworkOut` is the obviously correct measure - a Steam download is
+almost entirely inbound - but AWS refuses it:
 
-It also uses `treat-missing-data breaching`, deliberately. An instance wedged hard enough to
-stop publishing metrics is invisible to the default `notBreaching` - every guard stays green
-while it bills indefinitely. A false positive costs a two-minute restart; a miss costs money.
+    ValidationError: EC2 actions are not available for Metric Math monitors
 
-It is armed at the **end of `cg init`**, not left for `cg open`. Until then the build itself
-looks idle to CloudWatch; afterwards, the commonest way to abandon a running box is to close the
-laptop once setup finishes.
+The `ec2:stop` action cannot be attached to a math expression, and composite alarms cannot take
+EC2 actions either. So this layer watches one direction, and is armed **only for the duration of
+a session**: outside one, low egress is a normal state, and a game downloading with nobody
+connected looks exactly like an idle box. Layers 2 and 4 both count traffic in both directions
+and are armed the whole time, which is what actually covers downloads.
 
-Layer 3 is not armed *during* the build, because a freshly created alarm is
+It does use `treat-missing-data breaching`, deliberately. An instance wedged hard enough to stop
+publishing metrics is invisible to the default `notBreaching` - every guard stays green while it
+bills indefinitely. A false positive costs a two-minute restart; a miss costs money.
+
+Layer 3 is also not armed *during* the build, because a freshly created alarm is
 evaluated against the previous 30 minutes and would otherwise stop the box mid-build - see
 [docs/troubleshooting.md](docs/troubleshooting.md).
 

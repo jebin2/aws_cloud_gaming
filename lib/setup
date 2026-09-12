@@ -1055,17 +1055,12 @@ else
 "
 fi
 
-# Arm layer 3 here, not at `cg open`. Until this point the build itself looked
-# idle to CloudWatch; from here on an abandoned box is exactly what this layer
-# exists to stop - and the commonest way to abandon one is to close the laptop
-# after cg init. `cg open` re-arms it anyway, harmlessly.
-say "arming the idle alarm"
-if aws cloudwatch enable-alarm-actions --region "$REGION" \
-     --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null; then
-  log "armed - the box stops itself after 30 min with no traffic in or out"
-else
-  log "could not arm the idle alarm; the on-host watchdog still covers this"
-fi
+# Layer 3 is NOT armed here. It can only watch NetworkOut - CloudWatch refuses
+# EC2 actions on a metric-math alarm - and outside a session low egress is
+# normal: a game downloading with nobody connected looks exactly like an idle
+# box. Arming it here would stop downloads. `cg open` arms it for the duration
+# of a session, which is the only window where low egress really means idle.
+# Layers 2 and 4 cover the rest, and both count traffic in both directions.
 
 cat <<EOF
 
