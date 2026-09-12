@@ -21,8 +21,10 @@ only while you are using it and is guaranteed to go back down.
 > [LICENSE](LICENSE).
 >
 > Two things the guards do *not* catch. The root volume bills **even while the instance is
-> stopped**, so stopping is not free - only `cg destroy` reaches zero. And **egress is
-> billed but not counted** by `cg cost`; streaming can cost as much again as the instance.
+> stopped**, so stopping is not free - only `cg destroy` reaches zero. And **egress can cost as
+> much again as the instance** once you pass the free 100 GB/month - `cg cost` now tracks how
+> much of that allowance is left, because until it runs out egress bills at $0.00 and is
+> invisible in every other view.
 
 ---
 

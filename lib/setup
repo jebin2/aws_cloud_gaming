@@ -237,7 +237,7 @@ cost() {
     printf "  ---------------------------------------\n";
     printf "  estimate              $%6.2f  (INR %5.0f)\n", c+s+n, (c+s+n)*88;
   }'
-  echo "  (egress not included - see README; it can rival compute)"
+  echo "  (egress is counted under 'billed so far' below, not in this estimate)"
   if [[ -z $id ]]; then
     echo "  NOTE: no instance exists, so runtime from any earlier one this month is"
     echo "  not counted above. 'billed so far' below is the figure to trust."
@@ -267,9 +267,14 @@ cost() {
 import json,sys
 try: g=json.load(sys.stdin)
 except Exception: print("  (Cost Explorer unavailable)"); sys.exit()
+# Egress is the charge that rivals compute and it is INVISIBLE here until it
+# starts costing money: the first 100 GB/month is free, so it books at $0.00
+# and any "hide the small rows" filter drops the very line worth watching.
+# Pull it out before filtering.
+out_gb=sum(float(x["q"]) for x in g if "DataTransfer-Out-Bytes" in x["u"])
 g=[x for x in g if float(x["c"])>0.004]
-if not g: print("  nothing billed yet this month"); sys.exit()
 g.sort(key=lambda x:-float(x["c"]))
+if not g and not out_gb: print("  nothing billed yet this month"); sys.exit()
 print("  %-32s%9s %8s %7s" % ("USAGE TYPE","QTY","USD","INR"))
 tot=0.0; hrs=0.0; spot=False
 for x in g:
@@ -286,6 +291,19 @@ if hrs:
     print("  %.1f instance-hours this month (%s)" % (hrs,kind))
     if not spot:
         print("  the same hours on spot would be about $%.2f (INR %.0f)" % (hrs*0.23, hrs*0.23*88))
+
+# Streaming is data transfer out. Free to 100 GB/month, then $0.1093/GB - which
+# at a 20 Mbps stream (~9 GB/hour) is ~$0.98/hour, rivalling the instance.
+FREE=100.0
+left=max(0.0, FREE-out_gb)
+print("")
+print("  egress (streaming) %.1f GB of %.0f GB free - %.0f GB left" % (out_gb, FREE, left))
+if left > 0:
+    print("    ~%.1f more hours of streaming at 20 Mbps before it costs anything" % (left/9.0))
+    print("    after that: $0.1093/GB, about $0.98 (INR 86) per streaming hour")
+else:
+    print("    FREE ALLOWANCE USED - streaming now costs ~$0.98 (INR 86) per hour at 20 Mbps")
+    print("    lowering the Moonlight bitrate cuts this proportionally")
 ' || echo "  (Cost Explorer unavailable)"
 
   if [[ -z $budget || $budget == None ]]; then
