@@ -14,49 +14,62 @@ set -uo pipefail
 LABEL=games
 MP=/games
 
+# The root volume is EBS too, so "find an EBS disk" is not enough - it has to be
+# "find an EBS disk that is not the root and holds nothing". Getting this wrong
+# once meant trying to mount the root disk at /games; it only failed safely
+# because the root has a filesystem. Device selection is upstream of the format
+# guard, so a bug here bypasses the guard entirely.
 root_disk() {
-  local src; src=$(findmnt -no SOURCE / 2>/dev/null)
-  src=${src%p[0-9]}; src=${src%[0-9]}
+  local src pk
+  src=$(findmnt -no SOURCE / 2>/dev/null) || return 1
+  # PKNAME is the parent disk of a partition - far safer than stripping digits,
+  # which turned /dev/nvme0n1p1 into /dev/nvme0n and matched nothing.
+  pk=$(lsblk -no PKNAME "$src" 2>/dev/null | head -1 | tr -d ' ')
+  [[ -n $pk ]] && { echo "/dev/$pk"; return 0; }
   echo "$src"
 }
 
-# Wait for the volume: provision.sh attaches it after the instance launches, so
-# on a first boot cloud-init can easily get here before the device exists.
-DEV=""
-for _ in $(seq 1 40); do          # up to ~2 min
-  DEV=$(blkid -L "$LABEL" 2>/dev/null) && [[ -n $DEV ]] && break
-  DEV=""
-  for d in /dev/nvme*n1; do
-    [[ -b $d ]] || continue
-    [[ $d == "$(root_disk)" ]] && continue
-    m=$(cat "/sys/block/$(basename "$d")/device/model" 2>/dev/null || echo "")
-    [[ $m == *"Elastic Block Store"* ]] || continue
-    DEV=$d; break
-  done
-  [[ -n $DEV ]] && break
-  sleep 3
-done
-[[ -n ${DEV:-} ]] || { echo "no game volume found"; exit 0; }
-
-# THE dangerous decision. Only format a device carrying no filesystem AND no
-# partitions: a false positive here erases the entire game library, and there is
-# no undo. A device already labelled 'games' never reaches this path. Kept as a
-# function so the logic can be tested against stubs rather than trusted.
 safe_to_format() {
   local dev=$1
-  blkid "$dev" >/dev/null 2>&1 && return 1        # has a filesystem already
-  lsblk -no NAME "$dev" 2>/dev/null | tail -n +2 | grep -q . && return 1   # has partitions
+  blkid "$dev" >/dev/null 2>&1 && return 1                                  # has a filesystem
+  lsblk -no NAME "$dev" 2>/dev/null | tail -n +2 | grep -q . && return 1    # has partitions
   return 0
 }
 
-if ! blkid "$DEV" >/dev/null 2>&1; then
+# Returns the games device, or nothing. Prefers one already labelled; otherwise
+# the first EBS disk that is neither the root nor carrying any data.
+find_games_dev() {
+  local d m root; root=$(root_disk)
+  d=$(blkid -L "$LABEL" 2>/dev/null) && [[ -n $d ]] && { echo "$d"; return 0; }
+  for d in /dev/nvme*n1 /dev/xvd? /dev/sd?; do
+    [[ -b $d ]] || continue
+    [[ $d == "$root" ]] && continue
+    m=$(cat "/sys/block/$(basename "$d")/device/model" 2>/dev/null || echo "")
+    [[ $m == *"Elastic Block Store"* ]] || continue
+    safe_to_format "$d" || continue
+    echo "$d"; return 0
+  done
+  return 1
+}
+
+# provision.sh attaches the volume after the instance launches, so on a first
+# boot cloud-init can get here before the device exists.
+DEV=""
+for _ in $(seq 1 40); do          # up to ~2 min
+  DEV=$(find_games_dev) && [[ -n $DEV ]] && break
+  DEV=""
+  sleep 3
+done
+[[ -n ${DEV:-} ]] || { echo "no game volume found (root is $(root_disk))"; exit 1; }
+
+if ! blkid -L "$LABEL" >/dev/null 2>&1; then
   if safe_to_format "$DEV"; then
     echo "formatting $DEV as the game library"
-    mkfs.ext4 -F -L "$LABEL" "$DEV" || exit 0
+    mkfs.ext4 -F -L "$LABEL" "$DEV" || exit 1
     DEV=$(blkid -L "$LABEL" 2>/dev/null || echo "$DEV")
   else
     echo "$DEV already carries data - refusing to format"
-    exit 0
+    exit 1
   fi
 fi
 

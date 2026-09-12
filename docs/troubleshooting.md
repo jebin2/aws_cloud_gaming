@@ -578,3 +578,32 @@ minutes of saturated CPU are paid once rather than every session.
 
 The quota ceiling is worth knowing: shader compilation is CPU-bound, `g6.2xlarge` would halve
 it, and a 4 vCPU GPU quota cannot launch one. There is no tuning around that.
+
+### The root volume is EBS too, so "find the EBS disk" picks the wrong one
+
+The game library volume has to be located by inspection, because on Nitro EBS does not appear
+as the `/dev/sdf` it was attached as - it shows up as an NVMe device, alongside the instance
+store and the root volume:
+
+    nvme0n1   50G  Amazon Elastic Block Store        <- root
+    nvme1n1  233G  Amazon EC2 NVMe Instance Storage  <- /scratch
+    nvme2n1  160G  Amazon Elastic Block Store        <- the game volume
+
+The first attempt excluded the root disk by stripping the partition suffix from `findmnt`:
+
+    src=${src%p[0-9]}   # /dev/nvme0n1p1 -> /dev/nvme0n1
+    src=${src%[0-9]}    # -> /dev/nvme0n   WRONG, stripped twice
+
+So the comparison never matched, the loop took the **first** EBS disk it found - the root - and
+tried to mount it at `/games`. Use `lsblk -no PKNAME` to get a partition's parent disk instead
+of stripping digits.
+
+**The lesson worth keeping:** the `mkfs` guard was extracted and unit-tested against four
+cases, and it was never reached. Device *selection* is upstream of it, so a bug there bypasses
+the guard completely - the only reason nothing was destroyed is that the root disk happens to
+have a filesystem. Test the code that chooses the target, not just the code that protects it.
+
+Selection now prefers a device already labelled `games`, and otherwise takes the first EBS disk
+that is neither the root nor carrying any filesystem or partition. Verified on a real box with
+all three device types present, and verified idempotent: 50 MB written, volume unmounted,
+script re-run, checksum unchanged.
