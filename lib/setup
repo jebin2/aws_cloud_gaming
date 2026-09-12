@@ -960,18 +960,28 @@ except Exception:
 # Poll /welcome itself, not /. Sunshine answers on / before /welcome is ready,
 # so checking / raced ahead and a not-yet-200 /welcome was misread as
 # "already configured" - which then skipped account creation and pairing.
-SUN_UP=0; WELCOME=0
+# Three outcomes, and each must END the loop as soon as it is certain:
+#   200          first run, no account yet      -> create one
+#   2xx/3xx/4xx  Sunshine is up and configured  -> nothing to do
+#   000          not listening yet              -> keep waiting
+#
+# This only broke on 200, so a configured box ran the loop to exhaustion: 40
+# iterations of sleep 3 + sleep 5 is over five minutes of waiting on every
+# rerun, for an answer it already had on the first request. Measured 6s now.
+#
+# A non-200 is confirmed a few times rather than trusted at once, because
+# Sunshine serves / and redirects for a moment before /welcome settles - which
+# is what an earlier single check got wrong in the other direction.
+SUN_UP=0; WELCOME=0; configured=0
 for _ in $(seq 1 40); do
   code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "https://$IP:47990/welcome" 2>/dev/null || echo 000)
   case $code in
-    200) SUN_UP=1; WELCOME=1; break ;;          # first run, no account yet
-    000) : ;;                                   # not listening yet
-    *)   SUN_UP=1 ;;                            # answering, but not first run
+    200) SUN_UP=1; WELCOME=1; break ;;
+    000) configured=0 ;;
+    *)   SUN_UP=1; configured=$(( configured + 1 ))
+         (( configured >= 3 )) && break ;;
   esac
-  # Keep polling briefly even after a non-200: Sunshine serves / and redirects
-  # before /welcome settles.
-  (( SUN_UP && ! WELCOME )) && { sleep 3; code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "https://$IP:47990/welcome" 2>/dev/null || echo 000); [[ $code == 200 ]] && { WELCOME=1; break; }; }
-  sleep 5
+  sleep 3
 done
 
 if (( ! SUN_UP )); then
