@@ -266,6 +266,20 @@ the quota cannot cover the instance, logging that it did. Force either one expli
 Savings Plans and Reserved Instances are the wrong tool here: they commit you to a yearly $/hr
 spend whether you use it or not, and only pay off above roughly 15 hours of use *per day*.
 
+### Moonlight client settings
+
+Two settings on the **client**, both easy to miss:
+
+- **Input Settings → Capture system keyboard shortcuts** → on. Without it Alt+Tab and Super are
+  swallowed by your own desktop and never reach the stream.
+- **Basic Settings → Display Mode → Fullscreen** - *not* "Borderless windowed". On Wayland a
+  client can only take the keyboard from the compositor via `keyboard-shortcuts-inhibit`, and
+  KWin only honours that for a true fullscreen surface. Borderless looks identical and silently
+  breaks key capture.
+
+`cg open` runs `moonlight stream <ip> Desktop`, which streams and exits without ever showing the
+GUI - so there is no settings page to reach from it. Run `moonlight` on its own to change these.
+
 ### One thing to turn off in Steam
 
 **Steam → Settings → Downloads → Shader Pre-Caching → turn off "Allow background processing of
