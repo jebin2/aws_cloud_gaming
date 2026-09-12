@@ -475,12 +475,19 @@ JSON
   return 0
 }
 
-watchdog_ensure() {
-  [[ -n ${GAME_WATCHDOG_HOST:-} ]] || return 0
+# Builds the ssh command for the off-site host into WD_RSH. An Oracle box wants
+# its own key, which is what GAME_WATCHDOG_KEY is for; unset means the ssh
+# default. Written out three times before this existed.
+wd_rsh_init() {
   local kf="${GAME_WATCHDOG_KEY:-}" ident=()
   [[ -n $kf ]] && ident=(-i "${kf/#\~/$HOME}")
-  local rsh=(ssh "${ident[@]}" -o ConnectTimeout=8 -o BatchMode=yes
-             -o StrictHostKeyChecking=accept-new "$GAME_WATCHDOG_HOST")
+  WD_RSH=(ssh "${ident[@]}" -o ConnectTimeout=8 -o BatchMode=yes
+          -o StrictHostKeyChecking=accept-new "$GAME_WATCHDOG_HOST")
+}
+
+watchdog_ensure() {
+  [[ -n ${GAME_WATCHDOG_HOST:-} ]] || return 0
+  wd_rsh_init; local rsh=("${WD_RSH[@]}")
   if ! "${rsh[@]}" true 2>/dev/null; then
     log "off-site watchdog: $GAME_WATCHDOG_HOST unreachable - skipping"
     return 0
@@ -510,10 +517,7 @@ watchdog_ensure() {
 # were not readable by root. Exit codes are not evidence. Make it run once and
 # report what it actually decided, which is the only thing worth printing.
 watchdog_prove() {
-  local kf="${GAME_WATCHDOG_KEY:-}" ident=()
-  [[ -n $kf ]] && ident=(-i "${kf/#\~/$HOME}")
-  local rsh=(ssh "${ident[@]}" -o ConnectTimeout=8 -o BatchMode=yes
-             -o StrictHostKeyChecking=accept-new "$GAME_WATCHDOG_HOST")
+  wd_rsh_init; local rsh=("${WD_RSH[@]}")
   local line
   line=$("${rsh[@]}" 'sudo systemctl start remote-watchdog.service 2>/dev/null;
                       sleep 2; sudo tail -1 /var/log/cloud-gaming-watchdog.log' 2>/dev/null)
@@ -816,7 +820,27 @@ cmd_watcher() {
   else
     log "on-host watchdog  (box not reachable)"
   fi
-  # Layers 3 and 4 live in AWS and survive the box being gone.
+  # Layer 4, off site. The comment here used to claim layers 3 AND 4 were
+  # reported below, while only the alarm was - so the one guard that keeps
+  # working when everything else is gone was the one nothing displayed. It had
+  # been running blind on a revoked key with nobody able to see it, because
+  # only `cg init` ever checked.
+  echo
+  if [[ -n ${GAME_WATCHDOG_HOST:-} ]]; then
+    wd_rsh_init
+    local wst wline
+    wst=$("${WD_RSH[@]}" 'systemctl is-active remote-watchdog.timer 2>/dev/null' 2>/dev/null || echo unreachable)
+    log "off-site watchdog ${wst:-unreachable}  on ${GAME_WATCHDOG_HOST#*@}"
+    wline=$("${WD_RSH[@]}" 'sudo tail -1 /var/log/cloud-gaming-watchdog.log 2>/dev/null' 2>/dev/null)
+    [[ -n ${wline:-} ]] && log "  last            ${wline#* }"
+    if [[ ${wline:-} == *"CANNOT QUERY AWS"* ]]; then
+      log "  ^ BLIND - its credentials do not work, so layer 4 is decoration"
+      log "    cg init reissues the key and pushes it; or: cg watchdog install"
+    fi
+  else
+    log "off-site watchdog not configured (set GAME_WATCHDOG_HOST in .env)"
+  fi
+
   echo
   log "idle alarm        $(aws cloudwatch describe-alarms --region "$REGION" \
         --alarm-names "${TS_HOST}-idle-stop" \

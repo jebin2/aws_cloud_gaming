@@ -805,3 +805,34 @@ rather than a signal.
 
 `grep -c` needs no `|| echo 0`. It already reports the count; only its exit status needs
 tolerating, and the comparison should be numeric (`-eq`), not string.
+
+### The guard view claimed to show layer 4 and did not
+
+`cg watcher` carried this comment:
+
+    # Layers 3 and 4 live in AWS and survive the box being gone.
+
+and then printed the CloudWatch alarm and the budget. Layer 4 - the off-site watchdog, the only
+guard that keeps working when the box and the account resources are gone - was never printed at
+all. The comment asserted the coverage; the code did not provide it.
+
+That mattered because **only `cg init` ever checked it.** When its access key was revoked, the
+watchdog correctly logged `CANNOT QUERY AWS - this watchdog is blind`, kept its timer active,
+and no command surfaced that. `cg watcher` now reports the timer state, the last decision, and
+an explicit BLIND warning with the fix.
+
+Worth separating from a non-bug found in the same log:
+
+    19:24:10  CANNOT QUERY AWS ... AuthFailure
+    19:26:40  no running instance tagged gamevps - nothing to do
+
+That reads like intermittent blindness being misreported as health, and it was initially
+diagnosed as exactly that. It is not. Both lines fell within minutes of the key's deletion, and
+IAM is eventually consistent - the later call genuinely succeeded with a key AWS had not
+finished revoking, and genuinely found no instances. Re-running it afterwards gives `AuthFailure`
+every time, `rc=254`. The watchdog reported what it observed on each run.
+
+The lesson is about the diagnosis rather than the code: a guard printing reassurance next to a
+failure is such a familiar shape in this project that it was assumed rather than checked. One
+command (`run it again now`) separated propagation from a logic error, and it was available
+before any of the reasoning about why the branch might flip.
