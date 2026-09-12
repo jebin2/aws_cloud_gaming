@@ -913,7 +913,17 @@ pair_moonlight() {
   sleep 2
 
   # Moonlight must be waiting before Sunshine has a request to approve.
-  ( moonlight pair --pin "$pin" "$ip" >/dev/null 2>&1 ) &
+  #
+  # QT_QPA_PLATFORM=offscreen because `moonlight pair` is the full Qt app and
+  # otherwise flashes a window up that this function then has to kill. Offscreen
+  # needs no display at all, so no window can appear. Verified that the binary
+  # runs offscreen (`moonlight list` works with DISPLAY and WAYLAND_DISPLAY
+  # unset); NOT verified through a real handshake, because this only happens on
+  # a host that is not yet paired. Hence the fallback below: if no pairing
+  # request reaches Sunshine, try again the normal way rather than leaving you
+  # to pair by hand over a cosmetic improvement.
+  local ml_env=(env QT_QPA_PLATFORM=offscreen) attempt=1
+  ( "${ml_env[@]}" moonlight pair --pin "$pin" "$ip" >/dev/null 2>&1 ) &
   local mlpid=$!
 
   while (( tries < 20 )); do
@@ -927,6 +937,26 @@ except Exception:
     [[ -n $pid ]] && break
     sleep 2; tries=$(( tries + 1 ))
   done
+  # Fall back to the windowed invocation before giving up: offscreen is a
+  # convenience, pairing is not.
+  if [[ -z ${pid:-} ]] && (( attempt == 1 )); then
+    kill "$mlpid" 2>/dev/null; wait "$mlpid" 2>/dev/null || true
+    log "no pairing request seen offscreen - retrying with a window"
+    attempt=2; tries=0
+    ( moonlight pair --pin "$pin" "$ip" >/dev/null 2>&1 ) &
+    mlpid=$!
+    while (( tries < 20 )); do
+      pid=$(curl -sk -u "$su:$sp" --max-time 10 "https://$ip:47990/api/pin" 2>/dev/null \
+        | python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin)
+    print(d[0]["uniqueid"] if isinstance(d,list) and d else "")
+except Exception:
+    print("")' 2>/dev/null)
+      [[ -n $pid ]] && break
+      sleep 2; tries=$(( tries + 1 ))
+    done
+  fi
   [[ -n $pid ]] || { kill "$mlpid" 2>/dev/null; log "moonlight never registered a pairing request"; return 1; }
 
   if curl -sk -u "$su:$sp" --max-time 20 -X POST -H 'Content-Type: application/json' \
