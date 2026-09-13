@@ -85,6 +85,15 @@ ORIGINS="https://${TS_SELF},https://${TS_SELF}:47990"
 [[ -n $TS_IP   ]] && ORIGINS="$ORIGINS,https://${TS_IP},https://${TS_IP}:47990"
 ORIGINS="$ORIGINS,https://localhost:47990"
 cat > "/home/$USER_NAME/.config/sunshine/sunshine.conf" <<EOF
+# A STABLE name, not the EC2 hostname.
+#
+# Sunshine advertises its hostname by default, and every rebuild gets a new
+# private IP and therefore a new one - ip-172-31-34-96, ip-172-31-40-69, and so
+# on. Moonlight keys its saved PCs by that name, so a day of rebuilds left
+# thirty dead entries in the client and the live box buried among them. Pairing
+# is per Sunshine instance and still has to be redone each build, but with one
+# name there is one entry to re-pair instead of a new one to find.
+sunshine_name = $TS_HOST
 # Tailscale's MTU is 1280; Sunshine's default 1392 fragments and reads as stutter.
 packet_size = 1024
 # No resolution prep command, deliberately. Once xrandr changes the mode at

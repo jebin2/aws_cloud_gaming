@@ -26,6 +26,10 @@ ec2() { aws ec2 "$@" --region "$REGION"; }
 
 # The bucket and the instance role the box needs, created before the launch that
 # references the profile. Idempotent, so this is also the repair path.
+# Before anything joins the tailnet, clear entries left by boxes that
+# terminated themselves. Otherwise this build takes a suffixed name.
+bash lib/tailnet-prune.sh || true
+
 echo "==> ensuring the S3 game library and the box's instance role"
 S3_BUCKET=$(GAME_REGION="$REGION" GAME_TS_HOST="$TS_HOST" bash lib/library-aws.sh) \
   || { echo "could not set up the game library bucket/role"; exit 1; }

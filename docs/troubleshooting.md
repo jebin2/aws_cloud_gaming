@@ -1351,3 +1351,37 @@ not necessarily the guard that caused it.** The metric history settled it in one
 And before that, the archive's 72 GB looked like the whole story. It was not: `NetworkOut` showed
 104 GB leaving the box. The gap is multipart uploads that never completed - invisible in a bucket
 listing, which is why the lifecycle rule that aborts them exists.
+
+### Thirty dead entries in Moonlight, and a box called gamevps-1
+
+    Qt Critical: Computer ip-172-31-34-96 has not been paired.
+    Qt Info: "ip-172-31-33-167" is now offline
+    Qt Info: "ip-172-31-34-3" is now offline
+    ... thirty more
+
+Two separate leaks, both from the same root: **a box's identity is derived from
+something that changes on every rebuild, and nothing cleans up the old one.**
+
+**Sunshine advertised its hostname.** Every instance gets a new private IP and therefore a new
+one - `ip-172-31-34-96`, `ip-172-31-40-69` - and Moonlight keys saved PCs by that name. A day of
+rebuilding left thirty dead entries with the live box buried among them. `sunshine_name` is now
+pinned to the tailnet host name, so there is one entry that gets re-paired rather than a new one
+to hunt for each time. Pairing itself is still per Sunshine instance and still has to be redone.
+
+**Tailnet nodes were only pruned by `cg destroy`.** Which was fine when destroy was how a
+session ended - but the box now terminates *itself* when it goes idle, and nothing on the box can
+delete its own tailnet entry: that needs an API token, which deliberately never leaves the
+laptop. So every auto-terminated box leaked a node, the next build found `gamevps` taken, and the
+names crept to `gamevps-1`, `-2`, `-3`.
+
+Not cosmetic. A stale entry still answers DNS, so `ssh gamevps` hangs until it times out against
+a machine that no longer exists - which is exactly what happened while diagnosing this, and cost
+a wrong turn. `lib/tailnet-prune.sh` now runs before each launch and deletes **offline** nodes
+matching `<host>` or `<host>-N`. Only offline ones: an online node is a box that exists.
+
+**Also worth recording: a check that was wrong about a thing that was right.** Sunshine reported
+`paired clients: 0` after a successful pair, and that looked like another
+success-reported-while-broken bug. It was not - Sunshine stores them under `named_devices`, and
+the ad-hoc check looked for `devices`. `moonlight list <ip>` returning the app list is the
+authoritative answer, because it is the client actually using the pairing. **Prefer the check
+that exercises the thing over the one that inspects its storage.**

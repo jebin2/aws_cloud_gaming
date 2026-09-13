@@ -324,6 +324,33 @@ print(json.dumps({"apps":[a for a in d.get("apps",[]) if str(a.get("appid"))!=ap
   log "forgot $name ($id) - ${gb} GB stops billing"
 }
 
+# Re-run the Moonlight/Sunshine handshake without rebuilding the box.
+#
+# Pairing is per Sunshine instance, so every rebuild needs a fresh one, and
+# `cg init` does it. When that step fails - it has - the box streams nothing and
+# the only recourse used to be another twenty-minute build. Sunshine reporting
+# "paired clients: 0" is the symptom; this is the four-second fix.
+cmd_pair() {
+  need_node
+  local ip; ip=$(tailscale ip -4 "$TS_NODE")
+  [[ -n ${SUNSHINE_USER:-} && -n ${SUNSHINE_PASS:-} ]] \
+    || die "no Sunshine credentials in .env - they are written by cg init"
+  command -v moonlight >/dev/null || die "moonlight is not installed"
+
+  if timeout 30 moonlight list "$ip" 2>/dev/null | grep -q .; then
+    log "already paired with $TS_NODE ($ip)"
+    return 0
+  fi
+  say "pairing with $TS_NODE ($ip)"
+  # shellcheck source=lib/pair.sh
+  source lib/pair.sh
+  if pair_moonlight "$ip" "$SUNSHINE_USER" "$SUNSHINE_PASS"; then
+    log "paired - cg open should stream now"
+  else
+    die "pairing failed. The web UI is https://$ip:47990 (credentials in .env)"
+  fi
+}
+
 cmd_library() {
   case "${1:-status}" in
     status|"")
@@ -1066,6 +1093,7 @@ cg - cloud gaming rig
 build (changes things)
   cg init                    build everything; reuses an existing box   [costs money]
   cg open                    start, stream, stop on exit                [costs money]
+  cg pair                    redo the Moonlight handshake (no rebuild needed)
   cg stop                    mirror the games to S3, then stop - ends hourly billing
   cg status                  instance, disks, guards, tailnet, ping
   cg library                 what is on the box vs in S3, and what it costs
@@ -1112,6 +1140,7 @@ case "$CMD" in
   stop|down) cmd_stop "$@" ;;
   snapshot)  cmd_snapshot "$@" ;;
   games)     cmd_games "$@" ;;
+  pair)      cmd_pair ;;
   library|lib) cmd_library "$@" ;;
   watchdog)  cmd_watchdog "$@" ;;
   log|logs)  cmd_log "$@" ;;
