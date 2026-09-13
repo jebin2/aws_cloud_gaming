@@ -263,4 +263,23 @@ reset; rm -f "$T/state/restored" "$T/scratch/steam/.cg-symlinks.tsv"
 REMOTE_OBJECTS=10 REMOTE_BYTES=41000000 out=$(run pull)
 contains "warns the prefix may not start" "$out" "may not start"
 
+echo "22. status names an in-progress download instead of hiding it"
+# The mirror excludes steamapps/downloading, so a 29 GB disk can report a
+# 3.3 GB library. That gap needs explaining where it is seen.
+reset; echo "boot-aaaa" > "$T/state/restored"; fill 5
+mkdir -p "$T/scratch/steam/steamapps/downloading"
+dd if=/dev/zero of="$T/scratch/steam/steamapps/downloading/chunk" bs=1M count=200 status=none
+REMOTE_OBJECTS=10 REMOTE_BYTES=5000000 out=$(run status)
+contains "names the download" "$out" "downloading - excluded"
+# And it must not be counted as part of the library, or the size guard would
+# read a half-downloaded game as a healthy one.
+contains "local size excludes it" "$out" "local     5.0MB"
+
+echo "23. a trivial downloading dir is not worth mentioning"
+rm -f "$T/scratch/steam/steamapps/downloading/chunk"
+reset; echo "boot-aaaa" > "$T/state/restored"
+REMOTE_OBJECTS=10 REMOTE_BYTES=5000000 out=$(run status)
+lacks_dl=$(grep -c 'downloading - excluded' <<<"$out" || true)
+check "stays quiet" "${lacks_dl:-0}" "0"
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

@@ -224,6 +224,13 @@ cmd_status() {
   local lb rb ro; lb=$(local_bytes); read -r rb ro < <(remote_du)
   echo "  bucket    s3://$BUCKET/$PREFIX"
   echo "  local     $(hb "$lb")  at $LIB"
+  # Steam's partial downloads are excluded from the mirror, which makes the
+  # library look far smaller than the disk. 3.3 GB reported beside 29 GB used
+  # is a mystery worth pre-empting rather than a number worth hiding.
+  local dl; dl=$(du -sb "$LIB/steamapps/downloading" 2>/dev/null | cut -f1)
+  if [[ ${dl:-0} -gt 104857600 ]]; then
+    echo "  +$(hb "$dl") downloading - excluded until Steam finishes and moves it"
+  fi
   echo "  archive   $(hb "$rb")  in ${ro:-0} objects"
   echo "  restored  $(restored && echo "yes (this boot)" || echo "NO - push will refuse")"
   echo "  last push $(cat "$STATE/last-push" 2>/dev/null || echo never)"

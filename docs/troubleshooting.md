@@ -1121,3 +1121,41 @@ design that had been built around it stayed. The persistent request, the stop-on
 behaviour, the guards' inability to clean up, and the stranded volumes were all downstream of
 one assumption that had quietly stopped being true. It is worth asking, after any change of that
 size, which earlier decisions existed only to satisfy what just changed.
+
+### Three numbers that were locally true and globally wrong
+
+    budget          $57 limit, $0.00 spent so far
+    free egress     ~99 GB left of 100 GB/month
+    month to date:  compute  2.0 hrs
+
+All three were wrong, none was a calculation error, and each was accurate about something
+narrower than its label claimed.
+
+**`$0.00 spent`** is what the AWS Budgets API returns. `CalculatedSpend` is populated up to 24
+hours *after a budget is created*, and `cg init` recreates this budget on every build - so it
+reads zero essentially always. Printed bare, next to a real month of $12.17, it said "nothing
+has been spent" from the one component whose entire job is noticing spend. It now says AWS has
+not calculated it yet and points at `cg cost`.
+
+**`~99 GB left`** came from the box's NIC counters *since that box booted*, subtracted from the
+100 GB monthly allowance. Every session is a new box, so the figure resets each time. Cost
+Explorer said 91 GB left. The line is gone; the traffic block already says "this boot only" and
+now refers the month to `cg cost`.
+
+**`compute 2.0 hrs`** counts CloudWatch CPUUtilization datapoints for **one instance id** - the
+current one - under a heading that read "month to date". The comment above it even claimed "a
+terminated instance keeps its metrics, so this still reports the month", which is true of the
+metrics and false of the query: it only ever asks about one instance. The real month was 15
+hours across six instances. Each line is now labelled with its own scope, and the heading says
+what the section is: *not yet billed (Cost Explorer lags about a day)*.
+
+The shared mistake is scope. A number is computed from what happens to be at hand - this boot,
+this instance, this API's view - and then presented under a heading describing something larger.
+Nothing looks wrong in the code, because each calculation is correct; the error is entirely in
+the label. It is the same failure as a step verifying that it ran rather than that it worked,
+moved into arithmetic: **the value answers a question nobody asked.**
+
+Worth noting that none of these were found by tests. They were found by a user reading two
+outputs side by side and asking why they disagreed. A number that is never compared against an
+independent source can be wrong indefinitely - which is an argument for printing the source
+(`cg cost` reads Cost Explorer, `cg status` reads the box) rather than a single blended figure.

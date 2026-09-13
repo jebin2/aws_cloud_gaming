@@ -197,7 +197,17 @@ status() {
   if [[ -n $budget && $budget != None ]]; then
     limit=$(aws budgets describe-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" \
       --query 'Budget.CalculatedSpend.ActualSpend.Amount' --output text 2>/dev/null || echo 0)
-    printf '  budget          $%.0f limit, $%.2f spent so far\n' "$budget" "${limit:-0}"
+    # AWS Budgets populates CalculatedSpend up to 24h AFTER a budget is created,
+    # and `cg init` recreates this budget on every build - so it reads $0.00
+    # almost always. Printed bare, that says "nothing has been spent" beside a
+    # real month of $12.17, which is the opposite of what a cost guard should
+    # communicate.
+    if awk -v x="${limit:-0}" 'BEGIN{exit !(x+0==0)}'; then
+      printf '  budget          $%.0f limit, AWS reports $0.00 spent - not calculated yet\n' "$budget"
+      printf '                  (Budgets lags up to 24h after creation; real spend: cg cost)\n'
+    else
+      printf '  budget          $%.0f limit, $%.2f spent so far\n' "$budget" "$limit"
+    fi
   else
     printf '  budget          missing\n'
   fi
@@ -314,11 +324,17 @@ cost() {
       --period 3600 --statistics Average --query 'length(Datapoints)' --output text 2>/dev/null || echo 0)
   fi
 
-  echo "month to date ($(date -u +%B)):"
+  # Labelled by SCOPE, because these lines do not share one. `hours` counts
+  # CloudWatch datapoints for ONE instance id - the current one - so on a rig
+  # where every session is a new instance it never included the month. It was
+  # printed under "month to date" anyway, reading 2.0 hrs beside a real month
+  # of 15. Storage genuinely is month-so-far. The month's compute is in the
+  # "billed so far" section below, from Cost Explorer.
+  echo "not yet billed (Cost Explorer lags about a day):"
   awk -v h="${hours:-0}" -v r="$rate" -v g="${disk_gb:-0}" -v sg="${snap_gb:-0}" -v day="$(date -u +%d)" 'BEGIN{
     c=h*r; s=g*0.0912*(day/30.0); n=sg*0.0125*(day/30.0);
-    printf "  compute   %6.1f hrs  $%6.2f  (INR %5.0f)\n", h, c, c*88;
-    printf "  storage   %6d GB   $%6.2f  (INR %5.0f)  accrues while stopped\n", g, s, s*88;
+    printf "  compute   %6.1f hrs  $%6.2f  (INR %5.0f)  THIS instance only\n", h, c, c*88;
+    printf "  storage   %6d GB   $%6.2f  (INR %5.0f)  month so far, accrues while stopped\n", g, s, s*88;
     if (sg>0) printf "  snapshots %6d GB   $%6.2f  (INR %5.0f)\n", sg, n, n*88;
     printf "  ---------------------------------------\n";
     printf "  estimate              $%6.2f  (INR %5.0f)\n", c+s+n, (c+s+n)*88;

@@ -104,8 +104,11 @@ stream_usage() {
     printf "\n";
     printf "  total out       %.2f GB   <- what AWS bills (adds wireguard overhead, ssh, apt)\n", wan/1073741824;
     printf "  total in        %.2f GB   (free - game downloads land here)\n", win/1073741824;
-    left=100-wan/1073741824;
-    printf "  free egress     ~%.0f GB left of 100 GB/month\n", (left>0?left:0);
+    # NOT a monthly figure. These are NIC counters read since THIS box booted,
+    # and every session is a new box - so subtracting them from the 100 GB
+    # monthly allowance reported 99 GB left while Cost Explorer showed 91.
+    # The month lives in cg cost, which reads it from Cost Explorer.
+    printf "  (this boot only - monthly egress and what is left: cg cost)\n";
   }'
 }
 
