@@ -488,7 +488,11 @@ destroy_all() {
   echo "  security group  ${sg:-none}"
   echo "  key pair        ${key:-none}  (and ~/.ssh/${TS_HOST}.pem)"
   echo "  alarms          ${TS_HOST}-idle-stop"
-  echo "  budget          ${TS_HOST}-monthly"
+  if [[ ${CG_DESTROY_ALL:-0} == 1 ]]; then
+    echo "  budget          ${TS_HOST}-monthly"
+  else
+    echo "  budget          KEPT - guards the account, not the box (cg destroy --all removes it)"
+  fi
   echo
   # `cg destroy --all` is deleting the archive itself, so the reassurance below
   # is false on that path - and it was printed there anyway, directly above the
@@ -550,10 +554,29 @@ exception - nothing here touches it."
              --query 'Volumes[].[VolumeId,Tags[?Key==`Name`]|[0].Value]' --output text)
 
   say "removing alarms and notifications"
+  # The idle-stop alarm names one instance, so it goes with it.
   aws cloudwatch delete-alarms --region "$REGION" --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null || true
   local acct
   acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
-  aws budgets delete-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" 2>/dev/null || true
+  # The BUDGET stays. It guards the account, not the instance - and deleting it
+  # here made it useless: AWS Budgets populates CalculatedSpend up to 24h after
+  # a budget is created, `cg init` recreates it on every build, and a rig that
+  # is destroyed and rebuilt several times a day therefore reset it before it
+  # ever populated. It read $0.00 against a real month of $12.17 and could
+  # never have fired an alert.
+  #
+  # It also costs nothing to keep (AWS bills nothing for the first two budgets)
+  # and it is the guard most worth having ALIVE while no instance exists -
+  # which is exactly when this used to remove it.
+  #
+  # `cg destroy --all` still deletes it; that is the command for leaving nothing
+  # behind.
+  if [[ ${CG_DESTROY_ALL:-0} == 1 ]]; then
+    aws budgets delete-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" 2>/dev/null || true
+  else
+    log "keeping the budget ${TS_HOST}-monthly - it guards the account, not the box"
+    log "  (deleting it on every destroy is why it always reported \$0.00 spent)"
+  fi
   # Older versions used an SNS topic and a second alarm; clean those up too.
   aws cloudwatch delete-alarms --region us-east-1 --alarm-names "${TS_HOST}-monthly-spend" 2>/dev/null || true
   local topic

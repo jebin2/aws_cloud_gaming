@@ -141,7 +141,7 @@ reimplementing them.
 | `cg snapshot --list` | What images exist and what they cost |
 | `cg snapshot --delete <id>` | Delete an image **and its backing snapshots** |
 | `cg clean` | Free space: apt caches, logs, `/scratch/tmp`. Games are not touched |
-| `cg destroy` | Mirror the games to S3, then delete the box. **Refuses if the mirror fails** |
+| `cg destroy` | Mirror the games to S3, then delete the box. **Refuses if the mirror fails**. Keeps the budget |
 | `cg destroy --force` | Destroy even if the mirror failed - **loses the games** |
 | `cg destroy --all` | The box, the archive, **the bucket and the IAM role**. Asks you to type `DESTROY-ALL` |
 | `cg check` | Every preflight check, creates nothing |

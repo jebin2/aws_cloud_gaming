@@ -1159,3 +1159,35 @@ Worth noting that none of these were found by tests. They were found by a user r
 outputs side by side and asking why they disagreed. A number that is never compared against an
 independent source can be wrong indefinitely - which is an argument for printing the source
 (`cg cost` reads Cost Explorer, `cg status` reads the box) rather than a single blended figure.
+
+### The budget guard had never been able to fire
+
+    budget          $57 limit, $0.00 spent so far
+
+against a real month of $12.17. The first fix was to say AWS had not calculated it yet. That was
+true and still missed the point:
+
+    cg destroy  ->  aws budgets delete-budget
+    cg init     ->  aws budgets create-budget
+
+AWS Budgets populates `CalculatedSpend` up to **24 hours after a budget is created**. This rig is
+destroyed and rebuilt several times a day, so the budget was deleted and recreated before it
+could ever populate. It was not lagging - it was being reset. **The alert had never once been in
+a position to fire**, across the whole life of the project.
+
+A budget is not an instance resource. It guards the account, it costs nothing to keep (AWS bills
+nothing for the first two), and the moment it matters most is precisely the one `destroy` used to
+remove it in: no instance running, nobody watching. It now survives `cg destroy` and dies only
+with `cg destroy --all`.
+
+Two things about how this was found. It came from a user asking "budget is for per month cycle
+right?" - a question about semantics, not a bug report. And the earlier fix, which explained the
+lag, would have made the symptom *more* palatable while leaving the guard dead. **An explanation
+that makes a broken thing look reasonable is worse than the bare wrong number**, because the
+number invites the next question and the explanation closes it.
+
+`tests/destroy-budget.sh` exercises the real `lib/setup destroy` rather than a stub, so it checks
+the actual API calls. Writing it surfaced a stub bug worth repeating: returning `None` from
+`describe-instances` made destroy treat "None" as an instance id and wait for it to terminate, so
+the run never reached the code under test and three assertions failed for an unrelated reason. A
+stub must return what the real thing returns for *absence* - here, nothing at all.
