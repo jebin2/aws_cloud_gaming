@@ -125,13 +125,26 @@ else
       grep -vE '^[[:space:]]*#([^!]|$)' "$f" > "$f.stripped" && mv "$f.stripped" "$f"
     done
     chmod 755 "$HOST_SRC"/*.sh "$HOST_SRC"/cg-library 2>/dev/null || true
-    HOST_TGZ_B64=$(tar -cz -C "$HOST_SRC" . 2>/dev/null | base64 -w0)
-    rm -rf "$HOST_SRC"
+    # host/ goes to S3 and the box fetches it, rather than riding along inside
+    # user-data as base64. It used to: 9,572 bytes of a 16,384 byte budget -
+    # 58% - and base64 of a gzip does not compress, so every byte cost a full
+    # byte while the modules around it cost about 40% of one. That left 68
+    # bytes of headroom, which is not a budget, it is a tripwire.
+    #
+    # A presigned GET, valid two hours, so the box needs no credentials at the
+    # point in the build where it has none. The URL is ~600 bytes.
+    HOST_TGZ=$(mktemp); tar -cz -C "$HOST_SRC" . > "$HOST_TGZ" 2>/dev/null
+    aws s3 cp "$HOST_TGZ" "s3://$S3_BUCKET/boot/host.tgz" --region "$REGION" >/dev/null \
+      || { echo "could not upload host/ to s3://$S3_BUCKET/boot/host.tgz"; exit 1; }
+    HOST_TGZ_URL=$(aws s3 presign "s3://$S3_BUCKET/boot/host.tgz" --region "$REGION" --expires-in 7200)
+    [[ $HOST_TGZ_URL == https://* ]] || { echo "could not presign the host bundle"; exit 1; }
+    rm -rf "$HOST_SRC" "$HOST_TGZ"
     cat "${parts[@]}" \
       | grep -vE '^[[:space:]]*#([^!]|$)' \
       | sed -e "s|__TS_AUTHKEY__|$TS_AUTHKEY|" -e "s|__TS_HOST__|$TS_HOST|" \
-            -e "s|__HOST_TGZ_B64__|$HOST_TGZ_B64|" \
-            -e "s|__S3_BUCKET__|$S3_BUCKET|" > "$USERDATA"
+            -e "s|__HOST_TGZ_URL__|$HOST_TGZ_URL|" \
+            -e "s|__S3_BUCKET__|$S3_BUCKET|" \
+            -e "s|__CG_APPS__|${GAME_APPS:-all}|" > "$USERDATA"
     echo "    assembled ${#parts[@]} modules"
     # EC2 caps user-data at 16 KB, which bootstrap.sh outgrew. cloud-init
     # detects the gzip magic bytes and decompresses on its own, so shipping it

@@ -3,8 +3,9 @@
 # Installs the S3 game-library mirror: the script, its four units, and s5cmd.
 set -euo pipefail
 
-BUCKET="${1:?usage: install-library.sh <s3-bucket> [prefix]}"
+BUCKET="${1:?usage: install-library.sh <s3-bucket> [prefix] [apps-csv]}"
 PREFIX="${2:-steam}"
+CG_APPS="${3:-${CG_APPS:-all}}"
 S5_VERSION="${S5_VERSION:-2.2.2}"
 
 # The AWS CLI can do this, but at roughly 80 MB/s single-threaded; s5cmd
@@ -32,10 +33,15 @@ fi
 install -m 755 cg-library /usr/local/bin/cg-library
 
 # One config file rather than five copies of the bucket name in unit files.
+# CG_APPS is decided on the LAPTOP, before launch. The restore runs here at boot
+# with no terminal to ask at, and it has to start early to overlap the build, so
+# the choice cannot be made on the box. "all" is the default; "none" boots a
+# clean box for other work.
 cat > /etc/cg-library.conf <<EOF
 CG_S3_BUCKET=$BUCKET
 CG_S3_PREFIX=$PREFIX
 CG_LIB_DIR=${CG_LIB_DIR:-/scratch/steam}
+CG_APPS=${CG_APPS:-all}
 EOF
 chmod 644 /etc/cg-library.conf
 

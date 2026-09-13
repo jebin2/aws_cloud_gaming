@@ -1222,3 +1222,39 @@ key is deleted, an unrelated file beside it survives, and `$HOME` is not the rea
 The narrower lesson is about which tests deserve suspicion. Nine of the ten test files drive
 pure logic through stubs and can do no damage. This one executes a script whose entire purpose
 is deletion. That difference should have been obvious while writing it.
+
+### Two games, one disk: what the redesign found
+
+Buying a second 160 GB game made the archive need to be bigger than the disk, which the
+whole-tree sync could not do - it mirrored the disk with `--delete`, so installing one game
+deleted the other from S3. Moving to per-game prefixes turned up four things worth recording.
+
+**A prompt that could never have worked.** The chooser asked its question through
+
+    python3 - "$idx" "$avail" <<'PY'
+
+which makes python read its *program* from stdin - so `input()` saw the end of the program text
+and raised `EOFError` on the first keystroke. It printed the table and gave up. It was written to
+`/dev/tty`, which reads naturally and cannot be tested, so nothing caught it. The prompt is now a
+file, `lib/choose-games.py`, with prompts on stderr and only the answer on stdout: testable
+through a pty, and stdin left alone for the human.
+
+**An infinite loop behind that.** With the default selection larger than the disk, an EOF meant
+re-ask, re-refuse, re-ask. It now exits and lets the caller decide, and `cg init` falls back to
+whatever `.env` already said rather than to `all` - "all" is only safe while the archive is
+smaller than the disk, which is precisely what stopped being true.
+
+**68 bytes of user-data left.** The host bundle rode along as base64 inside user-data: 9,572
+bytes of a 16,384 budget, 58%, and base64 of a gzip does not compress, so every byte cost a full
+byte while the modules around it cost about 40% of one. It is uploaded to S3 now and fetched with
+a presigned URL valid two hours - the box has no credentials at that point in the build, so
+presigning is what makes it possible. **8,012 bytes free** instead of 68.
+
+**A guard quietly dropped in the rewrite.** The whole-tree push refused when the local library was
+under half the archive. Per-app prefixes make the catastrophic version of that impossible, so the
+check looked redundant and went - but a *single* game can still be half-present locally and
+overwrite its own complete copy. It is back, scoped to one game, and pointing at
+`cg library forget` for the case where the removal was deliberate.
+
+The pattern in the last one is worth naming. Removing a guard because the architecture changed is
+usually right; the mistake is assuming the guard only ever covered the case you just eliminated.

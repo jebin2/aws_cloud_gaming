@@ -220,6 +220,91 @@ cmd_stop() {
   exec lib/game stop
 }
 
+# Ask which games to restore, before anything launches. The answer is exported
+# for provision.sh to bake into user-data, and remembered in .env so the common
+# case next time is pressing Enter.
+choose_games() {
+  local sel
+  # On failure keep whatever .env already said rather than reaching for "all":
+  # "all" is only safe while the archive is smaller than the disk, and the whole
+  # reason this prompt exists is that it no longer is.
+  sel=$(GAME_S3_BUCKET="${GAME_S3_BUCKET:-}" bash lib/choose-games.sh) \
+    || sel="${GAME_APPS:-all}"
+  export GAME_APPS="${sel:-${GAME_APPS:-all}}"
+  local tmp; tmp=$(mktemp)
+  grep -vE '^GAME_APPS=' .env > "$tmp" 2>/dev/null || true
+  echo "GAME_APPS=$GAME_APPS" >> "$tmp"
+  cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
+}
+
+# list and forget are pure S3, so they work with no box running - which is when
+# you most want to know what the archive is costing, and the only time it is
+# safe to assume nothing is writing to it.
+library_index() {
+  [[ -n ${GAME_S3_BUCKET:-} ]] || { echo "no bucket yet - run cg init"; return 1; }
+  aws s3 cp "s3://$GAME_S3_BUCKET/steam/index.json" - 2>/dev/null || echo '{"apps":[]}'
+}
+
+library_list() {
+  library_index | python3 -c '
+import json,sys
+try:    apps=json.load(sys.stdin).get("apps",[])
+except Exception: apps=[]
+if not apps: print("  the archive is empty"); sys.exit()
+GB=1073741824.0
+print("  %-10s %-32s %9s  %s" % ("APPID","GAME","SIZE","ARCHIVED"))
+tot=0
+for a in apps:
+    tot+=a.get("bytes",0)
+    print("  %-10s %-32s %6.1f GB  %s" % (a["appid"], a.get("name","?")[:32],
+          a.get("bytes",0)/GB, a.get("pushed","?")[:16].replace("T"," ")))
+g=tot/GB
+print("  %-10s %-32s %6.1f GB   $%.2f/month (INR %.0f)" % ("","total",g,g*0.025,g*0.025*88))
+print("")
+print("  229 GB fits on the box at once (209 GB selectable after reserve)")
+if g > 209: print("  the archive is larger than the disk - cg init asks which to restore")'
+}
+
+library_forget() {
+  local id="${1:-}"
+  [[ -n $id ]] || die "which game? see: cg library list"
+  [[ -n ${GAME_S3_BUCKET:-} ]] || die "no bucket configured"
+  local row
+  row=$(library_index | python3 -c '
+import json,sys
+appid=sys.argv[1]
+try:    apps=json.load(sys.stdin).get("apps",[])
+except Exception: apps=[]
+for a in apps:
+    if str(a.get("appid"))==appid:
+        print("%s\t%s\t%s" % (a.get("name","?"), a.get("installdir",""), a.get("bytes",0))); break' "$id")
+  [[ -n ${row//[[:space:]]/} ]] || die "appid $id is not in the archive (see: cg library list)"
+  local name dir bytes; IFS=$'\t' read -r name dir bytes <<<"$row"
+  local gb; gb=$(awk -v b="$bytes" 'BEGIN{printf "%.1f", b/1073741824}')
+  echo "This permanently deletes $name ($id, ${gb} GB) from the archive."
+  echo "No undo, no versioning. Playing it again means downloading it from Steam."
+  echo "At Steam speeds that is roughly $(awk -v b="$bytes" 'BEGIN{printf "%.1f", b/12582912/3600}') hours."
+  local a; read -r -p "type FORGET to confirm: " a
+  [[ $a == FORGET ]] || { echo "aborted - nothing was deleted"; return 1; }
+  local pair
+  for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
+    aws s3 rm "s3://$GAME_S3_BUCKET/steam/steamapps/$pair" --recursive >/dev/null 2>&1 || true
+  done
+  aws s3 rm "s3://$GAME_S3_BUCKET/steam/steamapps/appmanifest_$id.acf" >/dev/null 2>&1 || true
+  aws s3 rm "s3://$GAME_S3_BUCKET/steam/meta/symlinks-$id.tsv" >/dev/null 2>&1 || true
+  # Drop it from the index too, or cg init keeps offering a game that is gone.
+  local tmp; tmp=$(mktemp)
+  library_index | python3 -c '
+import json,sys
+appid=sys.argv[1]
+try:    d=json.load(sys.stdin)
+except Exception: d={"apps":[]}
+print(json.dumps({"apps":[a for a in d.get("apps",[]) if str(a.get("appid"))!=appid]},indent=1))' "$id" > "$tmp"
+  aws s3 cp "$tmp" "s3://$GAME_S3_BUCKET/steam/index.json" >/dev/null 2>&1 || log "could not update the index"
+  rm -f "$tmp"
+  log "forgot $name ($id) - ${gb} GB stops billing"
+}
+
 cmd_library() {
   case "${1:-status}" in
     status|"")
@@ -236,11 +321,15 @@ cmd_library() {
     check)
       need_node
       box '/usr/local/bin/cg-library check' ;;
+    list)
+      library_list ;;
+    forget)
+      shift; library_forget "$@" ;;
     --bucket|bucket)
       # Answerable without the box, which matters when it is gone: this is where
       # the games are, and the one thing worth knowing then.
       echo "${GAME_S3_BUCKET:-(not set - run cg init)}" ;;
-    *) die "usage: cg library [status|push [--force|--verify]|pull|check|--bucket]" ;;
+    *) die "usage: cg library [list|status|push|pull [--apps <csv>]|check|forget <appid>|--bucket]" ;;
   esac
 }
 
@@ -953,6 +1042,8 @@ build (changes things)
   cg library push            mirror the games to S3 now (--verify for a full pass)
   cg library pull            restore the games from S3 now
   cg library check           is the disk mirrored? (no upload)
+  cg library list            what is archived, per game, and the monthly cost
+  cg library forget <appid>  delete one game from the archive           [permanent]
   cg games                   the OLD EBS volume, if you still have one
   cg games --delete          delete it and reclaim INR ~1,284/month    [permanent]
   cg snapshot                save an AMI of the current box             [bills monthly]
@@ -978,7 +1069,7 @@ EOF
 }
 
 case "$CMD" in
-  init)      watchdog_ensure; exec lib/setup ;;
+  init)      watchdog_ensure; choose_games; exec lib/setup ;;
   check)     exec lib/setup check ;;
   status)    lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true
              tailscale ip -4 "$TS_NODE" >/dev/null 2>&1 \

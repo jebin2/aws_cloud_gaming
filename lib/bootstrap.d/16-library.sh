@@ -19,7 +19,7 @@
 # The box reads S3 through an EC2 instance ROLE attached by provision.sh, not an
 # access key: there is no secret here to leak or rotate.
 progress "installing the S3 game library mirror"
-( cd /opt/cloud-gaming-host && bash ./install-library.sh '__S3_BUCKET__' steam ) \
+( cd /opt/cloud-gaming-host && bash ./install-library.sh '__S3_BUCKET__' steam '__CG_APPS__' ) \
   || echo ">>> FAILED: library mirror install - games will not persist a stop"
 
 # The restore needs credentials from the instance profile. IMDSv2 needs a token,

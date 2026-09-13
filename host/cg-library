@@ -1,17 +1,35 @@
 #!/usr/bin/env bash
-# The game library, on the box. Lives on the instance store (/scratch) because
-# that is local NVMe - the fastest disk here and free - and is mirrored to S3
-# because the instance store is wiped on every stop.
+# The game library, on the box: local NVMe, mirrored to S3 PER GAME.
 #
-#   pull    S3 -> /scratch/steam   (run at boot, in parallel with the build)
-#   push    /scratch/steam -> S3   (run on a timer, and before any shutdown)
-#   status  what is where, and whether a push is currently safe
+#   pull [--apps <csv|all|none>]   S3 -> /scratch/steam   (at boot, in parallel)
+#   push [--force|--verify]        /scratch/steam -> S3   (at stop and destroy)
+#   list                           what is archived, and how big
+#   forget <appid>                 delete one game from the archive
+#   check                          would a push transfer anything?
+#   status                         local vs archive
 #
-# The whole design rests on one uncomfortable fact: push deletes remote objects
-# that are no longer present locally, and the local copy is on a disk that
-# vanishes on stop. A push that runs against an empty /scratch would therefore
-# destroy the archive. Everything below labelled GUARD exists to make that
-# impossible, and the guards are tested in tests/library.sh.
+# WHY PER GAME. A g6.xlarge holds 229 GB and two modern titles do not fit
+# together, so the archive has to hold more than the disk does. The old whole-
+# tree sync could not: it mirrored the disk with --delete, so installing one
+# game deleted the other from S3. It also made "push an empty disk" a live
+# threat that a size guard had to catch. Syncing each app into its own prefix,
+# and never touching an app that is not installed, removes both - the second one
+# by construction rather than by vigilance.
+#
+# The cost is that the archive no longer shrinks on its own: `forget` exists
+# because otherwise you pay for games you stopped playing.
+#
+# LAYOUT. Unchanged from the whole-tree version, so nothing had to be migrated -
+# it is the same paths, synced in four pieces per app:
+#
+#   steamapps/appmanifest_<id>.acf
+#   steamapps/common/<installdir>/        (installdir comes from the manifest)
+#   steamapps/compatdata/<id>/            (the Proton prefix: saves, registry)
+#   steamapps/shadercache/<id>/
+#
+# plus two things outside any app:
+#   steam/index.json               appid, name, installdir, bytes, pushed
+#   steam/meta/symlinks-<id>.tsv   S3 cannot store a symlink; see restore_symlinks
 set -uo pipefail
 
 [[ -r /etc/cg-library.conf ]] && . /etc/cg-library.conf
@@ -21,58 +39,23 @@ BUCKET="${CG_S3_BUCKET:-}"
 PREFIX="${CG_S3_PREFIX:-steam}"
 STATE="${CG_STATE_DIR:-/var/lib/cg-library}"
 S5="${CG_S5CMD:-/usr/local/bin/s5cmd}"
-# s5cmd holds roughly workers x concurrency x part-size in memory at once. The
-# defaults (256 workers, 5 parts, 50 MB) want tens of GB; even --numworkers 32
-# is ~8 GB, which OOM-killed a real 2.9 GB push on this 16 GB box while Steam
-# was running. 16 x 4 x 16 MB is ~1 GB.
-#
-# The 10 GB benchmark that chose 32 did not OOM because it transferred ten 1 GiB
-# objects, so at most ten workers were ever live. A game library is thousands of
-# files and keeps every worker busy - the benchmark measured throughput on a
-# shape that could not reproduce the memory behaviour it was being used to
-# justify.
+# Which apps this boot should restore. Chosen on the laptop before launch and
+# baked into /etc/cg-library.conf, because the restore runs here at boot with no
+# terminal to ask at.
+APPS="${CG_APPS:-all}"
+
+# s5cmd holds roughly workers x concurrency x part-size in memory. The defaults
+# (256 x 5 x 50 MB) want tens of GB. 64 x 4 x 16 MB measured at 323 MB peak.
 WORKERS="${CG_WORKERS:-64}"
 CONCURRENCY="${CG_CONCURRENCY:-4}"
 PART_MB="${CG_PART_MB:-16}"
-# --no-follow-symlinks is not a nicety, it is what makes this work at all.
-# A Proton prefix contains:
-#     compatdata/<id>/pfx/dosdevices/z: -> /
-#     compatdata/<id>/pfx/dosdevices/s: -> /scratch/steam/steamapps
-# so a symlink-following walk of the library descends into the entire root
-# filesystem AND into the library itself, endlessly. s5cmd follows by default,
-# and the result was a 12 GB resident set and an OOM kill, on a 2.9 GB library.
-# Worker and part-size tuning made no difference to it, because the enumeration
-# was the thing exploding, not the transfer buffers.
-#
-# The cost: the ~1,350 symlinks in a prefix are skipped rather than stored - S3
-# has no symlink concept, and dereferencing them would upload copies of the
-# Proton runtime into every game's prefix. Proton rebuilds dosdevices and its
-# DLL links when it next starts the prefix; the save games under
-# drive_c/users/steamuser are real files and are mirrored normally.
+# --no-follow-symlinks is not a nicety. A Proton prefix contains
+# dosdevices/z: -> / and s: -> the library itself, so a symlink-following walk
+# descends into the whole filesystem AND into itself: 12 GB resident and an OOM
+# kill on a 2.9 GB library. Worker tuning changed nothing, because the file list
+# was exploding, not the transfer buffers.
 TUNE=(--concurrency "$CONCURRENCY" --part-size "$PART_MB" --no-follow-symlinks)
-# Below this fraction of the archive, a local library is assumed to be broken or
-# half-restored rather than deliberately shrunk. 0.5 is generous: uninstalling
-# one game out of two is a legitimate halving, so the guard asks rather than
-# refuses outright - it can be overridden with --force.
-MIN_FRACTION="${CG_MIN_FRACTION:-0.5}"
-
-# Steam writes partial chunks here during a download and reassembles them; they
-# are large, worthless once the download finishes, and change constantly.
-EXCLUDES=(--exclude "steamapps/downloading/*" --exclude "steamapps/temp/*")
-
-# S3 has no symlinks, and --no-follow-symlinks skips them rather than uploading
-# a copy of the target. That is right for the Proton runtime - Steam rebuilds
-# its trees - but WRONG for a game's Proton prefix, which nothing else repairs:
-# Proton sees .update-timestamp and a current version file, decides the prefix
-# is fine, and never recreates dosdevices/c: or z:. A prefix with an empty
-# dosdevices cannot resolve a single Windows path, so the game silently will
-# not start.
-#
-# So the links are recorded as one small text file inside the library, synced
-# like any other file, and recreated after a restore. Cheaper than tarring the
-# prefix (which would re-upload all of it every push) and it covers symlinks
-# anywhere in the tree, not just the case that was found.
-SYMLINKS=".cg-symlinks.tsv"
+EXCLUDES=(--exclude "downloading/*" --exclude "temp/*")
 
 log() { echo "$(date -Iseconds) cg-library: $*"; }
 die() { log "error: $*" >&2; exit 1; }
@@ -82,26 +65,10 @@ hb()  { numfmt --to=iec --suffix=B "${1:-0}" 2>/dev/null || echo "${1:-0}B"; }
 [[ -x $S5 ]] || die "s5cmd not installed at $S5"
 mkdir -p "$STATE" 2>/dev/null || true
 
-# s5cmd du prints one line: "<bytes> bytes in <n> objects: s3://bucket/prefix/*".
-# Note the COLON on "objects:" - matching the bare word silently yielded a count
-# of 0 forever, which disabled the size guard below and let a real push delete a
-# real archive. Both words are matched with an optional colon now, and the
-# guards key off BYTES rather than the count, so a parse change on the more
-# decorated field cannot switch a safety check off again.
-# An empty prefix is not an error here - it is the first-ever run.
-remote_du() { # -> "<bytes> <objects>"
-  local out
-  out=$("$S5" du "s3://$BUCKET/$PREFIX/*" 2>/dev/null | tail -1)
-  awk '{b=0;n=0; for(i=1;i<=NF;i++){ if($i ~ /^bytes:?$/)b=$(i-1); if($i ~ /^objects:?$/)n=$(i-1)} print b+0" "n+0}' <<<"${out:-}"
-}
-local_bytes() { du -sb --exclude=downloading --exclude=temp "$LIB" 2>/dev/null | cut -f1 || echo 0; }
+S3="s3://$BUCKET/$PREFIX"
 
 # The marker records WHICH boot restored the library, not merely that some boot
-# did. /var/lib is on the root volume and survives a reboot, while /scratch does
-# not, so a bare flag file could outlive the data it vouches for. It also means
-# re-running install-library.sh on a live box no longer has to delete the marker
-# to stay correct - deleting it locked the box out of pushing, which locks
-# `cg stop` and `cg destroy` out of saving the games.
+# did: /var/lib is on the root volume and survives a reboot, /scratch does not.
 BOOT_ID_FILE="${CG_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}"
 boot_id() { cat "$BOOT_ID_FILE" 2>/dev/null || echo unknown; }
 mark_restored() { boot_id > "$STATE/restored"; }
@@ -110,49 +77,91 @@ restored() {
   [[ "$(cat "$STATE/restored" 2>/dev/null)" == "$(boot_id)" ]]
 }
 
-# --- pull ----------------------------------------------------------------------
-cmd_pull() {
-  local parent; parent=$(dirname "$LIB")
-  # GUARD: never restore onto the root volume by accident. If /scratch failed to
-  # mount, the games would land on the 50 GB root disk and fill it.
-  mountpoint -q "$parent" || die "$parent is not a mountpoint - refusing to restore onto the root disk"
-  mkdir -p "$LIB/steamapps"
-
-  local rb ro; read -r rb ro < <(remote_du)
-  # Bytes, not the object count: see remote_du.
-  if [[ ${rb:-0} -eq 0 ]]; then
-    log "archive s3://$BUCKET/$PREFIX is empty - nothing to restore (first run)"
-    mark_restored
-    return 0
-  fi
-
-  log "restoring $ro objects, $(hb "$rb"), from s3://$BUCKET/$PREFIX"
-  local t0 dt; t0=$(date +%s)
-  # --size-only is deliberate. s5cmd's default compares modification times, and
-  # a freshly restored file is always NEWER than the S3 object it came from - so
-  # the very next push would re-upload the entire library. Size-only comparison
-  # makes pull and push idempotent. The cost is that a game patch which rewrites
-  # a file to exactly the same length is not noticed; `cg library push --verify`
-  # exists for that.
-  if ! "$S5" --numworkers "$WORKERS" sync --size-only "${TUNE[@]}" "${EXCLUDES[@]}" \
-        "s3://$BUCKET/$PREFIX/*" "$LIB/"; then
-    # No marker on failure: that is what stops a later push from mistaking a
-    # partial restore for a deliberately emptied library.
-    die "restore failed - NOT marking the library as restored (push will refuse)"
-  fi
-  dt=$(( $(date +%s) - t0 )); (( dt > 0 )) || dt=1
-  restore_symlinks
-  mark_restored
-  log "restored in ${dt}s ($(( rb / dt / 1048576 )) MB/s)"
+# --- what is installed here --------------------------------------------------
+# appid<TAB>installdir<TAB>name, one per line, from the manifests on disk.
+local_apps() {
+  local f id dir name
+  for f in "$LIB"/steamapps/appmanifest_*.acf; do
+    [[ -f $f ]] || continue
+    id=$(basename "$f" .acf); id=${id#appmanifest_}
+    dir=$(sed -n 's/.*"installdir"[[:space:]]*"\(.*\)".*/\1/p' "$f" | head -1)
+    name=$(sed -n 's/.*"name"[[:space:]]*"\(.*\)".*/\1/p' "$f" | head -1)
+    [[ -n $id && -n $dir ]] || continue
+    printf '%s\t%s\t%s\n' "$id" "$dir" "${name:-$dir}"
+  done
 }
 
-# Recreate what S3 could not hold. Only ever ADDS: anything already present -
-# a real file, or a link Steam rebuilt itself - is left alone.
-restore_symlinks() {
-  local f="$LIB/$SYMLINKS" link target made=0 skipped=0
-  if [[ ! -s $f ]]; then
-    log "no symlink manifest in the archive - a Proton prefix restored from it may not start"
-    return 0
+app_bytes() { # app_bytes <installdir> <appid>
+  local total=0 d
+  for d in "$LIB/steamapps/common/$1" "$LIB/steamapps/compatdata/$2" "$LIB/steamapps/shadercache/$2"; do
+    [[ -d $d ]] || continue
+    total=$(( total + $(du -sb --exclude=downloading --exclude=temp "$d" 2>/dev/null | cut -f1 || echo 0) ))
+  done
+  echo "$total"
+}
+
+# --- the index ---------------------------------------------------------------
+# One small object so the laptop can show sizes without listing 300k keys before
+# the box even exists. Read with the AWS CLI on the laptop, s5cmd here.
+index_get() { "$S5" cat "$S3/index.json" 2>/dev/null || echo '{"apps":[]}'; }
+
+index_put() { # index_put <json>
+  local t; t=$(mktemp)
+  printf '%s\n' "$1" > "$t"
+  "$S5" cp "$t" "$S3/index.json" >/dev/null 2>&1 || log "WARNING: could not write the index"
+  rm -f "$t"
+}
+
+# Merge the apps just pushed into whatever the index already holds, so pushing
+# one game does not erase the record of the others - the same rule the object
+# sync follows.
+index_merge() { # index_merge <appid> <installdir> <name> <bytes>
+  index_get | python3 -c '
+import json,sys,time
+appid,installdir,name,size = sys.argv[1:5]
+try:    d=json.load(sys.stdin)
+except Exception: d={"apps":[]}
+apps=[a for a in d.get("apps",[]) if str(a.get("appid"))!=appid]
+apps.append({"appid":appid,"name":name,"installdir":installdir,
+             "bytes":int(size),"pushed":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())})
+apps.sort(key=lambda a:-a["bytes"])
+print(json.dumps({"apps":apps},indent=1))' "$1" "$2" "$3" "$4"
+}
+
+index_drop() { # index_drop <appid>
+  index_get | python3 -c '
+import json,sys
+appid=sys.argv[1]
+try:    d=json.load(sys.stdin)
+except Exception: d={"apps":[]}
+print(json.dumps({"apps":[a for a in d.get("apps",[]) if str(a.get("appid"))!=appid]},indent=1))' "$1"
+}
+
+# --- symlinks ----------------------------------------------------------------
+# S3 has no symlinks and --no-follow-symlinks skips them, which is right for the
+# Proton runtime (Steam rebuilds its own trees) and WRONG for a game's prefix:
+# Proton sees a current version file, never recreates dosdevices/c: or z:, and a
+# prefix with an empty dosdevices cannot resolve one Windows path - the game
+# simply does not start. Recorded per app, so restoring one game brings back its
+# links and leaves another game's records untouched.
+symlinks_record() { # symlinks_record <appid> <installdir>
+  local out; out=$(mktemp)
+  ( cd "$LIB" && find "steamapps/common/$2" "steamapps/compatdata/$1" \
+      "steamapps/shadercache/$1" -type l -printf '%p\t%l\n' 2>/dev/null ) > "$out"
+  if [[ -s $out ]]; then
+    "$S5" cp "$out" "$S3/meta/symlinks-$1.tsv" >/dev/null 2>&1 \
+      && log "  recorded $(grep -c . "$out") symlinks"
+  else
+    "$S5" rm "$S3/meta/symlinks-$1.tsv" >/dev/null 2>&1 || true
+  fi
+  rm -f "$out"
+}
+
+symlinks_restore() { # symlinks_restore <appid>
+  local f made=0 skipped=0 link target
+  f=$(mktemp)
+  if ! "$S5" cp "$S3/meta/symlinks-$1.tsv" "$f" >/dev/null 2>&1 || [[ ! -s $f ]]; then
+    rm -f "$f"; return 0
   fi
   while IFS=$'\t' read -r link target; do
     [[ -n ${link:-} && -n ${target:-} ]] || continue
@@ -160,10 +169,93 @@ restore_symlinks() {
     mkdir -p "$(dirname "$LIB/$link")" 2>/dev/null
     ln -sfn "$target" "$LIB/$link" 2>/dev/null && made=$((made+1))
   done < "$f"
-  log "symlinks: $made recreated, $skipped already present"
+  rm -f "$f"
+  log "  symlinks: $made recreated, $skipped already present"
 }
 
-# --- push ----------------------------------------------------------------------
+# --- pull --------------------------------------------------------------------
+cmd_pull() {
+  local want="${1:-$APPS}"
+  local parent; parent=$(dirname "$LIB")
+  # Never restore onto the root disk: if /scratch failed to mount, the games
+  # would land on the 50 GB root volume and fill it.
+  mountpoint -q "$parent" || die "$parent is not a mountpoint - refusing to restore onto the root disk"
+  mkdir -p "$LIB/steamapps"
+
+  if [[ $want == none ]]; then
+    log "CG_APPS=none - restoring nothing by request (the box is for something else)"
+    mark_restored
+    return 0
+  fi
+
+  local idx; idx=$(index_get)
+  local chosen
+  chosen=$(printf '%s' "$idx" | python3 -c '
+import json,sys
+want=sys.argv[1]
+try:    apps=json.load(sys.stdin).get("apps",[])
+except Exception: apps=[]
+if want=="all": sel=apps
+else:
+    ids={w.strip() for w in want.split(",") if w.strip()}
+    sel=[a for a in apps if str(a.get("appid")) in ids]
+for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.get("name",""), a.get("bytes",0)))' "$want")
+
+  if [[ -z ${chosen//[[:space:]]/} ]]; then
+    log "archive holds nothing to restore for '$want' (first run, or an unknown appid)"
+    mark_restored
+    return 0
+  fi
+
+  # Capacity, enforced HERE and not only in the laptop prompt. CG_APPS can say
+  # "all" from an older .env, from a scripted run, or from a prompt that was
+  # skipped - and an archive larger than the disk would then fill /scratch
+  # mid-restore, which fails in the least legible way possible: a half-restored
+  # game that Steam reports as installed.
+  local avail_kb avail
+  avail_kb=$(df --output=avail -k "$LIB" 2>/dev/null | tail -1 | tr -d ' ')
+  avail=$(( ${avail_kb:-0} * 1024 ))
+  # CG_RESERVE_GB because a g6.2xlarge has 450 GB and this should not assume a
+  # g6.xlarge; CG_DISK_BUDGET to set the ceiling outright, which is how the
+  # tests exercise the skip path without a 300 GB sandbox.
+  local reserve=$(( ${CG_RESERVE_GB:-20} * 1024 * 1024 * 1024 ))
+  local budget=${CG_DISK_BUDGET:-$(( avail - reserve ))}
+  (( budget < 0 )) && budget=0
+  log "disk budget $(hb "$budget") ($(hb "$avail") free, $(hb "$reserve") reserved)"
+
+  local t0 dt id dir name total=0 skipped=0 used=0 want_bytes
+  t0=$(date +%s)
+  while IFS=$'\t' read -r id dir name bytes; do
+    [[ -n ${id:-} ]] || continue
+    want_bytes=${bytes:-0}
+    if (( used + want_bytes > budget )); then
+      log "SKIPPING $name ($id, $(hb "$want_bytes")) - only $(hb $(( budget - used ))) left"
+      log "  restore it on its own later: cg library pull --apps $id"
+      skipped=$((skipped+1))
+      continue
+    fi
+    used=$(( used + want_bytes ))
+    log "restoring $name ($id, $(hb "$want_bytes"))"
+    "$S5" cp "$S3/steamapps/appmanifest_$id.acf" "$LIB/steamapps/" >/dev/null 2>&1 || true
+    local src dst
+    for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
+      src="$S3/steamapps/$pair/*"; dst="$LIB/steamapps/$pair/"
+      mkdir -p "$dst"
+      "$S5" --numworkers "$WORKERS" sync --size-only "${TUNE[@]}" "$src" "$dst" >/dev/null 2>&1 || true
+    done
+    symlinks_restore "$id"
+    total=$((total+1))
+  done <<< "$chosen"
+
+  # Shared, tiny, and needed for Steam to accept the folder as a library.
+  "$S5" cp "$S3/steamapps/libraryfolder.vdf" "$LIB/steamapps/" >/dev/null 2>&1 || true
+  dt=$(( $(date +%s) - t0 )); (( dt > 0 )) || dt=1
+  mark_restored
+  log "restored $total game(s), $(hb "$used"), in ${dt}s"
+  (( skipped )) && log "$skipped game(s) skipped for space - see above"
+}
+
+# --- push --------------------------------------------------------------------
 cmd_push() {
   local force=0 verify=0 a
   for a in "$@"; do
@@ -173,94 +265,178 @@ cmd_push() {
       *) die "unknown option '$a' for push" ;;
     esac
   done
-
   [[ -d $LIB ]] || die "$LIB does not exist - nothing to push"
   mountpoint -q "$(dirname "$LIB")" || die "$(dirname "$LIB") is not a mountpoint - refusing to push"
 
-  # GUARD: the library must have been restored on THIS boot. Without this, a box
-  # that booted with a broken restore - or never ran one - would push its empty
-  # /scratch over the archive and delete every game.
+  # The library must have been restored on THIS boot. Weaker than it was, now
+  # that an absent app is never deleted - but it still stops a half-restored
+  # game overwriting a complete one.
   if ! restored && (( ! force )); then
-    die "the library was never restored on this boot; pushing now would delete the archive (--force overrides)"
+    die "the library was not restored on this boot; push would overwrite the archive with a partial copy (--force overrides)"
   fi
 
-  local lb rb ro; lb=$(local_bytes); read -r rb ro < <(remote_du)
-  # GUARD: a local copy far smaller than the archive means something went wrong,
-  # not that games were uninstalled. Checked with integer arithmetic - this runs
-  # as a systemd unit at shutdown where a floating-point surprise is not welcome.
-  if (( rb > 0 )) && (( lb * 100 < rb * $(awk -v f="$MIN_FRACTION" 'BEGIN{printf "%d", f*100}') )); then
-    if (( ! force )); then
-      die "local library $(hb "$lb") is far smaller than the archive $(hb "$rb") - refusing (--force overrides)"
-    fi
-    log "WARNING: local $(hb "$lb") << archive $(hb "$rb"), pushing anyway (--force)"
-  fi
-
-  # Written BEFORE the sync so it travels as an ordinary file - no extra upload
-  # step, and --delete cannot strip it as something that exists only remotely.
-  if ! ( cd "$LIB" && find . -type l -printf '%P\t%l\n' > "$SYMLINKS" ) 2>/dev/null; then
-    log "WARNING: could not record symlinks; a restored Proton prefix may not start"
-  else
-    # Not `|| echo 0`: grep -c prints its count AND exits non-zero on no match,
-    # so the fallback would be appended to a real "0" and logged as "0\n0".
-    local n; n=$(grep -c . "$LIB/$SYMLINKS" 2>/dev/null) || true
-    log "recorded ${n:-0} symlinks"
+  local apps; apps=$(local_apps)
+  if [[ -z ${apps//[[:space:]]/} ]]; then
+    log "no games installed - nothing to push (the archive is left alone)"
+    return 0
   fi
 
   local strategy=(--size-only)
-  (( verify )) && strategy=()   # full comparison; re-uploads anything whose mtime moved
-  log "pushing $(hb "$lb") to s3://$BUCKET/$PREFIX"
-  local t0 dt; t0=$(date +%s)
-  if ! "$S5" --numworkers "$WORKERS" sync --delete "${strategy[@]}" "${TUNE[@]}" "${EXCLUDES[@]}" \
-        "$LIB/" "s3://$BUCKET/$PREFIX/"; then
-    die "push failed - the archive still holds the previous contents"
-  fi
-  dt=$(( $(date +%s) - t0 ))
+  (( verify )) && strategy=()
+  # Read once: the index is re-written inside the loop, and re-reading it per
+  # app would compare against a figure this same push just updated.
+  local idx_cache; idx_cache=$(index_get)
+  local id dir name bytes archived t0 n=0
+  t0=$(date +%s)
+  while IFS=$'\t' read -r id dir name; do
+    [[ -n ${id:-} ]] || continue
+    bytes=$(app_bytes "$dir" "$id")
+    # Per-app size guard. The whole-tree version had one because pushing an
+    # empty disk could empty the whole archive; per-app prefixes make that
+    # impossible, but a single game that is half-present locally can still
+    # overwrite its own complete copy. Same protection, scoped to one game.
+    archived=$(printf '%s' "$idx_cache" | python3 -c '
+import json,sys
+appid=sys.argv[1]
+try:    apps=json.load(sys.stdin).get("apps",[])
+except Exception: apps=[]
+print(next((a.get("bytes",0) for a in apps if str(a.get("appid"))==appid), 0))' "$id")
+    if (( ${archived:-0} > 0 )) && (( bytes * 2 < archived )) && (( ! force )); then
+      log "SKIPPING $name ($id): local $(hb "$bytes") is less than half the archived $(hb "$archived")"
+      log "  that looks like a broken install, not an uninstall. --force overrides;"
+      log "  to remove it deliberately: cg library forget $id"
+      continue
+    fi
+    log "pushing $name ($id, $(hb "$bytes"))"
+    "$S5" cp "$LIB/steamapps/appmanifest_$id.acf" "$S3/steamapps/" >/dev/null 2>&1 || true
+    local src
+    for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
+      src="$LIB/steamapps/$pair"
+      [[ -d $src ]] || continue
+      # --delete INSIDE this app's prefix only. A file removed from the game is
+      # propagated; a game that is not installed is never touched.
+      "$S5" --numworkers "$WORKERS" sync --delete "${strategy[@]}" "${TUNE[@]}" \
+        "${EXCLUDES[@]}" "$src/" "$S3/steamapps/$pair/" >/dev/null 2>&1 \
+        || log "  WARNING: $pair did not sync cleanly"
+    done
+    symlinks_record "$id" "$dir"
+    index_put "$(index_merge "$id" "$dir" "$name" "$bytes")"
+    n=$((n+1))
+  done <<< "$apps"
+
+  "$S5" cp "$LIB/steamapps/libraryfolder.vdf" "$S3/steamapps/" >/dev/null 2>&1 || true
   date -Iseconds > "$STATE/last-push"
-  log "pushed in ${dt}s"
+  log "pushed $n game(s) in $(( $(date +%s) - t0 ))s"
 }
 
-# --- status --------------------------------------------------------------------
+# --- list --------------------------------------------------------------------
+cmd_list() {
+  index_get | python3 -c '
+import json,sys
+try:    apps=json.load(sys.stdin).get("apps",[])
+except Exception: apps=[]
+if not apps:
+    print("  the archive is empty"); sys.exit()
+GB=1073741824.0
+print("  %-10s %-34s %9s  %s" % ("APPID","GAME","SIZE","ARCHIVED"))
+tot=0
+for a in apps:
+    tot+=a.get("bytes",0)
+    print("  %-10s %-34s %6.1f GB  %s" % (a["appid"], a.get("name","?")[:34],
+          a.get("bytes",0)/GB, a.get("pushed","?")[:16].replace("T"," ")))
+print("  %-10s %-34s %6.1f GB   $%.2f/month (INR %.0f)"
+      % ("", "total", tot/GB, tot/GB*0.025, tot/GB*0.025*88))'
+}
+
+# --- forget ------------------------------------------------------------------
+# The archive no longer shrinks by itself, so this is how a game leaves it. A
+# typed word, because it is as unrecoverable as `cg destroy --all`: there is no
+# versioning behind the bucket.
+cmd_forget() {
+  local id="${1:-}" yes="${2:-}"
+  [[ -n $id ]] || die "usage: cg-library forget <appid>"
+  local row
+  row=$(index_get | python3 -c '
+import json,sys
+appid=sys.argv[1]
+try:    apps=json.load(sys.stdin).get("apps",[])
+except Exception: apps=[]
+for a in apps:
+    if str(a.get("appid"))==appid:
+        print("%s\t%s\t%s" % (a.get("name","?"), a.get("installdir",""), a.get("bytes",0)))
+        break' "$id")
+  [[ -n ${row//[[:space:]]/} ]] || die "appid $id is not in the archive (see: cg library list)"
+  local name dir bytes; IFS=$'\t' read -r name dir bytes <<<"$row"
+  echo "This permanently deletes $name ($id, $(hb "$bytes")) from the archive."
+  echo "No undo, no versioning. Playing it again means downloading it from Steam,"
+  echo "which at the ~100 Mbps this box sees is hours, not the ~11 min a restore takes."
+  if [[ $yes != --yes ]]; then
+    local a; read -r -p "type FORGET to confirm: " a
+    [[ $a == FORGET ]] || { echo "aborted - nothing was deleted"; return 1; }
+  fi
+  local pair
+  for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
+    "$S5" rm "$S3/steamapps/$pair/*" >/dev/null 2>&1 || true
+  done
+  "$S5" rm "$S3/steamapps/appmanifest_$id.acf" >/dev/null 2>&1 || true
+  "$S5" rm "$S3/meta/symlinks-$id.tsv" >/dev/null 2>&1 || true
+  index_put "$(index_drop "$id")"
+  log "forgot $name ($id) - $(hb "$bytes") of storage stops billing"
+}
+
+# --- status / check ----------------------------------------------------------
 cmd_status() {
-  local lb rb ro; lb=$(local_bytes); read -r rb ro < <(remote_du)
-  echo "  bucket    s3://$BUCKET/$PREFIX"
+  local lb; lb=$(du -sb --exclude=downloading --exclude=temp "$LIB" 2>/dev/null | cut -f1 || echo 0)
+  echo "  bucket    $S3"
   echo "  local     $(hb "$lb")  at $LIB"
-  # Steam's partial downloads are excluded from the mirror, which makes the
-  # library look far smaller than the disk. 3.3 GB reported beside 29 GB used
-  # is a mystery worth pre-empting rather than a number worth hiding.
   local dl; dl=$(du -sb "$LIB/steamapps/downloading" 2>/dev/null | cut -f1)
-  if [[ ${dl:-0} -gt 104857600 ]]; then
+  [[ ${dl:-0} -gt 104857600 ]] && \
     echo "  +$(hb "$dl") downloading - excluded until Steam finishes and moves it"
-  fi
-  echo "  archive   $(hb "$rb")  in ${ro:-0} objects"
   echo "  restored  $(restored && echo "yes (this boot)" || echo "NO - push will refuse")"
+  echo "  this boot $(printf '%s' "${APPS}")"
   echo "  last push $(cat "$STATE/last-push" 2>/dev/null || echo never)"
-  # S3 Standard, ap-south-2.
-  awk -v b="$rb" 'BEGIN{ g=b/1073741824; u=g*0.025;
-    printf "  cost      %.1f GB -> $%.2f/month (INR %.0f)\n", g, u, u*88 }'
+  echo "  archive:"
+  cmd_list
 }
 
-# Exits 0 when a push would transfer nothing - i.e. the archive already matches
-# the disk that is about to be wiped. Uses s5cmd's own dry run rather than
-# comparing byte totals, so the answer comes from the same comparison the real
-# push would make.
 cmd_check() {
-  local out
-  out=$("$S5" --dry-run --numworkers "$WORKERS" sync --size-only --delete \
-          "${TUNE[@]}" "${EXCLUDES[@]}" "$LIB/" "s3://$BUCKET/$PREFIX/" 2>/dev/null)
-  if [[ -z ${out//[[:space:]]/} ]]; then
-    log "library is mirrored - nothing to push"
-    return 0
-  fi
-  log "NOT mirrored: $(grep -c . <<<"$out") object(s) differ from the archive"
+  local apps; apps=$(local_apps)
+  [[ -n ${apps//[[:space:]]/} ]] || { log "no games installed - nothing to push"; return 0; }
+  local id dir name pending=0 out
+  while IFS=$'\t' read -r id dir name; do
+    [[ -n ${id:-} ]] || continue
+    for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
+      [[ -d "$LIB/steamapps/$pair" ]] || continue
+      out=$("$S5" --dry-run --numworkers "$WORKERS" sync --delete --size-only \
+              "${TUNE[@]}" "${EXCLUDES[@]}" "$LIB/steamapps/$pair/" \
+              "$S3/steamapps/$pair/" 2>/dev/null)
+      [[ -n ${out//[[:space:]]/} ]] && pending=$((pending + $(grep -c . <<<"$out")))
+    done
+  done <<< "$apps"
+  if (( pending == 0 )); then log "library is mirrored - nothing to push"; return 0; fi
+  log "NOT mirrored: $pending object(s) differ from the archive"
   return 1
 }
 
 case "${1:-status}" in
-  pull|restore) shift; cmd_pull "$@" ;;
-  check)        cmd_check ;;
+  pull|restore)
+    shift
+    # `--apps 123,456`, or a bare csv, or nothing (use CG_APPS from the config
+    # that the laptop wrote before launch).
+    want="$APPS"
+    while [[ $# -gt 0 ]]; do
+      case $1 in
+        --apps) want="${2:-}"; shift 2 ;;
+        *)      want="$1"; shift ;;
+      esac
+    done
+    cmd_pull "$want" ;;
   push|sync)    shift; cmd_push "$@" ;;
+  list)         cmd_list ;;
+  forget)       shift; cmd_forget "$@" ;;
+  check)        cmd_check ;;
   status|"")    cmd_status ;;
-  *) echo "usage: cg-library [pull|push [--force|--verify]|check|status]" >&2; exit 1 ;;
+  *) echo "usage: cg-library [pull [--apps <csv|all|none>]|push|list|forget <appid>|check|status]" >&2; exit 1 ;;
 esac
 
 # See the note at the end of cg: bash reads a script incrementally and returns

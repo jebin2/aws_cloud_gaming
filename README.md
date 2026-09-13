@@ -591,6 +591,61 @@ conditioned on that count. The unit test passed because the stub emitted a forma
 rather than the one s5cmd prints. Both were fixed: the guards key off *bytes*, and the stub is
 now byte-for-byte the real output.
 
+### One archive, one disk, and choosing between them
+
+A `g6.xlarge` holds **229 GB**. Two modern titles do not fit together - Black Myth: Wukong is
+~128 GB and Diablo IV ~160 GB - so the archive has to hold more than the disk does.
+
+Each game is archived under its own prefixes, so **pushing one game never touches another**:
+
+    steamapps/appmanifest_<id>.acf
+    steamapps/common/<installdir>/
+    steamapps/compatdata/<id>/        the Proton prefix: saves, registry
+    steamapps/shadercache/<id>/
+
+`--delete` is scoped inside each app's own prefix, so removing a file from a game still
+propagates, and a game that is simply not installed is left alone. That makes "an empty disk
+empties the archive" **impossible by construction**, where the whole-tree sync needed a size
+guard to catch it - the same failure that removed Shakes & Fidget when it was uninstalled and
+Proton when Steam moved it to another library.
+
+`cg init` asks which to restore, before the instance launches - the restore runs at boot with no
+terminal, and has to start early to overlap the build:
+
+    Archive (209 GB selectable of 229 GB - 20 GB reserved for Proton, shaders, headroom):
+
+      #   APPID      GAME                                  SIZE  ARCHIVED
+      1   2344520    Diablo IV                         160.0 GB  2026-09-13 11:02
+      2   2358720    Black Myth: Wukong                128.0 GB  2026-09-13 09:14
+      3   438040     Shakes and Fidget                   2.5 GB  2026-09-12 20:44
+
+    Restore which? (numbers or appids, comma separated | all | none) [all]
+    > 1,2
+      288 GB selected, 209 GB available - over by 79 GB.
+      Diablo IV 160 GB + Black Myth: Wukong 128 GB
+      These fit on their own: Diablo IV (160 GB), Black Myth: Wukong (128 GB)
+
+    > 1
+      160 GB selected, 49 GB spare. Restoring: Diablo IV
+
+It **refuses and explains** rather than silently picking a subset: which game to drop is not a
+decision a tool should make for you. `none` boots a clean box for other work. The answer is
+remembered in `.env` as `GAME_APPS`, so the usual case is pressing Enter, and that is also the
+non-interactive path for scripts.
+
+The box enforces the same arithmetic independently, because `CG_APPS` can still say `all` from an
+old `.env` or a run where the prompt never happened. It skips what will not fit and says so,
+rather than filling `/scratch` mid-restore - which fails in the least legible way available, as a
+half-restored game that Steam reports as installed.
+
+    cg library list            what is archived, per game, and the monthly cost
+    cg library pull --apps <csv|all|none>
+    cg library forget <appid>  delete one game from the archive (type FORGET)
+
+**The archive no longer shrinks on its own**, which is the price of never deleting an absent
+game. `forget` is how a game leaves it - with a typed word, because there is no versioning behind
+the bucket. Both games archived is 288 GB, **$7.20/month (INR 634)**; one is $4.00 (INR 352).
+
 ### Symlinks
 
 S3 cannot store a symlink, and `--no-follow-symlinks` is what keeps the uploader from recursing
