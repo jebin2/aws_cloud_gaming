@@ -559,6 +559,20 @@ This is not cosmetic. A restored game whose `dosdevices` is empty passes every c
 resolves every Windows path through those links. Steam rebuilds its own trees, so the Proton
 runtime recovers on its own; a *game's* prefix has no such owner and never self-repairs.
 
+### Proton and the Steam runtime are deliberately not mirrored
+
+Steam installs compatibility tools into whichever library it likes - usually the client's own,
+on the root disk, which `cg destroy` deletes. They are therefore re-downloaded on each rebuild
+rather than restored from S3.
+
+This was measured and left alone: **under a minute**. Mirroring them would add ~2 GB to the
+archive to save less time than the NVIDIA driver install already takes in parallel. The game,
+its Proton prefix (save games and registry) and the shader cache - the parts nothing else will
+rebuild for you - are all mirrored.
+
+If Steam happens to place the tools in `/scratch/steam` on some build, they will be mirrored and
+then removed again the first time it does not. That churn is harmless.
+
 ### Comparison is size-only
 
 `s5cmd sync` compares modification times by default, and a freshly restored file is always
