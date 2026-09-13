@@ -19,7 +19,7 @@ trap 'rm -rf "$T"' EXIT
 check() { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
           else echo "  FAIL $1: got '$2' want '$3'"; fail=$((fail+1)); fi; }
 
-mkdir -p "$T/bin" "$T/lib"
+mkdir -p "$T/bin" "$T/home/.ssh" "$T/lib"
 cp "$REPO/cg" "$T/cg"
 cp "$REPO/lib/common.sh" "$T/lib/common.sh"
 seed_env() {
@@ -78,7 +78,7 @@ chmod +x "$T/bin/scp"
 run() { # run <stdin> <args...>
   local input=$1; shift
   LOG="$T/log" rm -f "$T/log"
-  printf '%s\n' "$input" | ( cd "$T" && LOG="$T/log" PATH="$T/bin:$PATH" \
+  printf '%s\n' "$input" | ( cd "$T" && HOME="$T/home" LOG="$T/log" PATH="$T/bin:$PATH" \
     BOX_STATE="${BOX_STATE:-stopped}" WD_USER="${WD_USER:-1}" \
     ROLE_EXISTS="${ROLE_EXISTS:-1}" bash ./cg destroy "$@" 2>&1 )
 }

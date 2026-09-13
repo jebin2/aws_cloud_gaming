@@ -45,10 +45,20 @@ FAKE
 chmod +x "$T/bin/aws"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$T/bin/tailscale"; chmod +x "$T/bin/tailscale"
 
+# HOME is redirected into the sandbox. This file runs the REAL lib/setup
+# destroy, and stubbing only `aws` and `tailscale` left every filesystem
+# operation pointed at the real machine - including
+#
+#     rm -f "$HOME/.ssh/${TS_HOST}.pem"
+#
+# which deleted the actual private key for a running box, unrecoverably. A test
+# that executes a destroy script must isolate the filesystem as carefully as the
+# API, and $HOME is the one that bites: nothing in the command line mentions it.
 run() { # run <CG_DESTROY_ALL value>
   rm -f "$T/log"
-  ( cd "$T" && LOG="$T/log" PATH="$T/bin:$PATH" CG_DESTROY_ALL="${1:-0}" \
-      timeout 60 bash ./lib/setup destroy 2>&1 )
+  mkdir -p "$T/home/.ssh"
+  ( cd "$T" && HOME="$T/home" LOG="$T/log" PATH="$T/bin:$PATH" \
+      CG_DESTROY_ALL="${1:-0}" timeout 60 bash ./lib/setup destroy 2>&1 )
 }
 did() { grep -q "$1" "$T/log" 2>/dev/null && echo yes || echo no; }
 
@@ -67,5 +77,14 @@ echo "3. destroy --all DOES delete the budget"
 out=$(run 1)
 check    "budget deleted"         "$(did 'delete-budget')" "yes"
 contains "listing says it goes"   "$out" "budget          gamevps-monthly"
+
+echo "4. the sandbox really is isolated from the real home"
+# The guard for the mistake above: prove destroy deletes the key inside $T and
+# that a real one outside it would have survived.
+mkdir -p "$T/home/.ssh"; : > "$T/home/.ssh/gamevss.pem"; : > "$T/home/.ssh/gamevps.pem"
+run 0 >/dev/null
+check "deleted the sandboxed key"      "$(test -e "$T/home/.ssh/gamevps.pem" && echo yes || echo no)" "no"
+check "left unrelated files alone"     "$(test -e "$T/home/.ssh/gamevss.pem" && echo yes || echo no)" "yes"
+check "HOME was redirected, not real"  "$([[ $T/home != "$HOME" ]] && echo yes || echo no)" "yes"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

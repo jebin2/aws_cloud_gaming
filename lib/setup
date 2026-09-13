@@ -408,6 +408,18 @@ if sp_h or od_h:
 # at a 20 Mbps stream (~9 GB/hour) is ~$0.98/hour, rivalling the instance.
 FREE=100.0
 left=max(0.0, FREE-out_gb)
+# Cache it. Cost Explorer is the only source for MONTHLY egress - the box knows
+# only its own boot - and each CE call costs $0.01, so `cg status` cannot ask
+# for itself: at 20 runs a day that is INR 530/month, more than the S3 bill.
+# Writing down what this command already paid for lets status show the real
+# number for free, stamped with its age so it is never mistaken for live.
+try:
+    import os, time
+    os.makedirs(".cg-cache", exist_ok=True)
+    with open(".cg-cache/egress", "w") as f:
+        f.write("%d %.3f %.0f\n" % (time.time(), out_gb, FREE))
+except Exception:
+    pass
 print("")
 print("  egress (streaming) %.1f GB of %.0f GB free - %.0f GB left" % (out_gb, FREE, left))
 if left > 0:

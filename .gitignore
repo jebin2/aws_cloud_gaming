@@ -15,3 +15,7 @@
 
 # Personal scratch.
 clauderesumeid.txt
+
+# Cached Cost Explorer figures, so cg status can show the month without
+# paying $0.01 per call. Local, regenerable, and account-specific.
+.cg-cache/

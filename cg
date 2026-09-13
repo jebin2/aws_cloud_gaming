@@ -77,6 +77,27 @@ box() {
 # already, so read it live and for free. Since boot, not since the session -
 # the kernel keeps no per-session tally - and it includes ssh and Tailscale
 # keepalives, which is why it is labelled as tailnet traffic, not pure video.
+# The month, from whatever `cg cost` last paid Cost Explorer for. Free, because
+# it re-reads a number already bought - and stamped with its age, because a
+# cached figure presented as current would be the same scope bug this section
+# came from, wearing a different hat.
+egress_month() {
+  local f=.cg-cache/egress ts gb free age
+  [[ -r $f ]] || { printf '  monthly egress  unknown - run: cg cost\n'; return 0; }
+  read -r ts gb free < "$f" 2>/dev/null || return 0
+  [[ ${ts:-0} =~ ^[0-9]+$ ]] || return 0
+  age=$(( ($(date +%s) - ts) / 60 ))
+  awk -v g="${gb:-0}" -v fr="${free:-100}" -v a="$age" 'BEGIN{
+    left = fr - g; if (left < 0) left = 0;
+    if (a < 90)        when = sprintf("%d min ago", a);
+    else if (a < 2880) when = sprintf("%.0f h ago", a/60.0);
+    else               when = sprintf("%.0f days ago", a/1440.0);
+    printf "  monthly egress  %.1f GB used, ~%.0f GB of %.0f GB free left  (as of %s)\n",
+           g, left, fr, when;
+    if (a > 1440) printf "                  stale - refresh with: cg cost\n";
+  }'
+}
+
 stream_usage() {
   local node="${GAME_TS_NODE:-$TS_HOST}" ip
   tailscale ip -4 "$node" >/dev/null 2>&1 || return 0
@@ -108,8 +129,9 @@ stream_usage() {
     # and every session is a new box - so subtracting them from the 100 GB
     # monthly allowance reported 99 GB left while Cost Explorer showed 91.
     # The month lives in cg cost, which reads it from Cost Explorer.
-    printf "  (this boot only - monthly egress and what is left: cg cost)\n";
+    printf "  (above is this boot only)\n";
   }'
+  egress_month
 }
 
 steam_shutdown_for_cloud_sync() {

@@ -1191,3 +1191,34 @@ the actual API calls. Writing it surfaced a stub bug worth repeating: returning 
 `describe-instances` made destroy treat "None" as an instance id and wait for it to terminate, so
 the run never reached the code under test and three assertions failed for an unrelated reason. A
 stub must return what the real thing returns for *absence* - here, nothing at all.
+
+### A test deleted a real SSH key
+
+`tests/destroy-budget.sh` needed to check which AWS calls `cg destroy` makes, so it runs the
+**real** `lib/setup destroy` with `aws` and `tailscale` stubbed on `PATH`. That covered every API
+call and none of the filesystem, and destroy contains:
+
+    rm -f "$HOME/.ssh/${TS_HOST}.pem"
+
+`rm` was not stubbed and `$HOME` was the real home, so the test deleted the private key for a
+running instance. Unrecoverably - AWS shows a key pair's public half and never the private one.
+
+The box kept streaming, because Moonlight reaches Sunshine over Tailscale and needs no SSH, and
+the library still mirrored on shutdown, because that runs from a unit on the box rather than
+over SSH. What broke was every laptop-side operation: `cg ssh`, the disk and library sections of
+`cg status`, and the pre-destroy push.
+
+There was a second trap behind it. `provision.sh` creates a key pair only when AWS does not
+already have one, so the *next* `cg init` would have happily reused the orphaned `gamevps` pair
+and built another box nobody could log into. The AWS key pair has to be deleted too, so the pair
+is regenerated together.
+
+**Stubbing the API is not sandboxing.** A test that executes a real script inherits every side
+effect the stubs do not cover, and `$HOME` is the one that bites, because nothing in the command
+line mentions it - there is no `--home` flag to notice you have not set. Every test here that
+runs a real script now sets `HOME="$T/home"`, and `destroy-budget.sh` asserts it: the sandboxed
+key is deleted, an unrelated file beside it survives, and `$HOME` is not the real one.
+
+The narrower lesson is about which tests deserve suspicion. Nine of the ten test files drive
+pure logic through stubs and can do no damage. This one executes a script whose entire purpose
+is deletion. That difference should have been obvious while writing it.

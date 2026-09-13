@@ -22,7 +22,7 @@ contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 check()    { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: got '$2' want '$3'"; fail=$((fail+1)); fi; }
 
-mkdir -p "$T/bin" "$T/lib"
+mkdir -p "$T/bin" "$T/home/.ssh" "$T/lib"
 cp "$REPO/lib/game" "$T/lib/game"
 cp "$REPO/lib/common.sh" "$T/lib/common.sh"
 cat > "$T/.env" <<EOF
@@ -53,7 +53,7 @@ done
 
 run() {
   rm -f "$T/log"
-  ( cd "$T" && LOG="$T/log" PATH="$T/bin:$PATH" \
+  ( cd "$T" && HOME="$T/home" LOG="$T/log" PATH="$T/bin:$PATH" \
       LIFECYCLE="${LIFECYCLE:-none}" SPOT_STATE="${SPOT_STATE:-active}" \
       STATE="${STATE:-stopped}" timeout 25 bash ./lib/game up 2>&1 )
 }
@@ -99,7 +99,7 @@ end() { # end <stdin-answer>
   # The env goes on the side of the pipe that RUNS the script. Putting it before
   # printf set it for printf, and game inherited none of it.
   ( cd "$T" && printf '%s\n' "${1:-}" \
-      | LOG="$T/log" PATH="$T/bin:$PATH" LIFECYCLE="${LIFECYCLE:-none}" \
+      | HOME="$T/home" LOG="$T/log" PATH="$T/bin:$PATH" LIFECYCLE="${LIFECYCLE:-none}" \
         STATE=running timeout 25 bash ./lib/game stop 2>&1 )
 }
 # `cg destroy` must be reachable but must not actually run here.

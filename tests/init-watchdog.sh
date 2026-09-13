@@ -23,7 +23,7 @@ check()    { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
 lacks()    { if [[ $2 != *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: output contains '$3'"; fail=$((fail+1)); fi; }
 
-mkdir -p "$T/bin" "$T/lib" "$T/host"
+mkdir -p "$T/bin" "$T/home/.ssh" "$T/lib" "$T/host"
 cp "$REPO/cg" "$T/cg"
 cp "$REPO/lib/common.sh" "$T/lib/common.sh"
 touch "$T/host/remote-watchdog.sh" "$T/host/remote-watchdog.service" \
@@ -80,7 +80,7 @@ done
 
 run() {
   rm -f "$T/log"
-  ( cd "$T" && LOG="$T/log" PATH="$T/bin:$PATH" WD_USER="${WD_USER:-0}" \
+  ( cd "$T" && HOME="$T/home" LOG="$T/log" PATH="$T/bin:$PATH" WD_USER="${WD_USER:-0}" \
       WD_ENABLED="${WD_ENABLED:-disabled}" bash ./cg init 2>&1 )
 }
 did() { grep -q "$1" "$T/log" 2>/dev/null && echo yes || echo no; }
