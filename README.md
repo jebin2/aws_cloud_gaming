@@ -143,7 +143,7 @@ reimplementing them.
 | `cg clean` | Free space: apt caches, logs, `/scratch/tmp`. Games are not touched |
 | `cg destroy` | Mirror the games to S3, then delete the box. **Refuses if the mirror fails**. Keeps the budget |
 | `cg destroy --force` | Destroy even if the mirror failed - **loses the games** |
-| `cg destroy --all` | The box, the archive, **the bucket and the IAM role**. Asks you to type `DESTROY-ALL` |
+| `cg destroy --all` | The box **and the whole account footprint** - archive, bucket, IAM, budget. Asks you to type `DESTROY-ALL` |
 | `cg check` | Every preflight check, creates nothing |
 | `cg cost` | Month-to-date spend and what still bills |
 | `cg log [what] [--watch]` | `build` \| `steam` \| `watchdog` \| `disk` \| `sunshine` |
@@ -324,7 +324,7 @@ emails its subscribers directly and works the moment it is created.
 
 ### What things cost
 
-Three separate charges, and the third surprises people.
+Four separate charges. The third surprises people, and the fourth is the only API that bills.
 
 **Per hour running.** `g6.xlarge` in `ap-south-2` is $0.9664/hr plus $0.005/hr for the public
 IPv4 while it runs.
@@ -345,7 +345,29 @@ free, and immediate, where `cg cost` lags a day:
       stream out      2.59 GB   avg 2.2 Mbps over 2.8 h
       total out       5.03 GB   <- what AWS bills
       total in      132.31 GB   (free - game downloads land here)
-      free egress     ~95 GB left of 100 GB/month
+      (above is this boot only)
+      monthly egress  9.3 GB used, ~91 GB of 100 GB free left  (as of 12 min ago)
+
+The last line is the **month**, and it comes from Cost Explorer - the only place that knows it.
+The box knows only its own boot, and every session is a new box, so subtracting boot counters
+from a monthly allowance is wrong: it read "99 GB left" while Cost Explorer said 91. Since a
+Cost Explorer call costs $0.01, `cg status` does not make one - it re-reads the figure `cg cost`
+last paid for, cached in `.cg-cache/`, and stamps it with its age.
+
+**Per API call.** One AWS API in this project is not free: **Cost Explorer, at $0.01 per
+request**. `cg cost` is the only command that makes one, so it costs about INR 0.88 to run.
+Measured on a real month:
+
+    AWS Cost Explorer     25 requests    $0.25   (INR 22)
+
+Everything else this project calls is free at this volume - EC2 describe/run/terminate, STS,
+IAM, the Pricing API (where the S3 per-GB figure comes from), CloudWatch metrics and alarms
+(1M requests and 10 alarms free), AWS Budgets (first two free), and the Free Tier API. **S3
+requests do not even appear on the bill** - under $0.001 for a month of pushing and restoring a
+game library.
+
+That $0.01 is why `cg status` caches rather than asks: run 20 times a day it would be about
+INR 530/month, more than the S3 archive it reports on.
 
 Note the gap between the two "out" figures. Billed egress is what leaves the real NIC, so it
 includes WireGuard overhead, ssh, and - measured at **~2.4 GB against a 132 GB download** - the
@@ -512,12 +534,34 @@ worth the work to hide it inside the build.
 If you still have that volume, it is **not** attached or mounted any more, and it is **not**
 deleted either - `cg games` shows what it still costs and `cg games --delete` reclaims it.
 
-### Deleting all of it
+### What `destroy` removes, and what `--all` removes
 
-`cg destroy --all` removes the box, the archive, **the bucket and the `<host>-box` IAM role** -
-and asks you to type `DESTROY-ALL` first, because the archive is the only copy of the games and
+`cg destroy` removes the **box**. `cg destroy --all` removes the **account footprint**.
+
+| | `cg destroy` | `--all` |
+|---|---|---|
+| Mirror the games to S3 first | **yes**, and refuses if it fails | no - they are being deleted |
+| Instance (terminate + cancel the spot request) | gone | gone |
+| Idle-stop alarm | gone | gone |
+| Security group, key pair, `~/.ssh/<host>.pem` | gone | gone |
+| Tailnet nodes | gone | gone |
+| Untagged orphaned volumes | gone | gone |
+| **Monthly budget** | **kept** | gone |
+| **S3 archive and its bucket** | **kept** | gone |
+| **`<host>-box` role + instance profile** | **kept** | gone |
+| **`<host>-watchdog` user, its key, the `.env` entries** | **kept** | gone |
+| **Off-site watchdog units on the VPS** | **kept** | gone |
+| Old EBS game volume, if you still have one | **kept** | gone |
+
+`--all` asks you to type `DESTROY-ALL`, because the archive is the only copy of the games and
 there is no versioning behind it. It skips the mirror entirely, since pushing games to S3 and
 then deleting the archive would be nonsense.
+
+**The budget is kept by a plain destroy on purpose.** It guards the account rather than the
+instance, it costs nothing, and it used to be deleted on every destroy - which meant it was
+recreated on every `cg init`, and AWS Budgets populates its spend figure up to 24 hours *after*
+a budget is created. On a rig rebuilt several times a day it never populated. It reported
+`$0.00 spent` against a real month of $12.17 and had never once been in a position to alert.
 
 It leaves nothing behind on purpose. An earlier version kept the empty bucket and the role,
 reasoning that both are free and the names are deterministic - but that is an argument for a
