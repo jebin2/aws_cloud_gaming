@@ -12,6 +12,13 @@
 #
 # It also keeps each failure's output, which the loop discarded to /dev/null -
 # so a failure that cannot be reproduced afterwards is at least legible once.
+#
+# RUN IT UNPIPED. `bash tests/run-all.sh | tail -4 && git commit` throws away
+# this script's exit status - the pipeline reports tail's - and commits on a red
+# suite exactly as the loop it replaced did. That happened, with this file
+# already in the repo. If you want a short view, use the file:
+#
+#     bash tests/run-all.sh > /tmp/t.log || { tail -20 /tmp/t.log; false; }
 set -uo pipefail
 cd "$(dirname "$0")/.."
 TIMEOUT="${TEST_TIMEOUT:-180}"

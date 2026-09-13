@@ -21,9 +21,13 @@ check()    { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
 contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: output lacks '$3'"; fail=$((fail+1)); fi; }
 
-mkdir -p "$T/bin" "$T/lib"
-cp "$REPO/lib/setup" "$T/lib/setup"
-cp "$REPO/lib/common.sh" "$T/lib/common.sh"
+mkdir -p "$T/bin"
+# The WHOLE lib/, not a hand-picked pair of files. Copying just setup and
+# common.sh meant that adding `source lib/pair.sh` to lib/setup killed this
+# suite under `set -e` - the script died on a missing file before reaching
+# anything it was meant to test, and every assertion failed for that one reason.
+# A sandbox that mirrors the real layout does not care what the code adds next.
+cp -r "$REPO/lib" "$T/lib"
 printf 'GAME_REGION=ap-south-2\nGAME_TS_HOST=gamevps\n' > "$T/.env"
 
 # Everything returns "nothing here", so destroy walks its whole path quickly.
