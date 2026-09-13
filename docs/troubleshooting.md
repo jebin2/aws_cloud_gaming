@@ -1287,3 +1287,30 @@ recognisably incomplete rather than plausibly complete.** The manifest is the th
 the rest of the bytes meaningful, so it goes last - the same reason a marker file is written
 after the work it vouches for, which this project already does for the restore marker and then
 did not do here.
+
+### `&` in a sed replacement means "the whole match"
+
+    curl 'https://...host.tgz?X-Amz-Algorithm=AWS4-HMAC-SHA256__HOST_TGZ_URL__X-Amz-Credential=...'
+    curl: (22) The requested URL returned error: 400
+
+Every `&` in a presigned S3 URL came out as the literal string `__HOST_TGZ_URL__`. In a sed
+replacement an unescaped `&` is the entire matched text, and a presigned URL is mostly `&`.
+
+None of the substitutions here need regex. They are literal replacements, so they now go through
+python's `str.replace`, which has no metacharacters to escape and cannot do this.
+
+**How it got through.** A hand-written check before shipping rendered the modules with a sample
+URL - and the sample had its `&` escaped by hand, in the shell, to get the command to run at all.
+The escaping that made the test convenient was the thing under test. A fixture that has been
+adjusted until it works is not evidence about the input it stands in for; `tests/userdata-render.sh`
+now uses the exact bytes `aws s3 presign` emits, and keeps a case asserting that **sed still
+corrupts it**, so the reason for not using sed is demonstrable rather than asserted.
+
+**The second fault was worse than the first.** Stage 15 treated the download as fatal, and it runs
+before tailscale - so the box never got a network identity. No ssh, no log streaming, nothing but
+`get-console-output`, for a failure whose whole cause was one visible line of the rendered script.
+It is non-fatal now: the build continues, the box stays reachable, the `verify` lines report the
+missing layer, and layers 3 and 4 - armed before launch - still bound the spend.
+
+Ordering a fatal check before the thing that makes a machine reachable turns any bug in it into a
+blind one. If a step must be fatal, it belongs after the network, not before it.

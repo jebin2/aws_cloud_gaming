@@ -139,12 +139,28 @@ else
     HOST_TGZ_URL=$(aws s3 presign "s3://$S3_BUCKET/boot/host.tgz" --region "$REGION" --expires-in 7200)
     [[ $HOST_TGZ_URL == https://* ]] || { echo "could not presign the host bundle"; exit 1; }
     rm -rf "$HOST_SRC" "$HOST_TGZ"
+    # Substituted in python, not sed. A presigned URL is full of `&`, and in a
+    # sed replacement an unescaped `&` means "the entire matched text" - so every
+    # separator in the URL came out as the literal string __HOST_TGZ_URL__, curl
+    # got a 400, and the build died before tailscale existed. The bug survived a
+    # hand-written test because the URL in it had its `&` escaped by hand.
+    #
+    # Nothing here needs regex or escaping: these are literal replacements, so
+    # use a tool that does literal replacement.
     cat "${parts[@]}" \
       | grep -vE '^[[:space:]]*#([^!]|$)' \
-      | sed -e "s|__TS_AUTHKEY__|$TS_AUTHKEY|" -e "s|__TS_HOST__|$TS_HOST|" \
-            -e "s|__HOST_TGZ_URL__|$HOST_TGZ_URL|" \
-            -e "s|__S3_BUCKET__|$S3_BUCKET|" \
-            -e "s|__CG_APPS__|${GAME_APPS:-all}|" > "$USERDATA"
+      | TS_AUTHKEY="$TS_AUTHKEY" TS_HOST="$TS_HOST" HOST_TGZ_URL="$HOST_TGZ_URL" \
+        S3_BUCKET="$S3_BUCKET" CG_APPS="${GAME_APPS:-all}" \
+        python3 -c 'import os,sys
+s = sys.stdin.read()
+for k in ("TS_AUTHKEY", "TS_HOST", "HOST_TGZ_URL", "S3_BUCKET", "CG_APPS"):
+    s = s.replace("__%s__" % k, os.environ.get(k, ""))
+missing = [w for w in ("__TS_AUTHKEY__", "__TS_HOST__", "__HOST_TGZ_URL__",
+                       "__S3_BUCKET__", "__CG_APPS__") if w in s]
+if missing:
+    sys.exit("placeholders left unsubstituted: %s" % ", ".join(missing))
+sys.stdout.write(s)' > "$USERDATA" \
+      || { echo "could not render user-data"; exit 1; }
     echo "    assembled ${#parts[@]} modules"
     # EC2 caps user-data at 16 KB, which bootstrap.sh outgrew. cloud-init
     # detects the gzip magic bytes and decompresses on its own, so shipping it
