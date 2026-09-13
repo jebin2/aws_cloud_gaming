@@ -648,6 +648,11 @@ but not a destroy. The Fossilize cache that matters most is *inside* the library
     tests/             offline tests for the fiddly host-side logic
     docs/              architecture and troubleshooting
 
+`./tests/run-all.sh` runs every suite and **exits non-zero if any fails** - which the obvious
+`for t in tests/*.sh; do ... && echo PASS || echo FAIL; done` does not, because the last command
+in the loop is the `echo`. That returned 0 on a red suite and a `&& git commit` chained after it
+committed anyway.
+
 `./tests/steam-library.sh` checks the Steam library registration - the part that has broken
 most often - against a faked Steam install, so it can be verified without spending a build.
 `./tests/library.sh` does the same for the S3 mirror's refusals, which is the code whose failure
