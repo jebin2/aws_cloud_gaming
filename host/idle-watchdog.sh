@@ -15,7 +15,12 @@ IDLE_LIMIT="${IDLE_LIMIT:-15}"        # consecutive idle minutes before shutdown
 THRESHOLD="${THRESHOLD:-204800}"      # bytes/min of stream traffic below which we call it idle (200 KB)
 RX_THRESHOLD="${RX_THRESHOLD:-10485760}"  # bytes/min inbound that counts as a real download (10 MB)
 BOOT_GRACE="${BOOT_GRACE:-20}"        # minutes after boot before the switch arms
-STATE=/var/lib/idle-watchdog
+# Every other knob here is overridable; this one was not, purely by oversight.
+STATE="${STATE:-/var/lib/idle-watchdog}"
+# Overridable so the shutdown path can be tested. A watchdog whose only job is
+# to power off a machine is not something to verify by running it for real.
+CG_LIBRARY_BIN="${CG_LIBRARY_BIN:-/usr/local/bin/cg-library}"
+SHUTDOWN_BIN="${SHUTDOWN_BIN:-/sbin/shutdown}"
 
 mkdir -p "$STATE"
 
@@ -56,6 +61,27 @@ logger -t idle-watchdog \
   "tx=${tx_delta}B rx=${rx_delta}B streaming=${streaming} downloading=${downloading} idle=${idle}/${IDLE_LIMIT}"
 
 if (( idle >= IDLE_LIMIT )); then
-  logger -t idle-watchdog "idle limit reached - shutting down"
-  /sbin/shutdown -h now "idle watchdog"
+  # Mirror BEFORE shutting down, not on the way out.
+  #
+  # cg-library-shutdown.service exists and works, but it runs from ExecStop
+  # under TimeoutStopSec - and a first upload of a 140 GB game does not fit in
+  # any shutdown window. Measured: 104 GB of egress in the 15 minutes systemd
+  # allowed, then the push was killed with ~72 GB of 140 landed and no manifest
+  # written. The archive was correctly marked incomplete, which is to say the
+  # whole session's download was lost.
+  #
+  # Here there is no clock. The box is fully alive, the push takes as long as it
+  # takes, and the extra minutes cost a few rupees of spot time against a
+  # re-download measured in hours. ExecStop stays as the backstop for stops this
+  # watchdog did not initiate.
+  if [[ -x $CG_LIBRARY_BIN ]]; then
+    logger -t idle-watchdog "idle limit reached - mirroring the library before shutdown"
+    if runuser -u ubuntu -- "$CG_LIBRARY_BIN" push 2>&1 | logger -t idle-watchdog; then
+      logger -t idle-watchdog "mirror complete"
+    else
+      logger -t idle-watchdog "mirror FAILED - shutting down anyway; games since the last push are lost"
+    fi
+  fi
+  logger -t idle-watchdog "shutting down"
+  "$SHUTDOWN_BIN" -h now "idle watchdog"
 fi

@@ -1314,3 +1314,40 @@ missing layer, and layers 3 and 4 - armed before launch - still bound the spend.
 
 Ordering a fatal check before the thing that makes a machine reachable turns any bug in it into a
 blind one. If a step must be fatal, it belongs after the network, not before it.
+
+### The first upload of a big game does not fit in a shutdown window
+
+A 140 GB download completed, the box idled, the on-host watchdog shut it down, and 72 GB of
+~140 reached S3 with no manifest. The whole session's download was lost.
+
+Every guard behaved correctly. The metrics say so:
+
+    window   NetworkIn    NetworkOut
+    13:45    29.7 GB       0.48 GB     downloading
+    14:00    22.6 GB       0.36 GB     downloading
+    14:15     0.01 GB      1.65 GB     download finished, push starting
+    14:30     0.22 GB    104.79 GB     pushing to S3
+
+The on-host watchdog waited its 15 idle minutes and called `shutdown -h`. The pre-shutdown unit
+started the mirror. Then `TimeoutStopSec=900` expired and systemd killed it mid-upload.
+
+**The mistake was putting the upload in the shutdown path at all.** `ExecStop` is the right place
+for a *delta* - after `cg stop`, there is nothing left to send and it takes seconds. It is hopeless
+for a first upload, because the only clock that exists during shutdown is the one that kills it.
+
+The watchdog now pushes **before** calling `shutdown -h`, where the machine is fully alive and
+nothing is counting. The extra minutes cost a few rupees of spot time against a re-download
+measured in hours. `ExecStop` stays as the backstop for stops the box did not initiate.
+
+**Two wrong diagnoses on the way to that**, both worth recording:
+
+The alarm was in `ALARM` with `no datapoints were received for 6 periods ... treated as
+[Breaching]`, and its action is `ec2:terminate`. That reads exactly like the cause, and the
+alarm *is* NetworkOut-only and therefore blind to downloads - a real flaw, documented in the
+code. But it was innocent here: metrics stop when an instance terminates, so an alarm evaluating
+afterwards sees missing data and fires. **A guard that goes red immediately after a failure is
+not necessarily the guard that caused it.** The metric history settled it in one query.
+
+And before that, the archive's 72 GB looked like the whole story. It was not: `NetworkOut` showed
+104 GB leaving the box. The gap is multipart uploads that never completed - invisible in a bucket
+listing, which is why the lifecycle rule that aborts them exists.

@@ -25,11 +25,16 @@ Group=ubuntu
 # machine goes down, while the network is still up.
 ExecStart=/bin/true
 ExecStop=/usr/local/bin/cg-library push
-# Bounded on purpose. AWS gives a stopping instance only a few minutes before
-# forcing the power off, so waiting longer than this cannot finish an upload
-# that was not going to finish - it just makes a doomed shutdown hang. A push
-# with nothing to send takes seconds, which is the normal case after `cg stop`.
-TimeoutStopSec=300
+# The backstop, for stops this box did not initiate - an external StopInstances,
+# a console terminate. The on-host watchdog now pushes BEFORE calling shutdown,
+# where there is no timeout at all, because a first upload of a 140 GB game
+# cannot fit in any shutdown window: measured at 104 GB in the 15 minutes
+# systemd allowed, then killed with ~72 GB of 140 landed.
+#
+# Still bounded, because a doomed upload should not hang a shutdown forever, and
+# after an explicit `cg stop` or a watchdog push there is nothing left to send -
+# seconds, not minutes.
+TimeoutStopSec=600
 
 [Install]
 WantedBy=multi-user.target
