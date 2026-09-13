@@ -236,7 +236,15 @@ for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.ge
     fi
     used=$(( used + want_bytes ))
     log "restoring $name ($id, $(hb "$want_bytes"))"
-    "$S5" cp "$S3/steamapps/appmanifest_$id.acf" "$LIB/steamapps/" >/dev/null 2>&1 || true
+    # No manifest means push never completed for this game (it is written last,
+    # on purpose). Restoring the files without it would leave Steam with an
+    # unreferenced directory; restoring a manifest that was never written is
+    # impossible. Either way the honest answer is that the game is not there.
+    if ! "$S5" cp "$S3/steamapps/appmanifest_$id.acf" "$LIB/steamapps/" >/dev/null 2>&1; then
+      log "  SKIPPING $name - no manifest in the archive, so it was never fully pushed"
+      skipped=$((skipped+1)); used=$(( used - want_bytes ))
+      continue
+    fi
     local src dst
     for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
       src="$S3/steamapps/$pair/*"; dst="$LIB/steamapps/$pair/"
@@ -308,8 +316,13 @@ print(next((a.get("bytes",0) for a in apps if str(a.get("appid"))==appid), 0))' 
       continue
     fi
     log "pushing $name ($id, $(hb "$bytes"))"
-    "$S5" cp "$LIB/steamapps/appmanifest_$id.acf" "$S3/steamapps/" >/dev/null 2>&1 || true
-    local src
+    # The manifest goes LAST, after every file it describes. Pushed first, an
+    # interrupted upload leaves an archive whose manifest says StateFlags 4 -
+    # fully installed - beside a quarter of the files. Restoring that gives
+    # Steam a game it believes is complete and which fails at launch, and the
+    # repair is a verify pass that re-downloads the lot. Manifest last means an
+    # interrupted push leaves no manifest, so the game simply is not there.
+    local ok=1 src
     for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
       src="$LIB/steamapps/$pair"
       [[ -d $src ]] || continue
@@ -317,11 +330,22 @@ print(next((a.get("bytes",0) for a in apps if str(a.get("appid"))==appid), 0))' 
       # propagated; a game that is not installed is never touched.
       "$S5" --numworkers "$WORKERS" sync --delete "${strategy[@]}" "${TUNE[@]}" \
         "${EXCLUDES[@]}" "$src/" "$S3/steamapps/$pair/" >/dev/null 2>&1 \
-        || log "  WARNING: $pair did not sync cleanly"
+        || { ok=0; log "  WARNING: $pair did not sync cleanly"; }
     done
     symlinks_record "$id" "$dir"
-    index_put "$(index_merge "$id" "$dir" "$name" "$bytes")"
-    n=$((n+1))
+    if (( ok )); then
+      "$S5" cp "$LIB/steamapps/appmanifest_$id.acf" "$S3/steamapps/" >/dev/null 2>&1 || ok=0
+    fi
+    if (( ok )); then
+      index_put "$(index_merge "$id" "$dir" "$name" "$bytes")"
+      n=$((n+1))
+    else
+      # No manifest and no index entry: the half-uploaded files are wasted
+      # space, not a trap. The next push completes them; `forget` clears them.
+      "$S5" rm "$S3/steamapps/appmanifest_$id.acf" >/dev/null 2>&1 || true
+      log "  $name is NOT archived - files uploaded but the manifest was withheld"
+      log "  (a partial game that Steam thinks is installed is worse than none)"
+    fi
   done <<< "$apps"
 
   "$S5" cp "$LIB/steamapps/libraryfolder.vdf" "$S3/steamapps/" >/dev/null 2>&1 || true

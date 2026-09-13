@@ -165,7 +165,35 @@ check    "uploaded nothing"       "$(cnt 'sync')" "0"
 out=$(run push --force)
 contains "--force overrides"      "$out" "pushing Black Myth"
 
-echo "10. list shows each game, the total, and what it costs"
+echo "10. a failed file sync withholds the manifest rather than lying"
+# An archive whose manifest says StateFlags 4 beside a quarter of the files
+# gives Steam a game it believes is complete and which fails at launch - and the
+# repair re-downloads everything. Seen for real: 33.87 GB of files under a
+# manifest claiming 149.9 GB installed.
+echo "boot-aaaa" > "$T/state/restored"
+rm -rf "$T/scratch/steam/steamapps"; mkdir -p "$T/scratch/steam/steamapps"
+install_game 730 CS2 "Counter-Strike 2" 20
+cat > "$T/bin/s5cmd" <<'FAKE'
+#!/usr/bin/env bash
+args="$*"
+echo "$args" >> "$S5LOG"
+case "$args" in
+  version)          echo "v2.2.2" ;;
+  *cat*index.json*) cat "$IDX" ;;
+  *sync*)           exit 1 ;;          # every file sync fails
+  *)                : ;;
+esac
+FAKE
+chmod +x "$T/bin/s5cmd"
+out=$(run push)
+contains "says it is not archived"  "$out" "is NOT archived"
+contains "explains why that matters" "$out" "worse than none"
+contains "removed any stale manifest" "$(cat "$T/s5.log")" "rm s3://b/steam/steamapps/appmanifest_730.acf"
+n=$(grep -c 'cp .*appmanifest_730.acf s3' "$T/s5.log" 2>/dev/null) || true
+check "never uploaded the manifest"  "${n:-0}" "0"
+mkstub
+
+echo "11. list shows each game, the total, and what it costs"
 out=$(run list)
 contains "Diablo listed"              "$out" "Diablo IV"
 contains "Wukong listed"              "$out" "Black Myth: Wukong"
@@ -173,19 +201,19 @@ contains "total line"                 "$out" "total"
 # 160 + 128 = 288 GB at $0.025 = $7.20
 contains "monthly cost"               "$out" "7.20"
 
-echo "11. forget refuses without the typed word, and deletes nothing"
+echo "12. forget refuses without the typed word, and deletes nothing"
 out=$(printf 'no\n' | run forget 2344520)
 contains "names the game"             "$out" "Diablo IV"
 contains "warns it must be redownloaded" "$out" "downloading it from Steam"
 contains "aborted"                    "$out" "aborted"
 check    "nothing removed"            "$(cnt 'rm')" "0"
 
-echo "12. forget with FORGET removes that game only"
+echo "13. forget with FORGET removes that game only"
 out=$(printf 'FORGET\n' | run forget 2344520)
 contains "confirms"                   "$(cat "$T/s5.log")" "2344520"
 lacks    "left Wukong alone"          "$(grep 'rm' "$T/s5.log" || true)" "2358720"
 
-echo "13. an appid that is not archived is an error, not a silent no-op"
+echo "14. an appid that is not archived is an error, not a silent no-op"
 out=$(printf 'FORGET\n' | run forget 111111); rc=$?
 check    "exits non-zero"             "$rc" "1"
 contains "says it is not there"       "$out" "not in the archive"

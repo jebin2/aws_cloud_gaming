@@ -246,6 +246,25 @@ library_index() {
 }
 
 library_list() {
+  # An index.json is written only by the per-app push. A box built before that
+  # mirrors fine but writes no index, so "the archive is empty" would be a lie
+  # told about the thing that was looked for rather than the thing that is
+  # there. Check the objects before saying nothing is there.
+  local objs
+  objs=$(aws s3 ls "s3://$GAME_S3_BUCKET/steam/" --recursive --summarize 2>/dev/null \
+         | awk '/Total Objects:/{print $3}')
+  if [[ ${objs:-0} -gt 0 ]] \
+     && ! aws s3 ls "s3://$GAME_S3_BUCKET/steam/index.json" >/dev/null 2>&1; then
+    local sz
+    sz=$(aws s3 ls "s3://$GAME_S3_BUCKET/steam/" --recursive --summarize 2>/dev/null \
+         | awk '/Total Size:/{print $3}')
+    echo "  archive holds $objs objects, $(numfmt --to=iec --suffix=B "${sz:-0}" 2>/dev/null)"
+    echo "  but no per-game index yet - this box predates per-game archiving."
+    echo "  The next push from a rebuilt box writes one and this lists per game."
+    aws s3 ls "s3://$GAME_S3_BUCKET/steam/steamapps/common/" 2>/dev/null \
+      | sed 's/^ *PRE /  - /' | sed 's|/$||'
+    return 0
+  fi
   library_index | python3 -c '
 import json,sys
 try:    apps=json.load(sys.stdin).get("apps",[])
@@ -367,7 +386,18 @@ cmd_destroy() {
   if [[ $st == running ]]; then
     if ! library_push; then
       if (( ! force )); then
-        die "the library was not mirrored to S3 - destroying now would lose it. Fix it, or: cg destroy --force"
+        echo
+        echo "  The push from here failed, which usually means ssh cannot reach the box."
+        echo "  That is not the same as 'the games are lost':"
+        echo
+        echo "    cg-library-shutdown.service runs ON the box, from ExecStop, and"
+        echo "    mirrors the library as the machine shuts down. It needs no ssh."
+        echo "    Terminating sends a graceful shutdown, so it still runs."
+        echo
+        echo "  So --force is usually safe here. Afterwards, confirm it worked:"
+        echo "      cg library list      # the archive, read straight from S3"
+        echo
+        die "not mirrored from here - see above, then: cg destroy --force"
       fi
       log "WARNING: proceeding without a mirror (--force) - games will be re-downloaded"
     fi

@@ -1258,3 +1258,32 @@ overwrite its own complete copy. It is back, scoped to one game, and pointing at
 
 The pattern in the last one is worth naming. Removing a guard because the architecture changed is
 usually right; the mistake is assuming the guard only ever covered the case you just eliminated.
+
+### An archive that lied about being complete
+
+    BlackMythWukong/ in S3        33.87 GB
+    appmanifest_2358720.acf       "StateFlags" "4"   "SizeOnDisk" "149864365377"
+
+A manifest saying *fully installed, 149.9 GB* beside 23% of the files. Restoring that hands Steam
+a game it believes is complete, which then fails at launch - and the repair is a verify pass that
+re-downloads all 150 GB. Worse than having nothing archived, because nothing archived is at least
+true.
+
+The push was interrupted. The manifest is a single small file and the game is tens of thousands,
+so whichever order they upload in, an interruption lands between them - and the manifest going
+first means the archive claims more than it holds for the entire remainder of the transfer.
+
+**The manifest is now written last**, after every file it describes, and withheld entirely if any
+part of the file sync failed - along with a `rm` of any stale copy. An interrupted push therefore
+leaves orphaned files and no manifest, which the index does not list and `pull` skips with a
+reason. Wasted storage until the next push completes it, which is a bill, not a trap.
+
+`pull` enforces the same rule from the other side: no manifest means the game was never fully
+pushed, so it is skipped and said out loud rather than restored as a directory Steam will not
+acknowledge.
+
+The general shape: **when a transfer cannot be atomic, order it so the interrupted state is
+recognisably incomplete rather than plausibly complete.** The manifest is the thing that makes
+the rest of the bytes meaningful, so it goes last - the same reason a marker file is written
+after the work it vouches for, which this project already does for the restore marker and then
+did not do here.

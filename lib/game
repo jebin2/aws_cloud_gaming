@@ -195,7 +195,13 @@ down() {
   [[ $(state) == stopped ]] && { echo "already stopped"; return; }
   if ! mirror_library; then
     if [[ ${CG_FORCE:-0} != 1 ]]; then
-      die "the library was not mirrored - stopping now would lose it. Fix it, or: cg stop --force"
+      echo
+      echo "  The push from here failed - usually ssh cannot reach the box."
+      echo "  cg-library-shutdown.service mirrors from ON the box as it shuts"
+      echo "  down and needs no ssh, so --force is usually safe. Check after:"
+      echo "      cg library list"
+      echo
+      die "not mirrored from here - see above, then: cg stop --force"
     fi
     log "WARNING: stopping without a mirror (--force) - games will be re-downloaded"
   fi
