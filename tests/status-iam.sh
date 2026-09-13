@@ -18,6 +18,8 @@ contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: '$2' lacks '$3'"; fail=$((fail+1)); fi; }
 lacks()    { if [[ $2 != *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: '$2' should not contain '$3'"; fail=$((fail+1)); fi; }
+check()    { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
+             else echo "  FAIL $1: got '$2' want '$3'"; fail=$((fail+1)); fi; }
 
 # ROLE=1 the instance role exists; USER=1 the watchdog user exists;
 # KEY= the active key id it reports ("None" for a user with no active key).
@@ -33,10 +35,14 @@ esac
 FAKE
 chmod +x "$T/bin/aws"
 
+RC=0
 run() {
-  ( cd "$T" && PATH="$T/bin:$PATH" TS_HOST=gamevps \
+  local out
+  out=$( cd "$T" && PATH="$T/bin:$PATH" TS_HOST=gamevps \
       ROLE="${ROLE:-0}" USER_EXISTS="${USER_EXISTS:-0}" KEY="${KEY:-None}" \
       bash -c 'source "$1"; iam_lines' _ "$T/fn.sh" 2>&1 )
+  RC=$?
+  printf '%s' "$out"
 }
 sed -n '/^iam_lines() {/,/^}/p' lib/setup > "$T/fn.sh"
 [[ -s $T/fn.sh ]] || { echo "could not extract iam_lines from lib/setup"; exit 1; }
@@ -70,5 +76,21 @@ echo "5. a user with no active key is not reported as a live credential"
 out=$(ROLE=1 USER_EXISTS=1 KEY=None run)
 contains "says it has no key"   "$out" "no active key"
 lacks    "not called ACTIVE"    "$out" "ACTIVE"
+
+# Exit status, on every path. The function runs inside `set -e` callers, so a
+# non-zero return kills `cg status` and `cg cost` outright - which is exactly
+# what happened: `[[ ... ]] && printf` as the last statement returned 1 whenever
+# its test was false. The output assertions above all passed while that was
+# live, because they captured stdout and ignored $?.
+echo "6. iam_lines returns 0 on every path"
+for spec in "0 0 None" "1 0 None" "1 1 AKIAFAKE" "1 1 None"; do
+  set -- $spec
+  : > "$T/.env"
+  ROLE=$1 USER_EXISTS=$2 KEY=$3 run >/dev/null
+  check "role=$1 user=$2 key=$3 (no .env entry)" "$RC" "0"
+  printf 'GAME_WATCHDOG_AWS_KEY_ID=AKIAFAKE\n' > "$T/.env"
+  ROLE=$1 USER_EXISTS=$2 KEY=$3 run >/dev/null
+  check "role=$1 user=$2 key=$3 (key in .env)"   "$RC" "0"
+done
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

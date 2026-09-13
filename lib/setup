@@ -78,7 +78,15 @@ iam_lines() {
       printf '  watchdog key    %s  ACTIVE: %s  (can stop instances)\n' "$wd" "$keys"
       # A key AWS still honours but that we no longer hold is unusable and
       # unauditable - it can only be revoked, never used again.
-      [[ ${envk:-0} -eq 0 ]] && printf '                  not in .env - orphaned; revoke it: cg destroy --all\n'
+      #
+      # `if`, not `[[ ]] && printf`. As the LAST statement of a function, that
+      # compound returns 1 whenever the test is false, the function returns 1,
+      # and `set -e` kills the caller. It did: `cg status` and `cg cost` both
+      # exited 1 with no output past this line, but only once a watchdog key
+      # existed in .env - the condition under which the printf is skipped.
+      if [[ ${envk:-0} -eq 0 ]]; then
+        printf '                  not in .env - orphaned; revoke it: cg destroy --all\n'
+      fi
     else
       printf '  watchdog key    %s exists but has no active key\n' "$wd"
     fi
@@ -354,21 +362,31 @@ g=[x for x in g if float(x["c"])>0.004]
 g.sort(key=lambda x:-float(x["c"]))
 if not g and not out_gb: print("  nothing billed yet this month"); sys.exit()
 print("  %-32s%9s %8s %7s" % ("USAGE TYPE","QTY","USD","INR"))
-tot=0.0; hrs=0.0; spot=False
+# Spot and on-demand hours are counted SEPARATELY. This used to keep one
+# boolean - `spot = spot or "SpotUsage" in u` - so a single spot hour labelled
+# the entire month "(spot)". It hid the thing most worth seeing: 10.96 of 15
+# hours were on-demand at 4x the price, 87% of the bill, while the summary line
+# read "15.0 instance-hours this month (spot)".
+tot=0.0; sp_h=sp_c=od_h=od_c=0.0
 for x in g:
     c=float(x["c"]); q=float(x["q"]); tot+=c
     u=x["u"].split("-",1)[-1]          # strip the region prefix
-    if "BoxUsage" in u or "SpotUsage" in u:
-        hrs+=q; spot = spot or "SpotUsage" in u
+    if "SpotUsage" in u:  sp_h+=q; sp_c+=c
+    elif "BoxUsage" in u: od_h+=q; od_c+=c
     print("  %-32s%9.2f %8.2f %7.0f" % (u,q,c,c*88))
 print("  " + "-"*57)
 print("  %-32s%9s %8.2f %7.0f" % ("TOTAL","",tot,tot*88))
-if hrs:
-    kind = "spot" if spot else "on-demand"
+if sp_h or od_h:
     print("")
-    print("  %.1f instance-hours this month (%s)" % (hrs,kind))
-    if not spot:
-        print("  the same hours on spot would be about $%.2f (INR %.0f)" % (hrs*0.23, hrs*0.23*88))
+    if od_h: print("  %5.1f h on demand  $%6.2f (INR %5.0f)   $%.3f/hr" % (od_h, od_c, od_c*88, od_c/od_h))
+    if sp_h: print("  %5.1f h on spot    $%6.2f (INR %5.0f)   $%.3f/hr" % (sp_h, sp_c, sp_c*88, sp_c/sp_h))
+    # Compare against the rate actually paid where there is one, rather than a
+    # hardcoded guess.
+    rate = (sp_c/sp_h) if sp_h else 0.23
+    if od_h:
+        save = od_c - od_h*rate
+        print("  those on-demand hours would have been $%.2f (INR %.0f) on spot - %.0f%% less"
+              % (od_h*rate, od_h*rate*88, 100*save/od_c if od_c else 0))
 
 # Streaming is data transfer out. Free to 100 GB/month, then $0.1093/GB - which
 # at a 20 Mbps stream (~9 GB/hour) is ~$0.98/hour, rivalling the instance.
