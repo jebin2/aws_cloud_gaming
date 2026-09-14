@@ -107,10 +107,20 @@ up() {
     wait_instance_state "$REGION" "$INSTANCE_ID" running
   fi
 
-  # Arm layer 3 only now. Outside a session the box is idle for legitimate
-  # reasons (setup, updates) and an armed alarm would stop it mid-task.
+  # Arm layer 3 only now, and DISARM it when the stream ends - see below.
+  #
+  # This half was always here; the disarm was not, so the alarm stayed armed
+  # forever after the first `cg open`. It watches NetworkOut alone, because
+  # CloudWatch refuses EC2 actions on a metric-math expression, so it cannot
+  # tell "downloading 140 GB" from "idle": a download is almost entirely
+  # inbound. Thirty minutes after a stream ended it terminated the box, twice,
+  # each time losing a download that was still running.
   ec2_cw() { aws cloudwatch "$@" --region "$REGION"; }
   ec2_cw enable-alarm-actions --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null || true
+  # Disarm on EVERY exit from here, not just the happy path. A session that dies
+  # waiting for Sunshine, or a Ctrl+C, used to leave the alarm armed with no
+  # session to justify it - the same end state as never disarming at all.
+  trap 'ec2_cw disable-alarm-actions --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null || true' EXIT
 
   wait_for "waiting for tailscale" 60 tailscale ping -c 1 --timeout 2s "$TS_NODE"
 
@@ -141,6 +151,21 @@ up() {
   (( ${#mlf[@]} )) && echo "    stream: ${mlf[*]}" || true
   moonlight stream ${mlf[@]+"${mlf[@]}"} "$ip" "$APP" || true
   printf 'session ended after %dm\n' $(( (SECONDS - t0) / 60 ))
+
+  # Disarm layer 3 the moment the stream stops, whatever happens next.
+  #
+  # Its job is catching a wedged Sunshine WHILE you are streaming - during a
+  # session, no outbound traffic for 30 minutes means the stream is dead. Once
+  # the session is over that inference is simply wrong: a box left running to
+  # finish a download is doing exactly what it should, and looks identical to
+  # this alarm.
+  #
+  # Layers 2 and 4 both count inbound as well as outbound, so leaving the box
+  # running is still guarded - by the two layers that can tell the difference.
+  ec2_cw disable-alarm-actions --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null \
+    && log "layer 3 disarmed - a download left running will not be terminated" \
+    || true
+  trap - EXIT
 
   end_session
 }

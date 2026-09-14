@@ -1385,3 +1385,35 @@ success-reported-while-broken bug. It was not - Sunshine stores them under `name
 the ad-hoc check looked for `devices`. `moonlight list <ip>` returning the app list is the
 authoritative answer, because it is the client actually using the pairing. **Prefer the check
 that exercises the thing over the one that inspects its storage.**
+
+### The alarm did kill it, and I said it did not
+
+Yesterday a 140 GB download was lost when the box went away mid-upload. The idle-stop alarm was
+in ALARM with `no datapoints were received for 6 periods ... treated as [Breaching]` and an
+`ec2:terminate` action. I reasoned that metrics stop when an instance terminates, so an alarm
+evaluating afterwards would see missing data and fire - concluded it was an artifact, and wrote
+that down as a lesson about guards that go red after a failure they did not cause.
+
+It was the cause. `describe-alarm-history` records the actions, and both are there:
+
+    19:31:58  Action: Terminate EC2 Instance 'i-03de71b0974ddecf0' action completed successfully
+    15:11:48  Action: Terminate EC2 Instance 'i-0a384809f81212531' action completed successfully
+
+Two boxes, two downloads, both terminated by layer 3. The reasoning that exonerated it was
+sound and the conclusion was wrong, and one API call I never made would have settled it. When a
+component has an audit log, read the log before reasoning about what it would have done.
+
+**The actual bug.** `cg open` armed the alarm and *nothing ever disarmed it*, so it stayed armed
+for the life of the box. It watches NetworkOut alone - CloudWatch refuses EC2 actions on a
+metric-math expression, so it cannot sum in+out - and a download is almost entirely inbound.
+Thirty minutes after a stream ended, a box busy downloading looked exactly like an idle one.
+
+It is disarmed now the moment the stream stops, via a trap so it also covers a session that dies
+early or is interrupted. During a session the inference "no outbound for 30 minutes means the
+stream is dead" is sound, which is the only window where this layer is meant to be watching.
+Outside one, layers 2 and 4 both count inbound and can tell the difference.
+
+**And it explains the second failure.** The alarm terminates through the EC2 API, so the on-host
+watchdog never runs - the mirror-before-shutdown added for exactly this case was bypassed, and
+the upload got only the `ExecStop` window again. Fixing the guard that fires is not enough when a
+*different* guard can fire first and skip the path you fixed.
