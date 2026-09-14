@@ -281,8 +281,14 @@ the numbers behind it**:
     GAME_WATCHDOG_AWS_KEY_ID=AKIA...      # the scoped user, not yours
     GAME_WATCHDOG_AWS_SECRET=...
 
-`cg init` arms it **before it launches anything**, and refreshes it on later runs, so there is
-no manual step. The commands are there for when you want them:
+`cg init` arms it **before it launches anything**, so there is no manual step. On later runs it
+reinstalls **only if something changed**: the host keeps a fingerprint of the files and config it
+was given, and one `ssh` compares it, reads the timer state and fetches the last decision. When
+nothing changed, init shows that decision and its age rather than running a new check - a check
+on an idle box counts towards stopping it, so running one on every init was an idle tick. It
+also warns if the last decision is older than the 5-minute timer allows. All ssh to that host
+shares one connection. The first line used to take ~7 s to appear; the unchanged path is ~1 s.
+The commands are there for when you want them:
 
     cg watchdog install                   # systemd timer, survives a reboot
     cg watchdog status                    # timer state and recent decisions

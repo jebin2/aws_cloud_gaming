@@ -834,27 +834,77 @@ JSON
 # Builds the ssh command for the off-site host into WD_RSH. An Oracle box wants
 # its own key, which is what GAME_WATCHDOG_KEY is for; unset means the ssh
 # default. Written out three times before this existed.
+# One shared connection for every ssh and scp to the watchdog host. Each call
+# used to open its own: measured 0.30 s a handshake against 0.03 s over a shared
+# one, and `cg init` made about eight of them before printing a single line.
+# ControlPersist closes it by itself a minute after the last use. The socket
+# lives in the per-user runtime dir: a socket path over ~104 characters is
+# refused outright, and deeper directories hit that.
+WD_MUX=(-o ControlMaster=auto -o "ControlPath=${XDG_RUNTIME_DIR:-/tmp}/cg-wd-%C" -o ControlPersist=60)
+
 wd_rsh_init() {
   local kf="${GAME_WATCHDOG_KEY:-}" ident=()
   [[ -n $kf ]] && ident=(-i "${kf/#\~/$HOME}")
   WD_RSH=(ssh "${ident[@]}" -o ConnectTimeout=8 -o BatchMode=yes
-          -o StrictHostKeyChecking=accept-new "$GAME_WATCHDOG_HOST")
+          -o StrictHostKeyChecking=accept-new "${WD_MUX[@]}" "$GAME_WATCHDOG_HOST")
+}
+
+# What an install would put on the host, as one hash: the three files and the
+# config written from .env, secret included. The host keeps the hash of what it
+# was last given, so "is it current" is one comparison instead of a reinstall.
+# Only the hash leaves this machine, and it lands in a root-only file.
+watchdog_fingerprint() {
+  { cat host/remote-watchdog.sh host/remote-watchdog.service host/remote-watchdog.timer 2>/dev/null
+    printf 'GAME_REGION=%s\nGAME_TS_HOST=%s\nIDLE_LIMIT=%s\n' "$REGION" "$TS_HOST" "${GAME_WATCHDOG_IDLE:-6}"
+    printf '%s\n%s\n' "${GAME_WATCHDOG_AWS_KEY_ID:-}" "${GAME_WATCHDOG_AWS_SECRET:-}"
+  } | sha256sum | cut -d' ' -f1
 }
 
 watchdog_ensure() {
   [[ -n ${GAME_WATCHDOG_HOST:-} ]] || return 0
+  # Something on screen at once. This whole function used to print nothing until
+  # its last line, several seconds in, which reads as a hang.
+  _cg_styled && _cg_live "checking the off-site watchdog"
   wd_rsh_init; local rsh=("${WD_RSH[@]}")
-  if ! "${rsh[@]}" true 2>/dev/null; then
+  # ONE round trip answers everything the fast path needs: is the host up (ssh
+  # fails with 255 if not; `true` keeps a missing file from looking like that),
+  # is the timer enabled, what was last installed, and what it last decided.
+  local remote
+  if ! remote=$("${rsh[@]}" 'systemctl is-enabled remote-watchdog.timer 2>/dev/null | head -1;
+                  sudo cat /var/lib/cloud-gaming-watchdog/installed.sha256 2>/dev/null || echo;
+                  sudo tail -1 /var/log/cloud-gaming-watchdog.log 2>/dev/null; true' 2>/dev/null); then
     log "off-site watchdog: $GAME_WATCHDOG_HOST unreachable - skipping"
     return 0
   fi
+  # Before the fingerprint: this can reissue the keys, and new keys are a change.
   watchdog_iam_ensure || true
+
+  local enabled installed last
+  enabled=$(sed -n 1p <<<"$remote"); installed=$(sed -n 2p <<<"$remote"); last=$(sed -n 3p <<<"$remote")
+  if [[ $enabled == enabled && -n $installed && $installed == "$(watchdog_fingerprint)" ]]; then
+    # Current: no reinstall, and no new check either. Running one here counted
+    # towards stopping the box - every init was an idle tick. Report the last
+    # decision the timer made instead, and how old it is.
+    if [[ -z $last ]]; then
+      log "off-site watchdog: up to date, but it has logged nothing yet - check: cg watchdog logs"
+      return 0
+    fi
+    local age; age=$(( $(date +%s) - $(date -d "${last%% *}" +%s 2>/dev/null || date +%s) ))
+    local when; if (( age < 90 )); then when="${age}s"; else when="$(( age / 60 )) min"; fi
+    log "off-site watchdog: up to date - last check $when ago: ${last#* }"
+    # The timer fires every 5 minutes; three missed runs is not jitter.
+    (( age > 900 )) && log "  ^ nothing for $(( age / 60 )) min but the timer runs every 5 - it is not running. Check: cg watchdog status"
+    [[ $last == *"CANNOT QUERY AWS"* ]] \
+      && log "  ^ it cannot see your account - fix this or layer 4 is decoration"
+    return 0
+  fi
 
   # Every call below goes through a SUBSHELL. cmd_watchdog uses die(), which
   # exits the process - so a plain `cmd_watchdog install || log ...` cannot
   # catch it and a missing watchdog killed `cg init` outright. This function
   # promises never to be fatal; a subshell is what makes that true.
-  if [[ $("${rsh[@]}" 'systemctl is-enabled remote-watchdog.timer 2>/dev/null | head -1' 2>/dev/null) == enabled ]]; then
+  if [[ $enabled == enabled ]]; then
+    _cg_styled && _cg_live "updating the off-site watchdog"
     ( cmd_watchdog install ) >/dev/null 2>&1 \
       || log "off-site watchdog: refresh failed (the existing one is still armed)"
   else
@@ -875,8 +925,10 @@ watchdog_ensure() {
 watchdog_prove() {
   wd_rsh_init; local rsh=("${WD_RSH[@]}")
   local line
+  # The unit is Type=oneshot, so `systemctl start` returns only once the check
+  # has run and logged. The `sleep 2` that used to sit here waited for nothing.
   line=$("${rsh[@]}" 'sudo systemctl start remote-watchdog.service 2>/dev/null;
-                      sleep 2; sudo tail -1 /var/log/cloud-gaming-watchdog.log' 2>/dev/null)
+                      sudo tail -1 /var/log/cloud-gaming-watchdog.log' 2>/dev/null)
   if [[ -z ${line:-} ]]; then
     log "off-site watchdog: armed, but it logged nothing - check: cg watchdog logs"
     return 0
@@ -896,8 +948,8 @@ cmd_watchdog() {
   local kf="${GAME_WATCHDOG_KEY:-}"
   local ident=(); [[ -n $kf ]] && ident=(-i "${kf/#\~/$HOME}")
   local rsh=(ssh "${ident[@]}" -o ConnectTimeout=10 -o BatchMode=yes
-             -o StrictHostKeyChecking=accept-new "$host")
-  local scpid=("${ident[@]}")
+             -o StrictHostKeyChecking=accept-new "${WD_MUX[@]}" "$host")
+  local scpid=("${ident[@]}" "${WD_MUX[@]}")
   case "${1:-status}" in
     install)
       say "checking $host"
@@ -974,6 +1026,12 @@ cmd_watchdog() {
       log "installed and enabled - it survives a reboot of $host (OnBootSec + Persistent)"
       "${rsh[@]}" 'systemctl list-timers remote-watchdog.timer --no-pager' 2>/dev/null | sed 's/^/      /'
       log "it stops the box after $(( ${GAME_WATCHDOG_IDLE:-6} * 5 )) min with no traffic in or out"
+      # Last, so only an install that got this far is recorded as current. Every
+      # failure above dies first, and the next init installs again.
+      watchdog_fingerprint | "${rsh[@]}" 'sudo install -d -m 755 /var/lib/cloud-gaming-watchdog;
+        sudo tee /var/lib/cloud-gaming-watchdog/installed.sha256 >/dev/null;
+        sudo chmod 600 /var/lib/cloud-gaming-watchdog/installed.sha256' 2>/dev/null \
+        || log "could not record the install fingerprint - the next init will reinstall"
       ;;
     status)
       printf '  host    %s\n' "$host"

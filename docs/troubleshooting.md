@@ -1583,3 +1583,38 @@ safe failure is pruning nothing - not deleting the tailnet identity of a box tha
 
 Before running the fix against the real tailnet, the new filter was run read-only over the live
 device list. It selected exactly the dead node and kept the box that was mid-build beside it.
+
+### `cg init` sat silent for ~7 seconds before its first line
+
+The first line of `cg init` is the off-site watchdog's. Everything before it ran with no output:
+a reachability `ssh`, a credential check, a second `ssh` for the timer state, then a full
+reinstall with its output sent to `/dev/null` - `ssh`, `ssh`, `scp`, `ssh`, an `aws sts` call made
+*from* the host, another `aws sts` here, `ssh` - and finally a "proof" that started the watchdog and
+slept two seconds before reading its log. Measured, one piece at a time:
+
+| Piece | Each | Count |
+|---|---|---|
+| a new ssh connection to the host | 0.30 s | ~8 |
+| `aws sts` run on the host | 1.13 s | 1 |
+| `aws sts` run here | 0.47 s | 2 |
+| `sleep 2` | 2.00 s | 1 |
+
+Four things were wrong, and only the first is about speed:
+
+1. **It reinstalled an identical watchdog on every init.** The host now keeps a fingerprint of
+   what it was last given - the three files and the config, secret included, hashed - and one
+   `ssh` returns the timer state, that fingerprint and the last log line together. If nothing
+   changed there is nothing to install.
+2. **Every call opened its own connection.** They share one now (`ControlMaster`): 0.03 s a call
+   instead of 0.30 s. The socket goes in `$XDG_RUNTIME_DIR` because a socket path over about 104
+   characters is refused, which is exactly what the first measurement of this hit.
+3. **The `sleep 2` waited for nothing.** `remote-watchdog.service` is `Type=oneshot`, so
+   `systemctl start` does not return until the check has run and logged.
+4. **The proof moved the box towards being stopped.** It ran a real watchdog check, and an idle
+   box counts every check - so each `cg init` was an idle tick (`idle=2/6` became `3/6`). When
+   nothing changed, init now reports the *last* decision and its age instead of making a new one,
+   and says so if that decision is older than the 5-minute timer allows. A real check still runs
+   after an actual reinstall, where proving the new credentials is the point.
+
+On a terminal, a live line shows at once, so the part that is still necessary no longer looks like
+a hang.
