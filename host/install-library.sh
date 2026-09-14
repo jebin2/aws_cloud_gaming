@@ -16,7 +16,11 @@ if ! /usr/local/bin/s5cmd version >/dev/null 2>&1; then
   tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
   base="https://github.com/peak/s5cmd/releases/download/v${S5_VERSION}"
   tgz="s5cmd_${S5_VERSION}_Linux-64bit.tar.gz"
-  curl -fsSL -o "$tmp/$tgz" "$base/$tgz"
+  # Retries, because this is a third-party CDN on the critical path of a build.
+  # A single GitHub 504 killed a whole bootstrap once: the download failed, the
+  # verify that followed returned non-zero, and `set -e` took the rest of the
+  # build with it.
+  curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o "$tmp/$tgz" "$base/$tgz"
   # Checksums come from the same release, so this catches a truncated or
   # corrupted download - not a compromised release. Said plainly because a
   # checksum line invites the assumption that it does more than it does.

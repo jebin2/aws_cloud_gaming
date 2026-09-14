@@ -1453,3 +1453,39 @@ The irony is worth recording: the push path already had this exact protection - 
 manifest when a sync fails, which is why the archive itself was intact and Steam could repair
 from Valve's servers. The restore path had `|| true` instead. **The same operation in two
 directions, one guarded and one not**, because only one of them had ever burned me before.
+
+### A GitHub 504 killed the build, again from before tailscale
+
+    curl: (22) The requested URL returned error: 504
+    >>> FAILED: library mirror install - games will not persist a stop
+    >>> FAILED: library mirror installed
+    Failed to start cloud-final.service
+
+GitHub returned a 504 while `install-library.sh` fetched s5cmd. The install failed, the `verify`
+that followed returned non-zero, `set -e` took the rest of the build with it - and the library
+stage ran at 16, **before tailscale at 20**. So the box never got a network identity: no ssh, no
+log streaming, only `get-console-output`, for a failure that had nothing to do with the box.
+
+This is the second time the same shape has bitten. The first was a corrupted presigned URL at
+stage 15, fixed by making *that* download non-fatal. Fixing the instance is not fixing the
+class: **anything ordered before tailscale turns its own failures into blind ones**, and a
+third-party CDN on the critical path will eventually return a 504.
+
+Three changes:
+
+- the library stage moved to **22**, after tailscale. Nothing there needs to precede it, and
+  tailscale installs in seconds, so the overlap with the driver install is unchanged
+- its `verify` lines are `|| true`. A missing mirror is a bad day; an unreachable GPU instance
+  is one you can only kill from the AWS console
+- the s5cmd download retries (`--retry 5 --retry-delay 3 --retry-all-errors`), which would have
+  ridden out this 504 on its own
+
+`tests/bootstrap-order.sh` asserts the ordering rather than trusting it: every stage that fetches
+from a third party must be numbered after tailscale, the library stage's verifies must all be
+guarded, and third-party downloads must retry. That test exists because the ordering rule is
+invisible in any single file - it is a property of the directory listing, which is exactly the
+kind of thing that quietly regresses.
+
+Writing it produced its own small lesson: the first version detected "unguarded verify" with
+`^verify .*[^)]$`, which matches the guarded lines too, since they end in `true`. It reported
+four unguarded verifies in a file that had none.

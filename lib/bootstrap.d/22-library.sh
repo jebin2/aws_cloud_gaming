@@ -18,6 +18,17 @@
 #
 # The box reads S3 through an EC2 instance ROLE attached by provision.sh, not an
 # access key: there is no secret here to leak or rotate.
+# AFTER tailscale (20), not before it.
+#
+# This used to be stage 16. A transient GitHub 504 while fetching s5cmd failed
+# the install, the verify below returned non-zero, `set -e` killed the build -
+# and because that happened before tailscale, the box never got a network
+# identity. No ssh, no log streaming, only get-console-output, for a failure
+# that had nothing to do with networking.
+#
+# Nothing here needs to precede tailscale. Tailscale installs in seconds, so
+# moving this after it costs no measurable overlap with the driver install and
+# guarantees the box is reachable whatever happens here.
 progress "installing the S3 game library mirror"
 ( cd /opt/cloud-gaming-host && bash ./install-library.sh '__S3_BUCKET__' steam '__CG_APPS__' ) \
   || echo ">>> FAILED: library mirror install - games will not persist a stop"
@@ -38,8 +49,11 @@ fi
 # --no-block: start the download and carry on with the build.
 systemctl start --no-block cg-library-restore.service || true
 
-verify "library mirror installed" test -x /usr/local/bin/cg-library
-verify "library restore started" bash -c 'systemctl show -p ActiveState --value cg-library-restore.service | grep -qE "^(active|activating)$"'
-verify "mirror on shutdown armed" systemctl is-enabled cg-library-shutdown.service
-verify "no background push timer exists" bash -c '! systemctl list-unit-files cg-library-push.timer 2>/dev/null | grep -q enabled'
+# `|| true` on every one: a failure here must be REPORTED, not fatal. The games
+# not persisting a stop is a bad day; a box that never joins the tailnet is an
+# unreachable GPU instance you can only kill through the AWS console.
+verify "library mirror installed" test -x /usr/local/bin/cg-library || true
+verify "library restore started" bash -c 'systemctl show -p ActiveState --value cg-library-restore.service | grep -qE "^(active|activating)$"' || true
+verify "mirror on shutdown armed" systemctl is-enabled cg-library-shutdown.service || true
+verify "no background push timer exists" bash -c '! systemctl list-unit-files cg-library-push.timer 2>/dev/null | grep -q enabled' || true
 
