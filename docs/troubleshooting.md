@@ -1489,3 +1489,37 @@ kind of thing that quietly regresses.
 Writing it produced its own small lesson: the first version detected "unguarded verify" with
 `^verify .*[^)]$`, which matches the guarded lines too, since they end in `true`. It reported
 four unguarded verifies in a file that had none.
+
+### The capacity check double-counted a resume, and skipped the game
+
+    disk budget 153GB (173GB free, 20GB reserved)
+    SKIPPING Diablo® IV (2344520, 159GB) - only 153GB left
+
+158.7 GB of game, 229 GB of disk, and it refused. `cg games` then reported it **installed at
+158.7 GB** while `df` showed 44 GB used, because the manifest is one small file that restored
+fine while the game's files did not.
+
+The bootstrap deliberately ends with a reboot - the NVIDIA driver needs one - and the restore is
+started before it so the transfer overlaps the build. So the restore is *always* interrupted, and
+the run that finishes the job is a **resume**. That run compared the game's full 159 GB against
+free space, without noticing that 44 GB of it was already on the disk from the interrupted run.
+It needed 115 GB more and had 153 GB available.
+
+The check now subtracts what is already present for that app:
+
+    have = du(common/<dir>) + du(compatdata/<id>) + du(shadercache/<id>)
+    need = size - have
+
+Two things worth taking from it.
+
+**A design that interrupts itself must be tested on the second run, not the first.** Every test of
+the restore exercised a cold start with an empty disk, which is the one case that never happens
+in production - the reboot guarantees it. The fixture for the resume case uses a *sparse* file,
+since the sandbox has no 120 GB to spare and `du -b` reports apparent size, which is exactly what
+the code measures.
+
+**And the skip was silent in the place people look.** `cg games` reads the manifest, so a game
+whose manifest restored and whose files did not reads as "installed" at full size. It now has no
+way to know better; the honest fix would be for it to compare the manifest's `SizeOnDisk` against
+the bytes actually present, which is the same "measure the effect, not the intent" rule that the
+restore itself just learned.

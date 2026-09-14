@@ -246,13 +246,28 @@ for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.ge
   while IFS=$'\t' read -r id dir name bytes; do
     [[ -n ${id:-} ]] || continue
     want_bytes=${bytes:-0}
-    if (( used + want_bytes > budget )); then
-      log "SKIPPING $name ($id, $(hb "$want_bytes")) - only $(hb $(( budget - used ))) left"
+    # What is ALREADY here counts against what still has to be fetched.
+    #
+    # The bootstrap ends with a reboot, which kills the restore mid-transfer by
+    # design - so the run that matters is usually a RESUME. Comparing the game's
+    # full size against free space double-counts whatever the interrupted run
+    # already wrote: 44 GB landed, the next run saw 173 GB free, subtracted the
+    # 20 GB reserve and refused to fetch a "159 GB" game that actually needed
+    # 115 GB more. The game was then skipped while its manifest was already on
+    # disk, so Steam reported it installed with a quarter of its files.
+    local have need
+    have=$(du -sb --exclude=downloading --exclude=temp \
+      "$LIB/steamapps/common/$dir" "$LIB/steamapps/compatdata/$id" \
+      "$LIB/steamapps/shadercache/$id" 2>/dev/null | awk '{t+=$1} END{print t+0}')
+    need=$(( want_bytes - ${have:-0} )); (( need < 0 )) && need=0
+    if (( used + need > budget )); then
+      log "SKIPPING $name ($id): needs $(hb "$need") more, only $(hb $(( budget - used ))) left"
+      (( ${have:-0} > 0 )) && log "  ($(hb "$have") of $(hb "$want_bytes") is already here)"
       log "  restore it on its own later: cg library pull --apps $id"
       skipped=$((skipped+1))
       continue
     fi
-    used=$(( used + want_bytes ))
+    used=$(( used + need ))
     log "restoring $name ($id, $(hb "$want_bytes"))"
     # No manifest means push never completed for this game (it is written last,
     # on purpose). Restoring the files without it would leave Steam with an

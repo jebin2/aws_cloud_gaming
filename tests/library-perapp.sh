@@ -155,6 +155,22 @@ contains "offered the way to get it" "$out" "pull --apps 2344520"
 contains "counted the skips"         "$out" "1 game(s) skipped"
 contains "reported the budget"       "$out" "disk budget"
 
+echo "8b. a RESUME counts what is already on disk against the budget"
+# The bootstrap reboot kills the restore by design, so the run that matters is
+# usually a resume. Comparing full size against free space double-counts what
+# the interrupted run already wrote - and skipped a game needing 115 GB more
+# because its total was 159 GB.
+reset; rm -f "$T/state/restored"
+rm -rf "$T/scratch/steam/steamapps"; mkdir -p "$T/scratch/steam/steamapps/common/BlackMythWukong"
+# Archive says 128 GB; 120 GB of it is already here. A SPARSE file, because the
+# sandbox has no 120 GB to spare and `du -b` reports apparent size - which is
+# also what the code under test measures.
+truncate -s 120000000000 "$T/scratch/steam/steamapps/common/BlackMythWukong/have.bin"
+# Budget of 100 GB: the full 128 GB would not fit, the remaining 8 GB does.
+out=$(CG_DISK_BUDGET=100000000000 run pull --apps 2358720)
+lacks    "not skipped"        "$out" "SKIPPING Black Myth"
+contains "restored it"        "$out" "restoring Black Myth"
+
 echo "9. a game that is half-present locally does not overwrite its archived copy"
 # Per-app prefixes make "empty disk empties the archive" impossible, but one
 # game can still be broken locally. Same guard, scoped to that game.
