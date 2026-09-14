@@ -5,7 +5,9 @@ is in the [README](../README.md).
 
 ## What you need first
 
-Two of these take real time to obtain, so start them before anything else:
+Two of these take real time to obtain, so start them before anything else. The exact procedure -
+console pages, what to request, example justifications and how to verify each one - is in
+[aws-account-setup.md](aws-account-setup.md).
 
 - **An AWS account on a paid plan.** The new-style Free Plan can only launch free-tier-eligible
   instance types - **no GPU instances at all**, whatever your quota says, and the error message

@@ -15,7 +15,7 @@ login are saved to S3 and come back on the next build.
 
 - **An AWS account on a paid plan, with an approved GPU quota.** The Free Plan cannot launch GPU
   instances at all, and quota approval can take days - start this first.
-  [Details](docs/getting-started.md#what-you-need-first)
+  [Step-by-step setup](docs/aws-account-setup.md)
 - **[Tailscale](https://tailscale.com)**, installed and logged in, plus a pre-auth key
 - **[Moonlight](https://moonlight-stream.org)** on the device you play from
 - `aws` CLI v2, `python3`, `curl` and OpenSSH
@@ -51,7 +51,8 @@ Every command, and what is safe to run twice: [docs/commands.md](docs/commands.m
 
 | | |
 |---|---|
-| [Getting started](docs/getting-started.md) | AWS plan and GPU quota, credentials, configuration, the first build |
+| [AWS account setup](docs/aws-account-setup.md) | Step by step: paid plan, GPU quotas with example requests, how to verify - followable by a person or an AI |
+| [Getting started](docs/getting-started.md) | Credentials, configuration, the first build and pairing |
 | [Commands](docs/commands.md) | Every command, the terminal output, running things twice |
 | [Cost](docs/cost.md) | What every charge is, measured, and why spot is the default |
 | [Cost guards](docs/cost-guards.md) | The four layers that stop a forgotten box, and the off-site watchdog's IAM policy |
