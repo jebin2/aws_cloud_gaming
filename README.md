@@ -767,12 +767,13 @@ passed, and the next box asked for a login. The token was found on 2026-09-14 by
 time, signing in, and listing what Steam wrote: `ConnectCache` appeared only in `local.vdf`.
 The push now refuses unless `local.vdf` contains `ConnectCache`.
 
-**Whether the token works on a different machine is not yet known.** Steam encrypts it, and
-nothing public documents the key - the most direct answer found is "no publicly-known method"
-of reusing it elsewhere. If the key includes something that changes per instance
-(`/etc/machine-id`, hostname, MAC), a restored token will fail to decrypt and Steam will ask for
-a login as before. The next rebuild is the test: if it asks again, the archive cannot carry the
-login on its own. Nothing is broken by trying - a token that fails to decrypt is simply ignored.
+**It carries over to a new instance - verified.** On 2026-09-14 a login archived from one box
+was restored onto a freshly launched one - a different instance, so a different
+`/etc/machine-id`, hostname and MAC - and Steam started signed in without asking. Nothing
+public documents how the token is encrypted (the most direct answer found was "no
+publicly-known method" of reusing it elsewhere), so this was settled by trying it rather than
+by reading about it. If a future Steam update binds the token to the machine, the symptom is a
+login prompt on the next rebuild and nothing worse: a token that fails to decrypt is ignored.
 
 Rules that still hold:
 
