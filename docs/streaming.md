@@ -4,8 +4,10 @@ Client and Steam settings that make a session better, and what the hardware can 
 
 ## Resolution
 
-**Resolution follows whatever Moonlight asks for.** The host switches to match at the start of
-each session, so set Moonlight to 1920x1080 for the box's native mode.
+**The box's desktop is fixed at 1920x1080, and it does not change to match Moonlight.** Switching
+the X mode at runtime left screen capture broken for every session after the first, so the host no
+longer switches and the client scales the picture instead. Set Moonlight to **1920x1080** for a
+1:1 image; anything else is scaled on your device.
 
 ## Moonlight client settings
 

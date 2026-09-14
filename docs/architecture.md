@@ -1,131 +1,244 @@
-# How it connects
+# Architecture
 
-Three independent layers. Understanding the split is what makes failures diagnosable - almost
-every problem belongs to exactly one of them.
+A Linux desktop with a GPU, built on AWS when you want to play and destroyed when you stop. You
+reach it only through a private Tailscale network, stream it with Moonlight, and keep your games
+in S3 between sessions.
 
+## The big picture
+
+**How you connect.** Everything goes through one encrypted Tailscale tunnel; the box has no other
+way in.
+
+```mermaid
+flowchart LR
+  subgraph laptop["💻 Your laptop"]
+    ml["Moonlight"]
+    cg["cg CLI"]
+  end
+
+  tunnel(["🔒 Tailscale tunnel<br/>WireGuard · UDP 41641"])
+
+  subgraph box["🖥️ EC2 g6.xlarge · NVIDIA L4"]
+    sun["Sunshine<br/>X11 capture → NVENC"]
+    desk["XFCE desktop<br/>Steam + Proton"]
+    sshd["ssh"]
+  end
+
+  ml -->|"video down · input up"| tunnel
+  cg -->|"commands"| tunnel
+  tunnel --> sun
+  tunnel --> sshd
+  sun --- desk
 ```
-your machine                         AWS
-┌──────────────┐                    ┌──────────────────┐
-│ moonlight    │                    │ Sunshine         │
-│  ↕ decode    │                    │  ↕ NVENC (L4)    │
-│ 100.x.x.x    │◄── WireGuard ────► │ 100.x.x.x        │
-│              │  UDP 41641 direct  │ Xorg :0 (virtual)│
-└──────────────┘      ~16ms         │ XFCE autologin   │
-                                    └──────────────────┘
+
+**What runs where.** The box is disposable; S3 keeps your games, and three independent guards can
+terminate a box nobody is using.
+
+```mermaid
+flowchart LR
+  cg["💻 cg on your laptop"]
+  ec2["🖥️ EC2 box<br/>one-time spot · ap-south-2"]
+  s3[("🪣 S3<br/>games + Steam login")]
+  cw["⏰ CloudWatch alarm"]
+  bud["💰 AWS Budget"]
+  vps["🛡️ Oracle VPS<br/>off-site watchdog"]
+
+  cg -->|"launch · terminate"| ec2
+  ec2 <-->|"restore at boot<br/>push on destroy"| s3
+  cw -.->|"terminate if idle"| ec2
+  vps -.->|"terminate if idle"| ec2
+  bud -.->|"email"| cg
 ```
 
-## 1. Tailscale is the network
+The third guard, a watchdog on the box itself, is in [Flow 4](#flow-4---you-forget-the-box).
+Nothing on the box is reachable from the internet: the security group allows one inbound port,
+UDP 41641, and that is Tailscale's.
 
-Both machines run `tailscaled` and authenticate to Tailscale's coordination server, which acts
-as a matchmaker: it hands each peer the other's public key and current endpoint, then steps
-aside while they build a direct WireGuard tunnel.
+## The stack
 
-Each machine gets a stable `100.x` address. **That address is the box, permanently.** It
-survives the AWS public IP changing on every stop/start, which is exactly why this design needs
-no Elastic IP - and AWS bills idle public IPv4, so avoiding one matters.
+| Layer | Uses | Runs on | Why this |
+|---|---|---|---|
+| Control | `cg` (bash) and `lib/`, tested offline in `tests/` | laptop | one command per job; risky paths proven with stubs |
+| Compute | EC2 `g6.xlarge` - 4 vCPU, NVIDIA L4 | AWS `ap-south-2` | the only GPU type there that fits a 4 vCPU quota |
+| Purchase | one-time spot, terminated on shutdown | AWS | ~INR 20/hour against ~INR 85 on demand |
+| Build | Ubuntu 24.04, configured by user-data in 16 stages (`lib/bootstrap.d/`) | box | a clean box every session, no image to maintain |
+| Network | Tailscale (WireGuard); one security-group rule | laptop + box | no public ports, no Elastic IP |
+| GPU | NVIDIA driver 610 (open), DRM KMS off | box | KMS on blocks screen capture |
+| Display | headless Xorg at a fixed 1920x1080, LightDM autologin, XFCE | box | the L4 has no monitor outputs |
+| Streaming | Sunshine: X11 capture, NVENC encode, `packet_size 1024` | box | Tailscale's MTU is 1280 |
+| Client | Moonlight | laptop, phone | hardware decode on the device |
+| Audio | PipeWire with a virtual sink | box | there is no sound card to play into |
+| Games | Steam (Valve's `.deb`) and Proton | box | Windows games on Linux |
+| Game storage | local NVMe at `/scratch`, archived per game to S3 with `s5cmd` | box + S3 | fast and free locally, durable in S3 |
+| S3 access | EC2 instance role | box | no access key on the box to leak |
+| Guards | on-host watchdog, CloudWatch alarm, off-site watchdog, AWS Budget | box, AWS, VPS | four independent ways to stop a forgotten box |
+| Spend | Cost Explorer (for `cg cost`) | AWS | the only billed API here, $0.01 a call |
 
-The security group has exactly **one** inbound rule: UDP 41641. Sunshine's own ports are not
-reachable from the internet at all. Everything reaches them *through* the tunnel, which is why
-you address the box by its `100.x` address and never its public IP.
+## Where things live
 
-That single rule is not optional. Tailscale is outbound-only for connectivity, but it must be
-able to *receive* UDP to negotiate a direct path. Without the rule it still works - by falling
-back to a DERP relay, at 43-71 ms instead of 16 ms. It never errors; it just feels sluggish.
+```mermaid
+flowchart TB
+  subgraph box["🖥️ EC2 box - deleted by cg destroy"]
+    root["Root EBS · 50 GB gp3<br/>Ubuntu · NVIDIA driver<br/>Sunshine · Steam client<br/>Steam login"]
+    nvme["Local NVMe · /scratch<br/>229 GB<br/>games · shader caches<br/>downloads"]
+  end
+  s3[("S3 · cg-library-…<br/>one archive per game<br/>index.json<br/>steam-account.tgz")]
+  nvme <-->|"pull at boot<br/>push on destroy"| s3
+  root -->|"Steam login<br/>archived on push"| s3
+```
 
-## 2. Sunshine captures a desktop nobody is sitting at
-
-The L4 is a datacenter GPU with **no display outputs**, so there is no monitor for X to attach
-to. `xorg.conf` tells the NVIDIA driver to start anyway with
-`AllowEmptyInitialConfiguration`, against a virtual 2560x1600 screen. LightDM auto-logs in so
-an XFCE session actually exists to capture.
-
-Sunshine encodes that session with the L4's NVENC hardware encoder and serves it. Two settings
-matter:
-
-- `packet_size = 1024`, because Tailscale's MTU is 1280 and Sunshine defaults to 1392. The
-  mismatch fragments packets and reads as stutter.
-- `csrf_allowed_origins`, because Sunshine's web UI trusts only `localhost` by default and
-  rejects every request arriving over the tailnet.
-
-## 3. Moonlight decodes it
-
-Pairing swaps certificates - that is what the challenge/secret handshake does, and why it is
-one-time and survives stop/start. Video comes down as H.265 and is decoded in hardware on the
-client; input goes back up the same tunnel.
-
-`global_prep_cmd` runs `set-resolution.sh` on connect, which uses `xrandr` to match the
-desktop to whatever the client asked for. That is what lets one machine serve a phone, a
-tablet and a laptop without reconfiguration.
-
-## Storage
-
-Two disks, deliberately:
-
-- **Root EBS volume** (default 50 GB) - the OS, drivers, Sunshine, Steam client, Tailscale
-  identity. Persists across stops. Bills whether or not the instance runs, and **cannot be
-  shrunk once grown**.
-- **Instance store** (232 GB on `g6.xlarge`) mounted at `/scratch` - games, downloads, shader
-  caches. Free, local NVMe, much faster than EBS. **Wiped on every stop**, filesystem included,
-  so it is reformatted at each boot.
-
-- **S3 bucket** (`cg-library-<hash>`) - the durable copy of the game library. Regional, so it
-  pins no availability zone, and ~INR 310/month for 140 GB against INR 1,284 for the EBS volume
-  it replaced.
-
-`/scratch/steam` is registered as a Steam **library folder**, so the client persists on the
-root volume while games do not. This is why the root volume stays clean no matter what you
-install.
-
-The instance store being wiped on stop is survivable only because of the S3 mirror, which is a
-fourth thing that has to be right:
-
-- `cg-library-restore.service` pulls at boot, started at the **top** of the build with
-  `--no-block` so a ~10 minute restore overlaps the ~10 minute NVIDIA driver install rather
-  than following it. The readiness marker is ordered after it.
-- The **explicit push** runs from `lib/game`'s `down()` - reached by `cg stop`, by the "stop
-  instance now?" prompt at the end of `cg open`, and by the pre-image stop in destroy - and from
-  `cg destroy`. Both gate on it: a failed push aborts the stop or the destroy rather than
-  warning beside it.
-- `cg-library-shutdown.service` pushes from `ExecStop`. This is the layer that makes the
-  **automatic** stops safe: layers 2, 3 and 4 all stop the box without anyone typing a command,
-  and all three end in a graceful OS shutdown, so all three arrive here.
-- There is **no periodic timer**, by choice - nothing uploads while you are playing. The
-  remaining exposure is a stop that is not graceful: a spot interruption gives about two minutes,
-  a hard power-off gives none.
-
-The box reaches S3 through an **EC2 instance role**, not an access key: it is the one machine
-here that can borrow an identity from AWS, so there is no secret to leak or rotate. The role is
-scoped to that single bucket. The off-site watchdog still uses a long-lived key because it runs
-outside AWS and has no role to borrow.
-
-## Where cost control sits
-
-Four layers, described in [cost-guards.md](cost-guards.md). They are deliberately independent: layer 1 is the
-`game` script, layer 2 runs on the box itself, layers 3 and 4 run in AWS. A failure in any one
-is caught by the next.
-
-The single most important setting is `instance-initiated-shutdown-behavior`, and **its correct
-value depends on the purchase model.** The on-host watchdog acts by running `shutdown -h`, so
-this attribute decides what that means:
-
-| Purchase model | Value | Why |
+| | Lives on | Survives `cg destroy`? |
 |---|---|---|
-| on demand | `stop` | A misfiring watchdog parks the box; you restart it. `terminate` would delete the machine and its root disk. |
-| spot (one-time) | `terminate` | A *stopped* spot instance can never start again - the stop disables its request - and would bill for its root volume forever. Terminating is safe because a one-time request cannot relaunch. |
+| OS, driver, Sunshine, Steam client | root EBS | no - rebuilt by the next `cg init` |
+| Your games, their saves and shader caches | NVMe, archived to S3 | **yes**, in S3 |
+| Steam login | root EBS, archived to S3 | **yes**, in S3 |
+| Proton and the Steam runtime | NVMe | no - Steam re-downloads them in under a minute |
+| Security group, key pair, budget, S3 bucket | AWS | **yes** - free, reused |
 
-This inverted when the games moved to S3. The old design used a **persistent** spot request with
-`InstanceInterruptionBehavior=stop`, because the library lived on the instance store and
-terminating meant losing it. That had two consequences:
+The root disk size is `GAME_DISK_GB`: 100 GB by default, set to 50 here in `.env`. The NVMe is
+wiped whenever the instance stops, which is why S3 holds the durable copy. Details:
+[game-library.md](game-library.md).
 
-- a persistent request **relaunches** the moment its instance is terminated, so nothing could
-  terminate the box without cancelling the request first - and no guard can do that (the on-host
-  watchdog holds no credentials at all, and a CloudWatch alarm action cannot cancel a request)
-- so all three guards had to *stop*, and every one of them therefore produced a box that could
-  never start again while its 50 GB root volume kept billing ~INR 400/month
+## Flow 1 - `cg init`: build a box
 
-With the library in S3 there is nothing on the instance worth preserving, so the request is now
-**one-time** and every guard terminates. The alarm action, the off-site watchdog's verb, and the
-shutdown behaviour all follow the lifecycle rather than being fixed - and `lib/aws-setup.sh`
-asserts the one that matches, where it previously demanded `stop` unconditionally and then
-excused spot with "cannot be modified after", which meant that check could never protect a spot
-instance at all.
+```mermaid
+sequenceDiagram
+  autonumber
+  actor You
+  participant cg as cg (laptop)
+  participant VPS as Oracle VPS
+  participant AWS
+  participant EC2 as EC2 box
+  participant S3
+
+  You->>cg: ./cg init
+  cg->>VPS: is the off-site watchdog current? (one ssh)
+  cg->>You: which archived games to restore?
+  cg->>AWS: preflight - plan, GPU quota, region
+  cg->>AWS: budget, bucket and role, launch one-time spot with user-data
+  EC2->>EC2: install Tailscale, join the tailnet
+  EC2->>S3: start restoring games in the background
+  EC2->>EC2: desktop, NVIDIA driver, Xorg, Steam, Sunshine
+  S3-->>EC2: games and Steam login land on the NVMe
+  EC2->>EC2: reboot for the driver, restore resumes
+  cg->>EC2: follow the build log over ssh
+  cg->>AWS: create the idle alarm (disarmed)
+  cg->>EC2: create the Sunshine account, pair Moonlight
+  cg-->>You: ready - about 10 to 20 minutes
+```
+
+The game restore runs **alongside** the build, so a 160 GB game is usually on disk by the time
+the desktop is. The box is only reported ready once the restore has finished.
+
+## Flow 2 - `cg open`: play
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor You
+  participant cg as cg (laptop)
+  participant AWS
+  participant EC2 as EC2 box
+
+  You->>cg: ./cg open
+  cg->>AWS: arm the idle alarm for this session
+  cg->>EC2: wait for Tailscale and Sunshine
+  cg->>EC2: moonlight stream Desktop
+  You->>EC2: play - video down, input up, over WireGuard
+  You->>cg: quit Moonlight
+  cg->>AWS: disarm the idle alarm
+  cg-->>You: [d] destroy (recommended) or [n] leave it running
+```
+
+On a spot box there is no stop, only destroy - a stopped one-time spot instance can never start
+again. With `GAME_SPOT=0` the box is on demand, and `cg open` starts it if it is stopped.
+
+## Flow 3 - `cg destroy`: save and delete
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor You
+  participant cg as cg (laptop)
+  participant EC2 as EC2 box
+  participant S3
+  participant AWS
+
+  You->>cg: ./cg destroy
+  cg->>EC2: cg-library push (ssh)
+  EC2->>S3: Steam login
+  EC2->>S3: changed game files only
+  cg->>AWS: cancel the spot request, terminate the instance
+  EC2->>S3: shutdown push - nothing left to send
+  AWS-->>cg: terminated, root disk deleted
+  Note over cg,AWS: Kept for next time - S3 archive, budget,<br/>security group, key pair, alarm
+```
+
+If the push fails, `cg destroy` stops and deletes nothing. What it removes and keeps:
+[destroy.md](destroy.md).
+
+## Flow 4 - you forget the box
+
+```mermaid
+flowchart TB
+  idle["Box left running<br/>with no traffic"]
+
+  idle --> g2["On-host watchdog<br/>checks every minute<br/>15 idle minutes<br/>under 200 KB/min"]
+  idle --> g3["CloudWatch alarm<br/>NetworkOut under 10 MB<br/>per 5 min, 6 times<br/>armed only during cg open"]
+  idle --> g4["Off-site watchdog<br/>on the Oracle VPS<br/>every 5 min, 6 times<br/>in + out under 10 MB"]
+
+  g2 --> p2["push games to S3"] --> t2["shutdown, so terminate"]
+  g3 --> t3["terminate"]
+  g4 --> t4["terminate with a scoped IAM key"]
+
+  bud["AWS Budget · $57 a month"] -.->|"email at 80% spent<br/>and 100% forecast"| you["You"]
+```
+
+Each guard is independent, so one failing is caught by another. The two watchdogs wait 20
+minutes after boot before they arm, so a build is never mistaken for idleness; the CloudWatch
+alarm needs no such grace, because it is only ever armed during `cg open`. The budget stops
+nothing - it is the backstop that tells you. Details: [cost-guards.md](cost-guards.md).
+
+## Key decisions
+
+- **Tailscale is the only way in.** Each machine gets a stable `100.x` address that survives the
+  AWS public IP changing, so there is no Elastic IP to pay for. The single inbound rule, UDP 41641,
+  is what lets Tailscale build a direct path: without it, traffic falls back to a relay at
+  43-71 ms instead of 16 ms, and nothing errors - it just feels slow.
+- **A monitor that does not exist.** The L4 has no display outputs, so `xorg.conf` starts X with
+  `AllowEmptyInitialConfiguration` and a virtual `DFP-0` at a fixed 1920x1080. LightDM logs in
+  automatically so there is a desktop to capture.
+- **The resolution never changes.** Switching the X mode at runtime left capture broken for every
+  later session, so the box stays at 1920x1080 and Moonlight scales. See
+  [streaming.md](streaming.md).
+- **X11 capture, GPU encode.** NvFBC is NVIDIA's fast capture path, but it failed after the first
+  session on this box. X11 capture grabs frames on the CPU - about one core at 1080p60 - while
+  encoding still runs on the L4's NVENC.
+- **Sunshine tuned for the tunnel.** `packet_size = 1024` because Tailscale's MTU is 1280 and
+  Sunshine's default of 1392 fragments into stutter; `csrf_allowed_origins` so its web UI accepts
+  requests from the tailnet.
+- **Games on local NVMe, kept in S3.** The instance store is the fastest disk on the box and free,
+  and S3 pins no availability zone. It replaced an EBS volume costing INR 1,284 a month. See
+  [game-library.md](game-library.md).
+- **One-time spot that terminates.** With the games in S3 there is nothing on the box worth
+  keeping, so every guard terminates rather than stops:
+
+  | Purchase model | On shutdown | Why |
+  |---|---|---|
+  | on demand (`GAME_SPOT=0`) | `stop` | a misfiring watchdog parks the box and you restart it |
+  | spot (default) | `terminate` | a stopped spot box can never start again, and its root disk would bill forever |
+
+- **Roles on AWS, a scoped key off it.** The box reads and writes its bucket through an instance
+  role, so it holds no secret. The off-site watchdog runs outside AWS and cannot use a role, so it
+  gets a key allowed only to describe and stop or terminate the `gamevps`-tagged instance. See
+  [cost-guards.md](cost-guards.md).
+
+## Go deeper
+
+| Want to know | Read |
+|---|---|
+| How to get an AWS account able to launch this | [aws-account-setup.md](aws-account-setup.md) |
+| Every command | [commands.md](commands.md) |
+| What each piece costs | [cost.md](cost.md) |
+| How the games and Steam login persist | [game-library.md](game-library.md) |
+| Why something is built the way it is | [troubleshooting.md](troubleshooting.md) |
