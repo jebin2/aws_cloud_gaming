@@ -18,6 +18,8 @@ trap 'rm -rf "$T"' EXIT
 
 check() { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
           else echo "  FAIL $1: got '$2' want '$3'"; fail=$((fail+1)); fi; }
+contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
+             else echo "  FAIL $1: output lacks '$3'"; fail=$((fail+1)); fi; }
 
 mkdir -p "$T/bin" "$T/home/.ssh" "$T/lib"
 cp "$REPO/cg" "$T/cg"
@@ -53,6 +55,7 @@ case "$args" in
   *describe-volumes*)   echo "None	None" ;;
   *"iam get-user"*)     [[ ${WD_USER:-1} == 1 ]] || exit 1; echo "gamevps-watchdog" ;;
   *"iam get-role"*)     [[ ${ROLE_EXISTS:-1} == 1 ]] || exit 1; echo "gamevps-box" ;;
+  *put-role-policy*)    [[ ${IAM_FAILS:-0} == 1 ]] && exit 1; : ;;
   *list-access-keys*)   echo "AKIAFAKE" ;;
   *)                    echo "None" ;;
 esac
@@ -80,7 +83,8 @@ run() { # run <stdin> <args...>
   LOG="$T/log" rm -f "$T/log"
   printf '%s\n' "$input" | ( cd "$T" && HOME="$T/home" LOG="$T/log" PATH="$T/bin:$PATH" \
     BOX_STATE="${BOX_STATE:-stopped}" WD_USER="${WD_USER:-1}" \
-    ROLE_EXISTS="${ROLE_EXISTS:-1}" bash ./cg destroy "$@" 2>&1 )
+    ROLE_EXISTS="${ROLE_EXISTS:-1}" IAM_FAILS="${IAM_FAILS:-0}" \
+    bash ./cg destroy "$@" 2>&1 )
 }
 did()   { grep -q "$1" "$T/log" 2>/dev/null && echo yes || echo no; }
 
@@ -169,7 +173,37 @@ check "lists the role"     "$(grep -c 'instance role   gamevps-box' <<<"$out")" 
 check "lists the key"      "$(grep -c 'watchdog key    gamevps-watchdog' <<<"$out")" "1"
 check "says what it can do" "$(grep -c 'can stop' <<<"$out")" "1"
 
-echo "11. an unknown flag destroys nothing at all"
+echo "11. --no-push locks the archive before terminating"
+# Skipping the laptop-side push is only half the job: the box runs its own
+# mirror from ExecStop when it shuts down, so --no-push has to make that
+# physically impossible. It revokes the role's write access, which works even
+# when the box is too busy to answer ssh - the usual reason for wanting it.
+seed_env
+out=$(run "" --no-push)
+check "box destroyed"          "$(did SETUP-DESTROY-CALLED)" "yes"
+check "no push attempted"      "$(did 'cg-library push')" "no"
+check "revoked write access"   "$(grep -c 'put-role-policy' "$T/log" || true)" "2"
+contains "says what it did"    "$out" "archive is left exactly as it is"
+contains "and that it locked"  "$out" "read-only"
+contains "and unlocked after"  "$out" "writable again"
+# The lock must not include write verbs; the unlock must.
+ro=$(grep 'put-role-policy' "$T/log" | head -1)
+rw=$(grep 'put-role-policy' "$T/log" | tail -1)
+if [[ $ro != *PutObject* ]]; then echo "  ok   lock has no PutObject"; pass=$((pass+1));
+else echo "  FAIL the read-only policy still allows PutObject"; fail=$((fail+1)); fi
+if [[ $rw == *PutObject* ]]; then echo "  ok   unlock restores PutObject"; pass=$((pass+1));
+else echo "  FAIL the restore policy is missing PutObject"; fail=$((fail+1)); fi
+
+echo "11b. if the lock cannot be applied, nothing is destroyed"
+# Refusing is right: the alternative is terminating a box whose shutdown mirror
+# is still free to overwrite the archive.
+seed_env
+out=$(IAM_FAILS=1 run "" --no-push); rc=$?
+check    "exits non-zero"   "$rc" "1"
+check    "box NOT destroyed" "$(did SETUP-DESTROY-CALLED)" "no"
+contains "explains why"     "$out" "could not revoke"
+
+echo "12. an unknown flag destroys nothing at all"
 out=$(run "" --everything)
 check "refused"               "$(grep -c "unknown option" <<<"$out")" "1"
 check "box NOT destroyed"     "$(did SETUP-DESTROY-CALLED)" "no"

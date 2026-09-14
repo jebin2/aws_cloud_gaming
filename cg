@@ -170,6 +170,31 @@ ensure_moonlight_syskeys() {
 # that is about to disappear - and on a spot interruption there are two minutes
 # to work with. So anything initiated from here pushes first, from here, and
 # waits for it.
+# Revoke the box's write access to the archive, so its own shutdown mirror
+# cannot change anything. This is what makes `--no-push` mean what it says.
+#
+# Skipping the laptop-side push is only half the job: cg-library-shutdown.service
+# runs ON the box from ExecStop, and terminating triggers a graceful shutdown, so
+# it fires whether or not this end pushed. Disabling that unit would need ssh -
+# unavailable exactly when it is most wanted, because a box too busy to answer
+# ssh is the usual reason for wanting --no-push at all. IAM works from here
+# regardless of the box's state.
+archive_lock() {   # archive_lock ro|rw
+  local mode="$1" b="${GAME_S3_BUCKET:-}" role="${TS_HOST}-box"
+  [[ -n $b ]] || return 0
+  aws iam get-role --role-name "$role" >/dev/null 2>&1 || return 0
+  local write=''
+  [[ $mode == rw ]] && write=', "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"'
+  if aws iam put-role-policy --role-name "$role" --policy-name library-rw \
+      --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:ListBucket\",\"s3:GetBucketLocation\"],\"Resource\":\"arn:aws:s3:::$b\"},{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\"$write],\"Resource\":\"arn:aws:s3:::$b/*\"}]}" >/dev/null 2>&1; then
+    [[ $mode == ro ]] && log "archive set read-only for $role - its shutdown mirror cannot write"
+    [[ $mode == rw ]] && log "archive writable again for $role"
+    return 0
+  fi
+  log "could not set the archive to $mode (needs iam:PutRolePolicy)"
+  return 1
+}
+
 box_state() {
   [[ -n $INSTANCE_ID ]] || { echo none; return; }
   ec2 describe-instances --instance-ids "$INSTANCE_ID" \
@@ -461,14 +486,15 @@ cmd_library() {
 # ignored argument, or someone types it, sees "everything deleted", and keeps
 # paying INR 1,284/month for a volume they believe is gone.
 cmd_destroy() {
-  local all=0 force=0 a
+  local all=0 force=0 nopush=0 a
   for a in "$@"; do
     case $a in
-      --all)   all=1 ;;
-      --force) force=1 ;;
+      --all)     all=1 ;;
+      --force)   force=1 ;;
+      --no-push) nopush=1 ;;
       # Refuse anything else rather than ignore it: a typo like --everything
       # must not quietly behave as a plain destroy and leave the volume billing.
-      *) die "unknown option '$a' for destroy (--all and --force are accepted)" ;;
+      *) die "unknown option '$a' for destroy (--all, --force, --no-push)" ;;
     esac
   done
   # --all means the games go too, so mirroring them to S3 first and then
@@ -486,6 +512,21 @@ cmd_destroy() {
   # But only a RUNNING box can be pushed from. Gating on the push regardless of
   # state made destroying a stopped box impossible without --force, which would
   # have trained the habit of passing --force to destroy.
+  # --no-push: archive exactly as it is, and make sure nothing changes it.
+  if (( nopush )); then
+    say "destroying WITHOUT mirroring - the archive is left exactly as it is"
+    if ! archive_lock ro; then
+      die "could not revoke the box's write access, so its shutdown mirror could still
+       overwrite the archive. Either grant iam:PutRolePolicy, or wait for the box
+       to finish what it is doing and destroy normally."
+    fi
+    lib/setup destroy
+    # The instance is gone, so restore normal access. If this is interrupted the
+    # policy stays read-only, and `cg init` rewrites it on the next build.
+    archive_lock rw || log "archive left read-only - cg init restores it"
+    return
+  fi
+
   local st; st=$(box_state)
   if [[ $st == running ]]; then
     if ! library_push; then
@@ -1300,6 +1341,7 @@ build (changes things)
   cg clean                   free space: apt caches, logs, /scratch/tmp
   cg destroy                 mirror the games to S3, then delete the box
   cg destroy --force         destroy even if the mirror failed - loses the games
+  cg destroy --no-push       destroy and leave the archive untouched (locks it first)
 
 info (read-only)
   cg check                   every preflight check, creates nothing

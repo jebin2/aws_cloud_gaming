@@ -143,6 +143,7 @@ reimplementing them.
 | `cg clean` | Free space: apt caches, logs, `/scratch/tmp`. Games are not touched |
 | `cg destroy` | Mirror the games to S3, then delete the box. **Refuses if the mirror fails**. Keeps the budget |
 | `cg destroy --force` | Destroy even if the mirror failed - **loses the games** |
+| `cg destroy --no-push` | Destroy and leave the archive exactly as it is - locks it first |
 | `cg destroy --all` | The box **and the whole account footprint** - archive, bucket, IAM, budget. Asks you to type `DESTROY-ALL` |
 | `cg check` | Every preflight check, creates nothing |
 | `cg cost` | Month-to-date spend and what still bills |
@@ -487,6 +488,13 @@ marker waits for it, so `cg init` reports the box ready when the games are actua
     cg library push         mirror now  (--verify for a full comparison)
     cg library pull         restore now
     cg library --bucket     the bucket name, answerable with the box gone
+
+`cg destroy --no-push` exists for the case where the box's local copy is **worse** than what is
+archived - a half-finished restore, a game mid-repair, a disk you do not trust. Skipping this
+end's push is only half the job, because `cg-library-shutdown.service` runs on the box and fires
+on any graceful shutdown, so `--no-push` **revokes the box's S3 write access** first. That works
+even when the box is too busy to answer ssh, which is usually why you wanted it. Access is
+restored immediately afterwards, and `cg init` rewrites the policy on every build in any case.
 
 **The archive is the only copy.** It is written in three places, and not a fourth:
 
