@@ -46,6 +46,17 @@ APPS="${CG_APPS:-all}"
 
 # s5cmd holds roughly workers x concurrency x part-size in memory. The defaults
 # (256 x 5 x 50 MB) want tens of GB. 64 x 4 x 16 MB measured at 323 MB peak.
+# The Steam account lives on the ROOT disk, not in the library: config.vdf holds
+# the refresh token, loginusers.vdf the remembered account, registry.vdf the
+# machine identity Steam Guard checks. All three die with the box unless they
+# are archived, which is why every new instance asked for Steam Guard again.
+STEAM_BASE="${CG_STEAM_BASE:-$HOME}"
+STEAM_DIR="${CG_STEAM_DIR:-.local/share/Steam}"
+# Best-effort `steam -shutdown` before archiving. Steam rewrites config.vdf as
+# it exits, so a clean exit archives the settled file rather than a mid-session
+# one. Set 0 to archive whatever is on disk right now.
+STEAM_SHUTDOWN="${CG_STEAM_SHUTDOWN:-1}"
+
 WORKERS="${CG_WORKERS:-64}"
 CONCURRENCY="${CG_CONCURRENCY:-4}"
 PART_MB="${CG_PART_MB:-16}"
@@ -200,6 +211,11 @@ cmd_pull() {
   mountpoint -q "$parent" || die "$parent is not a mountpoint - refusing to restore onto the root disk"
   mkdir -p "$LIB/steamapps"
 
+  # Before anything else, and regardless of which games were chosen: the login
+  # lives on the root disk, so it is gone on every new box, and a boot that
+  # restores no games at all still wants Steam signed in.
+  account_pull
+
   if [[ $want == none ]]; then
     log "CG_APPS=none - restoring nothing by request (the box is for something else)"
     mark_restored
@@ -328,6 +344,121 @@ for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.ge
   mark_restored
 }
 
+# --- the Steam account (login, not games) ------------------------------------
+# One small tarball, not an s5cmd sync: these are a handful of files whose modes
+# matter (config.vdf is 0600 and Steam cares), and a tarball lands atomically -
+# a half-synced login directory is worse than no login at all.
+ACCOUNT_OBJ="$S3/account/steam-account.tgz"
+# Caches, not credentials: regenerated on demand, and they dwarf what is worth
+# keeping. These bite on userdata/, which IS walked as a directory - librarycache
+# alone is megabytes of box art. config/ is not walked (account_members names its
+# two files), so htmlcache and avatarcache are belt-and-braces against that list
+# ever becoming a directory, not load-bearing today.
+ACCOUNT_EXCLUDES=(--exclude=htmlcache --exclude=avatarcache --exclude=librarycache
+                  --exclude=shaderhitcache --exclude=depotcache --exclude='*.crash')
+ACCOUNT_MAX=$(( 64 * 1024 * 1024 ))
+
+steam_running() { pgrep -x steam >/dev/null 2>&1; }
+
+# The paths that carry the login, relative to $STEAM_BASE so tar can restore
+# them into a different home in tests. Only those that exist are returned:
+# tar fails the whole archive on one missing member, and ssfn* is legacy - a
+# modern Steam has none, and demanding it would break every push.
+account_members() {
+  local m
+  for m in "$STEAM_DIR/config/config.vdf" "$STEAM_DIR/config/loginusers.vdf" \
+           "$STEAM_DIR/userdata" ".steam/registry.vdf"; do
+    [[ -e "$STEAM_BASE/$m" ]] && printf '%s\n' "$m"
+  done
+  # Steam Guard sentry files, when this Steam is old enough to use them.
+  for m in "$STEAM_BASE/$STEAM_DIR"/ssfn*; do
+    [[ -f $m ]] && printf '%s\n' "${m#$STEAM_BASE/}"
+  done
+  return 0
+}
+
+account_push() {
+  local cfg="$STEAM_BASE/$STEAM_DIR/config/config.vdf"
+  # Without config.vdf there is no token, and archiving the rest would replace a
+  # good saved login with a logged-out one. Refusing is the safe direction.
+  if [[ ! -s $cfg ]]; then
+    log "steam account: no config.vdf - leaving the archived login alone"
+    return 0
+  fi
+
+  if steam_running; then
+    if (( STEAM_SHUTDOWN )); then
+      log "steam account: asking Steam to exit so the login file settles"
+      steam -shutdown >/dev/null 2>&1 || true
+      local i
+      for i in $(seq 1 20); do steam_running || break; sleep 1; done
+    fi
+    steam_running && log "steam account: Steam is still running - archiving the file as it stands"
+  fi
+
+  local members; members=$(account_members)
+  if [[ -z ${members//[[:space:]]/} ]]; then
+    log "steam account: nothing to archive"
+    return 0
+  fi
+
+  local tmp; tmp=$(mktemp -t steam-account.XXXXXX.tgz) || return 0
+  # No -h. userdata/ is walked as a directory, and Steam puts symlinks in it -
+  # the same hazard that OOM-killed the library sync at 12 GB resident when a
+  # Proton prefix pointed dosdevices/z: at /. Store links as links.
+  # Bounded on purpose. This is a few megabytes and takes under a second, but it
+  # runs on the shutdown path, and a walk that never finishes would hold the
+  # machine open indefinitely - a symlink loop under userdata/ does exactly that
+  # to a dereferencing tar. If it ever takes two minutes, something is wrong and
+  # giving up beats hanging the shutdown.
+  if ! timeout 120 tar -czf "$tmp" -C "$STEAM_BASE" "${ACCOUNT_EXCLUDES[@]}" $members 2>/dev/null; then
+    log "steam account: could not build the archive - the saved login is unchanged"
+    rm -f "$tmp"; return 0
+  fi
+
+  local sz; sz=$(stat -c %s "$tmp" 2>/dev/null || echo 0)
+  if (( sz == 0 || sz > ACCOUNT_MAX )); then
+    log "steam account: archive is $(hb "$sz") - refusing to upload (expected well under $(hb "$ACCOUNT_MAX"))"
+    rm -f "$tmp"; return 0
+  fi
+
+  if "$S5" cp "$tmp" "$ACCOUNT_OBJ" >/dev/null 2>&1; then
+    log "steam account: archived $(hb "$sz") (login, controller config, cloud staging)"
+  else
+    log "steam account: upload failed - the saved login is unchanged"
+  fi
+  rm -f "$tmp"
+}
+
+account_pull() {
+  # Restoring over a running Steam would be overwritten the moment it exits, and
+  # could log the session out mid-game.
+  if steam_running; then
+    log "steam account: Steam is running - not touching the login files"
+    return 0
+  fi
+
+  local tmp; tmp=$(mktemp -t steam-account.XXXXXX.tgz) || return 0
+  if ! "$S5" cp "$ACCOUNT_OBJ" "$tmp" >/dev/null 2>&1; then
+    log "steam account: none archived yet - you will sign in to Steam once, and the next push saves it"
+    rm -f "$tmp"; return 0
+  fi
+
+  mkdir -p "$STEAM_BASE/$STEAM_DIR/config" "$STEAM_BASE/.steam" 2>/dev/null || true
+  if tar -xzf "$tmp" -C "$STEAM_BASE" 2>/dev/null; then
+    # Steam refuses a token file the rest of the world can read.
+    chmod 600 "$STEAM_BASE/$STEAM_DIR/config/config.vdf" 2>/dev/null || true
+    # .steam/steam is how Steam finds its own root; it is a symlink, so it is
+    # not in the tarball and has to be recreated when this is a fresh box.
+    [[ -e "$STEAM_BASE/.steam/steam" ]] || \
+      ln -s "$STEAM_BASE/$STEAM_DIR" "$STEAM_BASE/.steam/steam" 2>/dev/null || true
+    log "steam account: restored - Steam should start already signed in"
+  else
+    log "steam account: archive would not extract - you will sign in manually"
+  fi
+  rm -f "$tmp"
+}
+
 # --- push --------------------------------------------------------------------
 cmd_push() {
   local force=0 verify=0 a
@@ -340,6 +471,12 @@ cmd_push() {
   done
   [[ -d $LIB ]] || die "$LIB does not exist - nothing to push"
   mountpoint -q "$(dirname "$LIB")" || die "$(dirname "$LIB") is not a mountpoint - refusing to push"
+
+  # Deliberately ahead of the restored-this-boot guard below. That guard exists
+  # to stop a half-restored GAME overwriting a complete one; the login has no
+  # such hazard - it is one small file with its own "does it exist" check - and
+  # a session that restored no games is exactly the one whose login is new.
+  account_push
 
   # The library must have been restored on THIS boot. Weaker than it was, now
   # that an absent app is never deleted - but it still stops a half-restored
@@ -492,6 +629,11 @@ cmd_status() {
   echo "  restored  $(restored && echo "yes (this boot)" || echo "NO - push will refuse")"
   echo "  this boot $(printf '%s' "${APPS}")"
   echo "  last push $(cat "$STATE/last-push" 2>/dev/null || echo never)"
+  if "$S5" ls "$ACCOUNT_OBJ" >/dev/null 2>&1; then
+    echo "  steam login archived - a new box starts signed in"
+  else
+    echo "  steam login NOT archived - a new box will ask for Steam Guard"
+  fi
   echo "  archive:"
   cmd_list
 }
@@ -529,11 +671,17 @@ case "${1:-status}" in
     done
     cmd_pull "$want" ;;
   push|sync)    shift; cmd_push "$@" ;;
+  account)      shift
+                case "${1:-}" in
+                  push) account_push ;;
+                  pull|restore) account_pull ;;
+                  *) echo "usage: cg-library account push|pull" >&2; exit 1 ;;
+                esac ;;
   list)         cmd_list ;;
   forget)       shift; cmd_forget "$@" ;;
   check)        cmd_check ;;
   status|"")    cmd_status ;;
-  *) echo "usage: cg-library [pull [--apps <csv|all|none>]|push|list|forget <appid>|check|status]" >&2; exit 1 ;;
+  *) echo "usage: cg-library [pull [--apps <csv|all|none>]|push|account push|pull|list|forget <appid>|check|status]" >&2; exit 1 ;;
 esac
 
 # See the note at the end of cg: bash reads a script incrementally and returns

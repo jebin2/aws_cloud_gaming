@@ -469,6 +469,13 @@ cmd_library() {
       if [[ -n ${orph//[[:space:]]/} ]]; then
         awk -F'\t' '{t+=$1} END{ if (t>0) printf "\n  plus %.1f GB of ORPHANED objects from an unfinished push\n  costing $%.2f/month and unusable - remove them: cg library clean\n", t/1073741824, t/1073741824*0.025 }' <<<"$orph"
       fi ;;
+    account|login)
+      shift
+      need_node
+      case "${1:-}" in
+        push|pull|restore) box "/usr/local/bin/cg-library account ${1/restore/pull}" ;;
+        *) die "usage: cg library account push|pull" ;;
+      esac ;;
     forget)
       shift; library_forget "$@" ;;
     clean)
@@ -477,7 +484,7 @@ cmd_library() {
       # Answerable without the box, which matters when it is gone: this is where
       # the games are, and the one thing worth knowing then.
       echo "${GAME_S3_BUCKET:-(not set - run cg init)}" ;;
-    *) die "usage: cg library [list|status|push|pull [--apps <csv>]|check|forget <appid>|clean|--bucket]" ;;
+    *) die "usage: cg library [list|status|push|pull [--apps <csv>]|account push|pull|check|forget <appid>|clean|--bucket]" ;;
   esac
 }
 

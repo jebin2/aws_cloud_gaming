@@ -1523,3 +1523,36 @@ whose manifest restored and whose files did not reads as "installed" at full siz
 way to know better; the honest fix would be for it to compare the manifest's `SizeOnDisk` against
 the bytes actually present, which is the same "measure the effect, not the intent" rule that the
 restore itself just learned.
+
+### Two of the new tests were green because they tested nothing
+
+The Steam-login archive shipped with twelve cases, all passing. Mutation testing - breaking the
+code on purpose, one change at a time, and checking the suite goes red - said two of them were
+decorative:
+
+    drop cache excludes     passed 33, failed 0     <- should have failed
+    tar follows symlinks    passed 33, failed 0     <- should have failed
+
+Both had the same cause. `config/` is archived as **two named files**, not as a directory, so
+the 40 MB `htmlcache` fixture was never a candidate for inclusion and the `--exclude` protecting
+it was decorative. And `.steam/registry.vdf` is likewise a named file, so the `.steam/steam`
+symlink beside it was never walked - the "tar does not follow symlinks" case could not fail.
+
+The tests were not wrong about the *outcome*. They were wrong about the *mechanism*, and a test
+that passes for a reason other than the one in its comment will keep passing after the mechanism
+is removed. The rewrite tests `userdata/`, which is the only path actually walked as a
+directory, and puts a symlink inside it pointing at its own ancestor.
+
+That mutation then **hung the suite instead of failing it**: `tar -h` on a self-referential link
+recurses forever. Two things came out of it - a `timeout` around the tar in the production path,
+which runs at shutdown where an unbounded walk would hold the machine open, and a `timeout`
+around the script under test, because a hung suite reads as "still running", not as a failure.
+
+Two more mutations survived a second round: dropping `account_pull` from the restore, and
+dropping the wait loop after `steam -shutdown`. The first was never covered because every case
+called `account pull` directly rather than going through a real restore. The second passed
+because the stubbed `steam -shutdown` removed its marker *synchronously* - so the code did not
+need to wait for anything. Making the stub exit after a beat, the way Steam does, made the wait
+loop load-bearing. **A stub that is more obedient than the real thing tests less than it looks.**
+
+Final: ten mutations, ten caught, 41 assertions, 1.4s.

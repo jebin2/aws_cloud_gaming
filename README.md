@@ -715,6 +715,48 @@ rebuild for you - are all mirrored.
 If Steam happens to place the tools in `/scratch/steam` on some build, they will be mirrored and
 then removed again the first time it does not. That churn is harmless.
 
+### The Steam login is not in the library
+
+The games are on `/scratch`. The *login* is not - it is four things on the **root disk**, which
+is destroyed with the instance:
+
+    ~/.local/share/Steam/config/config.vdf        the refresh token
+    ~/.local/share/Steam/config/loginusers.vdf    the remembered account
+    ~/.steam/registry.vdf                         the machine identity Steam Guard checks
+    ~/.local/share/Steam/userdata/                per-user config, controller bindings
+
+So a rebuild restored 160 GB of game perfectly and then asked for Steam Guard again, which is
+the wrong way round: the expensive thing came back and the cheap thing did not.
+
+These now go to `steam/account/steam-account.tgz` - a tarball rather than an `s5cmd sync`,
+because it is a handful of files whose **modes matter** (Steam rejects a `config.vdf` that other
+users can read) and because a tarball lands **atomically**. A half-synced login directory is
+worse than no login at all.
+
+Three details that are not obvious:
+
+**It is pushed even when the game push refuses.** The restored-this-boot guard exists to stop a
+half-restored *game* overwriting a complete archive. The login has no such hazard, and the boot
+most likely to carry a *new* login is the one that restored no games at all - the box used for
+something else. Blocking it would lose a real login to an unrelated rule.
+
+**A logged-out box does not overwrite a good saved login.** The guard is `config.vdf` existing
+and being non-empty. Without it, booting a box, never signing in, and destroying it would
+replace a working archived login with an empty one.
+
+**`userdata/` is the only directory walked**, so it is where the cache excludes and the symlink
+handling earn their place; `config/` is archived as two named files. Links are stored as links -
+the same `--no-follow-symlinks` lesson that OOM-killed the library sync at 12 GB resident.
+
+`cg library status` says which way it is:
+
+      steam login archived - a new box starts signed in
+      steam login NOT archived - a new box will ask for Steam Guard
+
+The token is a credential. It lives in a private bucket the box reaches through its instance
+role, and it is worth knowing it is there: anyone who can read that bucket can sign in as you.
+`cg destroy --no-push` skips it along with everything else.
+
 ### Comparison is size-only
 
 `s5cmd sync` compares modification times by default, and a freshly restored file is always
