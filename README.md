@@ -517,6 +517,15 @@ the path people actually use.
 
 ### Measured numbers
 
+**Steam download rate: 379 Mbps**, measured off the idle watchdog's own interface counters
+(2,710 MB/min inbound) while a game was downloading. So a 160 GB game re-downloads in about an
+hour, not the ~3.7 h an earlier ~100 Mbps guess implied - that guess came from watching the
+Steam *client* bootstrap, which is not the same thing as a game download and is far slower.
+
+The archive still earns its keep at that rate: ~11 min to restore against ~60 min to
+re-download, and the Proton prefix - save games, registry, shader cache - cannot be
+re-downloaded at any speed.
+
 On a `g6.xlarge` in `ap-south-2`:
 
 | Shape | Direction | Rate |

@@ -1114,9 +1114,18 @@ cmd_watcher() {
     ohw=$(box 'systemctl is-active idle-watchdog.timer 2>/dev/null' 2>/dev/null) || true
     ohw=${ohw//[$'\r\n']/}
     log "on-host watchdog  ${ohw:-unreachable}"
-    log "shutdown action   $(ec2 describe-instance-attribute --instance-id "$INSTANCE_ID" \
+    # What it MUST be depends on the purchase model, so say which. The hint used
+    # to read "must be 'stop'" unconditionally, which became wrong the moment
+    # spot switched to one-time+terminate - a correct setting flagged as an
+    # error, next to a guard people are reading precisely to check it.
+    local sb want
+    sb=$(ec2 describe-instance-attribute --instance-id "$INSTANCE_ID" \
          --attribute instanceInitiatedShutdownBehavior \
-         --query 'InstanceInitiatedShutdownBehavior.Value' --output text 2>/dev/null)  <- must be 'stop'"
+         --query 'InstanceInitiatedShutdownBehavior.Value' --output text 2>/dev/null)
+    if [[ $(ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].InstanceLifecycle' --output text 2>/dev/null) == spot ]]
+    then want=terminate; else want=stop; fi
+    log "shutdown action   $sb  <- must be '$want' $([[ $sb == "$want" ]] && echo "(ok)" || echo "(WRONG)")"
     echo
     box 'journalctl -t idle-watchdog -n 8 --no-pager -o cat 2>/dev/null | sed "s/^/      /"' || true
   else

@@ -393,7 +393,9 @@ for a in apps:
   local name dir bytes; IFS=$'\t' read -r name dir bytes <<<"$row"
   echo "This permanently deletes $name ($id, $(hb "$bytes")) from the archive."
   echo "No undo, no versioning. Playing it again means downloading it from Steam,"
-  echo "which at the ~100 Mbps this box sees is hours, not the ~11 min a restore takes."
+  echo "which at the 379 Mbps measured on this instance type is about an hour for"
+  echo "160 GB, against ~11 min to restore it. The saves and shader cache in the"
+  echo "Proton prefix are not re-downloadable at all."
   if [[ $yes != --yes ]]; then
     local a; read -r -p "type FORGET to confirm: " a
     [[ $a == FORGET ]] || { echo "aborted - nothing was deleted"; return 1; }
