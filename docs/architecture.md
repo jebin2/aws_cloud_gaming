@@ -100,7 +100,7 @@ outside AWS and has no role to borrow.
 
 ## Where cost control sits
 
-Four layers, described in the main README. They are deliberately independent: layer 1 is the
+Four layers, described in [cost-guards.md](cost-guards.md). They are deliberately independent: layer 1 is the
 `game` script, layer 2 runs on the box itself, layers 3 and 4 run in AWS. A failure in any one
 is caught by the next.
 

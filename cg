@@ -46,7 +46,7 @@ INSTANCE_ID="${GAME_INSTANCE_ID:-}"
 KEY="$HOME/.ssh/${TS_HOST}.pem"
 ec2() { aws ec2 "$@" --region "$REGION"; }
 
-# lib/setup and lib/game are dispatch targets, not commands - see lib/README
+# lib/setup and lib/game are dispatch targets, not commands - see docs/commands.md
 # is not needed, their headers say so.
 
 need_node() {
@@ -972,7 +972,7 @@ cmd_watchdog() {
         log "installed $("${rsh[@]}" 'aws --version 2>&1 | cut -d" " -f1' 2>/dev/null)"
       fi
       # Credentials can come from .env, so the whole thing is one command. These
-      # must be the SCOPED user's keys - see the IAM policy in the README. They
+      # must be the SCOPED user's keys - see the IAM policy in docs/cost-guards.md. They
       # are written 600 and owned by the remote user.
       if [[ -n ${GAME_WATCHDOG_AWS_KEY_ID:-} && -n ${GAME_WATCHDOG_AWS_SECRET:-} ]]; then
         log "scoped credentials go into the root-owned watchdog config"
@@ -1021,7 +1021,7 @@ cmd_watchdog() {
         log ""
         log "WARNING: $host is using the SAME credentials as this machine."
         log "  That gives an always-on, internet-facing host your full access."
-        log "  cg init creates a scoped user; see the IAM policy in the README."
+        log "  cg init creates a scoped user; see the IAM policy in docs/cost-guards.md."
         log ""
       fi
 

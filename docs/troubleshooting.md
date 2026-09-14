@@ -4,6 +4,24 @@ Real failures from building this, with the reasoning behind each fix. They are r
 the fix is rarely obvious from the code alone, and because most of them cost real money or
 hours to diagnose.
 
+## The ones that cost the most time
+
+Nearly all of them share a shape: **something reported success while broken.** That is why each
+provisioning step now asserts its effect rather than its execution.
+
+| Symptom | Actual cause |
+|---|---|
+| Stream connects, then `No video traffic was ever received from the host!` | Ubuntu ships `nvidia_drm modeset=1`. **NvFBC cannot capture while DRM KMS owns the display** - and it also blocks every `xrandr` mode change |
+| `apt install steam` succeeds, no Steam exists | `steam-installer` is a stub; its first-run licence dialog cannot be answered headless. Use Valve's `.deb` |
+| Steam downloads 74 MB and stops | Valve's launcher runs `steamdeps`, which re-execs into a **terminal prompt** whenever `DISPLAY` is set |
+| Steam killed mid-update | "Size stopped growing" is not "finished" - Steam alternates downloading and installing. Gate on the unpacked client existing |
+| "Storage is showing internal only" | Steam writes `libraryfolders.vdf` only after a sign-in, so on a fresh client there was nothing to append to and registration silently wrote nothing |
+| NVMe library vanishes after a stop | `/scratch` is reformatted at every start, destroying the marker Steam uses as proof the library is real |
+| Build hangs with no output, then "host rebooting" | A rebuilt box reclaims its hostname, and `known_hosts` still held the old key. ssh's stderr was being discarded, so a refusal looked like silence |
+| Re-running `cg init` hangs 30 minutes | It waited for a *new* tailnet node against a box that joined long ago - gated on a 2s ping that a cold WireGuard path loses |
+| CloudWatch alarm stops the box mid-build | A new alarm is evaluated against the previous 30 minutes, so it fires immediately. It is created **disarmed** and armed by `cg open` |
+| Billing looks like zero while spending | Credits are booked as a matching negative line; without filtering to `RECORD_TYPE=Usage` every figure nets out |
+
 ## Getting a GPU instance to launch at all
 
 ### There are three independent gates, not one
