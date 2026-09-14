@@ -250,14 +250,18 @@ library_list() {
   # mirrors fine but writes no index, so "the archive is empty" would be a lie
   # told about the thing that was looked for rather than the thing that is
   # there. Check the objects before saying nothing is there.
+  # `|| true` because `aws s3 ls` on an EMPTY prefix exits 1, and with
+  # `set -o pipefail` that made the assignment fail and `set -e` kill the whole
+  # command - so `cg library list` printed nothing at all the moment the archive
+  # became empty, which is exactly when someone runs it to check.
   local objs
   objs=$(aws s3 ls "s3://$GAME_S3_BUCKET/steam/" --recursive --summarize 2>/dev/null \
-         | awk '/Total Objects:/{print $3}')
+         | awk '/Total Objects:/{print $3}') || true
   if [[ ${objs:-0} -gt 0 ]] \
      && ! aws s3 ls "s3://$GAME_S3_BUCKET/steam/index.json" >/dev/null 2>&1; then
     local sz
     sz=$(aws s3 ls "s3://$GAME_S3_BUCKET/steam/" --recursive --summarize 2>/dev/null \
-         | awk '/Total Size:/{print $3}')
+         | awk '/Total Size:/{print $3}') || true
     echo "  archive holds $objs objects, $(numfmt --to=iec --suffix=B "${sz:-0}" 2>/dev/null)"
     echo "  but no per-game index yet - this box predates per-game archiving."
     echo "  The next push from a rebuilt box writes one and this lists per game."
@@ -282,6 +286,69 @@ print("  %-10s %-32s %6.1f GB   $%.2f/month (INR %.0f)" % ("","total",g,g*0.025,
 print("")
 print("  229 GB fits on the box at once (209 GB selectable after reserve)")
 if g > 209: print("  the archive is larger than the disk - cg init asks which to restore")'
+}
+
+# Objects the index does not know about.
+#
+# A push that dies leaves files with no manifest and no index entry - by design,
+# so a half-uploaded game is never mistaken for a complete one. But nothing
+# could then SEE them: `cg library list` read the index and reported an empty
+# archive while 76 GB of a dead Diablo IV download sat there billing INR 167 a
+# month, and `forget` could not touch it because forget works off the index too.
+# Cleaning it up meant hand-written `aws s3 rm` commands.
+library_orphans() {   # -> "<bytes>\t<prefix>" per orphan
+  local b="${GAME_S3_BUCKET:-}"; [[ -n $b ]] || return 0
+  local idx; idx=$(library_index)
+  # Same empty-prefix exit-1 trap as library_list; an empty archive has no
+  # orphans and must not abort the caller.
+  aws s3 ls "s3://$b/steam/steamapps/" --recursive 2>/dev/null \
+    | IDX="$idx" python3 -c '
+import json, os, sys, collections
+try:    apps = json.loads(os.environ["IDX"]).get("apps", [])
+except Exception: apps = []
+known_dirs = {a.get("installdir","") for a in apps}
+known_ids  = {str(a.get("appid","")) for a in apps}
+size = collections.Counter()
+for line in sys.stdin:
+    f = line.split(None, 3)
+    if len(f) < 4: continue
+    n, key = int(f[2]), f[3].rstrip("\n")
+    parts = key.split("/")          # steam/steamapps/<area>/<name>/...
+    if len(parts) < 4: continue
+    area, name = parts[2], parts[3]
+    if area == "common":
+        if name not in known_dirs: size["common/" + name] += n
+    elif area in ("compatdata", "shadercache"):
+        if name not in known_ids:  size[area + "/" + name] += n
+for k, v in sorted(size.items(), key=lambda kv: -kv[1]):
+    print("%d\t%s" % (v, k))' || true
+}
+
+library_clean() {
+  [[ -n ${GAME_S3_BUCKET:-} ]] || die "no bucket configured"
+  local rows; rows=$(library_orphans)
+  if [[ -z ${rows//[[:space:]]/} ]]; then
+    echo "  no orphaned objects - everything in the archive is indexed"
+    return 0
+  fi
+  local total=0 bytes prefix
+  echo "These objects belong to no archived game - a push that never finished:"
+  while IFS=$'\t' read -r bytes prefix; do
+    [[ -n ${prefix:-} ]] || continue
+    total=$(( total + bytes ))
+    printf '  %10s  %s\n' "$(numfmt --to=iec --suffix=B "$bytes" 2>/dev/null)" "$prefix"
+  done <<< "$rows"
+  awk -v b="$total" 'BEGIN{ g=b/1073741824;
+    printf "\n  %.1f GB, costing $%.2f/month (INR %.0f) for files no game can use\n", g, g*0.025, g*0.025*88 }'
+  echo "  They are not restorable: with no manifest, Steam cannot see them."
+  local a; read -r -p "type CLEAN to delete them: " a
+  [[ $a == CLEAN ]] || { echo "aborted - nothing was deleted"; return 1; }
+  while IFS=$'\t' read -r bytes prefix; do
+    [[ -n ${prefix:-} ]] || continue
+    aws s3 rm "s3://$GAME_S3_BUCKET/steam/steamapps/$prefix" --recursive >/dev/null 2>&1 \
+      && log "deleted $prefix" || log "could not delete $prefix"
+  done <<< "$rows"
+  log "storage charges for those stop now"
 }
 
 library_forget() {
@@ -368,14 +435,22 @@ cmd_library() {
       need_node
       box '/usr/local/bin/cg-library check' ;;
     list)
-      library_list ;;
+      library_list
+      # Say it here too: this is the view people check, and an unindexed pile
+      # is invisible everywhere else.
+      local orph; orph=$(library_orphans)
+      if [[ -n ${orph//[[:space:]]/} ]]; then
+        awk -F'\t' '{t+=$1} END{ if (t>0) printf "\n  plus %.1f GB of ORPHANED objects from an unfinished push\n  costing $%.2f/month and unusable - remove them: cg library clean\n", t/1073741824, t/1073741824*0.025 }' <<<"$orph"
+      fi ;;
     forget)
       shift; library_forget "$@" ;;
+    clean)
+      library_clean ;;
     --bucket|bucket)
       # Answerable without the box, which matters when it is gone: this is where
       # the games are, and the one thing worth knowing then.
       echo "${GAME_S3_BUCKET:-(not set - run cg init)}" ;;
-    *) die "usage: cg library [list|status|push|pull [--apps <csv>]|check|forget <appid>|--bucket]" ;;
+    *) die "usage: cg library [list|status|push|pull [--apps <csv>]|check|forget <appid>|clean|--bucket]" ;;
   esac
 }
 
@@ -1102,6 +1177,7 @@ build (changes things)
   cg library check           is the disk mirrored? (no upload)
   cg library list            what is archived, per game, and the monthly cost
   cg library forget <appid>  delete one game from the archive           [permanent]
+  cg library clean           delete orphaned objects left by an unfinished push
   cg games                   the OLD EBS volume, if you still have one
   cg games --delete          delete it and reclaim INR ~1,284/month    [permanent]
   cg snapshot                save an AMI of the current box             [bills monthly]

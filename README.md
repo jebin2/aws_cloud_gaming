@@ -657,6 +657,12 @@ half-restored game that Steam reports as installed.
     cg library pull --apps <csv|all|none>
     cg library forget <appid>  delete one game from the archive (type FORGET)
 
+A push that dies leaves files with no manifest and no index entry - deliberately, so a
+half-uploaded game is never mistaken for a complete one. Nothing could then *see* them:
+`cg library list` read the index and reported an empty archive while 76 GB of a dead download
+sat there costing INR 167/month, and `forget` could not reach it either. `cg library list` now
+reports orphaned objects and `cg library clean` removes them, behind a typed `CLEAN`.
+
 **The archive no longer shrinks on its own**, which is the price of never deleting an absent
 game. `forget` is how a game leaves it - with a typed word, because there is no versioning behind
 the bucket. Both games archived is 288 GB, **$7.20/month (INR 634)**; one is $4.00 (INR 352).
