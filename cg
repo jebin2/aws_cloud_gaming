@@ -959,7 +959,111 @@ cmd_watchdog() {
   esac
 }
 
+# What Steam is actually doing: installed, downloading, running, or only in the
+# archive. Every fact here already existed - the appmanifests on the box, the
+# index in S3, the interface counters the watchdog reads - and none of it was
+# reachable without ssh-ing in and reading .acf files by hand.
+#
+# StateFlags is a bitfield, not an enum, which is why "1042" means nothing on
+# its own: 1024 UpdateStarted + 16 Locked + 2 UpdateRequired = downloading.
 cmd_games() {
+  case "${1:-}" in
+    --volume|volume) shift; games_volume "$@"; return ;;
+  esac
+  need_node
+  local raw
+  raw=$(box '
+    for f in /scratch/steam/steamapps/appmanifest_*.acf; do
+      [ -f "$f" ] || continue
+      id=$(basename "$f" .acf); id=${id#appmanifest_}
+      name=$(sed -n "s/.*\"name\"[[:space:]]*\"\(.*\)\".*/\1/p" "$f" | head -1)
+      flags=$(sed -n "s/.*\"StateFlags\"[[:space:]]*\"\([0-9]*\)\".*/\1/p" "$f" | head -1)
+      size=$(sed -n "s/.*\"SizeOnDisk\"[[:space:]]*\"\([0-9]*\)\".*/\1/p" "$f" | head -1)
+      got=$(sed -n "s/.*\"BytesDownloaded\"[[:space:]]*\"\([0-9]*\)\".*/\1/p" "$f" | head -1)
+      want=$(sed -n "s/.*\"BytesToDownload\"[[:space:]]*\"\([0-9]*\)\".*/\1/p" "$f" | head -1)
+      dir=$(sed -n "s/.*\"installdir\"[[:space:]]*\"\(.*\)\".*/\1/p" "$f" | head -1)
+      stage=$(sed -n "s/.*\"BytesToStage\"[[:space:]]*\"\([0-9]*\)\".*/\1/p" "$f" | head -1)
+      on=0; pgrep -f "[/]steamapps/common/$dir/" >/dev/null 2>&1 && on=1
+      # Steam.s own BytesDownloaded lags badly - it read 0.6 GB with 67 GB on
+      # disk - so progress comes from the DISK: what is committed plus what is
+      # staged in downloading/, against BytesToStage.
+      done_b=$(du -sb "/scratch/steam/steamapps/common/$dir" 2>/dev/null | cut -f1)
+      printf "APP\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$id" "$name" "${flags:-0}" "${size:-0}" "${done_b:-0}" "${want:-0}" "$on" "${stage:-0}"
+    done
+    printf "DISK\t%s\n" "$(df -B1 --output=used,avail /scratch | tail -1 | tr -s " " "\t" | sed "s/^\t//")"
+    printf "DL\t%s\n" "$(du -sb /scratch/steam/steamapps/downloading 2>/dev/null | cut -f1 || echo 0)"
+    # Two samples three seconds apart: a rate averaged over the whole boot is
+    # not the rate right now, and "right now" is what an ETA needs.
+    w=$(ip route show default 2>/dev/null | awk "{print \$5; exit}")
+    r1=$(cat /sys/class/net/${w:-eth0}/statistics/rx_bytes 2>/dev/null || echo 0)
+    sleep 3
+    r2=$(cat /sys/class/net/${w:-eth0}/statistics/rx_bytes 2>/dev/null || echo 0)
+    printf "RATE\t%s\n" "$(( (r2 - r1) / 3 ))"
+  ' 2>/dev/null) || die "could not read the box"
+
+  local idx; idx=$(library_index 2>/dev/null || echo '"'"'{"apps":[]}'"'"')
+  RAW="$raw" IDX="$idx" python3 -c '
+import json, os, sys
+GB = 1073741824.0
+apps, disk, staging, rate = [], None, 0, 0
+for line in os.environ["RAW"].splitlines():
+    f = line.split("\t")
+    if f[0] == "APP" and len(f) >= 9:
+        apps.append(dict(zip(("id","name","flags","size","done","want","on","stage"), f[1:9])))
+    elif f[0] == "DISK" and len(f) >= 3: disk = (int(f[1]), int(f[2]))
+    elif f[0] == "DL"   and len(f) >= 2: staging = int(f[1] or 0)
+    elif f[0] == "RATE" and len(f) >= 2: rate = int(f[1] or 0)
+try:    archived = {str(a["appid"]): a for a in json.loads(os.environ["IDX"]).get("apps", [])}
+except Exception: archived = {}
+
+def state(flags, running):
+    n = int(flags or 0)
+    if running:        return "RUNNING"
+    if n & 1024:       return "downloading"
+    if n & 512:        return "paused"
+    if n & 2:          return "update needed"
+    if n & 32:         return "files missing"
+    if n & 128:        return "files corrupt"
+    if n & 4:          return "installed"
+    if n & 1:          return "uninstalled"
+    return "flags %d" % n
+
+rows = []
+downloading = [a for a in apps if int(a["flags"] or 0) & 1024]
+for a in apps:
+    size, done, target = int(a["size"]), int(a["done"]), int(a["stage"] or 0)
+    st = state(a["flags"], a["on"] == "1")
+    extra = ""
+    if st == "downloading" and target > 0:
+        # downloading/ is shared, so only attribute it when one game is using it.
+        on_disk = done + (staging if len(downloading) == 1 else 0)
+        pct = min(100.0, 100.0 * on_disk / target)
+        left = max(0, target - on_disk)
+        extra = "%.0f%% of %.0f GB" % (pct, target / GB)
+        if rate > 1_000_000:
+            extra += ", ~%.0f min left" % (left / rate / 60)
+        shown = on_disk
+    else:
+        shown = size if size else done
+    rows.append((a["name"][:28], st, shown / GB, extra))
+    archived.pop(a["id"], None)
+for a in archived.values():
+    rows.append((a.get("name","?")[:28], "in S3 only", a.get("bytes",0)/GB, "cg init offers it"))
+
+if not rows:
+    print("  no games installed, and nothing archived")
+else:
+    print("  %-28s %-14s %9s  %s" % ("GAME","STATE","SIZE",""))
+    for n, st, g, x in rows:
+        print("  %-28s %-14s %6.1f GB  %s" % (n, st, g, x))
+if disk:
+    used, avail = disk
+    print("\n  disk   %.0f GB used, %.0f GB free" % (used/GB, avail/GB))
+    if rate > 100_000: print("  link   %.0f Mbps inbound right now" % (rate*8/1e6))
+'
+}
+
+games_volume() {
   local vol az size state
   read -r vol az size state < <(ec2 describe-volumes \
     --filters "Name=tag:Name,Values=${TS_HOST}-games" \
@@ -1187,8 +1291,8 @@ build (changes things)
   cg library list            what is archived, per game, and the monthly cost
   cg library forget <appid>  delete one game from the archive           [permanent]
   cg library clean           delete orphaned objects left by an unfinished push
-  cg games                   the OLD EBS volume, if you still have one
-  cg games --delete          delete it and reclaim INR ~1,284/month    [permanent]
+  cg games                   what Steam has: installed, downloading, running, archived
+  cg games --volume          the OLD EBS volume, if you still have one
   cg snapshot                save an AMI of the current box             [bills monthly]
   cg snapshot --list         what images exist and what they cost
   cg clean                   free space: apt caches, logs, /scratch/tmp

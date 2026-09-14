@@ -135,8 +135,8 @@ reimplementing them.
 | `cg library` | What is on the box vs in S3, and what the archive costs |
 | `cg library push` | Mirror the games to S3 now (`--verify` for a full comparison) |
 | `cg library pull` | Restore the games from S3 now |
-| `cg games` | The **old** EBS volume, if you still have one, and its monthly cost |
-| `cg games --delete` | Delete it and reclaim ~INR 1,284/month. **Permanent** |
+| `cg games` | What Steam has: installed, downloading (with progress), running, archived |
+| `cg games --volume` | The **old** EBS volume, if you still have one, and its monthly cost |
 | `cg snapshot` | Save an AMI of the box. **Bills monthly** |
 | `cg snapshot --list` | What images exist and what they cost |
 | `cg snapshot --delete <id>` | Delete an image **and its backing snapshots** |
@@ -556,7 +556,7 @@ improves the odds on a spot launch. The cost is the ~10 minute restore, which is
 worth the work to hide it inside the build.
 
 If you still have that volume, it is **not** attached or mounted any more, and it is **not**
-deleted either - `cg games` shows what it still costs and `cg games --delete` reclaims it.
+deleted either - `cg games --volume` shows what it still costs and `cg games --volume --delete` reclaims it.
 
 ### What `destroy` removes, and what `--all` removes
 
