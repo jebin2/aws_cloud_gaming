@@ -43,15 +43,24 @@ provisioning step now asserts its effect rather than its execution.
 succeeded" immediately before two different real failures. **A passing dry-run is not evidence
 a launch will work.**
 
-### Quota requests filed from the CLI are auto-denied
+### A quota request arrives with no use case, and is refused
 
-`aws service-quotas request-service-quota-increase` has no use-case parameter, so Service
-Quotas files the case with the placeholder `This support case was created by Service Quotas`
-and no justification. The spot request was refused on exactly that basis.
+A request filed through Service Quotas - from the console *or* with
+`aws service-quotas request-service-quota-increase` - opens a support case whose only text is the
+placeholder `This support case was created by Service Quotas`. There is no field for a use case,
+so the reviewer has nothing to assess, and **every request here was refused first**: on-demand in
+two regions on 2026-09-06, and spot on 2026-09-09.
 
-File quota requests through the console with a real use case. The strongest argument for a
-spot increase is that on-demand quota is *already approved*, so it does not raise maximum
-concurrent capacity - it only changes the purchase model.
+An earlier version of this entry blamed the CLI and said to file from the console instead. That
+was wrong: the spot case was opened from the console and arrived just as empty.
+
+What worked, both times, was **reopening the refused case and replying with a detailed use case** -
+not filing a new request. On-demand was granted three to four days after the appeal; spot in under a
+day. For spot, the strongest argument is that on-demand quota is *already approved*, so it does
+not raise maximum concurrent capacity - it only changes the purchase model.
+
+The messages that worked, and the full sequence, are in
+[aws-account-setup.md](aws-account-setup.md#the-appeals-we-actually-sent).
 
 ### Region and instance type are not free choices
 
