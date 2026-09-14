@@ -82,6 +82,8 @@ make_login() {
   mkdir -p "$T/home/$SD/config/htmlcache" "$T/home/$SD/config/avatarcache" \
            "$T/home/$SD/userdata/1000000001/config/librarycache" "$T/home/.steam"
   echo 'refresh_token_here' > "$T/home/$SD/config/config.vdf"
+  # Where the token really is. config.vdf above holds the account list only.
+  printf '"MachineUserConfigStore"\n{\n\t"Software"\n\t{\n\t\t"Valve"\n\t\t{\n\t\t\t"Steam"\n\t\t\t{\n\t\t\t\t"ConnectCache"\n\t\t\t\t{\n\t\t\t\t\t"1a2b3c4d5"\t\t"5b9aENCRYPTED"\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n' > "$T/home/$SD/local.vdf"
   echo 'loginusers'         > "$T/home/$SD/config/loginusers.vdf"
   echo 'registry'           > "$T/home/.steam/registry.vdf"
   echo 'localconfig'        > "$T/home/$SD/userdata/1000000001/config/localconfig.vdf"
@@ -96,7 +98,8 @@ echo "1. push archives the files that carry the login"
 reset; make_login; rm -f "$T/remote/account.tgz"
 out=$(run account push)
 contains "says so"            "$out" "steam account: archived"
-contains "the token"          "$(members)" "config/config.vdf"
+contains "the token store"    "$(members)" "$SD/local.vdf"
+contains "the config"         "$(members)" "config/config.vdf"
 contains "the account list"   "$(members)" "config/loginusers.vdf"
 contains "the machine id"     "$(members)" ".steam/registry.vdf"
 contains "per-user config"    "$(members)" "userdata/1000000001/config/localconfig.vdf"
@@ -133,9 +136,14 @@ echo "3. a logged-OUT box does not overwrite a good saved login"
 # The failure this prevents: boot a box, never sign in, destroy it, and the
 # push replaces a working archived login with an empty one.
 reset; before=$(md5sum < "$T/remote/account.tgz")
-rm -rf "$T/home"; mkdir -p "$T/home/$SD/config"
+# The shape of the real 2026-09-14 failure: a signed-out Steam still writes a
+# large config.vdf, so "config.vdf is non-empty" is no evidence of a login.
+rm -rf "$T/home"; mkdir -p "$T/home/$SD/config" "$T/home/.steam"
+head -c 21676 /dev/zero | tr '\0' 'x' > "$T/home/$SD/config/config.vdf"
+echo 'registry' > "$T/home/.steam/registry.vdf"
+printf '"MachineUserConfigStore"\n{\n}\n' > "$T/home/$SD/local.vdf"
 out=$(run account push)
-contains "explains itself"     "$out" "no config.vdf"
+contains "explains itself"     "$out" "not signed in"
 check    "archive is untouched" "$(md5sum < "$T/remote/account.tgz")" "$before"
 
 echo "4. pull restores it onto a fresh box"
@@ -144,11 +152,13 @@ out=$(run account pull)
 contains "says so"          "$out" "steam account: restored"
 check "token is back"       "$(cat "$T/home/$SD/config/config.vdf" 2>/dev/null)" "refresh_token_here"
 check "machine id is back"  "$(cat "$T/home/.steam/registry.vdf" 2>/dev/null)" "registry"
+check "token store is back" "$(grep -c '"ConnectCache"' "$T/home/$SD/local.vdf" 2>/dev/null)" "1"
 
 echo "5. the restored token is 0600, and .steam/steam is recreated"
 # Steam refuses a config.vdf that other users can read, and .steam/steam is a
 # symlink so it cannot be in the tarball - it has to be made on extract.
 check "mode" "$(stat -c %a "$T/home/$SD/config/config.vdf" 2>/dev/null)" "600"
+check "token store mode" "$(stat -c %a "$T/home/$SD/local.vdf" 2>/dev/null)" "600"
 if [[ -L "$T/home/.steam/steam" ]]; then echo "  ok   symlink recreated"; pass=$((pass+1));
 else echo "  FAIL .steam/steam missing - Steam cannot find its own root"; fail=$((fail+1)); fi
 

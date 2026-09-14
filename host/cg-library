@@ -387,7 +387,8 @@ steam_running() { pgrep -x steam >/dev/null 2>&1; }
 # modern Steam has none, and demanding it would break every push.
 account_members() {
   local m
-  for m in "$STEAM_DIR/config/config.vdf" "$STEAM_DIR/config/loginusers.vdf" \
+  for m in "$STEAM_DIR/local.vdf" \
+           "$STEAM_DIR/config/config.vdf" "$STEAM_DIR/config/loginusers.vdf" \
            "$STEAM_DIR/userdata" ".steam/registry.vdf"; do
     [[ -e "$STEAM_BASE/$m" ]] && printf '%s\n' "$m"
   done
@@ -399,11 +400,14 @@ account_members() {
 }
 
 account_push() {
-  local cfg="$STEAM_BASE/$STEAM_DIR/config/config.vdf"
-  # Without config.vdf there is no token, and archiving the rest would replace a
-  # good saved login with a logged-out one. Refusing is the safe direction.
-  if [[ ! -s $cfg ]]; then
-    log "steam account: no config.vdf - leaving the archived login alone"
+  # The token is in local.vdf, under MachineUserConfigStore -> ConnectCache - NOT
+  # in config.vdf. The first version of this guard only required config.vdf to be
+  # non-empty, and a signed-out Steam writes a 21 KB config.vdf all the same: the
+  # archive held the account list and no token, and the next box asked for a
+  # login. Found on 2026-09-14 by diffing what Steam wrote when signing in.
+  local store="$STEAM_BASE/$STEAM_DIR/local.vdf"
+  if ! grep -q '"ConnectCache"' "$store" 2>/dev/null; then
+    log "steam account: not signed in (no ConnectCache in local.vdf) - leaving the archived login alone"
     return 0
   fi
 
@@ -468,7 +472,7 @@ account_pull() {
   mkdir -p "$STEAM_BASE/$STEAM_DIR/config" "$STEAM_BASE/.steam" 2>/dev/null || true
   if tar -xzf "$tmp" -C "$STEAM_BASE" 2>/dev/null; then
     # Steam refuses a token file the rest of the world can read.
-    chmod 600 "$STEAM_BASE/$STEAM_DIR/config/config.vdf" 2>/dev/null || true
+    chmod 600 "$STEAM_BASE/$STEAM_DIR/config/config.vdf" "$STEAM_BASE/$STEAM_DIR/local.vdf" 2>/dev/null || true
     # .steam/steam is how Steam finds its own root; it is a symlink, so it is
     # not in the tarball and has to be recreated when this is a fresh box.
     [[ -e "$STEAM_BASE/.steam/steam" ]] || \

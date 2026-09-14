@@ -735,44 +735,46 @@ ever slips through, extend that function and `cg library forget` its appid.
 
 ### The Steam login is not in the library
 
-The games are on `/scratch`. The *login* is not - it is four things on the **root disk**, which
-is destroyed with the instance:
+The games are on `/scratch`. The login is on the **root disk**, which is destroyed with the
+instance:
 
-    ~/.local/share/Steam/config/config.vdf        the refresh token
+    ~/.local/share/Steam/local.vdf                MachineUserConfigStore -> ConnectCache: the
+                                                  encrypted refresh token (1,024 hex chars)
+    ~/.local/share/Steam/config/config.vdf        settings and the account list - NO token
     ~/.local/share/Steam/config/loginusers.vdf    the remembered account
-    ~/.steam/registry.vdf                         the machine identity Steam Guard checks
+    ~/.steam/registry.vdf                         AutoLoginUser
     ~/.local/share/Steam/userdata/                per-user config, controller bindings
 
-So a rebuild restored 160 GB of game perfectly and then asked for Steam Guard again, which is
-the wrong way round: the expensive thing came back and the cheap thing did not.
+These go to `steam/account/steam-account.tgz` - a tarball rather than an `s5cmd sync`, because
+the file modes matter and a tarball lands atomically.
 
-These now go to `steam/account/steam-account.tgz` - a tarball rather than an `s5cmd sync`,
-because it is a handful of files whose **modes matter** (Steam rejects a `config.vdf` that other
-users can read) and because a tarball lands **atomically**. A half-synced login directory is
-worse than no login at all.
+**The first version archived the wrong file, and said it worked.** It assumed the token was in
+`config.vdf` and guarded on that file being non-empty. A signed-out Steam writes a 21 KB
+`config.vdf` all the same, so the archive held the account list without a token, the check
+passed, and the next box asked for a login. The token was found on 2026-09-14 by marking the
+time, signing in, and listing what Steam wrote: `ConnectCache` appeared only in `local.vdf`.
+The push now refuses unless `local.vdf` contains `ConnectCache`.
 
-Three details that are not obvious:
+**Whether the token works on a different machine is not yet known.** Steam encrypts it, and
+nothing public documents the key - the most direct answer found is "no publicly-known method"
+of reusing it elsewhere. If the key includes something that changes per instance
+(`/etc/machine-id`, hostname, MAC), a restored token will fail to decrypt and Steam will ask for
+a login as before. The next rebuild is the test: if it asks again, the archive cannot carry the
+login on its own. Nothing is broken by trying - a token that fails to decrypt is simply ignored.
+
+Rules that still hold:
 
 **It is pushed even when the game push refuses.** The restored-this-boot guard exists to stop a
-half-restored *game* overwriting a complete archive. The login has no such hazard, and the boot
-most likely to carry a *new* login is the one that restored no games at all - the box used for
-something else. Blocking it would lose a real login to an unrelated rule.
+half-restored *game* overwriting a complete archive. The login has no such hazard.
 
-**A logged-out box does not overwrite a good saved login.** The guard is `config.vdf` existing
-and being non-empty. Without it, booting a box, never signing in, and destroying it would
-replace a working archived login with an empty one.
+**A signed-out box does not overwrite a saved login** - that is exactly what the `ConnectCache`
+check is for.
 
 **`userdata/` is the only directory walked**, so it is where the cache excludes and the symlink
-handling earn their place; `config/` is archived as two named files. Links are stored as links -
-the same `--no-follow-symlinks` lesson that OOM-killed the library sync at 12 GB resident.
+handling earn their place. Links are stored as links, and the tar is bounded by `timeout`.
 
-`cg library status` says which way it is:
-
-      steam login archived - a new box starts signed in
-      steam login NOT archived - a new box will ask for Steam Guard
-
-The token is a credential. It lives in a private bucket the box reaches through its instance
-role, and it is worth knowing it is there: anyone who can read that bucket can sign in as you.
+The token is a credential in your bucket. It is private and reached through the instance role,
+but anyone who can read the bucket holds an encrypted copy of your Steam session.
 `cg destroy --no-push` skips it along with everything else.
 
 ### Comparison is size-only
