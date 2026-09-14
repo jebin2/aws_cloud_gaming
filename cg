@@ -212,8 +212,12 @@ archive_report() {
   local n sz
   n=$(awk '/Total Objects:/{print $3}' <<<"$out")
   sz=$(awk '/Total Size:/{print $3}' <<<"$out")
-  printf '      archive s3://%s/steam holds %s objects, %s\n' \
-    "$b" "${n:-0}" "$(numfmt --to=iec --suffix=B "${sz:-0}" 2>/dev/null || echo "${sz:-0}B")"
+  local human; human=$(numfmt --to=iec --suffix=B "${sz:-0}" 2>/dev/null || echo "${sz:-0}B")
+  if _cg_styled; then
+    _cg_line "$([[ ${n:-0} -gt 0 ]] && echo ok || echo warn)" "archive s3://$b/steam holds ${n:-0} objects, $human"
+  else
+    printf '      archive s3://%s/steam holds %s objects, %s\n' "$b" "${n:-0}" "$human"
+  fi
   [[ ${n:-0} -gt 0 ]]
 }
 
@@ -221,7 +225,7 @@ library_push() { # library_push [--force]; 0 on a completed push
   local extra="${1:-}"
   tailscale ip -4 "$TS_NODE" >/dev/null 2>&1 || { log "box is not reachable - no push"; return 1; }
   say "mirroring the game library to S3 before the box goes away"
-  box "/usr/local/bin/cg-library push $extra" 2>&1 | sed 's/^/      /'
+  box "/usr/local/bin/cg-library push $extra" 2>&1 | cg_relay '      '
   return "${PIPESTATUS[0]}"
 }
 
@@ -529,6 +533,7 @@ cmd_destroy() {
        overwrite the archive. Either grant iam:PutRolePolicy, or wait for the box
        to finish what it is doing and destroy normally."
     fi
+    _cg_section_end 0
     lib/setup destroy
     # The instance is gone, so restore normal access. If this is interrupted the
     # policy stays read-only, and `cg init` rewrites it on the next build.
@@ -540,6 +545,7 @@ cmd_destroy() {
   if [[ $st == running ]]; then
     if ! library_push; then
       if (( ! force )); then
+        {
         echo
         echo "  The push from here failed, which usually means ssh cannot reach the box."
         echo "  That is not the same as 'the games are lost':"
@@ -551,6 +557,7 @@ cmd_destroy() {
         echo "  So --force is usually safe here. Afterwards, confirm it worked:"
         echo "      cg library list      # the archive, read straight from S3"
         echo
+        } | cg_block "🚧" "The push from here failed"
         die "not mirrored from here - see above, then: cg destroy --force"
       fi
       log "WARNING: proceeding without a mirror (--force) - games will be re-downloaded"
@@ -559,6 +566,8 @@ cmd_destroy() {
     log "box is $st - nothing local to push"
     archive_report || log "the archive is EMPTY - if you expected games in it, stop here"
   fi
+  # lib/setup is a separate process and cannot close a step this one opened.
+  _cg_section_end 0
   lib/setup destroy
 }
 
@@ -1377,17 +1386,20 @@ EOF
 case "$CMD" in
   init)      watchdog_ensure; choose_games; exec lib/setup ;;
   check)     exec lib/setup check ;;
-  status)    lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true
-             tailscale ip -4 "$TS_NODE" >/dev/null 2>&1 \
-               && { echo; echo "game library"; box '/usr/local/bin/cg-library status' 2>/dev/null || true; }
-             stream_usage ;;
-  cost)      exec lib/setup cost ;;
+  # Reports go through cg_report: on a terminal it boxes and colours them, and
+  # anywhere else it is `cat`, so a redirected report is byte-for-byte as before.
+  status)    { lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true
+               tailscale ip -4 "$TS_NODE" >/dev/null 2>&1 \
+                 && { echo; echo "game library"; box '/usr/local/bin/cg-library status' 2>/dev/null || true; }
+               stream_usage; } | cg_report ;;
+  cost)      lib/setup cost | cg_report ;;
   clean)     exec lib/setup clean ;;
   destroy)   cmd_destroy "$@" ;;
   open|up)   ensure_moonlight_syskeys; exec lib/game up ;;
   stop|down) cmd_stop "$@" ;;
   snapshot)  cmd_snapshot "$@" ;;
-  games)     cmd_games "$@" ;;
+  # Only the bare report is piped: `games --volume --delete` asks a question.
+  games)     if (( $# )); then cmd_games "$@"; else cmd_games | cg_report "🎮" "Games"; fi ;;
   pair)      cmd_pair ;;
   library|lib) cmd_library "$@" ;;
   watchdog)  cmd_watchdog "$@" ;;

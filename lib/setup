@@ -512,6 +512,8 @@ destroy_all() {
       --output text 2>/dev/null || true)
   fi
 
+  _cg_section_end 0
+  {
   echo "This permanently deletes the box and everything listed here:"
   echo "  instances       ${inst:-none}"
   echo "  images          ${img:-none}"
@@ -547,6 +549,7 @@ Check with: cg library"
 exception - nothing here touches it."
   fi
   echo
+  } | cg_block "🧾" "What this destroy does"
 
   # A persistent spot request relaunches the moment its instance dies.
   local req
@@ -947,10 +950,15 @@ fi
 # Layer 4 first: it is account-level, costs nothing, and needs no instance. If
 # the build dies - or the laptop does - the bill is still being watched.
 say "arming the budget before anything launches"
-lib/aws-setup.sh budget 2>&1 | sed 's/^/    /' || log "budget setup failed - continuing"
+lib/aws-setup.sh budget 2>&1 | cg_relay '    ' || log "budget setup failed - continuing"
 
 say "provisioning instance"
-lib/provision.sh
+# On a terminal, stderr joins the relay too. provision.sh's children report on
+# stderr - library-aws.sh must, because its stdout is captured as the bucket
+# name - and a bare stderr line landed in the middle of the styled step with no
+# time and no gutter. Off a terminal it is left alone, so a redirected log gets
+# exactly what it got before.
+if _cg_styled; then lib/provision.sh 2>&1 | cg_relay ''; else lib/provision.sh | cg_relay ''; fi
 # shellcheck disable=SC1091
 set -a; source .env; set +a
 
@@ -959,8 +967,8 @@ set -a; source .env; set +a
 # the instance or TERMINATES it - deleting the root volume - is decided at
 # launch. The 20-minute boot grace usually covers the gap, but builds have
 # taken 10-20 minutes, so the check belongs ahead of the thing relying on it.
-say "confirming shutdown means stop, not terminate"
-lib/aws-setup.sh shutdown 2>&1 | sed 's/^/    /'
+say "confirming what shutdown does to this instance"
+lib/aws-setup.sh shutdown 2>&1 | cg_relay '    '
 
 # A reused instance may be stopped, in which case nothing will ever join the
 # tailnet until it is started.
@@ -1059,13 +1067,33 @@ ssh-keygen -R "$TS_NODE" >/dev/null 2>&1 || true
 node_ip=$(tailscale ip -4 "$TS_NODE" 2>/dev/null || true)
 [[ -n $node_ip ]] && { ssh-keygen -R "$node_ip" >/dev/null 2>&1 || true; }
 
+# For the live line on a terminal: how big the chosen games are, so the build can
+# say "109 of 160 GB, ~5 min left" rather than "109G on disk". Read once from the
+# archive's index. Best effort - without it the line still shows bytes so far.
+if _cg_styled && [[ ${GAME_APPS:-none} != none && -n ${GAME_S3_BUCKET:-} ]]; then
+  IFS=$'\t' read -r CG_RESTORE_BYTES CG_RESTORE_LABEL < <(
+    aws s3 cp "s3://$GAME_S3_BUCKET/steam/index.json" - --region "$REGION" 2>/dev/null \
+    | GAME_APPS="$GAME_APPS" python3 -c '
+import json, os, sys
+want = os.environ.get("GAME_APPS", "none")
+try:    apps = json.load(sys.stdin).get("apps", [])
+except Exception: apps = []
+if want != "all":
+    ids = {w.strip() for w in want.split(",") if w.strip()}
+    apps = [a for a in apps if str(a.get("appid")) in ids]
+names = [a.get("name", "?") for a in apps]
+label = names[0] if len(names) == 1 else "%d games" % len(names)
+print("%d\t%s" % (sum(int(a.get("bytes", 0)) for a in apps), label))' 2>/dev/null) || true
+  export CG_RESTORE_BYTES="${CG_RESTORE_BYTES:-0}" CG_RESTORE_LABEL="${CG_RESTORE_LABEL:-games}"
+fi
+
 say "building the box - live progress below (10-20 min)"
 stream_build "ubuntu@$TS_NODE" "$KEY" \
   || die "the build did not finish. The instance is still running and still
        billing - stop it with $C_STOP once you have looked at the log."
 
 say "arming cloud-side backstops"
-lib/aws-setup.sh
+lib/aws-setup.sh | cg_relay ''
 
 # The build already installed this (15-watchdog.sh), so the box has been
 # guarded since minute one. This pass refreshes it from the local host/ - which
@@ -1074,7 +1102,7 @@ say "refreshing the on-host watchdog"
 log "copying host/ ..."
 scp -q -i "$KEY" -o StrictHostKeyChecking=accept-new -r host "ubuntu@$TS_NODE:"
 log "installing units ..."
-$SSH 'cd host && sudo ./install-watchdog.sh' 2>&1 | sed 's/^/    /'
+$SSH 'cd host && sudo ./install-watchdog.sh' 2>&1 | cg_relay '    '
 
 IP=$(tailscale ip -4 "$TS_NODE")
 
@@ -1171,7 +1199,7 @@ if wait_for_steam "ubuntu@$TS_NODE" "$KEY" 1500; then
   # (client, library registration, dock pin) all succeeded.
   $SSH 'echo "    client:  $(du -shcL ~/.steam ~/.local/share/Steam 2>/dev/null | tail -1 | cut -f1)"
         echo "    library: $(grep -q '"$GAMES_LIB"' ~/.steam/steam/config/libraryfolders.vdf 2>/dev/null && echo "'"$GAMES_LIB"' registered" || echo "NOT registered")"
-        echo "    dock:    $(test -f ~/.config/xfce4/.steam-pinned && echo pinned || echo "not pinned")"' 2>/dev/null || true
+        echo "    dock:    $(test -f ~/.config/xfce4/.steam-pinned && echo pinned || echo "not pinned")"' 2>/dev/null | cg_relay '' || true
   # Report the library separately - it fails independently of the client, and
   # claiming "ready" when games would land on the 50 GB root disk is worse than
   # saying nothing.
@@ -1219,7 +1247,8 @@ fi
 # of a session, which is the only window where low egress really means idle.
 # Layers 2 and 4 cover the rest, and both count traffic in both directions.
 
-cat <<EOF
+_cg_section_end 0
+cat <<EOF | cg_block "🎉" "Setup complete"
 
 setup complete. $REMAINING
 

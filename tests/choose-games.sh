@@ -95,4 +95,46 @@ echo '{"apps":[]}' > "$T/index.json"
 got=$( IDX="$T/index.json" PATH="$T/bin:$PATH" GAME_S3_BUCKET=b bash lib/choose-games.sh </dev/null )
 check "defaults to all"            "$got" "all"
 
+echo "10. on a terminal the picker is styled - and stdout stays a clean csv"
+# stdout is the chosen appids, read by cg init and baked into user-data. An
+# escape code there would reach the box as part of an appid, so the styled run
+# must leave it byte-identical to the plain one.
+cat > "$T/index.json" <<'JSON'
+{"apps":[
+ {"appid":"2344520","name":"Diablo IV","installdir":"Diablo IV","bytes":171798691840,"pushed":"2026-09-13T11:02:00Z"},
+ {"appid":"1971870","name":"原神 Genshin","installdir":"Genshin","bytes":2644378735,"pushed":"2026-09-12T20:44:00Z"},
+ {"appid":"2358720","name":"Black Myth: Wukong","installdir":"BlackMythWukong","bytes":137438953472,"pushed":"2026-09-13T09:14:00Z"}
+]}
+JSON
+styled_ask() { # like ask, with CG_COLOR=always; stdout only
+  local input="" a
+  for a in "$@"; do input+="$a"$'\n'; done
+  printf '%s' "$input" | \
+    IDX="$T/index.json" PATH="$T/bin:$PATH" GAME_S3_BUCKET=b GAME_APPS=all CG_COLOR=always \
+    script -qec "bash lib/choose-games.sh 2>$T/err" /dev/null 2>/dev/null \
+    | tr -d '\r' | tail -1
+}
+ESC=$'\e'
+plain_errs() { errs | sed -E "s/${ESC}\[[0-9;]*[A-Za-z]//g"; }
+got=$(styled_ask "2")
+check    "stdout is exactly the appid"       "$got" "1971870"
+if [[ $got == *"$ESC"* ]]; then echo "  FAIL stdout carries an escape code"; fail=$((fail+1));
+else echo "  ok   no escape code on stdout"; pass=$((pass+1)); fi
+if [[ "$(errs)" == *"$ESC"* ]]; then echo "  ok   stderr IS styled"; pass=$((pass+1));
+else echo "  FAIL stderr has no colour - the styled path did not run"; fail=$((fail+1)); fi
+contains "the table is a box"                "$(plain_errs)" "╭─ 📦 Game archive"
+contains "the prompt keeps its words"        "$(plain_errs)" "Enter = none"
+contains "the result has a tick"             "$(plain_errs)" "✓ 2 GB selected"
+# "原神" is two characters but four columns. Padding by character count would
+# push this row's size two columns right of the row above it.
+col() { plain_errs | grep -F "$1" | head -1 | awk -v n="GB" '{ i=index($0, " GB"); print i }'; }
+d=$(plain_errs | grep -F "Diablo IV" | head -1); g=$(plain_errs | grep -F "Genshin" | head -1)
+dw=$(python3 -c 'import sys,unicodedata as u; s=sys.argv[1]; i=s.index(" GB"); print(sum(2 if u.east_asian_width(c) in "WF" else 1 for c in s[:i]))' "$d")
+gw=$(python3 -c 'import sys,unicodedata as u; s=sys.argv[1]; i=s.index(" GB"); print(sum(2 if u.east_asian_width(c) in "WF" else 1 for c in s[:i]))' "$g")
+check    "a wide name keeps the SIZE column aligned" "$gw" "$dw"
+got=$(styled_ask "1,3" "2")
+contains "a refusal still says 'over by'"    "$(plain_errs)" "over by"
+contains "  with a cross"                    "$(plain_errs)" "✗ 288 GB selected"
+check    "  and the retry is what comes out" "$got" "1971870"
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

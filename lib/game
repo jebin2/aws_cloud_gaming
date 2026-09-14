@@ -44,6 +44,14 @@ disks() {
 
 wait_for() { # wait_for <desc> <tries> <cmd...>
   local desc=$1 tries=$2; shift 2
+  if _cg_styled; then
+    local i
+    for (( i = 0; i < tries; i++ )); do
+      if "$@" &>/dev/null; then _cg_line ok "${desc#waiting for } is up"; return 0; fi
+      _cg_live "$desc ${_CG_GREY}$(_cg_dur $(( i * 2 )))${_CG_R}"; sleep 2
+    done
+    _cg_line fail "$desc - TIMEOUT"; return 1
+  fi
   printf '%s' "$desc"
   for _ in $(seq 1 "$tries"); do
     if "$@" &>/dev/null; then printf ' ok\n'; return 0; fi
@@ -74,13 +82,15 @@ instance_lifecycle() {
 
 up() {
   if [[ $(state) == running ]]; then
-    echo "instance already running"
+    cg_echo "instance already running"
   else
     # Checked BEFORE calling start, so the explanation replaces the API error
     # rather than following it.
     if [[ $(instance_lifecycle) == spot ]]; then
       local srs; srs=$(spot_request_state)
       if [[ $srs != active ]]; then
+        _cg_section_end 0
+        {
         echo
         echo "This box cannot be started again."
         echo
@@ -99,10 +109,11 @@ up() {
         echo
         echo "      cg destroy && GAME_SPOT=0 cg init"
         echo
+        } | cg_block "🚧" "This box cannot be started again"
         die "spot request is '$srs'"
       fi
     fi
-    echo "starting $INSTANCE_ID ..."
+    cg_echo "starting $INSTANCE_ID ..."
     ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
     wait_instance_state "$REGION" "$INSTANCE_ID" running
   fi
@@ -120,15 +131,17 @@ up() {
   # Disarm on EVERY exit from here, not just the happy path. A session that dies
   # waiting for Sunshine, or a Ctrl+C, used to leave the alarm armed with no
   # session to justify it - the same end state as never disarming at all.
-  trap 'ec2_cw disable-alarm-actions --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null || true' EXIT
+  # _cg_on_exit first: it closes the open step, and needs the exit status
+  # before the disarm command replaces it.
+  trap '_cg_on_exit; ec2_cw disable-alarm-actions --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null || true' EXIT
 
   wait_for "waiting for tailscale" 60 tailscale ping -c 1 --timeout 2s "$TS_NODE"
 
   # Confirm the path is direct. A relayed path adds tens of ms.
   local path
   path=$(tailscale ping -c 1 "$TS_NODE" 2>/dev/null | tail -1)
-  echo "  $path"
-  [[ $path == *relay* ]] && echo "  WARNING: relayed, not direct - latency will suffer"
+  cg_echo "  $path"
+  [[ $path == *relay* ]] && cg_echo "  WARNING: relayed, not direct - latency will suffer"
 
   local ip; ip=$(tailscale ip -4 "$TS_NODE")
   wait_for "waiting for sunshine" 60 \
@@ -148,9 +161,10 @@ up() {
   [[ -n ${GAME_DISPLAY_MODE:-} ]] && mlf+=(--display-mode "$GAME_DISPLAY_MODE") || true
   [[ -n ${GAME_VIDEO_CODEC:-} ]]  && mlf+=(--video-codec "$GAME_VIDEO_CODEC") || true
   [[ ${GAME_PERF_OVERLAY:-0} == 1 ]] && mlf+=(--performance-overlay) || true
-  (( ${#mlf[@]} )) && echo "    stream: ${mlf[*]}" || true
+  (( ${#mlf[@]} )) && cg_echo "    stream: ${mlf[*]}" || true
   moonlight stream ${mlf[@]+"${mlf[@]}"} "$ip" "$APP" || true
-  printf 'session ended after %dm\n' $(( (SECONDS - t0) / 60 ))
+  if _cg_styled; then _cg_line ok "session ended after $(_cg_dur $(( SECONDS - t0 )))"
+  else printf 'session ended after %dm\n' $(( (SECONDS - t0) / 60 )); fi
 
   # Disarm layer 3 the moment the stream stops, whatever happens next.
   #
@@ -165,7 +179,7 @@ up() {
   ec2_cw disable-alarm-actions --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null \
     && log "layer 3 disarmed - a download left running will not be terminated" \
     || true
-  trap - EXIT
+  trap _cg_on_exit EXIT
 
   end_session
 }
@@ -182,6 +196,8 @@ up() {
 end_session() {
   local a
   if [[ $(instance_lifecycle) == spot ]]; then
+    _cg_section_end 0
+    {
     echo
     echo "This is a SPOT instance, so there is nothing useful to stop:"
     echo "  - a one-time spot instance cannot be stopped at all"
@@ -191,10 +207,15 @@ end_session() {
     echo "Your games are mirrored to S3, so destroying costs a ~6 min rebuild"
     echo "and nothing else."
     echo
-    read -rp "[d] destroy (recommended)  [n] leave it running: " a
+    } | cg_block "💡" "Nothing to stop on a spot box"
+    if _cg_styled 2; then
+      read -rp "${_CG_B}${_CG_YEL}?${_CG_R} ${_CG_B}[d]${_CG_R} destroy ${_CG_GREY}(recommended)${_CG_R}   ${_CG_B}[n]${_CG_R} leave it running: " a
+    else
+      read -rp "[d] destroy (recommended)  [n] leave it running: " a
+    fi
     case "${a:-d}" in
-      d|D|"") exec ./cg destroy ;;
-      *)      echo "left running - it is STILL BILLING by the hour" ;;
+      d|D|"") _cg_section_end 0; exec ./cg destroy ;;
+      *)      cg_echo "left running - it is STILL BILLING by the hour" ;;
     esac
     return
   fi
@@ -212,20 +233,22 @@ mirror_library() {
   tailscale ip -4 "$TS_NODE" >/dev/null 2>&1 || {
     log "box is not reachable over the tailnet - cannot mirror the library"; return 1; }
   say "mirroring the game library to S3 (the instance store is wiped on stop)"
-  box '/usr/local/bin/cg-library push' 2>&1 | sed 's/^/      /'
+  box '/usr/local/bin/cg-library push' 2>&1 | cg_relay '      '
   return "${PIPESTATUS[0]}"
 }
 
 down() {
-  [[ $(state) == stopped ]] && { echo "already stopped"; return; }
+  [[ $(state) == stopped ]] && { cg_echo "already stopped"; return; }
   if ! mirror_library; then
     if [[ ${CG_FORCE:-0} != 1 ]]; then
+      {
       echo
       echo "  The push from here failed - usually ssh cannot reach the box."
       echo "  cg-library-shutdown.service mirrors from ON the box as it shuts"
       echo "  down and needs no ssh, so --force is usually safe. Check after:"
       echo "      cg library list"
       echo
+      } | cg_block "🚧" "The push from here failed"
       die "not mirrored from here - see above, then: cg stop --force"
     fi
     log "WARNING: stopping without a mirror (--force) - games will be re-downloaded"

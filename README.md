@@ -156,6 +156,40 @@ reimplementing them.
 `--region` and `--host` override `.env` without editing it; `--json` works on `ping` and
 `snapshot --list`.
 
+#### Terminal output
+
+On a terminal, progress is drawn as boxed steps with an emoji, a symbol per line and a live
+line while something is waited on:
+
+             ╭─ 💾 mirroring the game library to S3 ..................... 23:19:03
+    23:19:03 │  ✓ steam account: archived 21KB (login, controller config, cloud staging)
+    23:19:03 │  · not archiving Proton Experimental (1493710) - a Steam tool
+    23:19:04 │  ✓ pushed 1 game(s) in 8s
+             ╰─ ✓ done in 8s
+
+    ✓ done    ✗ failed    ! warning    ◌ waiting    ↺ kept    ▸ sub-step    · info
+
+**Anywhere else it is the plain format, byte for byte** - a pipe, a redirect to a file, the test
+suites. `cg destroy > destroy.log` stays greppable, with full ISO timestamps. That rule is also
+what makes every existing test a regression test for the styling: they all capture output, so
+they all see plain text, and `tests/ui.sh` covers the styled side with a real pty.
+
+| Variable | Effect |
+|---|---|
+| `CG_COLOR=never` | Plain output even on a terminal |
+| `CG_COLOR=always` | Styled output even into a pipe (e.g. `cg init | less -R`) |
+| `NO_COLOR=1` | Plain output - the [no-color.org](https://no-color.org) convention |
+
+The symbol on each line is chosen from its words, so the existing messages needed no changes. A
+wrong guess costs a symbol, never a message: the text is printed exactly as written.
+
+The reports - `cg status`, `cg cost`, `cg games` - and the restore picker at `cg init` get the same
+treatment: each section is a box with an emoji, `[ok]`/`[--]` become ✓/✗, states are coloured
+(running and installed green, disarmed and downloading yellow, missing and INCOMPLETE red) and
+`<-` hints turn yellow. They are restyled from their finished text rather than rebuilt, and only
+colour and a gutter are added, so every column keeps its position - `tests/ui.sh` strips both
+from each row of real reports and checks the original comes back character for character.
+
 Deleting an image deregisters it **and** deletes its backing snapshots. Deregistering alone
 leaves those billing - the usual way to believe you deleted something and keep paying for it.
 
