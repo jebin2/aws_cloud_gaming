@@ -229,7 +229,39 @@ check    "did NOT mark the boot restored"   "$(test -f "$T/state/restored" && ec
 contains "says the archive is safe" "$out" "archive is intact"
 mkstub
 
-echo "12. list shows each game, the total, and what it costs"
+echo "12. a game Steam is still working on is never pushed"
+# The dangerous case: a game 54% present and mid-repair. The size guard fires
+# only below HALF the archive, so it sails through - and --delete would then
+# remove the ~74 GB of objects missing locally, leaving a corrupt archive that
+# looks complete. Steam knows the answer exactly, so ask Steam.
+reset; echo "boot-aaaa" > "$T/state/restored"
+rm -rf "$T/scratch/steam/steamapps"; mkdir -p "$T/scratch/steam/steamapps"
+install_game 2344520 "Diablo IV" "Diablo IV" 30
+for f in 1042 6 1026 36 132 516; do
+  sed -i "s/\"StateFlags\"\t\t\"[0-9]*\"/\"StateFlags\"\t\t\"$f\"/"     "$T/scratch/steam/steamapps/appmanifest_2344520.acf"
+  out=$(run push)
+  contains "flags=$f refused" "$out" "SKIPPING Diablo IV"
+  check    "flags=$f uploaded nothing" "$(cnt 'sync')" "0"
+  reset
+done
+
+echo "13. and IS pushed once Steam says fully installed"
+# --force here only bypasses the SIZE guard, which the 30 MB fixture trips
+# against a 160 GB index entry. The StateFlags check has no force bypass on
+# purpose - pushing a game Steam is mid-way through is never right.
+sed -i 's/"StateFlags"\t\t"[0-9]*"/"StateFlags"\t\t"4"/' "$T/scratch/steam/steamapps/appmanifest_2344520.acf"
+out=$(run push --force)
+contains "pushed"                  "$out" "pushing Diablo IV"
+lacks    "not the StateFlags skip" "$out" "Steam says StateFlags"
+
+echo "13b. --force does NOT override the StateFlags check"
+sed -i 's/"StateFlags"\t\t"[0-9]*"/"StateFlags"\t\t"1042"/' "$T/scratch/steam/steamapps/appmanifest_2344520.acf"
+reset
+out=$(run push --force)
+contains "still refused"    "$out" "Steam says StateFlags"
+check    "uploaded nothing" "$(cnt 'sync')" "0"
+
+echo "14. list shows each game, the total, and what it costs"
 out=$(run list)
 contains "Diablo listed"              "$out" "Diablo IV"
 contains "Wukong listed"              "$out" "Black Myth: Wukong"
@@ -237,19 +269,19 @@ contains "total line"                 "$out" "total"
 # 160 + 128 = 288 GB at $0.025 = $7.20
 contains "monthly cost"               "$out" "7.20"
 
-echo "13. forget refuses without the typed word, and deletes nothing"
+echo "15. forget refuses without the typed word, and deletes nothing"
 out=$(printf 'no\n' | run forget 2344520)
 contains "names the game"             "$out" "Diablo IV"
 contains "warns it must be redownloaded" "$out" "downloading it from Steam"
 contains "aborted"                    "$out" "aborted"
 check    "nothing removed"            "$(cnt 'rm')" "0"
 
-echo "14. forget with FORGET removes that game only"
+echo "16. forget with FORGET removes that game only"
 out=$(printf 'FORGET\n' | run forget 2344520)
 contains "confirms"                   "$(cat "$T/s5.log")" "2344520"
 lacks    "left Wukong alone"          "$(grep 'rm' "$T/s5.log" || true)" "2358720"
 
-echo "15. an appid that is not archived is an error, not a silent no-op"
+echo "17. an appid that is not archived is an error, not a silent no-op"
 out=$(printf 'FORGET\n' | run forget 111111); rc=$?
 check    "exits non-zero"             "$rc" "1"
 contains "says it is not there"       "$out" "not in the archive"

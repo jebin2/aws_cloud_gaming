@@ -80,15 +80,33 @@ restored() {
 # --- what is installed here --------------------------------------------------
 # appid<TAB>installdir<TAB>name, one per line, from the manifests on disk.
 local_apps() {
-  local f id dir name
+  local f id dir name flags
   for f in "$LIB"/steamapps/appmanifest_*.acf; do
     [[ -f $f ]] || continue
     id=$(basename "$f" .acf); id=${id#appmanifest_}
     dir=$(sed -n 's/.*"installdir"[[:space:]]*"\(.*\)".*/\1/p' "$f" | head -1)
     name=$(sed -n 's/.*"name"[[:space:]]*"\(.*\)".*/\1/p' "$f" | head -1)
+    flags=$(sed -n 's/.*"StateFlags"[[:space:]]*"\([0-9]*\)".*/\1/p' "$f" | head -1)
     [[ -n $id && -n $dir ]] || continue
-    printf '%s\t%s\t%s\n' "$id" "$dir" "${name:-$dir}"
+    printf '%s\t%s\t%s\t%s\n' "$id" "$dir" "${name:-$dir}" "${flags:-0}"
   done
+}
+
+# Steam's own verdict on whether a game is whole.
+#
+# StateFlags 4 is FullyInstalled. Anything with UpdateStarted (1024),
+# UpdateRequired (2), FilesMissing (32), FilesCorrupt (128) or UpdatePaused
+# (512) set is a game mid-flight, and archiving one means pushing a partial copy
+# over a complete archive - with --delete, which removes what is missing.
+#
+# The size guard does not catch this: it fires below HALF the archive, and a
+# game 54% restored and mid-repair sails through. Steam knows the answer exactly,
+# so ask Steam rather than inferring it from bytes.
+app_is_whole() {   # app_is_whole <stateflags>
+  local n=$((${1:-0}))
+  (( n & 4 )) || return 1                      # not fully installed
+  (( n & (1024 | 2 | 32 | 128 | 512) )) && return 1
+  return 0
 }
 
 app_bytes() { # app_bytes <installdir> <appid>
@@ -328,8 +346,14 @@ cmd_push() {
   local idx_cache; idx_cache=$(index_get)
   local id dir name bytes archived t0 n=0
   t0=$(date +%s)
-  while IFS=$'\t' read -r id dir name; do
+  while IFS=$'\t' read -r id dir name flags; do
     [[ -n ${id:-} ]] || continue
+    if ! app_is_whole "${flags:-0}"; then
+      log "SKIPPING $name ($id): Steam says StateFlags=$flags - downloading, validating"
+      log "  or needing repair. Pushing it would overwrite a complete archive with"
+      log "  a partial copy. It will archive itself once Steam finishes."
+      continue
+    fi
     bytes=$(app_bytes "$dir" "$id")
     # Per-app size guard. The whole-tree version had one because pushing an
     # empty disk could empty the whole archive; per-app prefixes make that
@@ -460,8 +484,8 @@ cmd_status() {
 cmd_check() {
   local apps; apps=$(local_apps)
   [[ -n ${apps//[[:space:]]/} ]] || { log "no games installed - nothing to push"; return 0; }
-  local id dir name pending=0 out
-  while IFS=$'\t' read -r id dir name; do
+  local id dir name flags pending=0 out
+  while IFS=$'\t' read -r id dir name flags; do
     [[ -n ${id:-} ]] || continue
     for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
       [[ -d "$LIB/steamapps/$pair" ]] || continue
