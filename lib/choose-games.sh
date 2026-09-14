@@ -31,7 +31,9 @@ if ! printf '%s' "$idx" | python3 -c 'import json,sys; sys.exit(0 if json.load(s
   echo "all"; exit 0
 fi
 
-# Not a terminal (a script, CI, a pipe): honour .env and do not block.
+# Not a terminal (a script, CI, a pipe): honour .env and do not block. "all" is
+# the fallback only here, where a human already made a choice once and it was
+# written to .env; the interactive default is "none" - see below.
 if [[ ! -t 0 ]]; then
   echo "${GAME_APPS:-all}"; exit 0
 fi
@@ -40,5 +42,12 @@ fi
 # It used to push prompts at /dev/tty, which reads naturally and cannot be
 # tested - and a prompt nobody can test is a prompt whose capacity arithmetic
 # nobody can check.
-choice=$(python3 lib/choose-games.py "$idx" "$AVAIL_GB" "${GAME_APPS:-all}")
+# The interactive default is NONE, deliberately, and not the last selection.
+#
+# Enter is what people press to get past a prompt, and here that would start a
+# 158 GB transfer - minutes of build time and an S3 bill - for a box they might
+# have wanted empty. Restoring a game is cheap to ask for and annoying to undo,
+# so it costs one deliberate keystroke. Nothing is lost by defaulting low: the
+# archive is untouched, and `cg library pull --apps <id>` fetches it later.
+choice=$(python3 lib/choose-games.py "$idx" "$AVAIL_GB" none)
 echo "${choice:-all}"

@@ -77,10 +77,13 @@ got=$(ask "banana" "3")
 contains "quotes the bad token"    "$(errs)" "'banana' is not one of"
 check    "and continues"           "$got" "438040"
 
-echo "7. pressing Enter takes the remembered default"
+echo "7. pressing Enter restores NOTHING"
+# Enter is what people press to get past a prompt. Defaulting to "all" would
+# start a 158 GB transfer for a box someone might have wanted empty - and
+# restoring a game is cheap to ask for and annoying to undo.
 got=$(ask "")
-check "used GAME_APPS=all... which does not fit, so it re-asks" \
-  "$(grep -c 'over by' "$T/err" 2>/dev/null || true)" "1"
+check "Enter means none"     "$got" "none"
+contains "and the prompt says so" "$(errs)" "Enter = none"
 
 echo "8. no terminal: answers from .env without blocking"
 got=$( IDX="$T/index.json" PATH="$T/bin:$PATH" GAME_S3_BUCKET=b GAME_APPS=2358720 \

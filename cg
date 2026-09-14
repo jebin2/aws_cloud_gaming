@@ -228,9 +228,11 @@ choose_games() {
   # On failure keep whatever .env already said rather than reaching for "all":
   # "all" is only safe while the archive is smaller than the disk, and the whole
   # reason this prompt exists is that it no longer is.
+  # On failure keep whatever .env already said, and fall back to "none" rather
+  # than "all" - a chooser that broke should not decide to move 158 GB.
   sel=$(GAME_S3_BUCKET="${GAME_S3_BUCKET:-}" bash lib/choose-games.sh) \
-    || sel="${GAME_APPS:-all}"
-  export GAME_APPS="${sel:-${GAME_APPS:-all}}"
+    || sel="${GAME_APPS:-none}"
+  export GAME_APPS="${sel:-${GAME_APPS:-none}}"
   local tmp; tmp=$(mktemp)
   grep -vE '^GAME_APPS=' .env > "$tmp" 2>/dev/null || true
   echo "GAME_APPS=$GAME_APPS" >> "$tmp"

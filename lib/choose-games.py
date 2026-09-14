@@ -47,8 +47,8 @@ def resolve(text):
 table()
 while True:
     try:
-        print("Restore which? (numbers or appids, comma separated | all | none) [%s]\n> "
-              % default, end="", file=sys.stderr, flush=True)
+        print("Restore which? (numbers or appids, comma separated | all | none)\n"
+              "Enter = %s\n> " % default, end="", file=sys.stderr, flush=True)
         raw = input()
     except EOFError:
         # No more input. Re-asking would spin forever whenever the default does

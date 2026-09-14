@@ -643,7 +643,8 @@ terminal, and has to start early to overlap the build:
       2   2358720    Black Myth: Wukong                128.0 GB  2026-09-13 09:14
       3   438040     Shakes and Fidget                   2.5 GB  2026-09-12 20:44
 
-    Restore which? (numbers or appids, comma separated | all | none) [all]
+    Restore which? (numbers or appids, comma separated | all | none)
+    Enter = none
     > 1,2
       288 GB selected, 209 GB available - over by 79 GB.
       Diablo IV 160 GB + Black Myth: Wukong 128 GB
@@ -653,9 +654,13 @@ terminal, and has to start early to overlap the build:
       160 GB selected, 49 GB spare. Restoring: Diablo IV
 
 It **refuses and explains** rather than silently picking a subset: which game to drop is not a
-decision a tool should make for you. `none` boots a clean box for other work. The answer is
-remembered in `.env` as `GAME_APPS`, so the usual case is pressing Enter, and that is also the
-non-interactive path for scripts.
+decision a tool should make for you.
+
+**Enter means `none`.** Enter is what people press to get past a prompt, and defaulting to `all`
+would start a 158 GB transfer for a box they might have wanted empty. Restoring a game is cheap
+to ask for and annoying to undo, so it costs one deliberate keystroke; the archive is untouched
+either way and `cg library pull --apps <id>` fetches it later. The choice is still remembered in
+`.env` as `GAME_APPS`, which is what non-interactive runs use.
 
 The box enforces the same arithmetic independently, because `CG_APPS` can still say `all` from an
 old `.env` or a run where the prompt never happened. It skips what will not fit and says so,
