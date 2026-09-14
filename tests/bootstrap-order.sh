@@ -68,4 +68,37 @@ for f in host/install-library.sh; do
   else echo "  FAIL $(basename "$f") fetches without --retry"; fail=$((fail+1)); fi
 done
 
+echo "5. needrestart is told never to restart the library units"
+# apt's needrestart restarted cg-library-restore mid-download during the NVIDIA
+# install, killing a 160 GB restore and blocking the build for ~9 minutes. The
+# rule is checked by EVALUATING it the way needrestart does, not by grepping for
+# its text: a typo'd regex or a mangled \$ would still grep fine.
+base=lib/bootstrap.d/10-base.sh
+conf=$(awk "/<<'NRCONF'/{f=1;next} /^NRCONF\$/{f=0} f" "$base")
+if [[ -z $conf ]]; then
+  echo "  FAIL no needrestart override written in $base"; fail=$((fail+1))
+else
+  verdict=$(printf '%s\n' "$conf" | perl -e '
+    our %nrconf; my $src = do { local $/; <STDIN> };
+    eval $src; die "does not parse: $@" if $@;
+    sub skipped { my $u = shift;
+      for my $re (keys %{$nrconf{override_rc}}) {
+        return 1 if $u =~ /$re/ && !$nrconf{override_rc}{$re} } 0 }
+    print join " ", map { skipped($_) ? "skip" : "restart" }
+      qw(cg-library-restore.service cg-library-shutdown.service ssh.service sunshine.service);
+  ' 2>&1)
+  check "restore, shutdown skipped; ssh, sunshine still restarted" "$verdict" "skip skip restart restart"
+fi
+first_apt=$(grep -n 'apt-get install' "$base" | head -1 | cut -d: -f1)
+rule=$(grep -n 'NRCONF' "$base" | head -1 | cut -d: -f1)
+if [[ -n $rule && -n $first_apt && $rule -lt $first_apt ]]; then
+  echo "  ok   the rule is written before the first apt install"; pass=$((pass+1))
+else
+  echo "  FAIL the rule must come before the first apt-get install (rule ${rule:-none}, apt ${first_apt:-none})"; fail=$((fail+1))
+fi
+BASE_N=$(num "$base"); for f in lib/bootstrap.d/*.sh; do
+  if grep -q 'apt-get install' "$f" && [[ $(num "$f") -lt $BASE_N ]]; then
+    echo "  FAIL $(basename "$f") runs apt before the needrestart rule exists"; fail=$((fail+1)); fi
+done
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]
