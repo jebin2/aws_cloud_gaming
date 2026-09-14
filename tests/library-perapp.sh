@@ -22,6 +22,10 @@ contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 lacks()    { if [[ $2 != *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: output must not contain '$3'"; fail=$((fail+1)); fi; }
 cnt() { local n; n=$(grep -c "$1" "$T/s5.log" 2>/dev/null) || true; echo "${n:-0}"; }
+# A LOCAL reset. Calling it without defining it ran /usr/bin/reset, which tried
+# to reinitialise the terminal and printed "reset: terminal attributes: No such
+# device or address" - while leaving the log it was supposed to clear in place.
+reset() { : > "$T/s5.log"; }
 
 mkdir -p "$T/bin" "$T/state" "$T/scratch/steam/steamapps"
 echo "boot-aaaa" > "$T/bootid"
@@ -193,7 +197,39 @@ n=$(grep -c 'cp .*appmanifest_730.acf s3' "$T/s5.log" 2>/dev/null) || true
 check "never uploaded the manifest"  "${n:-0}" "0"
 mkstub
 
-echo "11. list shows each game, the total, and what it costs"
+echo "11. a restore that lands short is reported, not marked as done"
+# The real failure: 73 GB of a 158.7 GB game arrived, the sync error was
+# swallowed by `|| true`, the marker was set anyway, and Steam discovered it -
+# "unable to retrieve necessary data" - instead of the tool.
+reset; rm -f "$T/state/restored"
+rm -rf "$T/scratch/steam/steamapps"; mkdir -p "$T/scratch/steam/steamapps"
+cat > "$T/bin/s5cmd" <<'FAKE'
+#!/usr/bin/env bash
+args="$*"
+echo "$args" >> "$S5LOG"
+case "$args" in
+  version)          echo "v2.2.2" ;;
+  *cat*index.json*) cat "$IDX" ;;
+  *sync*)  # "succeeds" but writes only a fraction of the archived size
+    d=$(printf '%s
+' $args | tail -1)
+    mkdir -p "$d" 2>/dev/null
+    dd if=/dev/zero of="$d/partial.bin" bs=1M count=5 status=none 2>/dev/null
+    : ;;
+  *)       : ;;
+esac
+FAKE
+chmod +x "$T/bin/s5cmd"
+out=$(CG_DISK_BUDGET=400000000000 run pull --apps 2358720); rc=$?
+contains "says it is incomplete"   "$out" "INCOMPLETE"
+contains "gives both figures"      "$out" "on disk of"
+contains "predicts what Steam does" "$out" "re-download"
+check    "exits non-zero"          "$rc" "1"
+check    "did NOT mark the boot restored"   "$(test -f "$T/state/restored" && echo yes || echo no)" "no"
+contains "says the archive is safe" "$out" "archive is intact"
+mkstub
+
+echo "12. list shows each game, the total, and what it costs"
 out=$(run list)
 contains "Diablo listed"              "$out" "Diablo IV"
 contains "Wukong listed"              "$out" "Black Myth: Wukong"
@@ -201,19 +237,19 @@ contains "total line"                 "$out" "total"
 # 160 + 128 = 288 GB at $0.025 = $7.20
 contains "monthly cost"               "$out" "7.20"
 
-echo "12. forget refuses without the typed word, and deletes nothing"
+echo "13. forget refuses without the typed word, and deletes nothing"
 out=$(printf 'no\n' | run forget 2344520)
 contains "names the game"             "$out" "Diablo IV"
 contains "warns it must be redownloaded" "$out" "downloading it from Steam"
 contains "aborted"                    "$out" "aborted"
 check    "nothing removed"            "$(cnt 'rm')" "0"
 
-echo "13. forget with FORGET removes that game only"
+echo "14. forget with FORGET removes that game only"
 out=$(printf 'FORGET\n' | run forget 2344520)
 contains "confirms"                   "$(cat "$T/s5.log")" "2344520"
 lacks    "left Wukong alone"          "$(grep 'rm' "$T/s5.log" || true)" "2358720"
 
-echo "14. an appid that is not archived is an error, not a silent no-op"
+echo "15. an appid that is not archived is an error, not a silent no-op"
 out=$(printf 'FORGET\n' | run forget 111111); rc=$?
 check    "exits non-zero"             "$rc" "1"
 contains "says it is not there"       "$out" "not in the archive"

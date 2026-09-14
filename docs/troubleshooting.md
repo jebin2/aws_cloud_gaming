@@ -1417,3 +1417,39 @@ Outside one, layers 2 and 4 both count inbound and can tell the difference.
 watchdog never runs - the mirror-before-shutdown added for exactly this case was bypassed, and
 the upload got only the `ExecStop` window again. Fixing the guard that fires is not enough when a
 *different* guard can fire first and skip the path you fixed.
+
+### A restore that half-worked, and said it had worked
+
+Diablo IV, freshly restored, refused to start: *"unable to retrieve necessary data"*. Steam then
+began validating and re-downloading.
+
+CloudWatch settled it without needing the box, which was too busy validating to answer ssh:
+
+    launched 13:19, total inbound this boot: 73.0 GB
+
+The game is **158.7 GB**. Only 73 had arrived. The restore reported success anyway, set the
+"restored on this boot" marker, and left Steam to discover the problem.
+
+The cause was one deliberate `|| true`:
+
+    "$S5" sync --size-only "$src" "$dst" >/dev/null 2>&1 || true
+
+Every failure swallowed, stderr discarded. And the completion line printed the size from the
+*index* rather than from the disk, so it would have announced "restored 158.7 GB" over a 73 GB
+directory whatever happened.
+
+Three changes, and the second is the one that matters:
+
+- the sync's exit status is checked (via `PIPESTATUS[0]`, since the pipeline ends in `sed`), and
+  its stderr is kept - an s5cmd error in the journal is the only clue to *why*
+- **what landed is measured and compared against what the index promised.** Under 98% is
+  reported with both figures. Checking the transfer's exit code is not the same as checking that
+  the bytes are there, which is the lesson this project keeps relearning in new costumes
+- an incomplete restore does **not** set the marker, so the partial copy can never be pushed over
+  the complete archive. Steam repairs the install by downloading the remainder; archiving the
+  repaired copy afterwards needs an explicit `--force`, which is the right amount of friction
+
+The irony is worth recording: the push path already had this exact protection - it withholds the
+manifest when a sync fails, which is why the archive itself was intact and Steam could repair
+from Valve's servers. The restore path had `|| true` instead. **The same operation in two
+directions, one guarded and one not**, because only one of them had ever burned me before.

@@ -223,7 +223,7 @@ for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.ge
   (( budget < 0 )) && budget=0
   log "disk budget $(hb "$budget") ($(hb "$avail") free, $(hb "$reserve") reserved)"
 
-  local t0 dt id dir name total=0 skipped=0 used=0 want_bytes
+  local t0 dt id dir name total=0 skipped=0 used=0 want_bytes incomplete=0
   t0=$(date +%s)
   while IFS=$'\t' read -r id dir name bytes; do
     [[ -n ${id:-} ]] || continue
@@ -246,21 +246,53 @@ for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.ge
       continue
     fi
     local src dst
+    # NO `|| true` here. It used to swallow every failure, so a sync that died
+    # partway still reported success, still set the restored marker, and handed
+    # Steam a game with 73 GB of 158.7 GB present - which Steam reports as
+    # "unable to retrieve necessary data" and repairs by downloading the rest.
+    # A restore that silently half-works is worse than one that fails, because
+    # the failure is discovered by the game instead of by the tool.
+    local rc=0
     for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
       src="$S3/steamapps/$pair/*"; dst="$LIB/steamapps/$pair/"
       mkdir -p "$dst"
-      "$S5" --numworkers "$WORKERS" sync --size-only "${TUNE[@]}" "$src" "$dst" >/dev/null 2>&1 || true
+      # stderr is kept: an s5cmd error in the journal is the only clue to why.
+      if ! "$S5" --numworkers "$WORKERS" sync --size-only "${TUNE[@]}" "$src" "$dst" 2>&1 \
+           | grep -vE '^$' | tail -5 | sed 's/^/    s5cmd: /'; then :; fi
+      # PIPESTATUS[0], not $?, which is the sed at the end of that pipeline.
+      (( ${PIPESTATUS[0]:-0} == 0 )) || { rc=1; log "  FAILED syncing $pair"; }
     done
     symlinks_restore "$id"
+
+    # Measure what actually landed, and compare it with what the index promised.
+    # The old completion line printed the INDEX size whatever happened on disk -
+    # it would have said "restored 158.7 GB" over a 73 GB directory.
+    local got; got=$(du -sb --exclude=downloading --exclude=temp \
+      "$LIB/steamapps/common/$dir" "$LIB/steamapps/compatdata/$id" \
+      "$LIB/steamapps/shadercache/$id" 2>/dev/null | awk '{t+=$1} END{print t+0}')
+    if (( want_bytes > 0 )) && (( got * 100 < want_bytes * 98 )); then
+      rc=1
+      log "  INCOMPLETE: $(hb "$got") on disk of $(hb "$want_bytes") archived"
+      log "  Steam will report missing data and re-download the rest."
+    fi
+    if (( rc )); then incomplete=$((incomplete+1)); fi
     total=$((total+1))
   done <<< "$chosen"
 
   # Shared, tiny, and needed for Steam to accept the folder as a library.
   "$S5" cp "$S3/steamapps/libraryfolder.vdf" "$LIB/steamapps/" >/dev/null 2>&1 || true
   dt=$(( $(date +%s) - t0 )); (( dt > 0 )) || dt=1
-  mark_restored
-  log "restored $total game(s), $(hb "$used"), in ${dt}s"
+  log "restored $total game(s) in ${dt}s"
   (( skipped )) && log "$skipped game(s) skipped for space - see above"
+  if (( incomplete )); then
+    # No marker: a partial local copy must never be pushed over a complete
+    # archive. Steam will repair the install by downloading the remainder; once
+    # it has, `cg library push --force` is the way to archive the repaired copy.
+    log "$incomplete game(s) restored INCOMPLETE - not marking this boot as restored"
+    log "  the archive is intact; push is blocked until you pass --force"
+    return 1
+  fi
+  mark_restored
 }
 
 # --- push --------------------------------------------------------------------
