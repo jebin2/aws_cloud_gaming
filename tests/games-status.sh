@@ -92,4 +92,20 @@ n=$(grep -c '10% of 100 GB' <<<"$out" || true)
 if [[ ${n:-0} == 2 ]]; then echo "  ok   both, neither credited the shared 50 GB"; pass=$((pass+1));
 else echo "  FAIL expected both at 10%, got $n lines"; fail=$((fail+1)); fi
 
+echo "8. a manifest claiming more than the disk holds is called INCOMPLETE"
+# This is how the restore failure hid: the manifest is one small file, so a
+# restore that copied it and then ran out of room left a game reading
+# "installed 158.7 GB" with 44 GB actually present.
+printf 'APP\t2344520\tDiablo IV\t4\t172584496327\t47244640256\t0\t0\t0\nDISK\t1\t1\nDL\t0\nRATE\t0\n' > "$T/box.txt"
+out=$(run)
+contains "flags it"               "$out" "INCOMPLETE"
+contains "what is really there"   "$out" "44 GB of 161 GB"
+lacks    "not the manifest size"  "$out" " 160.7 GB"
+
+echo "9. a fully restored game is not flagged"
+printf 'APP\t2344520\tDiablo IV\t4\t172584496327\t172584496327\t0\t0\t0\nDISK\t1\t1\nDL\t0\nRATE\t0\n' > "$T/box.txt"
+out=$(run)
+lacks    "no false alarm"  "$out" "INCOMPLETE"
+contains "just installed"  "$out" "installed"
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

@@ -1088,6 +1088,12 @@ for a in apps:
         shown = on_disk
     else:
         shown = size if size else done
+        # The manifest is one small file. A restore that copies it and then runs
+        # out of room leaves a game that CLAIMS to be installed at full size
+        # with most of its bytes missing - so trust the disk, not the manifest.
+        if size and done and done < size * 0.95:
+            shown = done
+            extra = "INCOMPLETE - %.0f GB of %.0f GB on disk" % (done / GB, size / GB)
     rows.append((a["name"][:28], st, shown / GB, extra))
     archived.pop(a["id"], None)
 for a in archived.values():
