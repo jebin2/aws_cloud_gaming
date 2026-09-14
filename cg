@@ -455,7 +455,7 @@ cmd_library() {
   case "${1:-status}" in
     status|"")
       need_node
-      box '/usr/local/bin/cg-library status' ;;
+      box '/usr/local/bin/cg-library status' | cg_report "📦" "Game library on the box" ;;
     push|sync)
       shift
       need_node
@@ -468,13 +468,15 @@ cmd_library() {
       need_node
       box '/usr/local/bin/cg-library check' ;;
     list)
-      library_list
       # Say it here too: this is the view people check, and an unindexed pile
       # is invisible everywhere else.
       local orph; orph=$(library_orphans)
+      {
+      library_list
       if [[ -n ${orph//[[:space:]]/} ]]; then
         awk -F'\t' '{t+=$1} END{ if (t>0) printf "\n  plus %.1f GB of ORPHANED objects from an unfinished push\n  costing $%.2f/month and unusable - remove them: cg library clean\n", t/1073741824, t/1073741824*0.025 }' <<<"$orph"
-      fi ;;
+      fi
+      } | cg_report "📦" "Game archive" ;;
     account|login)
       shift
       need_node
@@ -1034,6 +1036,7 @@ cmd_watchdog() {
         || log "could not record the install fingerprint - the next init will reinstall"
       ;;
     status)
+      {
       printf '  host    %s\n' "$host"
       # is-enabled prints "not-found" AND exits non-zero, so a `|| echo` prints
       # both. Take the first word and normalise it.
@@ -1044,6 +1047,7 @@ cmd_watchdog() {
       echo "  recent decisions:"
       "${rsh[@]}" 'sudo tail -n 8 /var/log/cloud-gaming-watchdog.log 2>/dev/null' 2>/dev/null | sed 's/^/    /' \
         || echo "    (no log yet)"
+      } | cg_report "🔒" "Off-site watchdog"
       ;;
     logs)
       if (( WATCH )); then "${rsh[@]}" 'sudo tail -f /var/log/cloud-gaming-watchdog.log'
@@ -1232,7 +1236,10 @@ cmd_snapshot() {
         --query 'reverse(sort_by(Images,&CreationDate))[].{id:ImageId,name:Name,created:CreationDate,state:State,gb:BlockDeviceMappings[0].Ebs.VolumeSize}' \
         --output json)
       if (( JSON )); then printf '%s\n' "$imgs"; return; fi
-      python3 - <<PY
+      # The table's header starts at column 0, where cg_report reads a capitalised
+      # word as a section heading - so on a terminal the rows are indented first.
+      # Off one, cat: the plain listing is unchanged.
+      python3 - <<PY | { if _cg_styled; then sed 's/^/  /' | cg_report "💿" "Saved images"; else cat; fi; }
 import json,sys
 imgs=json.loads('''$imgs''')
 if not imgs: print("no saved images - nothing billing"); sys.exit()
@@ -1319,10 +1326,12 @@ cmd_ping() {
   if (( JSON )); then
     printf '{"node":"%s","path":"%s","median_ms":%s}\n' "$TS_NODE" "${path%% *}" "${ms:-null}"
   else
-    printf '\n  node    %s (%s)\n' "$TS_NODE" "$(tailscale ip -4 "$TS_NODE" 2>/dev/null)"
-    printf '  path    %s\n' "$path"
-    printf '  latency %s\n\n' "${ms:+${ms}ms median}${ms:-no reply}"
-    [[ $path == DERP* ]] && printf '  A relayed path adds latency and costs bandwidth both ways.\n  Check the security group still allows inbound UDP 41641.\n\n' || true
+    {
+      printf '\n  node    %s (%s)\n' "$TS_NODE" "$(tailscale ip -4 "$TS_NODE" 2>/dev/null)"
+      printf '  path    %s\n' "$path"
+      printf '  latency %s\n\n' "${ms:+${ms}ms median}${ms:-no reply}"
+      [[ $path == DERP* ]] && printf '  A relayed path adds latency and costs bandwidth both ways.\n  Check the security group still allows inbound UDP 41641.\n\n' || true
+    } | cg_report "📡" "connection to $TS_NODE"
   fi
 }
 
@@ -1332,7 +1341,9 @@ cmd_watcher() {
   local s
   s=$(ec2 describe-instances --instance-ids "${INSTANCE_ID:-x}" \
       --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "none")
-  log "instance          $s"
+  # Rows say what they mean rather than having it read from their words:
+  # "ALARM False  <- state, actions-enabled" contains "enabled" and got a tick.
+  log_as "$([[ $s == running ]] && echo ok || echo info)" "instance          $s"
   stranded_spot_note "$REGION" "${INSTANCE_ID:-}"
   # Layer 2, on the box.
   if [[ $s == running ]] && box true 2>/dev/null; then
@@ -1342,7 +1353,7 @@ cmd_watcher() {
     local ohw
     ohw=$(box 'systemctl is-active idle-watchdog.timer 2>/dev/null' 2>/dev/null) || true
     ohw=${ohw//[$'\r\n']/}
-    log "on-host watchdog  ${ohw:-unreachable}"
+    log_as "$([[ $ohw == active ]] && echo ok || echo warn)" "on-host watchdog  ${ohw:-unreachable}"
     # What it MUST be depends on the purchase model, so say which. The hint used
     # to read "must be 'stop'" unconditionally, which became wrong the moment
     # spot switched to one-time+terminate - a correct setting flagged as an
@@ -1354,18 +1365,19 @@ cmd_watcher() {
     if [[ $(ec2 describe-instances --instance-ids "$INSTANCE_ID" \
             --query 'Reservations[0].Instances[0].InstanceLifecycle' --output text 2>/dev/null) == spot ]]
     then want=terminate; else want=stop; fi
-    log "shutdown action   $sb  <- must be '$want' $([[ $sb == "$want" ]] && echo "(ok)" || echo "(WRONG)")"
-    echo
-    box 'journalctl -t idle-watchdog -n 8 --no-pager -o cat 2>/dev/null | sed "s/^/      /"' || true
+    log_as "$([[ $sb == "$want" ]] && echo ok || echo fail)" \
+      "shutdown action   $sb  <- must be '$want' $([[ $sb == "$want" ]] && echo "(ok)" || echo "(WRONG)")"
+    cg_gap
+    box 'journalctl -t idle-watchdog -n 8 --no-pager -o cat 2>/dev/null' | cg_relay '      ' || true
   else
-    log "on-host watchdog  (box not reachable)"
+    log_as info "on-host watchdog  (box not reachable)"
   fi
   # Layer 4, off site. The comment here used to claim layers 3 AND 4 were
   # reported below, while only the alarm was - so the one guard that keeps
   # working when everything else is gone was the one nothing displayed. It had
   # been running blind on a revoked key with nobody able to see it, because
   # only `cg init` ever checked.
-  echo
+  cg_gap
   if [[ -n ${GAME_WATCHDOG_HOST:-} ]]; then
     wd_rsh_init
     local wst wline
@@ -1377,26 +1389,39 @@ cmd_watcher() {
     # treat only EMPTY output as "could not reach the host".
     wst=$("${WD_RSH[@]}" 'systemctl is-active remote-watchdog.timer 2>/dev/null' 2>/dev/null) || true
     wst=${wst//[$'\r\n']/}
-    log "off-site watchdog ${wst:-unreachable}  on ${GAME_WATCHDOG_HOST#*@}"
+    log_as "$([[ $wst == active ]] && echo ok || echo warn)" "off-site watchdog ${wst:-unreachable}  on ${GAME_WATCHDOG_HOST#*@}"
     wline=$("${WD_RSH[@]}" 'sudo tail -1 /var/log/cloud-gaming-watchdog.log 2>/dev/null' 2>/dev/null)
     [[ -n ${wline:-} ]] && log "  last            ${wline#* }"
     if [[ ${wline:-} == *"CANNOT QUERY AWS"* ]]; then
-      log "  ^ BLIND - its credentials do not work, so layer 4 is decoration"
+      log_as fail "  ^ BLIND - its credentials do not work, so layer 4 is decoration"
       log "    cg init reissues the key and pushes it; or: cg watchdog install"
     fi
   else
-    log "off-site watchdog not configured (set GAME_WATCHDOG_HOST in .env)"
+    log_as info "off-site watchdog not configured (set GAME_WATCHDOG_HOST in .env)"
   fi
 
-  echo
-  log "idle alarm        $(aws cloudwatch describe-alarms --region "$REGION" \
+  cg_gap
+  local al bud
+  al=$(aws cloudwatch describe-alarms --region "$REGION" \
         --alarm-names "${TS_HOST}-idle-stop" \
         --query 'MetricAlarms[0].[StateValue,ActionsEnabled]' \
-        --output text 2>/dev/null | tr '\t' ' ' || echo absent)  <- state, actions-enabled"
-  log "budget            $(aws budgets describe-budgets --account-id \
+        --output text 2>/dev/null | tr '\t' ' ' || echo absent)
+  if _cg_styled; then
+    # Actions off is the NORMAL state between sessions - cg open arms it - so it
+    # is information: not a warning, and certainly not a tick.
+    case "$al" in
+      *" True")  log_as ok   "idle alarm        ${al% *}, armed" ;;
+      *" False") log_as info "idle alarm        ${al% *}, disarmed (cg open arms it for a session)" ;;
+      *)         log_as warn "idle alarm        ${al:-absent}" ;;
+    esac
+  else
+    log "idle alarm        $al  <- state, actions-enabled"
+  fi
+  bud=$(aws budgets describe-budgets --account-id \
         "$(aws sts get-caller-identity --query Account --output text)" \
         --query "Budgets[?BudgetName=='${TS_HOST}-monthly'].BudgetLimit.Amount" \
-        --output text 2>/dev/null || echo absent)"
+        --output text 2>/dev/null || echo absent)
+  log_as "$([[ $bud =~ ^[0-9.]+$ ]] && echo ok || echo warn)" "budget            $bud"
 }
 
 cmd_help() {
@@ -1447,8 +1472,15 @@ case "$CMD" in
   # Reports go through cg_report: on a terminal it boxes and colours them, and
   # anywhere else it is `cat`, so a redirected report is byte-for-byte as before.
   status)    { lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true
-               tailscale ip -4 "$TS_NODE" >/dev/null 2>&1 \
-                 && { echo; echo "game library"; box '/usr/local/bin/cg-library status' 2>/dev/null || true; }
+               # `tailscale ip` succeeds for a node that is registered but OFFLINE, so it
+               # does not mean the box answers - and the heading used to print with
+               # nothing under it. Ask the box first; say so when it did not answer.
+               if tailscale ip -4 "$TS_NODE" >/dev/null 2>&1; then
+                 lib_out=$(box '/usr/local/bin/cg-library status' 2>/dev/null) || true
+                 echo; echo "game library"
+                 if [[ -n ${lib_out//[[:space:]]/} ]]; then printf '%s\n' "$lib_out"
+                 else echo "  box not reachable - the archive is listed by: cg library list"; fi
+               fi
                stream_usage; } | cg_report ;;
   cost)      lib/setup cost | cg_report ;;
   clean)     exec lib/setup clean ;;

@@ -344,6 +344,10 @@ contains "billed so far is a box"         "$out" "╭─ 💰 billed so far"
 contains "credits is one line"            "$out" "💳 credits remaining \$122.29"
 out=$(report "🎮" "Games" < "$T/games.txt" | strip)
 contains "games gets the caller's title"  "$out" "╭─ 🎮 Games"
+# No input, no box: a command that dies before printing must leave its error on
+# its own, not framed by an empty titled box.
+check    "a title with no input prints nothing"   "$(printf '' | report "🎮" "Games" | strip)" ""
+check    "  nor with only blank lines"            "$(printf '\n\n' | report "🎮" "Games" | strip)" ""
 for f in status cost games; do
   args=(); [[ $f == games ]] && args=("🎮" "Games")
   verdict=$(report "${args[@]}" < "$T/$f.txt" | strip | python3 -c '
@@ -364,5 +368,23 @@ else:
     else: print("DIFF count got=%d want=%d" % (len(got), len(want)))' "$T/$f.txt")
   check "$f: every row survives, character for character" "$verdict" "same"
 done
+
+echo "9. rows that state their meaning, and gaps that keep the box"
+matches "log_as plain is exactly log"        "$(sh_ 'log_as ok "idle alarm        ALARM False"')" "^${ISO}      idle alarm        ALARM False$"
+check   "cg_gap plain is an empty line"      "$(sh_ 'cg_gap' | od -c | head -1)" "$(echo | od -c | head -1)"
+# The words say "enabled"; the caller says it is information. The caller wins.
+out=$(styled 'log_as info "idle alarm        ALARM False  <- state, actions-enabled"' | strip)
+contains "log_as: the stated kind wins over the words" "$out" "· idle alarm"
+lacks    "  no tick from 'enabled'"          "$out" "✓"
+out=$(styled 'say "guards"; log "a"; cg_gap; log "b"' | strip)
+# Counted, not addressed by line number: the header starts with a blank line.
+check   "a gap inside a step is the gutter"  "$(grep -c '^         │$' <<<"$out")" "1"
+contains "'preflight passed' is a finishing line" "$(styled 'say "preflight passed - nothing was created"' | strip)" "🎉 preflight passed"
+raw=$(printf '\n  node    gamevps (100.64.0.1)\n  path    unknown\n  latency no reply\n\n' | report "📡" "connection to gamevps")
+contains "ping: 'no reply' is red"           "$raw" $'\e[38;5;203mno reply'
+contains "ping: the box has its title"       "$(printf '%s' "$raw" | strip)" "╭─ 📡 connection to gamevps"
+check    "ping: no empty gutter line before the first row" "$(printf '%s' "$raw" | strip | sed -n 2p)" "         │   node    gamevps (100.64.0.1)"
+raw=$(printf '  path    direct\n' | report "📡" "x")
+contains "ping: 'direct' is green"           "$raw" $'\e[38;5;78mdirect'
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

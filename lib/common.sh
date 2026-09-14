@@ -34,7 +34,7 @@ _cg_cols() { local c=${COLUMNS:-}; [[ $c =~ ^[0-9]+$ ]] || c=$(tput cols 2>/dev/
 _cg_icon() {
   local t=${1,,}
   case $t in
-    *deleted*|*complete*|"everything "*)          printf '🎉 %s' "$_CG_GREEN" ;;
+    *deleted*|*complete*|*passed*|"everything "*) printf '🎉 %s' "$_CG_GREEN" ;;
     *terminat*|*destroy*|*delet*|*deregist*|*remov*) printf '🔥 %s' "$_CG_ORANGE" ;;
     *mirror*)                                     printf '💾 %s' "$_CG_CYAN" ;;
     *restor*|*library*)                           printf '📦 %s' "$_CG_CYAN" ;;
@@ -153,6 +153,21 @@ die() {
   exit 1
 }
 
+# A log line whose meaning the caller states, instead of it being read from the
+# words. For report-like rows where the words mislead: "ALARM False  <-
+# state, actions-enabled" contains "enabled", and read as a success. Plain: log.
+log_as() { # log_as <ok|fail|warn|wait|kept|skip|info|cont> <text>
+  if ! _cg_styled; then log "$2"; return; fi
+  _cg_line "$1" "$2"
+}
+
+# A blank line. Plain: an empty line, as `echo` printed. Styled: the gutter
+# alone, so a gap inside a step does not break the box it sits in.
+cg_gap() {
+  if ! _cg_styled; then echo; return; fi
+  if (( _CG_SEC )); then printf '%s%s│%s\n' "$_CG_PAD" "$_CG_SEC_COL" "$_CG_R"; else echo; fi
+}
+
 # echo that is plain off a terminal and a styled detail line on one.
 cg_echo() {
   if ! _cg_styled; then echo "$*"; return; fi
@@ -244,10 +259,10 @@ def icon(title):
 # phrases first so "files missing" is red before "missing" is considered alone.
 WORDS = [
     (r"RUNNING", B + K["mag"]),
-    (r"files missing|files corrupt|INCOMPLETE|STRANDED|ORPHANED|MISSING|missing|FAILED|NO CREDENTIALS|NOT registered|EMPTY", K["red"]),
-    (r"update needed|not calculated yet|INSUFFICIENT_DATA|disarmed|downloading|paused|stopping|shutting-down|pending|stopped|LEGACY|unknown|never", K["yel"]),
+    (r"files missing|files corrupt|INCOMPLETE|STRANDED|ORPHANED|MISSING|missing|FAILED|NO CREDENTIALS|NOT registered|EMPTY|no reply", K["red"]),
+    (r"update needed|not calculated yet|INSUFFICIENT_DATA|disarmed|downloading|paused|stopping|shutting-down|pending|stopped|LEGACY|unknown|never|DERP relay", K["yel"]),
     (r"in S3 only|none", K["grey"]),
-    (r"installed|running|armed|ACTIVE|present|online|configured|PAID|OK|yes", K["green"]),
+    (r"installed|running|armed|ACTIVE|present|online|configured|PAID|OK|yes|direct", K["green"]),
 ]
 WORD_RX = [(re.compile(r"(?<![A-Za-z_-])(" + w + r")(?![A-Za-z_-])"), c) for w, c in WORDS]
 
@@ -284,7 +299,7 @@ def is_heading(line):
     if re.match(r"^[A-Z]{3,}\b", line): return True
     return bool(re.fullmatch(r"[a-z]+( [a-z]+){0,2}", line.strip()))
 
-col, open_, blanks, first = K["cyan"], False, 0, True
+col, open_, blanks, first, rows = K["cyan"], False, 0, True, 0
 def close():
     global open_
     if open_: print("%s%s╰─%s" % (PAD, col, R), flush=True)
@@ -299,16 +314,23 @@ def heading(title, emoji=None):
     print("%s%s%s╭─ %s %s%s%s%s" % ("" if first else "\n", PAD, col, e, B, name, R,
           (" " + K["grey"] + note + R) if note else ""), flush=True)
     open_, first = True, False
+    global rows
+    rows = 0
 
-# A report with no heading of its own (cg games) is titled by the caller.
-if len(sys.argv) >= 3:
-    heading(sys.argv[2], sys.argv[1] or None)
+# A report with no heading of its own (cg games) is titled by the caller - but
+# the box opens with its first line, not before. Opened up front, a command that
+# failed before printing anything had its error (on stderr, which does not come
+# through here) land inside an empty box: "Games" around "could not read the box".
+pending_title = (sys.argv[2], sys.argv[1] or None) if len(sys.argv) >= 3 else None
 
 MARK = re.compile(r"^(\s*)\[(ok|--)\](.*)$")
 for raw in iter(sys.stdin.readline, ""):
     line = raw.rstrip("\n")
     if not line.strip():
         blanks += 1; continue
+    if pending_title and not is_heading(line):
+        heading(*pending_title)
+    pending_title = None
     if is_heading(line):
         blanks = 0; heading(line); continue
     ol = re.match(r"^([a-z][a-z ]{1,24}):\s+(\S.*)$", line)
@@ -318,9 +340,12 @@ for raw in iter(sys.stdin.readline, ""):
         print("\n%s%s %s%s%s %s" % (PAD, e, B, ol.group(1), R, paint(ol.group(2))), flush=True)
         first = False
         continue
-    if blanks and open_:
+    # A gap is kept only BETWEEN rows. Blank lines ahead of the first row - cg
+    # ping's text starts with one - drew an empty gutter line under the title.
+    if blanks and open_ and rows:
         for _ in range(blanks): print("%s%s│%s" % (PAD, col, R), flush=True)
     blanks = 0
+    rows += 1
     # [ok]/[--] first, and the rest of the line painted on its own. Swapping in a
     # placeholder and painting the whole line let the word rules colour INSIDE
     # the placeholder, so it never turned back into a tick.

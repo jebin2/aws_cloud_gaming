@@ -923,9 +923,16 @@ if [[ -z ${GAME_ALERT_EMAIL:-} ]]; then
 fi
 
 if (( CHECK_ONLY )); then
-  echo
-  echo "preflight passed - nothing was created."
-  echo "Run $C_INIT to actually build the box."
+  if _cg_styled; then
+    # Close the preflight box first. These lines printed INSIDE it, and the box
+    # then closed beneath them.
+    say "preflight passed - nothing was created."
+    log "Run $C_INIT to actually build the box."
+  else
+    echo
+    echo "preflight passed - nothing was created."
+    echo "Run $C_INIT to actually build the box."
+  fi
   exit 0
 fi
 
