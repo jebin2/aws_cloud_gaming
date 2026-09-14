@@ -90,10 +90,11 @@ And locally:
 - **Tailscale**, installed and up (`sudo tailscale up`), plus a
   [pre-auth key](https://login.tailscale.com/admin/settings/keys)
 - optionally a **Tailscale API access token** (a different credential, from the same page) as
-  `TAILSCALE_API_KEY`. With it, `cg destroy` deletes the tailnet nodes it created, so rebuilds
-  keep the clean hostname instead of climbing `gamevps-1`, `-2`, `-3`. Only nodes named exactly
-  `<GAME_TS_HOST>` or `<GAME_TS_HOST>-<number>` are ever touched. These tokens expire after 90
-  days; when one does, `cg destroy` says so plainly rather than skipping the cleanup silently
+  `TAILSCALE_API_KEY`. With it, `cg init` prunes offline nodes before each launch (and
+  `cg destroy --all` deletes them), so rebuilds keep the clean hostname instead of climbing
+  `gamevps-1`, `-2`, `-3`. Only nodes named exactly `<GAME_TS_HOST>` or `<GAME_TS_HOST>-<number>`
+  are ever touched. These tokens expire after 90 days; when one does, the prune says so plainly
+  rather than skipping the cleanup silently
 - **Moonlight** (`moonlight-qt`) - only needed to stream, so `setup` warns rather than stops
 - `aws` CLI v2 configured, `python3`, `curl`, and OpenSSH (`ssh`/`scp`)
 
@@ -574,9 +575,10 @@ deleted either - `cg games --volume` shows what it still costs and `cg games --v
 |---|---|---|
 | Mirror the games to S3 first | **yes**, and refuses if it fails | no - they are being deleted |
 | Instance (terminate + cancel the spot request) | gone | gone |
-| Idle-stop alarm | gone | gone |
-| Security group, key pair, `~/.ssh/<host>.pem` | gone | gone |
-| Tailnet nodes | gone | gone |
+| Idle-stop alarm | **kept** - `cg init` rewrites it | gone |
+| Security group, key pair, `~/.ssh/<host>.pem` | **kept** - `cg init` reuses them | gone |
+| Tailnet nodes | **kept** offline - `cg init` prunes them | gone |
+| Per-box `.env` lines (instance id, node, Sunshine login) | cleared | cleared |
 | Untagged orphaned volumes | gone | gone |
 | **Monthly budget** | **kept** | gone |
 | **S3 archive and its bucket** | **kept** | gone |
@@ -584,6 +586,16 @@ deleted either - `cg games --volume` shows what it still costs and `cg games --v
 | **`<host>-watchdog` user, its key, the `.env` entries** | **kept** | gone |
 | **Off-site watchdog units on the VPS** | **kept** | gone |
 | Old EBS game volume, if you still have one | **kept** | gone |
+
+**A plain destroy removes only what bills.** The security group, the key pair, the idle-stop
+alarm and the tailnet node cost nothing, and the next build reuses or rewrites each of them:
+`provision.sh` reuses a security group and key pair of the same name, `put-metric-alarm`
+overwrites the alarm, and offline nodes are pruned before launch. Deleting them bought nothing
+and cost time - the security group step alone waited up to a minute for the network interface
+to be released. The `.pem` is kept *with* the key pair on purpose: AWS hands out a private key
+exactly once, so a surviving key pair whose `.pem` had been deleted would be reused by the next
+build with no way to log in. The per-box `.env` lines are still cleared - they are not resources,
+and left in place `cg ssh` and `cg status` would point at a terminated instance.
 
 `--all` asks you to type `DESTROY-ALL`, because the archive is the only copy of the games and
 there is no versioning behind it. It skips the mirror entirely, since pushing games to S3 and

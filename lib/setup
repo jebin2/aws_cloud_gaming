@@ -485,27 +485,51 @@ rebuild() {
 # key pair, local key and .env entries. Nothing is kept, nothing is saved.
 destroy_all() {
   ec2() { aws ec2 "$@" --region "$REGION"; }
-  local inst img snap sg key
+  local inst img snap sg="" key="" all=0
+  [[ ${CG_DESTROY_ALL:-0} == 1 ]] && all=1
   inst=$(ec2 describe-instances \
     --filters "Name=tag:Name,Values=$TS_HOST" \
               "Name=instance-state-name,Values=pending,running,stopping,stopped" \
     --query 'Reservations[].Instances[].InstanceId' --output text)
   img=$(ec2 describe-images --owners self --query 'Images[].ImageId' --output text)
-  sg=$(ec2 describe-security-groups --filters "Name=group-name,Values=${TS_HOST}-sg" \
-    --query 'SecurityGroups[].GroupId' --output text 2>/dev/null || true)
-  key=$(ec2 describe-key-pairs --key-names "$TS_HOST" --query 'KeyPairs[].KeyName' \
-    --output text 2>/dev/null || true)
+
+  # A plain destroy removes only what BILLS. The security group, the key pair,
+  # the idle-stop alarm and the tailnet node cost nothing, and cg init reuses or
+  # rewrites every one of them:
+  #   security group  provision.sh reuses one of that name
+  #   key pair        provision.sh reuses it; the .pem is kept WITH it, because
+  #                   AWS hands out the private key only once - an AWS key whose
+  #                   .pem is gone would be reused with no way to log in
+  #   alarm           aws-setup.sh put-metric-alarm overwrites it by name
+  #   tailnet node    provision.sh prunes offline nodes before the next launch
+  # Deleting them bought nothing and cost time: the security group alone waited
+  # up to a minute for the network interface to be released.
+  # --all still removes them - that is the command for leaving nothing behind.
+  if (( all )); then
+    sg=$(ec2 describe-security-groups --filters "Name=group-name,Values=${TS_HOST}-sg" \
+      --query 'SecurityGroups[].GroupId' --output text 2>/dev/null || true)
+    key=$(ec2 describe-key-pairs --key-names "$TS_HOST" --query 'KeyPairs[].KeyName' \
+      --output text 2>/dev/null || true)
+  fi
 
   echo "This permanently deletes the box and everything listed here:"
   echo "  instances       ${inst:-none}"
   echo "  images          ${img:-none}"
-  echo "  security group  ${sg:-none}"
-  echo "  key pair        ${key:-none}  (and ~/.ssh/${TS_HOST}.pem)"
-  echo "  alarms          ${TS_HOST}-idle-stop"
-  if [[ ${CG_DESTROY_ALL:-0} == 1 ]]; then
+  if (( all )); then
+    echo "  security group  ${sg:-none}"
+    echo "  key pair        ${key:-none}  (and ~/.ssh/${TS_HOST}.pem)"
+    echo "  alarms          ${TS_HOST}-idle-stop"
+    echo "  tailnet nodes   ${TS_HOST}, ${TS_HOST}-N"
     echo "  budget          ${TS_HOST}-monthly"
   else
-    echo "  budget          KEPT - guards the account, not the box (cg destroy --all removes it)"
+    echo
+    echo "Kept, because they are free and cg init reuses them:"
+    echo "  security group  ${TS_HOST}-sg"
+    echo "  key pair        ${TS_HOST}, with ~/.ssh/${TS_HOST}.pem"
+    echo "  alarm           ${TS_HOST}-idle-stop - rewritten for the next instance"
+    echo "  tailnet node    left offline - pruned before the next launch"
+    echo "  budget          guards the account, not the box"
+    echo "  (cg destroy --all removes all of these)"
   fi
   echo
   # `cg destroy --all` is deleting the archive itself, so the reassurance below
@@ -567,6 +591,7 @@ exception - nothing here touches it."
   done < <(ec2 describe-volumes --filters Name=status,Values=available \
              --query 'Volumes[].[VolumeId,Tags[?Key==`Name`]|[0].Value]' --output text)
 
+  if (( all )); then
   say "removing alarms and notifications"
   # The idle-stop alarm names one instance, so it goes with it.
   aws cloudwatch delete-alarms --region "$REGION" --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null || true
@@ -597,9 +622,13 @@ exception - nothing here touches it."
   topic=$(aws sns list-topics --region us-east-1 \
     --query "Topics[?contains(TopicArn,'${TS_HOST}-billing')].TopicArn | [0]" --output text 2>/dev/null || true)
   [[ -n $topic && $topic != None ]] && aws sns delete-topic --region us-east-1 --topic-arn "$topic" || true
+  else
+    log "keeping the idle-stop alarm - free, and cg init rewrites it for the next instance"
+    log "keeping the budget ${TS_HOST}-monthly - it guards the account, not the box"
+  fi
 
   # The security group cannot go until the instance's ENI is fully released.
-  if [[ -n $sg && $sg != None ]]; then
+  if (( all )) && [[ -n $sg && $sg != None ]]; then
     say "deleting security group $sg"
     # The group cannot go until the terminated instance's network interface is
     # released, which takes a little while - so retry rather than fail, and say
@@ -614,12 +643,18 @@ exception - nothing here touches it."
     done
   fi
 
-  [[ -n $key && $key != None ]] && { say "deleting key pair"; ec2 delete-key-pair --key-name "$key" >/dev/null; }
-  rm -f "$HOME/.ssh/${TS_HOST}.pem"
+  if (( all )); then
+    [[ -n $key && $key != None ]] && { say "deleting key pair"; ec2 delete-key-pair --key-name "$key" >/dev/null; }
+    rm -f "$HOME/.ssh/${TS_HOST}.pem"
+  fi
   # Sunshine credentials and the tailnet node belong to the box being deleted;
   # leaving them behind makes the next build authenticate against nothing.
   sed -i '/^GAME_INSTANCE_ID=/d;/^GAME_REGION=/d;/^GAME_TS_HOST=/d;/^GAME_TS_NODE=/d;/^SUNSHINE_USER=/d;/^SUNSHINE_PASS=/d' .env 2>/dev/null || true
 
+  if (( ! all )); then
+    say "box deleted - security group, key pair, alarm and tailnet node kept for cg init"
+    return 0
+  fi
   say "everything deleted"
   # The tailnet node is left in place on purpose. Note that its identity lives on
   # the disk just deleted, so a rebuild cannot actually reclaim it: Tailscale will
