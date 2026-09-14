@@ -1113,7 +1113,10 @@ if command -v moonlight >/dev/null && timeout 45 moonlight list "$IP" 2>/dev/nul
   log "already paired"
   PAIRED=1
 elif command -v moonlight >/dev/null && [[ -n ${SUNSHINE_USER:-} && -n ${SUNSHINE_PASS:-} ]]; then
-  if pair_moonlight "$IP" "$SUNSHINE_USER" "$SUNSHINE_PASS"; then
+  # Once more before giving up. A pairing that does not stick is now REPORTED
+  # as a failure instead of printed as "paired", so a retry is worth the seconds.
+  if pair_moonlight "$IP" "$SUNSHINE_USER" "$SUNSHINE_PASS" \
+     || { log "pairing did not stick - trying once more"; pair_moonlight "$IP" "$SUNSHINE_USER" "$SUNSHINE_PASS"; }; then
     log "paired"
     PAIRED=1
   else
