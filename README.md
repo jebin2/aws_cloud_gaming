@@ -712,8 +712,26 @@ archive to save less time than the NVIDIA driver install already takes in parall
 its Proton prefix (save games and registry) and the shader cache - the parts nothing else will
 rebuild for you - are all mirrored.
 
-If Steam happens to place the tools in `/scratch/steam` on some build, they will be mirrored and
-then removed again the first time it does not. That churn is harmless.
+If Steam happens to place the tools in `/scratch/steam` on some build, **they are archived like
+any game, and they stay archived.** This happened on 2026-09-14: one push picked up four of them.
+
+    1493710    Proton Experimental                 1.8 GB
+    1391110    Steam Linux Runtime 2.0 (soldier)   0.6 GB
+    4183110    Steam Linux Runtime 4.0             0.6 GB
+    3086180    Proton Voice Files                  0.1 GB
+
+An earlier version of this section said they would be "removed again the first time it does
+not". That was true of the whole-tree sync, where `--delete` removed anything absent from the
+disk. It stopped being true with per-game archiving, which deliberately leaves an app that is
+not installed alone - the property that stops an empty disk emptying the archive. Nothing removes
+an archived app except `cg library forget <appid>`.
+
+What that costs and changes:
+
+- **About 3.2 GB, roughly $0.08 (INR 7) a month** - cheap enough to leave.
+- **They appear as choices in the `cg init` prompt**, alongside the games. Restoring Diablo IV
+  alone is fine; Steam fetches whatever tools it is missing in under a minute, same as before.
+- To drop them: `cg library forget 1493710` and so on, one per appid, each with the typed confirm.
 
 ### The Steam login is not in the library
 
