@@ -362,9 +362,24 @@ Measured on a real month:
 
 Everything else this project calls is free at this volume - EC2 describe/run/terminate, STS,
 IAM, the Pricing API (where the S3 per-GB figure comes from), CloudWatch metrics and alarms
-(1M requests and 10 alarms free), AWS Budgets (first two free), and the Free Tier API. **S3
-requests do not even appear on the bill** - under $0.001 for a month of pushing and restoring a
-game library.
+(1M requests and 10 alarms free), AWS Budgets (first two free), and the Free Tier API.
+
+**S3 requests are small but not free**, and this claim used to say they were. Measured over two
+days of pushing a ~140 GB game:
+
+    2026-09-12   73,345 PUT/LIST   119,925 GET    $0.415  (INR 37)
+    2026-09-13   52,304 PUT/LIST    26,550 GET    $0.273  (INR 24)
+
+About **INR 25 per full push** of a 140 GB game. An incremental push where nothing changed is
+near-free, because `--size-only` skips every matching file and the cost is mostly the LIST calls
+`sync` uses to compare. The count is high relative to the file count because of multipart: at
+`--part-size 16` MiB a large `.pak` becomes thousands of separate PUTs. Raising part-size would
+cut that roughly fourfold and multiply s5cmd's memory the same way, which is the trade that
+caused an OOM once - not worth INR 15 a push.
+
+**Data transfer between S3 and EC2 in the same region really is free**, in both directions:
+`DataTransfer-In-Bytes` and `DataTransfer-Out-Bytes` both bill $0.000 across every push and
+restore so far. The upload and the restore cost requests and nothing else.
 
 That $0.01 is why `cg status` caches rather than asks: run 20 times a day it would be about
 INR 530/month, more than the S3 archive it reports on.
