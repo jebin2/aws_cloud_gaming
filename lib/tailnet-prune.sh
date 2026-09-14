@@ -45,7 +45,13 @@ except Exception: sys.exit(0)
 for d in devs:
     name = (d.get("hostname") or "")
     # "online" is absent on some plans; treat only an explicit False as offline.
-    if pat.match(name) and d.get("online") is False:
+    # connectedToControl, not "online": the v2 devices API has no "online" field
+    # at all (checked live 2026-09-14, default and ?fields=all). Testing
+    # d.get("online") is False never matched, so this pruned nothing, ever - which
+    # only showed once cg destroy stopped deleting nodes itself and a rebuild
+    # joined as gamevps-1. A node whose field is absent is left alone: deleting
+    # the tailnet identity of a box that is still up makes it unreachable.
+    if pat.match(name) and d.get("connectedToControl") is False:
         print("%s\t%s\t%s" % (d["id"], name, (d.get("lastSeen") or "")[:19]))')
 
 [[ -n ${stale//[[:space:]]/} ]] || exit 0

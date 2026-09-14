@@ -1556,3 +1556,30 @@ need to wait for anything. Making the stub exit after a beat, the way Steam does
 loop load-bearing. **A stub that is more obedient than the real thing tests less than it looks.**
 
 Final: ten mutations, ten caught, 41 assertions, 1.4s.
+
+### The tailnet prune never pruned anything, and its test agreed with it
+
+A rebuild joined the tailnet as `gamevps-1`, straight after a prune that was supposed to have
+removed the dead `gamevps` node. The prune ran, printed nothing, and deleted nothing.
+
+It matched nodes with `d.get("online") is False`. **The Tailscale v2 devices API has no `online`
+field** - not in the default response, not with `?fields=all`. The real field is
+`connectedToControl`. `None is False` is never true, so the prune had deleted nothing since the
+day it was written.
+
+It went unnoticed for two reasons, and both are worth keeping:
+
+1. **`cg destroy` used to delete tailnet nodes unconditionally**, so a working destroy hid a
+   broken prune. The failure appeared the moment destroy stopped doing that job, which is the
+   point at which the prune finally had one.
+2. **The test fixture invented the same field the code did.** It fed `"online": false` to a
+   function checking `"online"`, and every case passed. A fixture written from the code proves
+   only that the code agrees with itself. This one is now captured from the live API, including
+   the detail that makes the prune dangerous: a live box and a dead one have the **same
+   `hostname`** (`gamevps`); only the MagicDNS `name` carries the `-1`.
+
+A node that does not report the field at all is now left alone. If the API renames it again, the
+safe failure is pruning nothing - not deleting the tailnet identity of a box that may be up.
+
+Before running the fix against the real tailnet, the new filter was run read-only over the live
+device list. It selected exactly the dead node and kept the box that was mid-build beside it.

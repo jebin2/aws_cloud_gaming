@@ -80,15 +80,15 @@ run() {
 make_login() {
   rm -rf "$T/home"
   mkdir -p "$T/home/$SD/config/htmlcache" "$T/home/$SD/config/avatarcache" \
-           "$T/home/$SD/userdata/1000000001/config/librarycache" "$T/home/.steam"
+           "$T/home/$SD/userdata/12345678/config/librarycache" "$T/home/.steam"
   echo 'refresh_token_here' > "$T/home/$SD/config/config.vdf"
   # Where the token really is. config.vdf above holds the account list only.
   printf '"MachineUserConfigStore"\n{\n\t"Software"\n\t{\n\t\t"Valve"\n\t\t{\n\t\t\t"Steam"\n\t\t\t{\n\t\t\t\t"ConnectCache"\n\t\t\t\t{\n\t\t\t\t\t"1a2b3c4d5"\t\t"5b9aENCRYPTED"\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n' > "$T/home/$SD/local.vdf"
   echo 'loginusers'         > "$T/home/$SD/config/loginusers.vdf"
   echo 'registry'           > "$T/home/.steam/registry.vdf"
-  echo 'localconfig'        > "$T/home/$SD/userdata/1000000001/config/localconfig.vdf"
+  echo 'localconfig'        > "$T/home/$SD/userdata/12345678/config/localconfig.vdf"
   dd if=/dev/zero of="$T/home/$SD/config/htmlcache/blob" bs=1M count=40 status=none
-  dd if=/dev/zero of="$T/home/$SD/userdata/1000000001/config/librarycache/b" bs=1M count=5 status=none
+  dd if=/dev/zero of="$T/home/$SD/userdata/12345678/config/librarycache/b" bs=1M count=5 status=none
   ln -sfn "$T/home/$SD" "$T/home/.steam/steam"
 }
 reset() { unset MOUNTED UPLOAD_FAILS CG_STEAM_SHUTDOWN; rm -f "$T/up"; : > "$T/s5.log"; }
@@ -102,7 +102,7 @@ contains "the token store"    "$(members)" "$SD/local.vdf"
 contains "the config"         "$(members)" "config/config.vdf"
 contains "the account list"   "$(members)" "config/loginusers.vdf"
 contains "the machine id"     "$(members)" ".steam/registry.vdf"
-contains "per-user config"    "$(members)" "userdata/1000000001/config/localconfig.vdf"
+contains "per-user config"    "$(members)" "userdata/12345678/config/localconfig.vdf"
 
 echo "2. the directory that IS walked - userdata - stays small and stays flat"
 # Two of these are structural rather than filtered, and saying which is which
@@ -123,14 +123,14 @@ echo "2b. a symlink inside userdata is stored as a link, not followed"
 # parent makes the walk archive the whole tree again, or recurse. tar -h here
 # would inline 45 MB of cache through the link.
 reset; make_login
-ln -sfn "$T/home/$SD" "$T/home/$SD/userdata/1000000001/steamroot"
+ln -sfn "$T/home/$SD" "$T/home/$SD/userdata/12345678/steamroot"
 rm -f "$T/remote/account.tgz"; run account push >/dev/null
-contains "the link is a member"  "$(members)" "userdata/1000000001/steamroot"
+contains "the link is a member"  "$(members)" "userdata/12345678/steamroot"
 lacks    "but nothing under it"  "$(members)" "steamroot/config"
 sz=$(stat -c %s "$T/remote/account.tgz")
 if (( sz < 1048576 )); then echo "  ok   still small ($sz bytes) - the link was not followed"; pass=$((pass+1));
 else echo "  FAIL archive ballooned to $sz bytes - tar followed the symlink"; fail=$((fail+1)); fi
-rm -f "$T/home/$SD/userdata/1000000001/steamroot"; rm -f "$T/remote/account.tgz"; run account push >/dev/null
+rm -f "$T/home/$SD/userdata/12345678/steamroot"; rm -f "$T/remote/account.tgz"; run account push >/dev/null
 
 echo "3. a logged-OUT box does not overwrite a good saved login"
 # The failure this prevents: boot a box, never sign in, destroy it, and the

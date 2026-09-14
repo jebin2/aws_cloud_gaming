@@ -7,7 +7,17 @@
 # auto-terminated box leaked a node and the names crept: gamevps-1, -2, -3.
 #
 # The dangerous half of this is the DELETE call, so the assertions that matter
-# are the negative ones: an ONLINE node must never be touched.
+# are the negative ones: a CONNECTED node must never be touched.
+#
+# The fixture is the shape the API actually returns, captured live on
+# 2026-09-14. The first version of this file invented an "online" field - the
+# v2 devices API has none; the real one is connectedToControl - and the code was
+# written against the same invention. Every case passed, and the prune deleted
+# nothing in production, ever. It only surfaced once cg destroy stopped deleting
+# nodes itself and a rebuild joined as gamevps-1.
+#
+# Note "hostname" is the box's OS hostname, so a live box and a dead one BOTH
+# say "gamevps"; only "name" (the MagicDNS name) carries the -1 suffix.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 T=$(mktemp -d); pass=0; fail=0
@@ -38,11 +48,12 @@ chmod +x "$T/bin/curl"
 
 cat > "$T/devices.json" <<'JSON'
 {"devices":[
- {"id":"111","hostname":"gamevps","online":false,"lastSeen":"2026-09-13T08:59:49Z"},
- {"id":"222","hostname":"gamevps","online":true,"lastSeen":"2026-09-13T13:43:20Z"},
- {"id":"333","hostname":"gamevps-2","online":false,"lastSeen":"2026-09-12T21:00:00Z"},
- {"id":"444","hostname":"conflict200","online":false,"lastSeen":"2026-09-10T10:00:00Z"},
- {"id":"555","hostname":"laptop","online":true,"lastSeen":"2026-09-13T13:44:00Z"}
+ {"id":"111","nodeId":"n111","hostname":"gamevps","name":"gamevps.tail0000.ts.net","connectedToControl":false,"lastSeen":"2026-09-13T08:59:49Z"},
+ {"id":"222","nodeId":"n222","hostname":"gamevps","name":"gamevps-1.tail0000.ts.net","connectedToControl":true,"lastSeen":"2026-09-13T13:43:20Z"},
+ {"id":"333","nodeId":"n333","hostname":"gamevps-2","name":"gamevps-2.tail0000.ts.net","connectedToControl":false,"lastSeen":"2026-09-12T21:00:00Z"},
+ {"id":"444","nodeId":"n444","hostname":"conflict200","name":"conflict200.tail0000.ts.net","connectedToControl":false,"lastSeen":"2026-09-10T10:00:00Z"},
+ {"id":"555","nodeId":"n555","hostname":"laptop","name":"laptop.tail0000.ts.net","connectedToControl":true,"lastSeen":"2026-09-13T13:44:00Z"},
+ {"id":"666","nodeId":"n666","hostname":"gamevps","name":"gamevps-3.tail0000.ts.net","lastSeen":"2026-09-13T13:40:00Z"}
 ]}
 JSON
 
@@ -59,9 +70,15 @@ check    "pruned the stale gamevps"   "$(cnt 'DELETE 111')" "1"
 check    "pruned the stale gamevps-2" "$(cnt 'DELETE 333')" "1"
 contains "said which, and when"       "$out" "last seen 2026-09-13T08:59:49"
 
-echo "2. an ONLINE node is never touched"
-# This is the one that would break a live box mid-build.
+echo "2. a CONNECTED node is never touched"
+# This is the one that would break a live box mid-build - and it has the same
+# hostname as the dead node it sits beside.
 check "left the running box alone" "$(cnt 'DELETE 222')" "0"
+
+echo "2b. a node whose connection state is not reported is left alone"
+# If the API ever drops or renames the field again, the safe failure is pruning
+# nothing, not deleting the tailnet identity of a box that may be up.
+check "field absent: not deleted" "$(cnt 'DELETE 666')" "0"
 
 echo "3. other machines on the tailnet are never touched"
 check "left the off-site VPS alone" "$(cnt 'DELETE 444')" "0"
