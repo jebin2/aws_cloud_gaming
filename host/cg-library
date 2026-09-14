@@ -90,6 +90,22 @@ restored() {
 
 # --- what is installed here --------------------------------------------------
 # appid<TAB>installdir<TAB>name, one per line, from the manifests on disk.
+# Proton, the Steam Linux Runtimes and the anti-cheat/redistributable runtimes
+# are tools, not games. It was decided on 2026-09-13 not to mirror them - Steam
+# re-fetches them in under a minute - but Steam sometimes installs them into
+# /scratch/steam, and on 2026-09-14 a push archived four of them (3.2 GB) as if
+# they were games. Per-game archiving never removes an absent app, so once in,
+# they stayed. Matched by installdir, so new Proton versions are covered too.
+is_steam_tool() { # is_steam_tool <appid> <installdir>
+  # "Proton " with the space: every real one is "Proton 9.0", "Proton - Experimental",
+  # "Proton Voice Files"... while a bare Proton* would also swallow a game
+  # installed as "ProtonHunter".
+  case "$2" in Proton|"Proton "*|SteamLinuxRuntime*) return 0 ;; esac
+  # Steamworks Common Redistributables, Proton EasyAntiCheat, Proton BattlEye.
+  case "$1" in 228980|1826330|1161040) return 0 ;; esac
+  return 1
+}
+
 local_apps() {
   local f id dir name flags
   for f in "$LIB"/steamapps/appmanifest_*.acf; do
@@ -99,6 +115,11 @@ local_apps() {
     name=$(sed -n 's/.*"name"[[:space:]]*"\(.*\)".*/\1/p' "$f" | head -1)
     flags=$(sed -n 's/.*"StateFlags"[[:space:]]*"\([0-9]*\)".*/\1/p' "$f" | head -1)
     [[ -n $id && -n $dir ]] || continue
+    if is_steam_tool "$id" "$dir"; then
+      # stderr: this runs inside $(...), and a log on stdout would become an app.
+      log "not archiving $name ($id) - a Steam tool, re-downloaded in under a minute" >&2
+      continue
+    fi
     printf '%s\t%s\t%s\t%s\n' "$id" "$dir" "${name:-$dir}" "${flags:-0}"
   done
 }

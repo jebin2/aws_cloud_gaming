@@ -401,7 +401,9 @@ for a in apps:
   [[ $a == FORGET ]] || { echo "aborted - nothing was deleted"; return 1; }
   local pair
   for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
-    aws s3 rm "s3://$GAME_S3_BUCKET/steam/steamapps/$pair" --recursive >/dev/null 2>&1 || true
+    # The trailing slash is the boundary: without it "common/Diablo IV" is a
+    # prefix of "common/Diablo IV Expansion" too, and --recursive deletes both.
+    aws s3 rm "s3://$GAME_S3_BUCKET/steam/steamapps/$pair/" --recursive >/dev/null 2>&1 || true
   done
   aws s3 rm "s3://$GAME_S3_BUCKET/steam/steamapps/appmanifest_$id.acf" >/dev/null 2>&1 || true
   aws s3 rm "s3://$GAME_S3_BUCKET/steam/meta/symlinks-$id.tsv" >/dev/null 2>&1 || true
