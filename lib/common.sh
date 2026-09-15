@@ -816,6 +816,18 @@ cg_ntfy_url() {
   printf '%s' "$v"
 }
 
+# env_set <KEY> <value>: one line in .env, replacing any earlier one. The file is
+# made readable by you alone before anything is written to it.
+env_set() {
+  local tmp; tmp=$(mktemp) || return 1
+  grep -v "^$1=" .env 2>/dev/null > "$tmp" || true
+  printf '%s=%s\n' "$1" "$2" >> "$tmp"
+  touch .env && chmod 600 .env && cat "$tmp" > .env
+  local rc=$?
+  rm -f "$tmp"
+  return "$rc"
+}
+
 # Best effort, and never fatal: a notification that cannot be sent is logged and
 # the command carries on. The URL is never printed - on ntfy.sh, the topic is all
 # it takes to read and post.

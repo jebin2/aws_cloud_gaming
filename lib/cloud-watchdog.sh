@@ -15,6 +15,21 @@ CW_NAME="${TS_HOST}-cloud-watchdog"
 CW_LOGS="/aws/lambda/$CW_NAME"
 CW_SRC="lambda/cloud_watchdog.py"
 CW_RUNTIME="python3.13"
+
+# A laptop with no GAME_NTFY_URL - a new one, say - redeployed the watchdog without
+# it, silently turning notifications off for the whole rig. When .env does not
+# mention it at all and the deployed watchdog has one, it is copied here, never
+# printed. An empty GAME_NTFY_URL= is a choice to go without, and is left alone.
+cw_adopt_ntfy() {
+  [[ -z ${GAME_NTFY_URL+set} ]] || return 0
+  local v
+  v=$(aws lambda get-function-configuration --region "$REGION" --function-name "$CW_NAME" \
+        --query 'Environment.Variables.CG_NTFY_URL' --output text 2>/dev/null) || return 0
+  [[ -n $v && $v != None ]] || return 0
+  env_set GAME_NTFY_URL "$v" || return 0
+  export GAME_NTFY_URL="$v"
+  log_as ok "notifications: copied the ntfy address from the cloud watchdog into .env"
+}
 CW_POLICY_NAME="idle-guard"
 # EC2's own events: state changes, so the watchdog can confirm a box is gone, and
 # spot interruption warnings. One rule for both - a detail filter would have to

@@ -74,7 +74,9 @@ Use `cg check` to run every check and stop before anything is created. It lists 
 laptop is missing at once, and `cg check --fix` installs it: the AWS CLI v2, Tailscale, Moonlight,
 OpenSSH, `curl` and `python3`, through pacman, apt, dnf or zypper. It shows what it will run and
 asks once before using sudo, then starts the Tailscale sign-in and asks for an AWS access key if
-there is none. It creates nothing in AWS and costs nothing.
+there is none. Any `.env` setting that is missing - the Tailscale auth key and alert email, and
+optionally the Tailscale API token and ntfy address - is asked for and saved to `.env`. It creates
+nothing in AWS and costs nothing.
 
 **On a second laptop,** copy `.env` across: it holds your keys and is not in git. The ssh key
 sorts itself out. `cg check` compares `~/.ssh/<host>.pem` with the key pair in AWS, and when the

@@ -701,6 +701,7 @@ destroy_everything() {
 # a missing guard must not stop you building a box.
 watchdog_ensure() {
   _cg_styled && _cg_live "checking the cloud watchdog"
+  cw_adopt_ntfy
   if cw_current; then
     cw_report_last
   else
@@ -740,6 +741,7 @@ cmd_notify() {
 cmd_watchdog() {
   case "${1:-status}" in
     install) say "installing the cloud watchdog"
+             cw_adopt_ntfy
              cw_install || die "the cloud watchdog was not installed"
              cw_prove ;;
     check)   cw_prove ;;
