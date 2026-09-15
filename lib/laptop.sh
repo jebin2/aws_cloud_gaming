@@ -131,10 +131,12 @@ laptop_tailscale_up() {
   sudo tailscale up
 }
 
-# What is missing, all at once. Returns 0 when the build can go ahead: Moonlight
-# alone does not stop it, since streaming needs it and building does not.
+# What is missing, all at once. Returns 0 when nothing is. Moonlight stops it too:
+# cg init pairs it and cg open streams with it.
+# laptop_report 1: after --fix, so what is left is for you to install - suggesting
+# --fix again would only send you round in a loop.
 laptop_report() {
-  local missing t ready=0 v found=()
+  local after_fix=${1:-0} missing t ready=0 v found=() by_hand=0
   missing=$(laptop_missing)
   for t in "${LAPTOP_TOOLS[@]}"; do
     grep -qx "$t" <<<"$missing" && continue
@@ -148,21 +150,20 @@ laptop_report() {
   if (( ${#found[@]} )); then
     v=$(printf '%s, ' "${found[@]}"); log_as ok "installed: ${v%, }"
   fi
+  { laptop_pm >/dev/null && (( ! after_fix )); } || by_hand=1
   for t in $missing; do
-    if [[ $t == moonlight ]]; then
-      log "WARNING: Moonlight not found - building does not need it, streaming does"
-    else
-      log "missing: $(laptop_label "$t")"; ready=1
-    fi
-    laptop_pm >/dev/null || log "  install it by hand: $(laptop_manual "$t")"
+    log_as fail "missing: $(laptop_label "$t")"; ready=1
+    (( by_hand )) && log "  install it yourself: $(laptop_manual "$t")"
   done
   if laptop_tailscale_down; then
-    log "Tailscale is installed but not signed in, or not running"; ready=1
+    log_as fail "Tailscale is installed but not signed in, or not running"; ready=1
+    (( after_fix )) && log "  sign in yourself: sudo tailscale up"
   elif laptop_has tailscale; then
     log_as ok "Tailscale signed in"
   fi
-  if [[ -n $missing ]] || (( ready )); then
-    laptop_pm >/dev/null && log "cg check --fix installs and signs in what is missing, after asking"
+  # --fix can sign Tailscale in with no package manager, so offer it for that too.
+  if (( ready && ! after_fix )) && { laptop_pm >/dev/null || [[ -z $missing ]]; }; then
+    log "cg check --fix installs and signs in what is missing, after asking"
   fi
   return "$ready"
 }

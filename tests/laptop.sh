@@ -92,13 +92,23 @@ lacks    "  and only that"                   "$r" "OpenSSH (ssh, scp), curl"
 contains "names the AWS CLI"                 "$r" "missing: AWS CLI v2"
 contains "  and curl"                        "$r" "missing: curl"
 contains "  and Tailscale"                   "$r" "missing: Tailscale"
-contains "  Moonlight only warns"            "$r" "WARNING: Moonlight not found"
+contains "  and Moonlight"                   "$r" "missing: Moonlight"
 contains "  points to --fix"                 "$r" "cg check --fix"
 contains "  and stops the build"             "$r" "rc=1"
 fresh python3 ssh curl aws tailscale pacman
 r=$(run 'laptop_report; echo "rc=$?"')
-contains "Moonlight alone does not stop it"  "$r" "rc=0"
-contains "  but is said"                     "$r" "WARNING: Moonlight"
+contains "Moonlight alone stops it"          "$r" "rc=1"
+contains "  said as missing"                 "$r" "missing: Moonlight"
+contains "  with --fix to install it"        "$r" "cg check --fix"
+r=$(run 'laptop_report 1; echo "rc=$?"')
+contains "after --fix: install it yourself"  "$r" "install it yourself: https://github.com/moonlight-stream/moonlight-qt/releases"
+lacks    "  and no --fix again"              "$r" "cg check --fix"
+contains "  still stops"                     "$r" "rc=1"
+fresh python3 ssh curl aws tailscale moonlight
+rm -f "$T/ts-up"
+r=$(run 'laptop_report 1; echo "rc=$?"')
+contains "after --fix, still signed out: sign in yourself" "$r" "sudo tailscale up"
+lacks    "  and no --fix again"              "$r" "cg check --fix"
 fresh python3 ssh curl aws tailscale moonlight
 rm -f "$T/ts-up"
 r=$(run 'laptop_report; echo "rc=$?"')

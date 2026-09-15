@@ -18,7 +18,7 @@ Everything else is automatic:
 - **Laptop tools** - `./cg check --fix` installs the AWS CLI, Tailscale,
   [Moonlight](https://github.com/moonlight-stream), OpenSSH, `curl` and `python3` after asking, with
   pacman, apt, dnf or zypper. Moonlight needs the distro's `moonlight-qt` package, which Arch-based
-  distros have; where there is none, `--fix` links the download
+  distros have; where there is none, `cg check` stops with a link, for you to install it yourself
 - **Sign-ins** - `--fix` starts the Tailscale login and asks for an AWS access key if none works
 - **AWS setup** - `cg init` creates the ssh key pair, the S3 bucket for your games, the box's IAM
   role, the budget alert and the cloud watchdog

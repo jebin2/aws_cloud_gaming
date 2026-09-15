@@ -734,8 +734,8 @@ source lib/laptop.sh
 if (( FIX )); then
   laptop_fix || true
 fi
-if ! laptop_report; then
-  (( FIX )) && die "the laptop is still not ready - see above."
+if ! laptop_report "$FIX"; then
+  (( FIX )) && die "the laptop is still not ready - install what is left yourself (see above), then run cg check again."
   die "the laptop is not ready - see above."
 fi
 
