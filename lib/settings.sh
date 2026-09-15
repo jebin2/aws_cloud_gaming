@@ -8,6 +8,58 @@
 
 settings_tty() { [[ -t 0 ]]; }
 
+# settings_masked <prompt> - what is typed or pasted, on stdout, with a * on screen
+# for each character. A plain hidden read showed nothing at all, so a pasted key
+# looked as if the paste had failed. Backspace works. Escape sequences - the
+# bracketed-paste markers some terminals wrap a paste in, arrow keys - are
+# skipped, so they are neither shown nor saved. Returns 1 at end of input with
+# nothing typed.
+settings_masked() {
+  local c v="" esc=0
+  printf '%s' "$1" >&2
+  while :; do
+    if ! IFS= read -rsn1 c; then
+      echo >&2
+      [[ -n $v ]] || return 1
+      break
+    fi
+    if (( esc )); then
+      [[ $c == [A-Za-z~] ]] && esc=0
+      continue
+    fi
+    case $c in
+      ""|$'\r')      echo >&2; break ;;
+      $'\e')         esc=1 ;;
+      $'\x7f'|$'\b') if [[ -n $v ]]; then v=${v%?}; printf '\b \b' >&2; fi ;;
+      *)             v+=$c; printf '*' >&2 ;;
+    esac
+  done
+  printf '%s' "$v"
+}
+
+# settings_secret <prompt> <regex> <what> [optional] - a pasted secret, on stdout.
+# Stray whitespace is removed, and up to three tries are given. Returns 1 with no
+# usable answer; an optional one returns an empty value when Enter is pressed on
+# its own.
+settings_secret() {
+  local prompt=$1 re=$2 what=$3 optional=${4:-} v try
+  for try in 1 2 3; do
+    v=$(settings_masked "$prompt") || return 1     # end of input: no answer, not a skip
+    v=${v//[[:space:]]/}
+    if [[ -z $v ]]; then
+      [[ -n $optional ]] && return 0
+      echo "    nothing arrived - paste with Ctrl+Shift+V (or right-click, Paste), then press Enter" >&2
+      continue
+    fi
+    if [[ $v =~ $re ]]; then
+      printf '%s' "$v"
+      return 0
+    fi
+    echo "    that is not a $what - check you copied all of it, and paste again" >&2
+  done
+  return 1
+}
+
 # settings_prompts <fix: 0|1>
 #   required  TAILSCALE_AUTH_KEY, EMAIL_ALERTS - asked whenever missing
 #   optional  TAILSCALE_API_KEY, GAME_NTFY_URL - asked by --fix, and only when .env
@@ -27,8 +79,8 @@ settings_prompts() {
     echo "  Reusable: on  - a retry needs a key that has not been spent."
     echo "  Ephemeral: OFF - ephemeral nodes are purged when they go offline, and"
     echo "             this box goes offline every time the watchdog stops it."
-    read -rsp "  paste auth key: " GAME_TS_AUTHKEY || true; echo
-    [[ -n $GAME_TS_AUTHKEY ]] || die "no auth key given"
+    GAME_TS_AUTHKEY=$(settings_secret "  paste auth key: " '^tskey-[A-Za-z0-9-]+$' "Tailscale auth key") \
+      || die "no auth key given - copy it from the Tailscale page and paste it with Ctrl+Shift+V"
     env_set TAILSCALE_AUTH_KEY "$GAME_TS_AUTHKEY"
   fi
   if [[ -z $GAME_ALERT_EMAIL ]]; then
@@ -44,9 +96,13 @@ settings_prompts() {
     echo "Optional: a Tailscale API access token - not the auth key. With it, cg init removes old"
     echo "box entries, so the box keeps its name, and turns off the box's key expiry."
     echo "Generate one at: https://login.tailscale.com/admin/settings/keys"
-    read -rsp "  paste API token (Enter to skip): " v || true; echo
-    env_set TAILSCALE_API_KEY "$v"
-    export TAILSCALE_API_KEY="$v"
+    if v=$(settings_secret "  paste API token (Enter to skip): " '^tskey-[A-Za-z0-9-]+$' \
+             "Tailscale API token" optional); then
+      env_set TAILSCALE_API_KEY "$v"
+      export TAILSCALE_API_KEY="$v"
+    else
+      log_as fail "no valid API token - not saved, so cg check --fix asks again"
+    fi
   fi
   if [[ -n ${TAILSCALE_API_KEY:-} ]]; then
     log_as ok "Tailscale API key set - old nodes are pruned and key expiry is turned off"
@@ -58,8 +114,9 @@ settings_prompts() {
   if [[ -z ${GAME_NTFY_URL+set} ]] && (( fix )) && settings_tty; then
     echo
     echo "Optional: phone notifications through ntfy - a long random topic name, or a full ntfy URL."
-    read -rsp "  ntfy topic or URL (Enter to skip): " v || true; echo
-    if [[ -n $v && -z $(GAME_NTFY_URL="$v" cg_ntfy_url) ]]; then
+    v=$(settings_secret "  ntfy topic or URL (Enter to skip): " '^[A-Za-z0-9:/._-]+$' \
+          "ntfy topic or URL" optional) || v="-"
+    if [[ $v == "-" || ( -n $v && -z $(GAME_NTFY_URL="$v" cg_ntfy_url) ) ]]; then
       log_as fail "that is not a valid ntfy topic or URL - not saved, so cg check --fix asks again"
     else
       env_set GAME_NTFY_URL "$v"

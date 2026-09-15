@@ -112,7 +112,36 @@ echo "7. no auth key given: stops"
 fresh
 r=$(run 'settings_prompts 0; echo "rc=$?"' '\n')
 contains "stops"                              "$r" "no auth key given"
+contains "  after saying how to paste"        "$r" "nothing arrived - paste with Ctrl+Shift+V"
 lacks    "  before going on"                  "$r" "rc=0"
+
+echo "9. pasting: what the terminal adds is removed, and what arrived is confirmed"
+fresh
+r=$(run 'settings_prompts 0' '\e[200~tskey-auth-abc-DEF\e[201~\nme@example.com\n')
+check    "bracketed-paste markers removed"    "$(grep '^TAILSCALE_AUTH_KEY=' "$T/repo/.env")" "TAILSCALE_AUTH_KEY=tskey-auth-abc-DEF"
+contains "  a * per character, markers not shown" "$r" "$(printf '%.0s*' {1..18})"
+lacks    "  and no more"                      "$r" "$(printf '%.0s*' {1..19})"
+lacks    "  without printing it"              "$r" "abc-DEF"
+fresh
+run 'settings_prompts 0' '  tskey-auth-x  \nme@example.com\n' >/dev/null
+check    "spaces around it removed"           "$(grep '^TAILSCALE_AUTH_KEY=' "$T/repo/.env")" "TAILSCALE_AUTH_KEY=tskey-auth-x"
+fresh
+r=$(run 'settings_prompts 0' 'hello\ntskey-auth-2\nme@example.com\n')
+contains "a wrong paste is said"              "$r" "that is not a Tailscale auth key"
+check    "  and asked again"                  "$(grep '^TAILSCALE_AUTH_KEY=' "$T/repo/.env")" "TAILSCALE_AUTH_KEY=tskey-auth-2"
+fresh
+r=$(run 'settings_prompts 0' '\ntskey-auth-3\nme@example.com\n')
+contains "nothing pasted: how to paste"       "$r" "Ctrl+Shift+V"
+check    "  and asked again"                  "$(grep '^TAILSCALE_AUTH_KEY=' "$T/repo/.env")" "TAILSCALE_AUTH_KEY=tskey-auth-3"
+fresh
+r=$(EXTRA="TAILSCALE_AUTH_KEY=k EMAIL_ALERTS=e GAME_NTFY_URL=" run 'settings_prompts 1' 'nope\nnope\nnope\n')
+contains "a wrong API token three times: said" "$r" "no valid API token - not saved"
+lacks    "  and not saved"                    "$(envfile)" "TAILSCALE_API_KEY"
+
+echo "10. typing: backspace removes a character"
+fresh
+run 'settings_prompts 0' 'tskey-auth-abX\x7fc\nme@example.com\n' >/dev/null
+check    "the deleted character is gone"      "$(grep '^TAILSCALE_AUTH_KEY=' "$T/repo/.env")" "TAILSCALE_AUTH_KEY=tskey-auth-abc"
 
 echo "8. wired in"
 check "setup asks through it"                 "$(grep -c '^settings_prompts "$FIX"' lib/setup)" "1"
