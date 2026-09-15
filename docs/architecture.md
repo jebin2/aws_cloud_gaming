@@ -222,14 +222,14 @@ flowchart TB
   tick["Cloud watchdog<br/>once an hour"] --> off{"GAME_ARCHIVE_EXPIRY_DAYS<br/>set to 0?"}
   off -->|yes| forever["Kept forever"]
   off -->|no| box{"A gamevps box exists?<br/>running or stopped"}
-  box -->|yes| stamp["Kept<br/>cg-last-seen set to now"]
-  box -->|no| bucket{"Archive bucket<br/>exists?"}
+  box -->|yes| stamp["Kept<br/>last-seen mark set to now"]
+  box -->|no| bucket{"S3 size metric:<br/>an archive?"}
   bucket -->|no| none["Nothing to do"]
-  bucket -->|yes| mark{"cg-last-seen tag<br/>on the bucket"}
+  bucket -->|yes| mark{"Last-seen mark<br/>in SSM"}
   mark -->|missing| start["Kept<br/>counting starts now"]
   mark -->|under 14 days old| count["Kept<br/>countdown in cg status"]
   mark -->|14 days or older| trail{"CloudTrail: a gamevps<br/>launch in 14 days?"}
-  trail -->|yes| moved["Kept<br/>tag moves to that launch"]
+  trail -->|yes| moved["Kept<br/>mark moves to that launch"]
   trail -->|no| again{"One last look:<br/>a box now?"}
   again -->|yes| kept["Kept"]
   again -->|no| del["Empty and delete<br/>the S3 bucket"]
@@ -239,9 +239,11 @@ flowchart TB
 ```
 
 With no box, the S3 archive is the only thing still billing, so it is deleted after 14 days
-unused. That deletes the only copy of every game, so both records must agree first - the tag the
+unused. That deletes the only copy of every game, so both records must agree first - the mark the
 watchdog keeps fresh while a box exists, and CloudTrail's launch history - and anything uncertain
-keeps it. `cg watchdog check` runs every step as a dry run. Details, and what is lost:
+keeps it. Until it deletes, it makes no S3 request at all: its marks are free SSM parameters, and
+whether there is an archive comes from S3's free daily size metric. `cg watchdog check` runs every
+step as a dry run. Details, and what is lost:
 [cost-guards.md](cost-guards.md#game-archive-expiry).
 
 ## Notifications - what reaches your phone

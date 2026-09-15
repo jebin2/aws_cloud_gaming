@@ -55,8 +55,8 @@ cw_env() { # cw_env <account>
 # uses; write only its own log group. It cannot launch anything, read the game
 # archive beyond expiring it, or touch IAM.
 #
-# Archive expiry adds CloudTrail lookups and list/tag/delete on the ONE archive
-# bucket - and only while expiry is on. With GAME_ARCHIVE_EXPIRY_DAYS=0 the role
+# Archive expiry adds CloudTrail lookups, its own free SSM marks, and list/delete on
+# the ONE archive bucket - and only while expiry is on. With GAME_ARCHIVE_EXPIRY_DAYS=0 the role
 # cannot delete a single game.
 cw_policy() { # cw_policy <account>
   local b extra=""
@@ -66,10 +66,12 @@ cw_policy() { # cw_policy <account>
 ,
  {"Sid":"ArchiveExpiryLookups","Effect":"Allow","Action":"cloudtrail:LookupEvents","Resource":"*"},
  {"Sid":"ArchiveExpiryBucket","Effect":"Allow",
-  "Action":["s3:ListBucket","s3:ListBucketMultipartUploads","s3:GetBucketTagging","s3:PutBucketTagging","s3:DeleteBucket"],
+  "Action":["s3:ListBucket","s3:ListBucketMultipartUploads","s3:DeleteBucket"],
   "Resource":"arn:aws:s3:::$b"},
  {"Sid":"ArchiveExpiryObjects","Effect":"Allow","Action":["s3:DeleteObject","s3:AbortMultipartUpload"],
-  "Resource":"arn:aws:s3:::$b/*"}
+  "Resource":"arn:aws:s3:::$b/*"},
+ {"Sid":"ArchiveExpiryMarks","Effect":"Allow","Action":["ssm:GetParameter","ssm:PutParameter"],
+  "Resource":"arn:aws:ssm:$REGION:$1:parameter/cloud-gaming/$TS_HOST/*"}
 JSON
 )
   fi
@@ -391,6 +393,9 @@ cw_remove() {
   cw_aws events delete-rule --name "$CW_STATE_RULE" >/dev/null 2>&1 && { any=1; log "deleted the rule $CW_STATE_RULE"; }
   cw_aws lambda delete-function --function-name "$CW_NAME" >/dev/null 2>&1 && { any=1; log "deleted the function $CW_NAME"; }
   cw_aws logs delete-log-group --log-group-name "$CW_LOGS" >/dev/null 2>&1 && { any=1; log "deleted its logs"; }
+  # Its marks. Not counted as "something removed": deleting absent parameters succeeds.
+  aws ssm delete-parameters --region "$REGION" --names "/cloud-gaming/$TS_HOST/archive-last-seen" \
+    "/cloud-gaming/$TS_HOST/archive-warned" "/cloud-gaming/$TS_HOST/archive-deleted" >/dev/null 2>&1 || true
   aws iam delete-role-policy --role-name "$CW_NAME" --policy-name "$CW_POLICY_NAME" >/dev/null 2>&1 && any=1
   aws iam delete-role --role-name "$CW_NAME" >/dev/null 2>&1 && { any=1; log "deleted the role $CW_NAME"; }
   (( any )) || log "cloud watchdog: nothing to remove"

@@ -158,24 +158,30 @@ the empty bucket by itself.
 
 **How it decides.** Once an hour, and deleting only when two independent records agree:
 
-1. A `gamevps` instance exists in any state, stopped included: **kept**, and the bucket's
-   `cg-last-seen` tag is set to now.
-2. No bucket: nothing to do.
-3. No `cg-last-seen` tag yet: **kept**, and counting starts now.
-4. The tag is under 14 days old: **kept**, with the countdown.
+1. A `gamevps` instance exists in any state, stopped included: **kept**, and the last-seen mark is
+   set to now.
+2. S3's daily size metric shows no archive: nothing to do.
+3. No last-seen mark yet: **kept**, and counting starts now.
+4. The mark is under 14 days old: **kept**, with the countdown.
 5. CloudTrail's free 90-day history shows a successful `RunInstances` of an instance tagged
-   `gamevps` in the window: **kept**, and the tag moves to that launch.
+   `gamevps` in the window: **kept**, and the mark moves to that launch.
 6. One more look for an instance, then: **deleted** - objects, abandoned multipart uploads, and the
    bucket.
 
 **It fails closed.** A CloudTrail error, a history too long to read in full, an unreadable event or
-tag, or S3 refusing a delete all stop it with nothing removed - and the invocation is recorded as an
+mark, or S3 refusing a delete all stop it with nothing removed - and the invocation is recorded as an
 error, which `cg watchdog status` shows. A dry run (`cg watchdog check`) runs every step and deletes
 nothing.
 
-**The permissions it adds**, only while expiry is on: `cloudtrail:LookupEvents`, and list, tag,
-delete and abort-upload on **the one archive bucket**. It still cannot touch IAM, the budget, or
-anything else in the account.
+**It costs nothing until it deletes.** The last-seen mark and the warning are SSM Parameter Store
+standard parameters under `/cloud-gaming/<host>/`, which are free. Whether an archive exists comes
+from S3's `BucketSizeBytes` metric, which S3 publishes daily at no charge and which is read inside
+CloudWatch's free API allowance. The only S3 requests are the few listings made once, when it
+actually deletes - S3 does not charge for the deletes themselves.
+
+**The permissions it adds**, only while expiry is on: `cloudtrail:LookupEvents`, reading and writing
+its own parameters under `/cloud-gaming/<host>/`, and list, delete and abort-upload on **the one
+archive bucket**. It still cannot touch IAM, the budget, or anything else in the account.
 
 **Why "a box", not "an access".** Seeing every S3 read would need CloudTrail data events, which are
 billed. A box launched or running is the free signal that the archive is still wanted, and a box
@@ -197,7 +203,7 @@ Push notifications through [ntfy](https://ntfy.sh), **off unless `GAME_NTFY_URL`
 | a box still stuck an hour after forcing - then hourly | the cloud watchdog |
 | the game archive 24 hours from deletion - once per countdown | the cloud watchdog |
 | the game archive deleted | the cloud watchdog |
-| the box confirmed gone - terminated or stopped, however it ended | the cloud watchdog, from EC2's events |
+| the box confirmed gone - however it ended - and what S3 still bills for the games | the cloud watchdog, from EC2's events |
 | a spot box about to be reclaimed - AWS's 2-minute warning | the cloud watchdog, from EC2's events |
 | the cloud watchdog failing - at most once an hour | the cloud watchdog |
 | a build finished, or failed | `cg init` |
@@ -214,7 +220,7 @@ channel, self-host ntfy and set its URL instead.
 **How it reaches each sender.** The cloud watchdog gets it as an environment variable, so the
 next `cg init` or `cg watchdog install` applies a change. The box gets it inside its private host
 bundle, as a root-only `/etc/cg-notify.conf`; `cg init` refreshes it, and removing the setting
-removes the file. The 24-hour warning is recorded on the archive bucket as `cg-warned`, so the
+removes the file. The 24-hour warning is recorded as a free SSM parameter, so the
 hourly check sends it once, and retries next hour if the send failed.
 The confirmation that a box is gone comes from a second EventBridge rule,
 `<host>-cloud-watchdog-state`, which hands EC2's state changes and spot interruption warnings to

@@ -204,9 +204,12 @@ check "no action" "$(field 1 "$r")|$(field 2 "$r")" "none|-"
 
 # --- archive expiry ------------------------------------------------------------
 # It deletes the only copy of every game, so every branch that keeps the archive
-# has a case, and every uncertainty must keep it too.
-# Default scenario: no box, a last-seen mark 20 days old, nothing in CloudTrail,
-# 2,500 objects and one abandoned upload - the one that DOES delete.
+# has a case, and every uncertainty must keep it too. It must also cost nothing
+# until it deletes: its marks are SSM parameters and whether an archive exists is
+# S3's daily CloudWatch metric - the S3 fake records every billed request made to it.
+# Default scenario: no box, 160 GB measured yesterday, a last-seen mark 20 days
+# old, nothing in CloudTrail, 2,500 objects and one abandoned upload - the one that
+# DOES delete.
 arch_() {
   PYTHONDONTWRITEBYTECODE=1 python3 - "$1" <<'PY' 2>&1
 import sys, io, json, contextlib
@@ -225,7 +228,7 @@ def iso(t): return t.strftime("%Y-%m-%dT%H:%M:%SZ")
 class AwsError(Exception):
     def __init__(s, code):
         super().__init__(code); s.response = {"Error": {"Code": code}}
-calls = []
+calls = []; s3_requests = []
 class EC2:
     def __init__(s, *batches, fail_idle=False):
         s.batches, s.fail_idle = list(batches) or [[]], fail_idle
@@ -237,32 +240,43 @@ class EC2:
         b = s.batches.pop(0) if len(s.batches) > 1 else s.batches[0]
         return {"Reservations": [{"Instances": [{"InstanceId": i, "State": {"Name": st}} for i, st in b]}]}
 class CWStub:
-    def get_metric_statistics(s, **kw): return {"Datapoints": []}
+    def __init__(s, gb=160.0, measured_days_ago=1, fails=False):
+        s.gb, s.days, s.fails = gb, measured_days_ago, fails
+    def get_metric_statistics(s, Namespace=None, MetricName=None, **kw):
+        if Namespace != "AWS/S3": return {"Datapoints": []}
+        if s.fails: raise AwsError("Throttling")
+        if s.gb is None: return {"Datapoints": []}
+        day = (NOW - timedelta(days=s.days)).replace(hour=0, minute=0, second=0)
+        return {"Datapoints": [{"Timestamp": day, "Average": s.gb * 1073741824}]}
+class SSM:
+    def __init__(s, **marks):
+        s.p, s.fails = {}, False
+        for k, v in marks.items():
+            s.p["/cloud-gaming/gamevps/archive-" + k.replace("_", "-")] = v if isinstance(v, str) else iso(v)
+    def get_parameter(s, Name):
+        if s.fails: raise AwsError("AccessDeniedException")
+        if Name not in s.p: raise AwsError("ParameterNotFound")
+        return {"Parameter": {"Value": s.p[Name]}}
+    def put_parameter(s, Name, Value, Type, Overwrite):
+        s.p[Name] = Value
+        calls.append("%s=%s" % (Name.rsplit("/", 1)[1].replace("archive-", ""), Value))
 class S3:
-    def __init__(s, exists=True, tags=None, objects=0, uploads=0, tag_error=None, delete_errors=False):
-        s.exists, s.tags, s.objects, s.uploads = exists, tags, objects, uploads
-        s.tag_error, s.delete_errors = tag_error, delete_errors
-    def head_bucket(s, Bucket):
-        if not s.exists: raise AwsError("404")
-    def get_bucket_tagging(s, Bucket):
-        if s.tag_error: raise AwsError(s.tag_error)
-        if not s.exists: raise AwsError("NoSuchBucket")
-        if s.tags is None: raise AwsError("NoSuchTagSet")
-        return {"TagSet": s.tags}
-    def put_bucket_tagging(s, Bucket, Tagging):
-        old = {t["Key"]: t["Value"] for t in (s.tags or [])}
-        s.tags = Tagging["TagSet"]
-        new = {t["Key"]: t["Value"] for t in s.tags}
-        if new.get("cg-last-seen") != old.get("cg-last-seen"): calls.append("stamp:" + new["cg-last-seen"])
-        if new.get("cg-warned") != old.get("cg-warned"): calls.append("warned:" + new["cg-warned"])
-        if len(s.tags) > 1 and "cg-warned" not in new: calls.append("keys:" + "+".join(t["Key"] for t in s.tags))
+    def __init__(s, objects=0, uploads=0, delete_errors=False, gone=False):
+        s.objects, s.uploads, s.delete_errors, s.gone = objects, uploads, delete_errors, gone
+    def __getattr__(s, name):          # any S3 call not modelled here is still a request
+        def call(**kw):
+            s3_requests.append(name); return {}
+        return call
     def list_objects_v2(s, Bucket, MaxKeys=1000):
+        s3_requests.append("list")
+        if s.gone: raise AwsError("NoSuchBucket")
         n = min(MaxKeys, s.objects)
         return {"Contents": [{"Key": "k%d" % i} for i in range(n)]} if n else {}
-    def delete_objects(s, Bucket, Delete):
+    def delete_objects(s, Bucket, Delete):          # DELETE requests are free
         if s.delete_errors: return {"Errors": [{"Key": "k0"}]}
         n = len(Delete["Objects"]); s.objects -= n; calls.append("delete-objects:%d" % n); return {}
     def list_multipart_uploads(s, Bucket):
+        s3_requests.append("list-uploads")
         return {"Uploads": [{"Key": "u", "UploadId": "x"}]} if s.uploads else {}
     def abort_multipart_upload(s, **kw):
         s.uploads -= 1; calls.append("abort")
@@ -284,63 +298,70 @@ class Trail:
         out = {"Events": evs}
         if s.served < s.pages: out["NextToken"] = "t%d" % s.served
         return out
-ec2 = EC2([]); s3 = S3(tags=[{"Key": "cg-last-seen", "Value": iso(ago(days=20))}], objects=2500, uploads=1)
+ec2 = EC2([]); cw = CWStub(); ssm = SSM(last_seen=ago(days=20)); s3 = S3(objects=2500, uploads=1)
 trail = Trail(); dry = False; now = NOW; mode = "archive"
 exec(sys.argv[1])
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     try:
-        res = w.expire_archive(ec2, s3, trail, now, dry) if mode == "archive" else w.run_all(ec2, CWStub(), s3, trail, now, dry)
+        if mode == "archive": res = w.expire_archive(ec2, s3, ssm, cw, trail, now, dry)
+        else: res = w.run_all(ec2, cw, s3, ssm, trail, now, dry)
     except Exception as e:
         res = "RAISED"
         print("error: %s" % e)
-print("%s | %s | %s" % (res, ",".join(calls) or "-", buf.getvalue().replace("\n", " / ").strip()))
+print("%s | %s | %s | s3:%s" % (res, ",".join(calls) or "-", buf.getvalue().replace("\n", " / ").strip(),
+                               ",".join(s3_requests) or "none"))
 PY
 }
-OLD='s3 = S3(tags=[{"Key": "cg-last-seen", "Value": iso(ago(days=20))}], objects=2500, uploads=1)'
 
 echo "20. expiry off: nothing is looked at"
 r=$(arch_ 'w.EXPIRY_DAYS = 0')
-check "no result, no calls" "$(field 1 "$r")|$(field 2 "$r")" "None|-"
+check "no result, no calls" "$(field 1 "$r")|$(field 2 "$r")|$(field 4 "$r")" "None|-|s3:none"
 
 echo "21. hourly: outside the first 5 minutes of the hour, a real run does nothing"
 r=$(arch_ 'now = NOW + timedelta(minutes=17)')
-check "no result, no calls" "$(field 1 "$r")|$(field 2 "$r")" "None|-"
+check "no result, no calls" "$(field 1 "$r")|$(field 2 "$r")|$(field 4 "$r")" "None|-|s3:none"
 
-echo "22. a box exists: kept, and its last-seen mark refreshed"
+echo "22. a box exists: kept, and its last-seen mark refreshed - in SSM"
 r=$(arch_ 'ec2 = EC2([("i-a", "running")])')
-check "kept, stamped now" "$(field 1 "$r")|$(field 2 "$r")" "in-use|stamp:2026-09-15T12:00:00Z"
+check "kept, marked now" "$(field 1 "$r")|$(field 2 "$r")" "in-use|last-seen=2026-09-15T12:00:00Z"
 contains "says why" "$r" "archive: kept - a box exists (i-a)"
-r=$(arch_ 'ec2 = EC2([("i-a", "running")]); s3 = S3(tags=[{"Key": "cg-last-seen", "Value": iso(ago(minutes=30))}])')
+r=$(arch_ 'ec2 = EC2([("i-a", "running")]); ssm = SSM(last_seen=ago(minutes=30))')
 check "a mark under an hour old is not rewritten" "$(field 2 "$r")" "-"
 r=$(arch_ 'ec2 = EC2([("i-a", "stopped")])')
 check "a STOPPED box keeps it too" "$(field 1 "$r")" "in-use"
-r=$(arch_ 'ec2 = EC2([("i-a", "running")]); s3 = S3(tags=[{"Key": "owner", "Value": "me"}, {"Key": "cg-last-seen", "Value": iso(ago(days=2))}])')
-contains "stamping keeps the bucket's other tags" "$(field 2 "$r")" "keys:owner+cg-last-seen"
 
-echo "23. no archive: nothing to do"
-r=$(arch_ 's3 = S3(exists=False)')
-check "absent, nothing deleted" "$(field 1 "$r")|$(field 2 "$r")" "absent|-"
+echo "23. no archive measured: nothing to do"
+r=$(arch_ 'cw = CWStub(gb=None)')
+check "no size measured: absent, nothing deleted" "$(field 1 "$r")|$(field 2 "$r")" "absent|-"
+r=$(arch_ 'cw = CWStub(gb=0)')
+check "an empty bucket is no archive" "$(field 1 "$r")" "absent"
+r=$(arch_ 'ssm = SSM(last_seen=ago(days=20), deleted=ago(hours=5))')
+check "a size measured before the last deletion is the deleted archive" "$(field 1 "$r")|$(field 2 "$r")" "absent|-"
+r=$(arch_ 'ssm = SSM(last_seen=ago(days=20), deleted=ago(days=30))')
+check "a deletion long ago does not hide a new archive" "$(field 1 "$r")" "deleted"
 
 echo "24. no last-seen mark yet: counting starts, nothing deleted"
-r=$(arch_ 's3 = S3(tags=None, objects=5)')
-check "started, stamped now" "$(field 1 "$r")|$(field 2 "$r")" "started|stamp:2026-09-15T12:00:00Z"
+r=$(arch_ 'ssm = SSM()')
+check "started, marked now" "$(field 1 "$r")|$(field 2 "$r")" "started|last-seen=2026-09-15T12:00:00Z"
 
 echo "25. last used 3 days ago: kept, with the countdown, CloudTrail not asked"
-r=$(arch_ 's3 = S3(tags=[{"Key": "cg-last-seen", "Value": iso(ago(days=3))}], objects=5)')
+r=$(arch_ 'ssm = SSM(last_seen=ago(days=3))')
 check "kept, no calls" "$(field 1 "$r")|$(field 2 "$r")" "kept|-"
 contains "counts down" "$r" "kept - last used 3d ago; deleted in 11d unless a box is launched"
 
 echo "26. mark is old, but CloudTrail shows a launch: kept, and the mark moved to it"
 r=$(arch_ 'trail = Trail([("gamevps", 5, None)])')
-check "kept" "$(field 1 "$r")|$(field 2 "$r")" "kept|lookup,stamp:2026-09-10T12:00:00Z"
+check "kept" "$(field 1 "$r")|$(field 2 "$r")" "kept|lookup,last-seen=2026-09-10T12:00:00Z"
 contains "names the evidence" "$r" "a box was launched 5d ago (CloudTrail)"
 
-echo "27. mark is old AND CloudTrail agrees: emptied, uploads aborted, deleted"
+echo "27. mark is old AND CloudTrail agrees: emptied, uploads aborted, deleted, remembered"
 r=$(arch_ '')
 check "deleted, in order" "$(field 1 "$r")|$(field 2 "$r")" \
-  "deleted|lookup,delete-objects:1000,delete-objects:1000,delete-objects:500,abort,delete-bucket"
+  "deleted|lookup,delete-objects:1000,delete-objects:1000,delete-objects:500,abort,delete-bucket,deleted=2026-09-15T12:00:00Z"
 contains "says so" "$r" "unused for 20d - DELETED s3://cg-library-test (2500 objects)"
+r=$(arch_ 's3 = S3(gone=True)')
+check "already gone when deleting: absent, and remembered" "$(field 1 "$r")|$(field 2 "$r")" "absent|lookup,deleted=2026-09-15T12:00:00Z"
 
 echo "28. another host's launch, or a FAILED launch of this one, does not keep it"
 r=$(arch_ 'trail = Trail([("other-box", 1, None), ("gamevps", 2, "Client.InsufficientInstanceCapacity")])')
@@ -350,13 +371,14 @@ echo "29. anything uncertain deletes NOTHING"
 for spec in 'trail = Trail(fails=True)' \
             'trail = Trail(pages=5)' \
             'trail = Trail([("gamevps", 1, None)], junk=True)' \
-            's3 = S3(tags=[], tag_error="AccessDenied", objects=5)' \
-            's3 = S3(tags=[{"Key": "cg-last-seen", "Value": "yesterday"}], objects=5)'; do
+            'ssm = SSM(last_seen="yesterday")' \
+            'ssm.fails = True' \
+            'cw = CWStub(fails=True)'; do
   r=$(arch_ "$spec")
   check "raised: $spec" "$(field 1 "$r")" "RAISED"
   lacks "  and deleted nothing" "$(field 2 "$r")" "delete"
 done
-r=$(arch_ "$OLD; s3.delete_errors = True")
+r=$(arch_ 's3 = S3(objects=5, delete_errors=True)')
 check "S3 refusing deletes: raised" "$(field 1 "$r")" "RAISED"
 contains "  at the first refusal, and says so" "$r" "S3 refused to delete"
 lacks "  and the bucket itself kept" "$(field 2 "$r")" "delete-bucket"
@@ -368,13 +390,23 @@ echo "30. a dry run looks at any minute, and changes nothing"
 r=$(arch_ 'dry = True; now = NOW + timedelta(minutes=17)')
 check "would delete, no writes" "$(field 1 "$r")|$(field 2 "$r")" "would-delete|lookup"
 contains "says so" "$r" "WOULD DELETE s3://cg-library-test (dry run)"
-r=$(arch_ 'dry = True; s3 = S3(tags=None)')
+r=$(arch_ 'dry = True; ssm = SSM()')
 check "no mark written in a dry run" "$(field 1 "$r")|$(field 2 "$r")" "started|-"
 
 echo "31. the archive check still runs when the idle check fails"
 r=$(arch_ 'mode = "all"; ec2 = EC2([("i-a", "running")], fail_idle=True)')
 check "the run still errors" "$(field 1 "$r")" "RAISED"
 contains "but the archive was checked" "$r" "archive: kept - a box exists"
+
+echo "31b. it costs nothing until it deletes: no S3 request on any path that keeps the archive"
+for spec in 'ec2 = EC2([("i-a", "running")])' 'ssm = SSM()' 'ssm = SSM(last_seen=ago(days=3))' \
+            'trail = Trail([("gamevps", 5, None)])' 'cw = CWStub(gb=None)' 'dry = True' \
+            'w.NTFY_URL = "u"; w.EXPIRY_DAYS = 1; ssm = SSM(last_seen=ago(hours=3))'; do
+  r=$(arch_ "$spec")
+  check "no S3 request: $spec" "$(field 4 "$r")" "s3:none"
+done
+r=$(arch_ '')
+check "deleting: only the listings are billed requests" "$(field 4 "$r")" "s3:list,list,list,list,list-uploads,list-uploads"
 
 echo "32. the watchdog names the archive bucket exactly as library-aws.sh creates it"
 # Two copies of one formula. If they drift, expiry watches a bucket that does not
@@ -396,6 +428,8 @@ check "unset is 14"         "$(days '')" "14"
 pol() { TS_HOST=gamevps REGION=ap-south-2 GAME_S3_BUCKET=b GAME_ARCHIVE_EXPIRY_DAYS="$1" bash -c 'source lib/cloud-watchdog.sh; cw_policy 123456789012'; }
 check "off: the role cannot delete a thing" "$(pol 0 | grep -cE 'DeleteBucket|DeleteObject|cloudtrail' || true)" "0"
 check "on: delete is scoped to that bucket" "$(pol 14 | grep -c '"Resource":"arn:aws:s3:::b/\*"')" "1"
+check "on: no bucket tagging - the marks are SSM parameters" "$(pol 14 | grep -c 'BucketTagging' || true)" "0"
+check "on: SSM limited to this host's marks" "$(pol 14 | grep -c '"Resource":"arn:aws:ssm:ap-south-2:123456789012:parameter/cloud-gaming/gamevps/\*"')" "1"
 pol 14 | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null \
   && { echo "  ok   on: the policy is valid JSON"; pass=$((pass+1)); } \
   || { echo "  FAIL on: the policy is not valid JSON"; fail=$((fail+1)); }
@@ -415,27 +449,27 @@ r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; SEND_FAILS = True; ec2 = EC2([inst(
 check "a failed send changes nothing" "$(field 1 "$r")|$(field 2 "$r")" "terminate|terminate:i-a"
 contains "  and is logged" "$r" "notification not sent (ignored)"
 
-echo "35. the 24-hour archive warning - once per countdown"
-MARK='s3 = S3(tags=[{"Key": "cg-last-seen", "Value": iso(ago(hours=3))}])'
+echo "35. the 24-hour archive warning - once per countdown, recorded in SSM"
+MARK='ssm = SSM(last_seen=ago(hours=3))'
 r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; $MARK")
 check "warned, and recorded against that mark" "$(field 1 "$r")|$(field 2 "$r")" \
-  "kept|notify:gamevps: game archive deleted in 21h,warned:2026-09-15T09:00:00Z"
-r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; s3 = S3(tags=[{'Key': 'cg-last-seen', 'Value': iso(ago(hours=3))}, {'Key': 'cg-warned', 'Value': iso(ago(hours=3))}])")
+  "kept|notify:gamevps: game archive deleted in 21h,warned=2026-09-15T09:00:00Z"
+r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; ssm = SSM(last_seen=ago(hours=3), warned=ago(hours=3))")
 check "already warned for this mark: silent" "$(field 2 "$r")" "-"
-r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; s3 = S3(tags=[{'Key': 'cg-last-seen', 'Value': iso(ago(hours=3))}, {'Key': 'cg-warned', 'Value': iso(ago(days=9))}])")
+r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; ssm = SSM(last_seen=ago(hours=3), warned=ago(days=9))")
 contains "a warning for an OLD mark does not count" "$(field 2 "$r")" "notify:gamevps: game archive deleted in 21h"
-r=$(arch_ "w.NTFY_URL = 'u'; s3 = S3(tags=[{'Key': 'cg-last-seen', 'Value': iso(ago(days=3))}])")
+r=$(arch_ "w.NTFY_URL = 'u'; ssm = SSM(last_seen=ago(days=3))")
 check "more than 24h left: silent" "$(field 2 "$r")" "-"
 r=$(arch_ "w.NTFY_URL = 'u'; SEND_FAILS = True; w.EXPIRY_DAYS = 1; $MARK")
 check "a failed send is not recorded, so the next hour retries" "$(field 2 "$r")" "-"
 r=$(arch_ "w.EXPIRY_DAYS = 1; $MARK")
-check "no URL: no warning, no tag" "$(field 2 "$r")" "-"
+check "no URL: no warning, no mark" "$(field 2 "$r")" "-"
 r=$(arch_ "w.NTFY_URL = 'u'; dry = True; w.EXPIRY_DAYS = 1; $MARK")
-check "a dry run: no warning, no tag" "$(field 2 "$r")" "-"
+check "a dry run: no warning, no mark" "$(field 2 "$r")" "-"
 
 echo "36. archive deleted, and a failing watchdog, are notified"
 r=$(arch_ "w.NTFY_URL = 'u'")
-contains "deleted, then notified" "$(field 2 "$r")" "delete-bucket,notify:gamevps: game archive deleted"
+contains "deleted, remembered, then notified" "$(field 2 "$r")" "delete-bucket,deleted=2026-09-15T12:00:00Z,notify:gamevps: game archive deleted"
 r=$(arch_ "w.NTFY_URL = 'u'; mode = 'all'; ec2 = EC2([('i-a', 'running')], fail_idle=True)")
 contains "failing: notified" "$(field 2 "$r")" "notify:gamevps: cloud watchdog failing"
 r=$(arch_ "w.NTFY_URL = 'u'; mode = 'all'; now = NOW + timedelta(minutes=17); ec2 = EC2([('i-a', 'running')], fail_idle=True)")
@@ -449,8 +483,12 @@ sys.path.insert(0, "lambda")
 import cloud_watchdog as w
 w.TS_HOST, w.NTFY_URL = "gamevps", "https://ntfy.sh/t"
 calls = []
-def fake_send(url, title, message, priority, tags): calls.append("notify:" + title)
+def fake_send(url, title, message, priority, tags):
+    calls.append("notify:" + title); print("sent: " + message)
 w.send = fake_send
+from datetime import datetime, timezone
+NOW = datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc)
+w.BUCKET, w.EXPIRY_DAYS = "cg-library-test", 14
 class AwsError(Exception):
     def __init__(s, code):
         super().__init__(code); s.response = {"Error": {"Code": code}}
@@ -467,7 +505,14 @@ def event(state, iid="i-a"):
 def spot(iid="i-a"):
     return {"source": "aws.ec2", "detail-type": "EC2 Spot Instance Interruption Warning",
             "detail": {"instance-id": iid, "instance-action": "terminate"}}
-ec2 = EC2(); ev = event("terminated"); mode = "direct"
+class CWS:
+    def __init__(s, gb=160.0, fails=False): s.gb, s.fails = gb, fails
+    def get_metric_statistics(s, **kw):
+        calls.append("metric")
+        if s.fails: raise AwsError("Throttling")
+        if s.gb is None: return {"Datapoints": []}
+        return {"Datapoints": [{"Timestamp": datetime(2026, 9, 14, tzinfo=timezone.utc), "Average": s.gb * 1073741824}]}
+ec2 = EC2(); cw = CWS(); ev = event("terminated"); mode = "direct"
 exec(sys.argv[1])
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
@@ -477,12 +522,12 @@ with contextlib.redirect_stdout(buf):
             class Boto3:
                 def client(s, name):
                     made.append(name)
-                    return ec2 if name == "ec2" else object()
+                    return ec2 if name == "ec2" else cw if name == "cloudwatch" else object()
             sys.modules["boto3"] = Boto3()
             res = w.handler(ev, None)
             calls.append("clients:" + "+".join(made))
         else:
-            res = w.state_changed(ec2, ev)
+            res = w.state_changed(ec2, ev, cw, NOW)
         res = res.get("state", "-")
     except Exception as e:
         res = "RAISED"; print("error: %s" % e)
@@ -492,9 +537,9 @@ PY
 
 echo "37. the box confirmed gone, from EC2's own state-change event"
 r=$(state_ '')
-check "terminated: notified" "$(field 1 "$r")|$(field 2 "$r")" "terminated|describe:i-a,notify:gamevps: box terminated"
+check "terminated: notified" "$(field 1 "$r")|$(field 2 "$r")" "terminated|describe:i-a,metric,notify:gamevps: box terminated"
 r=$(state_ 'ev = event("stopped")')
-check "stopped: notified" "$(field 2 "$r")" "describe:i-a,notify:gamevps: box stopped"
+check "stopped: notified" "$(field 2 "$r")" "describe:i-a,metric,notify:gamevps: box stopped"
 r=$(state_ 'ec2 = EC2(name="someone-else")')
 check "another instance in the account: silent" "$(field 1 "$r")|$(field 2 "$r")" "not-ours|describe:i-a"
 r=$(state_ 'ec2 = EC2(fails=True)')
@@ -503,18 +548,34 @@ contains "  and says why" "$r" "could not be described"
 r=$(state_ 'ev = event("running")')
 check "a state that is not an end: ignored" "$(field 1 "$r")|$(field 2 "$r")" "ignored|-"
 r=$(state_ 'w.NTFY_URL = ""')
-check "no URL: logged, nothing sent" "$(field 2 "$r")" "describe:i-a"
-contains "  logged" "$r" "i-a terminated - it no longer bills"
+check "no URL: logged, nothing sent" "$(field 2 "$r")" "describe:i-a,metric"
+contains "  logged" "$r" "i-a terminated - compute no longer bills."
 r=$(state_ 'mode = "handler"')
 check "the handler routes it, and runs no idle or archive check" "$(field 2 "$r")" \
-  "describe:i-a,notify:gamevps: box terminated,clients:ec2"
+  "describe:i-a,metric,notify:gamevps: box terminated,clients:ec2+cloudwatch"
 
 r=$(state_ 'ev = spot()')
 check "a spot interruption warning: notified" "$(field 1 "$r")|$(field 2 "$r")" "interruption|describe:i-a,notify:gamevps: spot box being reclaimed"
 r=$(state_ 'ev = spot(); ec2 = EC2(name="someone-else")')
 check "another instance's warning: silent" "$(field 1 "$r")|$(field 2 "$r")" "not-ours|describe:i-a"
 r=$(state_ 'ev = spot(); mode = "handler"')
-check "the handler routes a warning too" "$(field 2 "$r")" "describe:i-a,notify:gamevps: spot box being reclaimed,clients:ec2"
+check "the handler routes a warning too" "$(field 2 "$r")" "describe:i-a,notify:gamevps: spot box being reclaimed,clients:ec2+cloudwatch"
+
+echo "37b. 'box gone' says what still bills in S3 - from the free size metric"
+r=$(state_ '')
+contains "size, month cost and INR" "$r" "S3 still holds about 160 GB of games (as of 2026-09-14): about \$4.00 a month (INR 352)."
+contains "  and when it expires"     "$r" "Deleted after 14 days with no box, around 2026-09-29."
+r=$(state_ 'cw = CWS(gb=None)')
+contains "no archive: nothing else bills" "$r" "No game archive is measured in S3, so nothing else bills."
+r=$(state_ 'w.EXPIRY_DAYS = 0')
+contains "expiry off: kept until deleted" "$r" "Kept until you delete it: cg destroy --all."
+r=$(state_ 'cw = CWS(gb=0.5)')
+contains "a small archive keeps a decimal" "$r" "about 0.5 GB of games"
+r=$(state_ 'cw = CWS(fails=True)')
+contains "size unreadable: says so"  "$r" "size could not be read"
+contains "  and still notifies"      "$(field 2 "$r")" "notify:gamevps: box terminated"
+r=$(state_ 'ev = event("stopped")')
+contains "stopped: the disk still bills" "$r" "its disk still does. S3 still holds"
 
 echo "38. a slow, then a stuck, shutdown - each said once, then hourly while it lasts"
 SD="inst(state='shutting-down', reason='User initiated (2026-09-15 11:25:00 GMT)'"

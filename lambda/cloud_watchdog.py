@@ -25,7 +25,7 @@ It also expires the GAME ARCHIVE. Once no box has existed for EXPIRY_DAYS, the
 S3 bucket - the only thing that bills while no box exists - is emptied and
 deleted. Deleting the only copy of every game is not something to get wrong, so
 the check fails closed: two independent records must both say "unused" - the
-bucket's own last-seen mark, refreshed while a box exists, and CloudTrail's
+last-seen mark - a free SSM parameter - refreshed while a box exists, and CloudTrail's
 RunInstances history - and any error, gap or unreadable answer keeps it.
 """
 import json
@@ -56,9 +56,11 @@ SPOT_EVENT = "EC2 Spot Instance Interruption Warning"
 # Archive expiry, in days with no box. 0 turns it off.
 BUCKET = os.environ.get("CG_BUCKET", "")
 EXPIRY_DAYS = int(os.environ.get("CG_ARCHIVE_EXPIRY_DAYS", "0") or 0)
-LAST_SEEN_TAG = "cg-last-seen"
-# Records which countdown the 24-hour warning was sent for, so it goes out once.
-WARNED_TAG = "cg-warned"
+# The expiry check's marks are SSM Parameter Store standard parameters - which cost
+# nothing - under /cloud-gaming/<host>/, not bucket tags, which are billed S3
+# requests. Whether an archive exists comes from S3's free daily size metric.
+S3_USD_PER_GB = float(os.environ.get("CG_S3_USD_PER_GB", "0.025"))
+INR_PER_USD = 88
 
 # ntfy push notifications. Off unless cg passed a URL.
 NTFY_URL = os.environ.get("CG_NTFY_URL", "")
@@ -97,13 +99,14 @@ def handler(event, context):
     # EC2's own state-change events, from the second EventBridge rule. Nothing
     # else runs for these: they answer "is the box really gone", not "is it idle".
     if isinstance(event, dict) and event.get("detail-type") in (STATE_EVENT, SPOT_EVENT):
-        return state_changed(boto3.client("ec2"), event)
+        return state_changed(boto3.client("ec2"), event, boto3.client("cloudwatch"),
+                             datetime.now(timezone.utc))
     dry = isinstance(event, dict) and bool(event.get("dry_run"))
     return run_all(boto3.client("ec2"), boto3.client("cloudwatch"), boto3.client("s3"),
-                   boto3.client("cloudtrail"), datetime.now(timezone.utc), dry)
+                   boto3.client("ssm"), boto3.client("cloudtrail"), datetime.now(timezone.utc), dry)
 
 
-def state_changed(ec2, event):
+def state_changed(ec2, event, cw=None, now=None):
     """An instance finished stopping or terminating. The box cannot report its own
     end - by then it is gone - so this is the notification that says it really is,
     however it ended: a watchdog, cg destroy, a spot interruption, the console.
@@ -129,16 +132,20 @@ def state_changed(ec2, event):
                "AWS takes %s back in about 2 minutes. Games since the last push may not finish mirroring."
                % iid, "urgent", "warning")
     elif state == "terminated":
-        say("%s terminated - it no longer bills" % iid)
-        notify("box terminated", "%s is gone, and no longer bills." % iid, "default", "white_check_mark")
+        # "No longer bills" was half true while the games sit in S3, so say what still does.
+        note = archive_note(cw, now or datetime.now(timezone.utc))
+        say("%s terminated - compute no longer bills.%s" % (iid, note))
+        notify("box terminated", "%s is gone - compute no longer bills.%s" % (iid, note),
+               "default", "white_check_mark")
     else:
-        say("%s stopped - compute no longer bills" % iid)
-        notify("box stopped", "%s is stopped: compute no longer bills, its disk still does." % iid,
+        note = archive_note(cw, now or datetime.now(timezone.utc))
+        say("%s stopped - compute no longer bills, its disk still does.%s" % (iid, note))
+        notify("box stopped", "%s is stopped - compute no longer bills, its disk still does.%s" % (iid, note),
                "default", "white_check_mark")
     return {"state": state, "instance": iid}
 
 
-def run_all(ec2, cw, s3, trail, now, dry=False):
+def run_all(ec2, cw, s3, ssm, trail, now, dry=False):
     """The idle check, then the archive check. The second runs even when the
     first fails, and the invocation still counts as an error afterwards."""
     failure = None
@@ -147,7 +154,7 @@ def run_all(ec2, cw, s3, trail, now, dry=False):
     except Exception as exc:
         failure, result = exc, {"decisions": []}
     try:
-        result["archive"] = expire_archive(ec2, s3, trail, now, dry)
+        result["archive"] = expire_archive(ec2, s3, ssm, cw, trail, now, dry)
     except Exception as exc:
         say("archive: check FAILED - nothing deleted: %s" % exc)
         failure = failure or exc
@@ -424,48 +431,83 @@ def boxes(ec2):
     return [i["InstanceId"] for r in resp.get("Reservations", []) for i in r.get("Instances", [])]
 
 
-def read_tags(s3):
+def mark_name(name):
+    return "/cloud-gaming/%s/%s" % (TS_HOST, name)
+
+
+def mark_get(ssm, name):
     try:
-        return s3.get_bucket_tagging(Bucket=BUCKET).get("TagSet", [])
+        return ssm.get_parameter(Name=mark_name(name))["Parameter"]["Value"]
     except Exception as exc:
-        if error_code(exc) == "NoSuchTagSet":
-            return []
+        if error_code(exc) == "ParameterNotFound":
+            return None
         raise
 
 
-def last_seen(tags):
-    for tag in tags:
-        if tag.get("Key") == LAST_SEEN_TAG:
-            try:
-                return datetime.strptime(tag["Value"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-            except (KeyError, ValueError):
-                # Unreadable is not "never": refuse rather than guess.
-                raise RuntimeError("unreadable %s tag %r" % (LAST_SEEN_TAG, tag.get("Value")))
-    return None
+def mark_put(ssm, name, value):
+    ssm.put_parameter(Name=mark_name(name), Value=value, Type="String", Overwrite=True)
 
 
-def set_tag(s3, tags, key, value):
-    # put_bucket_tagging REPLACES the whole set, so keep every other tag.
-    kept = [t for t in tags if t.get("Key") != key]
-    s3.put_bucket_tagging(Bucket=BUCKET, Tagging={"TagSet": kept + [{"Key": key, "Value": value}]})
+def mark_time(ssm, name):
+    """A stored time, or None when there is none. Unreadable is not "never": refuse."""
+    value = mark_get(ssm, name)
+    if value is None:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        raise RuntimeError("unreadable %s mark %r" % (name, value))
 
 
-def stamp(s3, tags, when):
-    set_tag(s3, tags, LAST_SEEN_TAG, iso(when))
+def archive_size(cw, now):
+    """(bytes, day measured) from S3's daily BucketSizeBytes metric, or (None, None)
+    when nothing was measured in 3 days. Free to read, unlike any S3 request."""
+    resp = cw.get_metric_statistics(
+        Namespace="AWS/S3", MetricName="BucketSizeBytes",
+        Dimensions=[{"Name": "BucketName", "Value": BUCKET},
+                    {"Name": "StorageType", "Value": "StandardStorage"}],
+        StartTime=now - timedelta(days=3), EndTime=now, Period=86400, Statistics=["Average"])
+    points = sorted(resp.get("Datapoints", []), key=lambda p: p["Timestamp"])
+    if not points:
+        return None, None
+    return points[-1].get("Average", 0), points[-1]["Timestamp"]
 
 
-def warn_once(s3, tags, seen, idle, left):
-    """The 24-hour warning, once per countdown. It is recorded on the bucket against
-    the last-seen mark it was sent for, so a new box - a new mark - arms it again,
-    and a send that failed is retried at the next hourly check."""
+def archive_note(cw, now):
+    """What still bills in S3, for the "box is gone" notification, from the free metric."""
+    if not BUCKET or cw is None:
+        return ""
+    try:
+        size, day = archive_size(cw, now)
+    except Exception as exc:
+        say("archive size could not be read: %s" % exc)
+        return " The S3 game archive's size could not be read."
+    if not size:
+        return " No game archive is measured in S3, so nothing else bills."
+    gb = size / 1073741824
+    usd = gb * S3_USD_PER_GB
+    note = (" S3 still holds about %s GB of games (as of %s): about $%.2f a month (INR %.0f)."
+            % (("%.1f" if gb < 10 else "%.0f") % gb, day.strftime("%Y-%m-%d"), usd, usd * INR_PER_USD))
+    if EXPIRY_DAYS > 0:
+        note += " Deleted after %d days with no box, around %s." % (
+            EXPIRY_DAYS, (now + timedelta(days=EXPIRY_DAYS)).strftime("%Y-%m-%d"))
+    else:
+        note += " Kept until you delete it: cg destroy --all."
+    return note
+
+
+def warn_once(ssm, seen, idle, left):
+    """The 24-hour warning, once per countdown. It is recorded against the last-seen
+    mark it was sent for, so a new box - a new mark - arms it again, and a send that
+    failed is retried at the next hourly check."""
     if not NTFY_URL:
         return
-    if any(t.get("Key") == WARNED_TAG and t.get("Value") == iso(seen) for t in tags):
+    if mark_get(ssm, "archive-warned") == iso(seen):
         return
     if notify("game archive deleted in %s" % span(left),
               "No box for %s. Launch one to keep the games, or set GAME_ARCHIVE_EXPIRY_DAYS=0."
               % span(idle), "high", "warning"):
-        set_tag(s3, tags, WARNED_TAG, iso(seen))
+        mark_put(ssm, "archive-warned", iso(seen))
 
 
 def last_launch(trail, since, now):
@@ -518,7 +560,7 @@ def empty_and_delete(s3):
     return removed
 
 
-def expire_archive(ec2, s3, trail, now, dry=False):
+def expire_archive(ec2, s3, ssm, cw, trail, now, dry=False):
     if EXPIRY_DAYS <= 0 or not BUCKET:
         return None
     # Hourly: one invocation in twelve lands in the first 5 minutes of an hour.
@@ -530,30 +572,24 @@ def expire_archive(ec2, s3, trail, now, dry=False):
     live = boxes(ec2)
     if live:
         if not dry:
-            try:
-                tags = read_tags(s3)
-                seen = last_seen(tags)
-                if seen is None or now - seen >= timedelta(hours=1):
-                    stamp(s3, tags, now)
-            except Exception as exc:
-                if error_code(exc) not in ("NoSuchBucket", "404", "NotFound"):
-                    raise
+            seen = mark_time(ssm, "archive-last-seen")
+            if seen is None or now - seen >= timedelta(hours=1):
+                mark_put(ssm, "archive-last-seen", iso(now))
         say("archive: kept - a box exists (%s)" % ", ".join(live))
         return "in-use"
 
-    try:
-        s3.head_bucket(Bucket=BUCKET)
-    except Exception as exc:
-        if error_code(exc) in ("404", "NoSuchBucket", "NotFound"):
-            say("archive: none in s3://%s - nothing to expire" % BUCKET)
-            return "absent"
-        raise
+    # Whether there is an archive at all, from S3's free daily size metric - not an
+    # S3 request. A size measured on or before the last deletion is that archive.
+    size, day = archive_size(cw, now)
+    deleted = mark_time(ssm, "archive-deleted")
+    if not size or (deleted is not None and day <= deleted):
+        say("archive: none measured in s3://%s - nothing to expire" % BUCKET)
+        return "absent"
 
-    tags = read_tags(s3)
-    seen = last_seen(tags)
+    seen = mark_time(ssm, "archive-last-seen")
     if seen is None:
         if not dry:
-            stamp(s3, tags, now)
+            mark_put(ssm, "archive-last-seen", iso(now))
         say("archive: no last-seen mark yet - counting %d days from now" % EXPIRY_DAYS)
         return "started"
     if now - seen < window:
@@ -561,13 +597,13 @@ def expire_archive(ec2, s3, trail, now, dry=False):
         say("archive: kept - last used %s ago; deleted in %s unless a box is launched"
             % (span(now - seen), span(left)))
         if not dry and left <= timedelta(hours=24):
-            warn_once(s3, tags, seen, now - seen, left)
+            warn_once(ssm, seen, now - seen, left)
         return "kept"
 
     launched = last_launch(trail, now - window, now)
     if launched is not None:
         if not dry and launched > seen:
-            stamp(s3, tags, launched)
+            mark_put(ssm, "archive-last-seen", iso(launched))
         say("archive: kept - a box was launched %s ago (CloudTrail)" % span(now - launched))
         return "kept"
 
@@ -578,7 +614,16 @@ def expire_archive(ec2, s3, trail, now, dry=False):
     if dry:
         say("archive: unused for %s - WOULD DELETE s3://%s (dry run)" % (span(now - seen), BUCKET))
         return "would-delete"
-    removed = empty_and_delete(s3)
+    # The only S3 requests this check ever makes are these, once, when it deletes.
+    try:
+        removed = empty_and_delete(s3)
+    except Exception as exc:
+        if error_code(exc) in ("NoSuchBucket", "404", "NotFound"):
+            mark_put(ssm, "archive-deleted", iso(now))
+            say("archive: s3://%s is already gone - nothing to expire" % BUCKET)
+            return "absent"
+        raise
+    mark_put(ssm, "archive-deleted", iso(now))
     say("archive: unused for %s - DELETED s3://%s (%d objects)" % (span(now - seen), BUCKET, removed))
     notify("game archive deleted",
            "Unused for %s: %d objects removed from S3. The next cg init starts empty, and Steam "
