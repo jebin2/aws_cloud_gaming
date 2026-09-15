@@ -28,9 +28,20 @@ cat > "$T/index.json" <<'JSON'
  {"appid":"438040","name":"Shakes and Fidget","installdir":"Shakes & Fidget","bytes":2644378735,"pushed":"2026-09-12T20:44:00Z"}
 ]}
 JSON
+# STS_FAIL=1: no account. CP=missing|denied: the index read fails that way.
 cat > "$T/bin/aws" <<'FAKE'
 #!/usr/bin/env bash
-case "$*" in *index.json*) cat "$IDX" ;; *) echo "" ;; esac
+echo "aws $*" >> "${AWSLOG:-/dev/null}"
+case "$*" in
+  *get-caller-identity*) [[ ${STS_FAIL:-0} == 1 ]] && exit 255; echo 123456789012 ;;
+  *index.json*)
+    case ${CP:-ok} in
+      ok)      cat "$IDX" ;;
+      missing) echo 'fatal error: An error occurred (404) when calling the HeadObject operation: Key "steam/index.json" does not exist' >&2; exit 1 ;;
+      denied)  echo 'fatal error: An error occurred (403) when calling the HeadObject operation: Forbidden' >&2; exit 1 ;;
+    esac ;;
+  *) echo "" ;;
+esac
 FAKE
 chmod +x "$T/bin/aws"
 
@@ -39,7 +50,7 @@ ask() { # ask <answers...>
   local input="" a
   for a in "$@"; do input+="$a"$'\n'; done
   printf '%s' "$input" | \
-    IDX="$T/index.json" PATH="$T/bin:$PATH" GAME_S3_BUCKET=b GAME_APPS=all \
+    IDX="$T/index.json" PATH="$T/bin:$PATH" GAME_S3_BUCKET="${BKT-b}" GAME_APPS=all \
     script -qec "bash lib/choose-games.sh 2>$T/err" /dev/null 2>/dev/null \
     | tr -d '\r' | tail -1
 }
@@ -136,5 +147,30 @@ got=$(styled_ask "1,3" "2")
 contains "a refusal still says 'over by'"    "$(plain_errs)" "over by"
 contains "  with a cross"                    "$(plain_errs)" "✗ 288 GB selected"
 check    "  and the retry is what comes out" "$got" "1971870"
+
+echo "11. a new laptop: no bucket in .env, and the question is still asked"
+# The first cg init on a new laptop answered "all" without asking, because the
+# bucket was not in .env yet - so every archived game was restored.
+cat > "$T/index.json" <<'JSON'
+{"apps":[
+ {"appid":"2344520","name":"Diablo IV","installdir":"Diablo IV","bytes":171798691840,"pushed":"2026-09-13T11:02:00Z"},
+ {"appid":"438040","name":"Shakes and Fidget","installdir":"Shakes & Fidget","bytes":2644378735,"pushed":"2026-09-12T20:44:00Z"}
+]}
+JSON
+h=$(printf '%s' "123456789012-gamevps" | sha256sum | cut -c1-12)
+rm -f "$T/awslog"
+got=$(BKT="" AWSLOG="$T/awslog" ask "2")
+check    "asked, and the answer taken"      "$got" "438040"
+contains "  from the account's own bucket"  "$(cat "$T/awslog")" "s3://cg-library-$h/steam/index.json"
+got=$(BKT="" STS_FAIL=1 ask "2")
+check    "account unknown: none, not all"   "$got" "none"
+contains "  and says so"                    "$(errs)" "could not tell which game archive"
+
+echo "12. an index that cannot be read is not an empty archive"
+got=$(CP=denied ask "2")
+check    "access denied: none, not all"     "$got" "none"
+contains "  and says so"                    "$(errs)" "could not read the game archive's index"
+got=$(CP=missing ask "2")
+check    "no index at all: nothing archived, all" "$got" "all"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

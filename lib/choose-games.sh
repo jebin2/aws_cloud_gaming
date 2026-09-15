@@ -22,9 +22,32 @@ DISK_GB="${CG_DISK_GB:-229}"
 RESERVE_GB="${CG_RESERVE_GB:-20}"
 AVAIL_GB=$(( DISK_GB - RESERVE_GB ))
 
-[[ -n $BUCKET ]] && command -v aws >/dev/null || { echo "all"; exit 0; }
+command -v aws >/dev/null || { echo "${GAME_APPS:-none}"; exit 0; }
 
-idx=$(aws s3 cp "s3://$BUCKET/$PREFIX/index.json" - 2>/dev/null || echo '{"apps":[]}')
+# No bucket in .env: a new laptop, before its first cg init writes one. This used
+# to answer "all" without asking, so a new laptop's first build restored every
+# archived game. The name is derived exactly as lib/library-aws.sh derives it.
+if [[ -z $BUCKET ]]; then
+  acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || acct=""
+  if [[ -z $acct || $acct == None ]]; then
+    echo "  could not tell which game archive to read - restoring none; cg library pull fetches games later" >&2
+    echo "none"; exit 0
+  fi
+  BUCKET="cg-library-$(printf '%s' "$acct-${GAME_TS_HOST:-gamevps}" | sha256sum | cut -c1-12)"
+fi
+
+# No index at all means nothing was ever archived, and "all" of nothing restores
+# nothing. Any other failure - access, network - is not an empty archive, so it
+# must not become "all".
+if ! idx=$(aws s3 cp "s3://$BUCKET/$PREFIX/index.json" - 2>"${TMPDIR:-/tmp}/cg-index-err.$$"); then
+  err=$(cat "${TMPDIR:-/tmp}/cg-index-err.$$" 2>/dev/null); rm -f "${TMPDIR:-/tmp}/cg-index-err.$$"
+  if [[ $err == *"(404)"* || $err == *NoSuchKey* || $err == *NoSuchBucket* || $err == *"does not exist"* ]]; then
+    echo "all"; exit 0
+  fi
+  echo "  could not read the game archive's index - restoring none; cg library pull fetches games later" >&2
+  echo "none"; exit 0
+fi
+rm -f "${TMPDIR:-/tmp}/cg-index-err.$$"
 
 # Nothing archived yet: no question worth asking.
 if ! printf '%s' "$idx" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("apps") else 1)' 2>/dev/null; then
