@@ -12,8 +12,8 @@
 #
 # Credentials: an instance ROLE, not an access key. The box is the one machine
 # here that can borrow an identity from EC2, so it should - there is no secret to
-# leak, rotate or accidentally commit. (The off-site watchdog runs outside AWS
-# and genuinely has no role to borrow; that is why it still uses a key.)
+# leak, rotate or accidentally commit. (The cloud watchdog is a Lambda, so it
+# runs on a role too: nothing here holds a long-lived AWS key.)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

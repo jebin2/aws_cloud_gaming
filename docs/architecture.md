@@ -41,12 +41,12 @@ flowchart LR
   s3[("🪣 S3<br/>games + Steam login")]
   cw["⏰ CloudWatch alarm"]
   bud["💰 AWS Budget"]
-  vps["🛡️ Oracle VPS<br/>off-site watchdog"]
+  lam["⚡ Lambda<br/>cloud watchdog"]
 
   cg -->|"launch · terminate"| ec2
   ec2 <-->|"restore at boot<br/>push on destroy"| s3
   cw -.->|"terminate if idle"| ec2
-  vps -.->|"terminate if idle"| ec2
+  lam -.->|"terminate if idle"| ec2
   bud -.->|"email"| cg
 ```
 
@@ -71,7 +71,7 @@ UDP 41641, and that is Tailscale's.
 | Games | Steam (Valve's `.deb`) and Proton | box | Windows games on Linux |
 | Game storage | local NVMe at `/scratch`, archived per game to S3 with `s5cmd` | box + S3 | fast and free locally, durable in S3 |
 | S3 access | EC2 instance role | box | no access key on the box to leak |
-| Guards | on-host watchdog, CloudWatch alarm, off-site watchdog, AWS Budget | box, AWS, VPS | four independent ways to stop a forgotten box |
+| Guards | on-host watchdog, CloudWatch alarm, cloud watchdog (Lambda + EventBridge), AWS Budget | box, AWS | four independent ways to stop a forgotten box |
 | Spend | Cost Explorer (for `cg cost`) | AWS | the only billed API here, $0.01 a call |
 
 ## Where things live
@@ -106,13 +106,12 @@ sequenceDiagram
   autonumber
   actor You
   participant cg as cg (laptop)
-  participant VPS as Oracle VPS
   participant AWS
   participant EC2 as EC2 box
   participant S3
 
   You->>cg: ./cg init
-  cg->>VPS: is the off-site watchdog current? (one ssh)
+  cg->>AWS: is the cloud watchdog current? arm or repair it
   cg->>You: which archived games to restore?
   cg->>AWS: preflight - plan, GPU quota, region
   cg->>AWS: budget, bucket and role, launch one-time spot with user-data
@@ -185,19 +184,38 @@ flowchart TB
 
   idle --> g2["On-host watchdog<br/>checks every minute<br/>15 idle minutes<br/>under 200 KB/min"]
   idle --> g3["CloudWatch alarm<br/>NetworkOut under 10 MB<br/>per 5 min, 6 times<br/>armed only during cg open"]
-  idle --> g4["Off-site watchdog<br/>on the Oracle VPS<br/>every 5 min, 6 times<br/>in + out under 10 MB"]
+  idle --> g4["Cloud watchdog<br/>Lambda, every 5 min<br/>30 idle minutes<br/>in + out under 10 MB"]
 
-  g2 --> p2["push games to S3"] --> t2["shutdown, so terminate"]
-  g3 --> t3["terminate"]
-  g4 --> t4["terminate with a scoped IAM key"]
+  g2 --> p2["push games to S3<br/>then shutdown -h"]
+  g3 --> api["AWS terminates the instance"]
+  g4 -->|"its own IAM role"| api
+
+  p2 --> os["Graceful OS shutdown"]
+  api --> os
+  os --> push["cg-library-shutdown.service<br/>pushes games to S3<br/>up to 30 minutes"]
+  push --> gone["Instance terminated<br/>games safe in S3"]
+  push -.->|"still stuck<br/>after 1 hour"| force["Cloud watchdog forces it<br/>skipping the OS shutdown"]
+  force -.-> gone
 
   bud["AWS Budget · $57 a month"] -.->|"email at 80% spent<br/>and 100% forecast"| you["You"]
 ```
 
+All three guards end in the **same place**: a graceful OS shutdown, where
+`cg-library-shutdown.service` pushes the games to S3 before the machine goes down. The on-host
+watchdog also pushes before it calls `shutdown`, so its shutdown push finds nothing left to send;
+the other two run outside the box and can only ask AWS to terminate it, which AWS turns into
+that same graceful shutdown. Two pushes never run at once - a second one waits for the first.
+
+The shutdown push is allowed 30 minutes (`TimeoutStopSec=1800`). When AWS itself terminates the
+box it may cut the power sooner than that, and a spot interruption gives only two minutes, so
+`cg destroy` - which pushes first and deletes nothing if that fails - stays the safe way out.
+
 Each guard is independent, so one failing is caught by another. The two watchdogs wait 20
 minutes after boot before they arm, so a build is never mistaken for idleness; the CloudWatch
-alarm needs no such grace, because it is only ever armed during `cg open`. The budget stops
-nothing - it is the backstop that tells you. Details: [cost-guards.md](cost-guards.md).
+alarm needs no such grace, because it is only ever armed during `cg open`. If both the alarm and
+the cloud watchdog fire, the box still shuts down once. A box still going down an hour later -
+whichever guard started it - is forced by the cloud watchdog. The budget stops nothing - it is the
+backstop that tells you. Details: [cost-guards.md](cost-guards.md).
 
 ## Key decisions
 
@@ -228,9 +246,9 @@ nothing - it is the backstop that tells you. Details: [cost-guards.md](cost-guar
   | on demand (`GAME_SPOT=0`) | `stop` | a misfiring watchdog parks the box and you restart it |
   | spot (default) | `terminate` | a stopped spot box can never start again, and its root disk would bill forever |
 
-- **Roles on AWS, a scoped key off it.** The box reads and writes its bucket through an instance
-  role, so it holds no secret. The off-site watchdog runs outside AWS and cannot use a role, so it
-  gets a key allowed only to describe and stop or terminate the `gamevps`-tagged instance. See
+- **Roles, not keys.** The box reads and writes its bucket through an instance role, and the
+  cloud watchdog runs on a Lambda role allowed only to describe, stop or terminate the
+  `gamevps`-tagged instance. Nothing holds a long-lived AWS secret. See
   [cost-guards.md](cost-guards.md).
 
 ## Go deeper

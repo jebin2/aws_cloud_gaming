@@ -821,178 +821,10 @@ an `exit` after `esac` would have broken `cg init` entirely. It goes at the end 
 the end of the dispatch. `tests/tail-exit.sh` checks all eight scripts and re-verifies the
 underlying bash behaviour, so the rule carries its own evidence.
 
-### `cg destroy --all` left a live access key behind, and status could not show it
-
-After `--all` reported "everything deleted", an IAM audit by hand found:
-
-    gamevps-watchdog    AKIA................    Active
-
-The off-site watchdog's user, with an active long-lived key scoped to
-`ec2:StopInstances` - held in `.env` and on an internet-facing VPS. Two separate reasons it
-survived:
-
-**It cost nothing.** Every other resource in `--all` was on the list because it billed: the
-instance, the volume, the archive, the bucket. An IAM user bills nothing, so it was never on
-the list. "Free" is a bad filter for what to clean up - a credential that can act on the
-account outranks a bucket that merely sits there.
-
-**Nothing listed it.** `cg status` showed instances, volumes, snapshots, images, EIPs, key
-pairs, security groups, alarms and the budget - and no IAM whatsoever. A leftover that no
-command displays is one nobody notices. Status now prints the instance role and the watchdog
-key, including whether the key is `ACTIVE` and what it can do.
-
-It also flags a key AWS still honours that `.env` no longer holds. That combination is the
-worst of the three states: unusable, because the secret is gone, and unauditable, because
-nothing local records it. It can only be revoked.
-
-Writing the test for that orphan check found a third bug in the check itself:
-
-    envk=$(grep -c '^GAME_WATCHDOG_AWS_KEY_ID=' .env || echo 0)
-    [[ $envk == 0 ]] && printf 'orphaned...'
-
-`grep -c` **prints `0` and exits `1`** when nothing matches. So `|| echo 0` appends a second
-zero, `envk` becomes `"0\n0"`, and the comparison against `"0"` is never true - the warning
-could not fire under any circumstances. The same duplicated count had already appeared in a
-manual audit's output (`0` on one line, `  0` on the next) and was read as harmless formatting
-rather than a signal.
-
-`grep -c` needs no `|| echo 0`. It already reports the count; only its exit status needs
-tolerating, and the comparison should be numeric (`-eq`), not string.
-
-### The guard view claimed to show layer 4 and did not
-
-`cg watcher` carried this comment:
-
-    # Layers 3 and 4 live in AWS and survive the box being gone.
-
-and then printed the CloudWatch alarm and the budget. Layer 4 - the off-site watchdog, the only
-guard that keeps working when the box and the account resources are gone - was never printed at
-all. The comment asserted the coverage; the code did not provide it.
-
-That mattered because **only `cg init` ever checked it.** When its access key was revoked, the
-watchdog correctly logged `CANNOT QUERY AWS - this watchdog is blind`, kept its timer active,
-and no command surfaced that. `cg watcher` now reports the timer state, the last decision, and
-an explicit BLIND warning with the fix.
-
-Worth separating from a non-bug found in the same log:
-
-    19:24:10  CANNOT QUERY AWS ... AuthFailure
-    19:26:40  no running instance tagged gamevps - nothing to do
-
-That reads like intermittent blindness being misreported as health, and it was initially
-diagnosed as exactly that. It is not. Both lines fell within minutes of the key's deletion, and
-IAM is eventually consistent - the later call genuinely succeeded with a key AWS had not
-finished revoking, and genuinely found no instances. Re-running it afterwards gives `AuthFailure`
-every time, `rc=254`. The watchdog reported what it observed on each run.
-
-The lesson is about the diagnosis rather than the code: a guard printing reassurance next to a
-failure is such a familiar shape in this project that it was assumed rather than checked. One
-command (`run it again now`) separated propagation from a logic error, and it was available
-before any of the reasoning about why the branch might flip.
-
-### `--all` cleaned up AWS and left the other machine running
-
-`cg destroy --all` grew a block to remove the off-site watchdog's IAM user, because that user's
-long-lived key had survived "everything deleted". The block worked. It also reimplemented what
-`cg watchdog remove` already did - and reimplemented only half of it.
-
-`cg watchdog remove` handles the keys, the inline policy, the user, the `.env` entries, the
-units on the remote host, and the credentials file there. The new block covered the first four.
-So `--all` left a systemd timer running on an always-on VPS, firing every few minutes,
-authenticating with a key that no longer existed, appending `AuthFailure` to a log forever.
-
-Nothing detected it because nothing was looking at that machine. The destroy printed a line
-saying the units still existed and suggesting the command to remove them - true, accurate, and
-easy to read as housekeeping rather than as "a process is still running out there".
-
-`--all` now calls `cg watchdog remove` in a subshell (it uses `die()`), with the IAM-only path
-kept for the case where no host is configured but the user exists - an earlier setup, or an init
-interrupted after `watchdog_ensure` created the credential and before anything launched. That
-last case is not hypothetical: it is how a key with a different id turned up minutes after the
-previous one was revoked.
-
-The general point: when a destructive command grows to cover a new resource, the question is not
-only "does this remove it" but "does something already remove it, and more completely". Two
-places that delete the same thing will not stay in agreement, and the incomplete one wins
-whenever it is the one that runs.
-
-### A destroy that listed a resource and then never mentioned it again
-
-    type DESTROY-ALL to confirm: DESTROY-ALL
-    ...
-      IAM            gamevps-box role, and the gamevps-watchdog user
-                      (a long-lived key that can stop instances - it lives
-                       in .env and on the off-site watchdog host)
-    ...
-    ==> removing the instance role gamevps-box
-          role gamevps-box was already gone
-
-The watchdog user is announced before the confirmation and never appears again. Nothing is
-wrong: it had been deleted by an earlier run, so the removal block found nothing and printed
-nothing. But that output cannot be told apart from three different situations:
-
-- it was removed, quietly
-- it was never there
-- the step was skipped by a bug
-
-The role line is the contrast. `role gamevps-box was already gone` is the same do-nothing
-outcome, stated. That is all the difference between an audit trail and a guess.
-
-Two fixes, and they are separate:
-
-**List only what exists.** The summary printed the role and the watchdog user unconditionally,
-including the parenthetical about a long-lived key on a remote host - when neither the user nor
-the host existed. A confirmation prompt that overstates what it is about to delete trains people
-to stop reading it, which is the one thing it cannot afford.
-
-**Report an outcome on every path, including the empty one.** `nothing to remove` is a result. A
-step that appears in the plan and produces no line in the log is a gap in the record, not
-brevity.
-
-This is the same shape as the empty-archive line in `cg status`, which printed a bucket name
-whether it held 13,000 objects or nothing, and as `cg watcher` claiming to cover a layer it
-never printed. Three separate places where the output described the intent rather than the
-result.
-
-### A RETURN trap is not scoped to the function that set it
-
-    2026-09-13T01:08:19  off-site watchdog: no running instance tagged gamevps - nothing to do
-    ./cg: line 540: pol: unbound variable
-
-`cg init` armed the off-site watchdog, reported it working, and then died - before launching
-anything. Line 540 is the closing `}` of `watchdog_ensure`, which has no variable called `pol`.
-
-The cause is 80 lines earlier, in `watchdog_iam_ensure`:
-
-    local pol; pol=$(mktemp); trap 'rm -f "$pol"' RETURN
-
-A RETURN trap fires "each time a shell function finishes executing" - **any** function, not the
-one that installed it. So the trap outlived `watchdog_iam_ensure`, fired when
-`watchdog_ensure` returned, and evaluated `$pol` in a scope where the local no longer existed.
-Under `set -u` an unset variable is fatal, so the script exited. The trap was doing its cleanup
-job correctly and then doing it again forever.
-
-The fix is to not need the file: `aws iam put-user-policy --policy-document` takes JSON inline,
-so the temp file, the trap and the whole class of problem go away together.
-
-**Why it survived so long.** That branch only runs when the scoped IAM user does not exist - a
-first-ever `cg init`, or the first one after `cg destroy --all`. Every init in between found the
-user, took an early `return 0` before the trap was ever installed, and worked perfectly. The bug
-was introduced with the function and became reachable again only when `--all` started deleting
-that user.
-
-That is the shape worth remembering: a latent fault on a rarely-taken branch, exposed by an
-unrelated change that made the branch ordinary. `tests/init-watchdog.sh` now covers it, and was
-checked against the reverted code to confirm it actually fails - its "existing credential" case
-passes even with the bug present, which is the whole reason nobody noticed.
-
-If a RETURN trap is genuinely wanted, `local -` inside the function restores `set` options and
-traps on return; but the simpler answer is almost always to avoid the temp file.
-
 ### `|| echo` after a command that prints on failure, three times
 
-    off-site watchdog inactive
-    unreachable  on 203.0.113.10
+    on-host watchdog  inactive
+    unreachable
 
 One field, two values. `systemctl is-active` **prints** `inactive` and **exits non-zero**, so:
 
@@ -1005,14 +837,13 @@ only correct after a command that prints *nothing* when it fails - `aws ... 2>/d
 Commands in this repo that print AND exit non-zero: `systemctl is-active`, `systemctl
 is-enabled` (`not-found`, `disabled`), `grep -c` (`0`).
 
-This was already documented in `cmd_watchdog status`:
+This was already documented at one call site:
 
     # is-enabled prints "not-found" AND exits non-zero, so a `|| echo` prints
     # both. Take the first word and normalise it.
 
 and it was still written three more times in one sitting - `grep -c` in `iam_lines`, then
-`is-active` in the off-site line of `cg watcher`, then `is-active` in the on-host line right
-above it, the last two *after* fixing the first. A comment at the one site that got it right
+`is-active` twice in `cg watcher`, both *after* fixing the first. A comment at the one site that got it right
 does not generalise; the knowledge has to be attached to the pattern, not to a location.
 
 The shape to look for is a substitution whose fallback could be *appended* rather than
@@ -1103,20 +934,18 @@ Two changes, and the second matters more:
 Stopping a spot instance disables its request, after which the box can never start again while
 its root volume keeps charging - 50 GB of gp3 is ~INR 400/month for a machine that cannot run.
 
-That was not an edge case. It was what **all three cost guards did**, every time they fired:
+That was not an edge case. It was what **the cost guards did**, every time they fired:
 
 | Layer | Action |
 |---|---|
 | on-host watchdog | `shutdown -h` with `instance-initiated-shutdown-behavior=stop` |
 | CloudWatch alarm | `arn:aws:automate:REGION:ec2:stop` |
-| off-site watchdog | `ec2 stop-instances` |
 
 And they could not simply terminate instead, because the spot request was **persistent**, and a
 persistent request relaunches the moment its instance dies. Terminating from a guard would have
 started a fresh instance immediately - an unbounded cost loop, the exact opposite of the guard's
-purpose. None of the three can cancel the request first: the on-host watchdog holds no AWS
-credentials by design, a CloudWatch alarm action cannot cancel a request, and the off-site user
-was scoped to `StopInstances` only.
+purpose. Neither can cancel the request first: the on-host watchdog holds no AWS credentials by
+design, and a CloudWatch alarm action cannot cancel a request.
 
 So stop was correct, and the leak was structural.
 
@@ -1130,12 +959,8 @@ actually remove the thing it is guarding against:
 - `SpotInstanceType=one-time`, and `InstanceInterruptionBehavior` dropped (one-time only supports
   terminate, which is now fine - a stop wipes the instance store anyway)
 - `instance-initiated-shutdown-behavior=terminate` on spot, `stop` on demand
-- the alarm action and the off-site watchdog's verb both follow the instance lifecycle, read from
-  the same `describe-instances` call that found the instance
-- the off-site IAM user gained `ec2:TerminateInstances`, still tag-scoped. A real widening, and
-  a smaller blast radius than before: the worst an attacker on that VPS can now do is cost a
-  six-minute rebuild, where the same access under the old design would have destroyed a 140 GB
-  library.
+- the alarm action follows the instance lifecycle, read from the same `describe-instances` call
+  that found the instance
 
 Two smaller things fell out of it. `lib/aws-setup.sh` demanded `stop` unconditionally and then
 excused spot with "set at launch, cannot be modified after" - so its FATAL check could never
@@ -1611,37 +1436,29 @@ safe failure is pruning nothing - not deleting the tailnet identity of a box tha
 Before running the fix against the real tailnet, the new filter was run read-only over the live
 device list. It selected exactly the dead node and kept the box that was mid-build beside it.
 
-### `cg init` sat silent for ~7 seconds before its first line
+### `cg init` waited 30 minutes for a box that joined in 47 seconds
 
-The first line of `cg init` is the off-site watchdog's. Everything before it ran with no output:
-a reachability `ssh`, a credential check, a second `ssh` for the timer state, then a full
-reinstall with its output sent to `/dev/null` - `ssh`, `ssh`, `scp`, `ssh`, an `aws sts` call made
-*from* the host, another `aws sts` here, `ssh` - and finally a "proof" that started the watchdog and
-slept two seconds before reading its log. Measured, one piece at a time:
+The previous box had terminated itself, which leaves its tailnet node behind, offline. `cg init`
+listed the tailnet's node **names** before launching, to recognise the new box as "a name that was
+not there before". Then the build's prune deleted that offline `gamevps` - freeing the name - and
+the new box joined as plain `gamevps`, a name already in the list. Nothing new ever appeared:
 
-| Piece | Each | Count |
-|---|---|---|
-| a new ssh connection to the host | 0.30 s | ~8 |
-| `aws sts` run on the host | 1.13 s | 1 |
-| `aws sts` run here | 0.47 s | 2 |
-| `sleep 2` | 2.00 s | 1 |
+    ◌ waiting for the box to join 10m 10s
 
-Four things were wrong, and only the first is about speed:
+while `tailscale status` showed `gamevps` online, created 47 seconds after the launch.
 
-1. **It reinstalled an identical watchdog on every init.** The host now keeps a fingerprint of
-   what it was last given - the three files and the config, secret included, hashed - and one
-   `ssh` returns the timer state, that fingerprint and the last log line together. If nothing
-   changed there is nothing to install.
-2. **Every call opened its own connection.** They share one now (`ControlMaster`): 0.03 s a call
-   instead of 0.30 s. The socket goes in `$XDG_RUNTIME_DIR` because a socket path over about 104
-   characters is refused, which is exactly what the first measurement of this hit.
-3. **The `sleep 2` waited for nothing.** `remote-watchdog.service` is `Type=oneshot`, so
-   `systemctl start` does not return until the check has run and logged.
-4. **The proof moved the box towards being stopped.** It ran a real watchdog check, and an idle
-   box counts every check - so each `cg init` was an idle tick (`idle=2/6` became `3/6`). When
-   nothing changed, init now reports the *last* decision and its age instead of making a new one,
-   and says so if that decision is older than the 5-minute timer allows. A real check still runs
-   after an actual reinstall, where proving the new credentials is the point.
+A name is not an identity; a node key is. The list is now of keys (`tailnet_node_keys`), and a new
+key under this host's name - `gamevps` or `gamevps-N` - is the box, so a phone joining meanwhile is
+not mistaken for it. `tests/wait-node.sh` replays that run.
 
-On a terminal, a live line shows at once, so the part that is still necessary no longer looks like
-a hang.
+A rerun of `cg init` recovers either way: it finds the running instance and the node named after
+it, and continues from there.
+
+### A test of the shutdown path failed only when the laptop was busy
+
+`tests/idle-watchdog.sh` passed on its own and failed inside a full suite run, with the box
+building beside it: `just shuts down: got '' want 'SHUTDOWN '`. The watchdog reads real interface
+counters - `lo`, and the default-route interface - and the test kept them between cases, so
+whatever this laptop sent in between counted as use and reset the idle counter. Loopback traffic
+made 4 of its 7 checks fail every time. The cases test what happens at the idle limit, so they now
+run with thresholds no real traffic reaches.

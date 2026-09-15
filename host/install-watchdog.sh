@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run this ON THE VPS, as root.
+# Run this ON THE GAME BOX, as root. The build does: lib/bootstrap.d/15-watchdog.sh.
 set -euo pipefail
 install -m 755 idle-watchdog.sh /usr/local/bin/idle-watchdog.sh
 install -m 644 idle-watchdog.service /etc/systemd/system/

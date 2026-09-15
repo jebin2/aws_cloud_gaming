@@ -5,7 +5,7 @@
 #
 # The push runs in `cg stop`, in `cg destroy`, and from a unit that fires as the
 # machine shuts down - which is what covers the three ways this box stops itself
-# without being asked (idle watchdog, CloudWatch alarm, off-site watchdog); all
+# without being asked (idle watchdog, CloudWatch alarm, cloud watchdog); all
 # three end in a graceful shutdown. There is no periodic timer, so nothing
 # uploads while you are playing.
 #

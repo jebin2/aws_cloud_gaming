@@ -45,6 +45,8 @@ TS_NODE="${GAME_TS_NODE:-$TS_HOST}"
 INSTANCE_ID="${GAME_INSTANCE_ID:-}"
 KEY="$HOME/.ssh/${TS_HOST}.pem"
 ec2() { aws ec2 "$@" --region "$REGION"; }
+# Layer 4, the cloud watchdog: needs REGION and TS_HOST, so sourced after them.
+source lib/cloud-watchdog.sh
 
 # lib/setup and lib/game are dispatch targets, not commands - see docs/commands.md
 # is not needed, their headers say so.
@@ -611,21 +613,16 @@ destroy_everything() {
   # though both were about to be deleted - and then said nothing more about the
   # watchdog, leaving no way to tell "removed" from "was never there" from
   # "skipped by a bug".
-  local role_x=0 wd_x=0
+  local role_x=0 cw_x=0
   aws iam get-role --role-name "${TS_HOST}-box" >/dev/null 2>&1 && role_x=1
-  aws iam get-user --user-name "${TS_HOST}-watchdog" >/dev/null 2>&1 && wd_x=1
+  cw_exists && cw_x=1
   if (( role_x )); then
     echo "  instance role   ${TS_HOST}-box, and its instance profile"
   fi
-  if (( wd_x )); then
-    echo "  watchdog key    ${TS_HOST}-watchdog - a long-lived key that can stop"
-    echo "                  instances. Held in .env${GAME_WATCHDOG_HOST:+ and on ${GAME_WATCHDOG_HOST#*@}}"
+  if (( cw_x )); then
+    echo "  cloud watchdog  $CW_NAME - its function, schedule, role and logs"
   fi
-  if [[ -n ${GAME_WATCHDOG_HOST:-} ]]; then
-    echo "  off-site units  the watchdog timer and config on ${GAME_WATCHDOG_HOST#*@}"
-  fi
-  (( role_x || wd_x )) || [[ -n ${GAME_WATCHDOG_HOST:-} ]] \
-    || echo "  IAM             nothing - no role or watchdog credential exists"
+  (( role_x || cw_x )) || echo "  IAM             nothing - no role or watchdog exists"
   echo
   echo "Nothing is left behind. cg init recreates all of it - the bucket name is"
   echo "derived from your account, so it comes back identical."
@@ -673,45 +670,10 @@ destroy_everything() {
     log "role $prof was already gone"
   fi
 
-  # The off-site watchdog. Not about cost: it holds a long-lived access key that
-  # can call ec2:StopInstances, on an internet-facing VPS. "everything deleted"
-  # leaving a live AWS credential behind is the leftover that actually matters,
-  # and it survived --all until someone audited IAM by hand.
-  #
-  # `cg watchdog remove` already does every part of this - keys, policy, user,
-  # .env, the units on the remote host and the credentials file there. This used
-  # to reimplement the IAM half and skip the remote half, which left a timer
-  # running every few minutes on the VPS forever, logging AuthFailure against a
-  # key that no longer existed. Subshelled because cmd_watchdog uses die().
-  # An outcome is logged on every path, including the do-nothing one. A step
-  # that is listed as part of the deletion and then prints nothing is
-  # indistinguishable from a step that silently failed.
-  local wd="${TS_HOST}-watchdog"
-  if [[ -n ${GAME_WATCHDOG_HOST:-} ]]; then
-    say "removing the off-site watchdog: IAM user and the units on ${GAME_WATCHDOG_HOST#*@}"
-    ( cmd_watchdog remove ) \
-      || log "off-site watchdog not fully removed - check: cg watchdog status"
-  elif aws iam get-user --user-name "$wd" >/dev/null 2>&1; then
-    # No host configured, but the IAM user exists - an earlier setup, or an init
-    # that created the credential before being interrupted. The key still works
-    # and still has to go.
-    say "removing the off-site watchdog credential $wd"
-    local k
-    for k in $(aws iam list-access-keys --user-name "$wd" \
-               --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null); do
-      [[ -n $k && $k != None ]] && aws iam delete-access-key --user-name "$wd" \
-        --access-key-id "$k" >/dev/null 2>&1 && log "revoked key $k"
-    done
-    aws iam delete-user-policy --user-name "$wd" --policy-name idle-stop >/dev/null 2>&1 || true
-    aws iam delete-user --user-name "$wd" >/dev/null 2>&1 \
-      && log "deleted IAM user $wd - that key can no longer stop anything" \
-      || log "could not delete $wd; check: aws iam list-access-keys --user-name $wd"
-    local t2; t2=$(mktemp)
-    grep -vE '^GAME_WATCHDOG_AWS_(KEY_ID|SECRET)=' .env > "$t2" 2>/dev/null || true
-    cat "$t2" > .env; rm -f "$t2"; chmod 600 .env
-  else
-    log "off-site watchdog: no credential and no host configured - nothing to remove"
-  fi
+  # The cloud watchdog costs nothing, but --all leaves nothing. It is removed
+  # schedule first, so nothing invokes a half-deleted function.
+  say "removing the cloud watchdog $CW_NAME"
+  cw_remove
 
   [[ -n ${vol:-} && $vol != None ]] || return 0
   # Terminating the instance detaches it, but AWS takes a moment to let go.
@@ -728,357 +690,45 @@ destroy_everything() {
   fi
 }
 
-# Layer 4: the same watchdog logic, on a host that is always on. The on-host
-# watchdog dies with the box it protects, and the CloudWatch alarm can be
-# deleted, disarmed or misconfigured - and has stopped a box once here with no
-# visible reasoning. This layer writes down every decision and the numbers
-# behind it, which is most of its value.
-# Called by `cg init` before anything launches. The off-site watchdog polls by
-# TAG, so it does not need the instance to exist - and the whole point of an
-# independent guard is that it is already watching when the box appears, not
-# installed afterwards by hand. Quiet when it is already in place, and never
-# fatal: a missing watchdog must not stop you building a box.
-# Create the scoped IAM user the off-site watchdog needs, so none of this is a
-# manual step. Deliberately narrow: describe instances, read metrics, and stop
-# or terminate ONLY an instance tagged with this host name. It cannot launch
-# anything, touch the game archive, or read anything else.
+# Layer 4: the cloud watchdog. The pieces are in lib/cloud-watchdog.sh.
 #
-# Terminate is new, and it is a deliberate widening. On a one-time spot instance
-# stopping is the destructive option - the box can never start again and bills
-# for its root volume forever - so the guard has to be able to terminate to do
-# its job at all. The blast radius is also smaller than it looks now that the
-# games live in S3: the worst an attacker on that VPS can do is cost you a
-# six-minute rebuild. Under the old design the same access would have destroyed
-# a 140 GB library.
-#
-# Long-lived access keys are the only option for a host outside AWS: there is no
-# instance role to borrow. They land in .env, which is gitignored, and are
-# pushed to the box over stdin.
-watchdog_iam_ensure() {
-  local user="${TS_HOST}-watchdog"
-  # Already have working credentials? Then there is nothing to do. Checked by
-  # using them, not by assuming the variables are still valid.
-  if [[ -n ${GAME_WATCHDOG_AWS_KEY_ID:-} && -n ${GAME_WATCHDOG_AWS_SECRET:-} ]]; then
-    if AWS_ACCESS_KEY_ID="$GAME_WATCHDOG_AWS_KEY_ID" \
-       AWS_SECRET_ACCESS_KEY="$GAME_WATCHDOG_AWS_SECRET" \
-       aws sts get-caller-identity >/dev/null 2>&1; then
-      return 0
-    fi
-    log "the watchdog credentials in .env no longer work - reissuing"
-  fi
-
-  aws iam get-user --user-name "$user" >/dev/null 2>&1 || {
-    say "creating the scoped IAM user $user"
-    aws iam create-user --user-name "$user" >/dev/null 2>&1 || {
-      log "could not create $user (needs iam:CreateUser) - skipping the off-site watchdog"
-      return 1
-    }
-  }
-
-  # put-user-policy overwrites, so this also repairs a policy edited by hand.
-  #
-  # Passed inline rather than through a temp file. The temp file came with
-  # `trap 'rm -f "$pol"' RETURN`, and a RETURN trap set inside a function is NOT
-  # scoped to it: it stays installed and fires on every later function return,
-  # by which point $pol is out of scope. Under `set -u` that is fatal, so
-  # `cg init` died with "pol: unbound variable" after the watchdog was armed and
-  # before anything launched.
-  #
-  # It only ever ran on the branch where the IAM user does not exist - a first
-  # init, or the first one after `cg destroy --all` - which is why it sat here
-  # unnoticed until --all started deleting that user.
-  local pol
-  pol=$(cat <<JSON
-{ "Version": "2012-10-17", "Statement": [
-  { "Effect": "Allow",
-    "Action": ["ec2:DescribeInstances", "cloudwatch:GetMetricStatistics"],
-    "Resource": "*" },
-  { "Effect": "Allow",
-    "Action": ["ec2:StopInstances", "ec2:TerminateInstances"],
-    "Resource": "*",
-    "Condition": { "StringEquals": { "ec2:ResourceTag/Name": "$TS_HOST" } } }
-]}
-JSON
-)
-  aws iam put-user-policy --user-name "$user" --policy-name idle-stop \
-    --policy-document "$pol" >/dev/null 2>&1 \
-    || { log "could not attach the policy to $user - skipping the off-site watchdog"; return 1; }
-
-  # AWS allows two keys per user and shows a secret exactly once, so an existing
-  # key whose secret we do not have is useless - clear the way and reissue.
-  local k
-  for k in $(aws iam list-access-keys --user-name "$user" \
-             --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null); do
-    [[ -n $k && $k != None ]] && aws iam delete-access-key --user-name "$user" --access-key-id "$k" >/dev/null 2>&1
-  done
-  local kid sec
-  read -r kid sec < <(aws iam create-access-key --user-name "$user" \
-    --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text 2>/dev/null)
-  [[ -n ${kid:-} && $kid != None ]] || { log "could not create an access key for $user"; return 1; }
-
-  # New keys are eventually consistent; using one immediately can fail.
-  local i
-  for i in $(seq 1 10); do
-    AWS_ACCESS_KEY_ID="$kid" AWS_SECRET_ACCESS_KEY="$sec" \
-      aws sts get-caller-identity >/dev/null 2>&1 && break
-    sleep 3
-  done
-
-  local tmp; tmp=$(mktemp)
-  grep -vE '^GAME_WATCHDOG_AWS_(KEY_ID|SECRET)=' .env 2>/dev/null > "$tmp" || true
-  printf 'GAME_WATCHDOG_AWS_KEY_ID=%s\nGAME_WATCHDOG_AWS_SECRET=%s\n' "$kid" "$sec" >> "$tmp"
-  cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
-  export GAME_WATCHDOG_AWS_KEY_ID="$kid" GAME_WATCHDOG_AWS_SECRET="$sec"
-  log "issued a scoped key for $user and saved it to .env"
-  return 0
-}
-
-# Builds the ssh command for the off-site host into WD_RSH. An Oracle box wants
-# its own key, which is what GAME_WATCHDOG_KEY is for; unset means the ssh
-# default. Written out three times before this existed.
-# One shared connection for every ssh and scp to the watchdog host. Each call
-# used to open its own: measured 0.30 s a handshake against 0.03 s over a shared
-# one, and `cg init` made about eight of them before printing a single line.
-# ControlPersist closes it by itself a minute after the last use. The socket
-# lives in the per-user runtime dir: a socket path over ~104 characters is
-# refused outright, and deeper directories hit that.
-WD_MUX=(-o ControlMaster=auto -o "ControlPath=${XDG_RUNTIME_DIR:-/tmp}/cg-wd-%C" -o ControlPersist=60)
-
-wd_rsh_init() {
-  local kf="${GAME_WATCHDOG_KEY:-}" ident=()
-  [[ -n $kf ]] && ident=(-i "${kf/#\~/$HOME}")
-  WD_RSH=(ssh "${ident[@]}" -o ConnectTimeout=8 -o BatchMode=yes
-          -o StrictHostKeyChecking=accept-new "${WD_MUX[@]}" "$GAME_WATCHDOG_HOST")
-}
-
-# What an install would put on the host, as one hash: the three files and the
-# config written from .env, secret included. The host keeps the hash of what it
-# was last given, so "is it current" is one comparison instead of a reinstall.
-# Only the hash leaves this machine, and it lands in a root-only file.
-watchdog_fingerprint() {
-  { cat host/remote-watchdog.sh host/remote-watchdog.service host/remote-watchdog.timer 2>/dev/null
-    printf 'GAME_REGION=%s\nGAME_TS_HOST=%s\nIDLE_LIMIT=%s\n' "$REGION" "$TS_HOST" "${GAME_WATCHDOG_IDLE:-6}"
-    printf '%s\n%s\n' "${GAME_WATCHDOG_AWS_KEY_ID:-}" "${GAME_WATCHDOG_AWS_SECRET:-}"
-  } | sha256sum | cut -d' ' -f1
-}
-
+# Called by `cg init` before anything launches. It watches by TAG, so it does
+# not need the instance to exist - and the point of an independent guard is that
+# it is already watching when the box appears. When nothing changed this is one
+# parallel round of read-only calls: no redeploy, and no new check. Never fatal:
+# a missing guard must not stop you building a box.
 watchdog_ensure() {
-  [[ -n ${GAME_WATCHDOG_HOST:-} ]] || return 0
-  # Something on screen at once. This whole function used to print nothing until
-  # its last line, several seconds in, which reads as a hang.
-  _cg_styled && _cg_live "checking the off-site watchdog"
-  wd_rsh_init; local rsh=("${WD_RSH[@]}")
-  # ONE round trip answers everything the fast path needs: is the host up (ssh
-  # fails with 255 if not; `true` keeps a missing file from looking like that),
-  # is the timer enabled, what was last installed, and what it last decided.
-  local remote
-  if ! remote=$("${rsh[@]}" 'systemctl is-enabled remote-watchdog.timer 2>/dev/null | head -1;
-                  sudo cat /var/lib/cloud-gaming-watchdog/installed.sha256 2>/dev/null || echo;
-                  sudo tail -1 /var/log/cloud-gaming-watchdog.log 2>/dev/null; true' 2>/dev/null); then
-    log "off-site watchdog: $GAME_WATCHDOG_HOST unreachable - skipping"
-    return 0
-  fi
-  # Before the fingerprint: this can reissue the keys, and new keys are a change.
-  watchdog_iam_ensure || true
-
-  local enabled installed last
-  enabled=$(sed -n 1p <<<"$remote"); installed=$(sed -n 2p <<<"$remote"); last=$(sed -n 3p <<<"$remote")
-  if [[ $enabled == enabled && -n $installed && $installed == "$(watchdog_fingerprint)" ]]; then
-    # Current: no reinstall, and no new check either. Running one here counted
-    # towards stopping the box - every init was an idle tick. Report the last
-    # decision the timer made instead, and how old it is.
-    if [[ -z $last ]]; then
-      log "off-site watchdog: up to date, but it has logged nothing yet - check: cg watchdog logs"
+  _cg_styled && _cg_live "checking the cloud watchdog"
+  if cw_current; then
+    cw_report_last
+  else
+    if [[ $CW_DRIFT == "no function" ]]; then
+      say "arming the cloud watchdog before anything launches"
+    else
+      say "updating the cloud watchdog: $CW_DRIFT"
+    fi
+    # A subshell, so nothing inside can end `cg init`.
+    if ( cw_install ); then
+      cw_prove
+    else
+      log "cloud watchdog not installed - the other three layers still apply"
       return 0
     fi
-    local age; age=$(( $(date +%s) - $(date -d "${last%% *}" +%s 2>/dev/null || date +%s) ))
-    local when; if (( age < 90 )); then when="${age}s"; else when="$(( age / 60 )) min"; fi
-    log "off-site watchdog: up to date - last check $when ago: ${last#* }"
-    # The timer fires every 5 minutes; three missed runs is not jitter.
-    (( age > 900 )) && log "  ^ nothing for $(( age / 60 )) min but the timer runs every 5 - it is not running. Check: cg watchdog status"
-    [[ $last == *"CANNOT QUERY AWS"* ]] \
-      && log "  ^ it cannot see your account - fix this or layer 4 is decoration"
-    return 0
   fi
-
-  # Every call below goes through a SUBSHELL. cmd_watchdog uses die(), which
-  # exits the process - so a plain `cmd_watchdog install || log ...` cannot
-  # catch it and a missing watchdog killed `cg init` outright. This function
-  # promises never to be fatal; a subshell is what makes that true.
-  if [[ $enabled == enabled ]]; then
-    _cg_styled && _cg_live "updating the off-site watchdog"
-    ( cmd_watchdog install ) >/dev/null 2>&1 \
-      || log "off-site watchdog: refresh failed (the existing one is still armed)"
-  else
-    say "arming the off-site watchdog before anything launches"
-    ( cmd_watchdog install ) || {
-      log "off-site watchdog not installed - the other three layers still apply"
-      return 0
-    }
-  fi
-  watchdog_prove
-  return 0
-}
-
-# "refreshed" used to mean "the install command exited 0" - and it printed that
-# while the watchdog was blind, because the units run as root and the credentials
-# were not readable by root. Exit codes are not evidence. Make it run once and
-# report what it actually decided, which is the only thing worth printing.
-watchdog_prove() {
-  wd_rsh_init; local rsh=("${WD_RSH[@]}")
-  local line
-  # The unit is Type=oneshot, so `systemctl start` returns only once the check
-  # has run and logged. The `sleep 2` that used to sit here waited for nothing.
-  line=$("${rsh[@]}" 'sudo systemctl start remote-watchdog.service 2>/dev/null;
-                      sudo tail -1 /var/log/cloud-gaming-watchdog.log' 2>/dev/null)
-  if [[ -z ${line:-} ]]; then
-    log "off-site watchdog: armed, but it logged nothing - check: cg watchdog logs"
-    return 0
-  fi
-  # Strip the timestamp; the line already reads as a sentence.
-  log "off-site watchdog: ${line#* }"
-  [[ $line == *"CANNOT QUERY AWS"* ]] \
-    && log "  ^ it cannot see your account - fix this or layer 4 is decoration"
   return 0
 }
 
 cmd_watchdog() {
-  local host="${GAME_WATCHDOG_HOST:-}"
-  [[ -n $host ]] || die "set GAME_WATCHDOG_HOST=user@host in .env (an always-on box with the aws CLI)"
-  # That host is almost never reachable with a default key - an Oracle box wants
-  # its own. GAME_WATCHDOG_KEY supplies it; unset means use the ssh default.
-  local kf="${GAME_WATCHDOG_KEY:-}"
-  local ident=(); [[ -n $kf ]] && ident=(-i "${kf/#\~/$HOME}")
-  local rsh=(ssh "${ident[@]}" -o ConnectTimeout=10 -o BatchMode=yes
-             -o StrictHostKeyChecking=accept-new "${WD_MUX[@]}" "$host")
-  local scpid=("${ident[@]}" "${WD_MUX[@]}")
   case "${1:-status}" in
-    install)
-      say "checking $host"
-      # Install the CLI rather than complaining about it. Amazon's installer,
-      # not apt: this is an Oracle Ampere box where `awscli` is not in the
-      # enabled repos at all, and the installer covers both x86_64 and aarch64.
-      if ! "${rsh[@]}" 'command -v aws >/dev/null' 2>/dev/null; then
-        say "installing the aws CLI on $host"
-        "${rsh[@]}" '
-          set -e
-          command -v unzip >/dev/null || { sudo apt-get update -qq; sudo apt-get install -y -qq unzip; }
-          cd /tmp
-          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o awscliv2.zip
-          unzip -q -o awscliv2.zip
-          sudo ./aws/install --update >/dev/null
-          rm -rf /tmp/aws /tmp/awscliv2.zip
-        ' || die "could not install the aws CLI on $host"
-        log "installed $("${rsh[@]}" 'aws --version 2>&1 | cut -d" " -f1' 2>/dev/null)"
-      fi
-      # Credentials can come from .env, so the whole thing is one command. These
-      # must be the SCOPED user's keys - see the IAM policy in docs/cost-guards.md. They
-      # are written 600 and owned by the remote user.
-      if [[ -n ${GAME_WATCHDOG_AWS_KEY_ID:-} && -n ${GAME_WATCHDOG_AWS_SECRET:-} ]]; then
-        log "scoped credentials go into the root-owned watchdog config"
-      fi
-
-      # Verify credentials AFTER writing them, not before: the check used to run
-      # first and failed on a box that was about to be configured correctly.
-      say "installing the off-site watchdog on $host"
-      "${rsh[@]}" 'sudo install -d -m 755 /var/lib/cloud-gaming-watchdog' 2>/dev/null || true
-      scp -q "${scpid[@]}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-        host/remote-watchdog.sh host/remote-watchdog.service \
-        host/remote-watchdog.timer "$host:/tmp/" || die "copy to $host failed"
-      # The whole config, secrets included, goes over stdin: the units run as
-      # ROOT, so credentials in a user's home are invisible to them - which is
-      # exactly how this watchdog spent half an hour blind.
-      {
-        printf 'GAME_REGION=%s\nGAME_TS_HOST=%s\nIDLE_LIMIT=%s\n' \
-          "$REGION" "$TS_HOST" "${GAME_WATCHDOG_IDLE:-6}"
-        [[ -n ${GAME_WATCHDOG_AWS_KEY_ID:-} ]] && \
-          printf 'export AWS_ACCESS_KEY_ID=%s\nexport AWS_SECRET_ACCESS_KEY=%s\nexport AWS_DEFAULT_REGION=%s\n' \
-            "$GAME_WATCHDOG_AWS_KEY_ID" "$GAME_WATCHDOG_AWS_SECRET" "$REGION"
-      } | "${rsh[@]}" "
-        set -e
-        sudo install -m 755 /tmp/remote-watchdog.sh /usr/local/bin/remote-watchdog.sh
-        sudo install -m 644 /tmp/remote-watchdog.service /tmp/remote-watchdog.timer /etc/systemd/system/
-        sudo install -m 600 /dev/null /etc/cloud-gaming-watchdog.conf
-        sudo tee /etc/cloud-gaming-watchdog.conf >/dev/null
-        sudo systemctl daemon-reload
-        sudo systemctl enable --now remote-watchdog.timer
-        rm -f /tmp/remote-watchdog.*
-      " || die "install on $host failed"
-      # Verify the credentials the WATCHDOG will actually use: root, reading the
-      # config just written. Checking as the login user was wrong twice - first
-      # before the keys existed, then after they moved somewhere only root can
-      # read. Verify the thing that runs, not something adjacent to it.
-      local remote_arn local_arn
-      remote_arn=$("${rsh[@]}" 'sudo bash -c "set -a; . /etc/cloud-gaming-watchdog.conf; aws sts get-caller-identity --query Arn --output text"' 2>/dev/null) \
-        || die "the watchdog cannot authenticate to AWS on $host.
-       Put the scoped user's keys in .env as GAME_WATCHDOG_AWS_KEY_ID and
-       GAME_WATCHDOG_AWS_SECRET - cg init creates that user for you."
-      log "watchdog identity: $remote_arn"
-      local_arn=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null || echo "")
-      # An always-on, internet-facing box holding the same credentials as your
-      # laptop is the worst outcome here, so say so plainly.
-      if [[ -n $local_arn && $remote_arn == "$local_arn" ]]; then
-        log ""
-        log "WARNING: $host is using the SAME credentials as this machine."
-        log "  That gives an always-on, internet-facing host your full access."
-        log "  cg init creates a scoped user; see the IAM policy in docs/cost-guards.md."
-        log ""
-      fi
-
-      log "installed and enabled - it survives a reboot of $host (OnBootSec + Persistent)"
-      "${rsh[@]}" 'systemctl list-timers remote-watchdog.timer --no-pager' 2>/dev/null | sed 's/^/      /'
-      log "it stops the box after $(( ${GAME_WATCHDOG_IDLE:-6} * 5 )) min with no traffic in or out"
-      # Last, so only an install that got this far is recorded as current. Every
-      # failure above dies first, and the next init installs again.
-      watchdog_fingerprint | "${rsh[@]}" 'sudo install -d -m 755 /var/lib/cloud-gaming-watchdog;
-        sudo tee /var/lib/cloud-gaming-watchdog/installed.sha256 >/dev/null;
-        sudo chmod 600 /var/lib/cloud-gaming-watchdog/installed.sha256' 2>/dev/null \
-        || log "could not record the install fingerprint - the next init will reinstall"
-      ;;
-    status)
-      {
-      printf '  host    %s\n' "$host"
-      # is-enabled prints "not-found" AND exits non-zero, so a `|| echo` prints
-      # both. Take the first word and normalise it.
-      local st
-      st=$("${rsh[@]}" 'systemctl is-enabled remote-watchdog.timer 2>/dev/null | head -1' 2>/dev/null)
-      printf '  timer   %s\n' "${st:-not installed}"
-      "${rsh[@]}" 'systemctl list-timers remote-watchdog.timer --no-pager 2>/dev/null | sed -n 2p' 2>/dev/null | sed 's/^/  next    /'
-      echo "  recent decisions:"
-      "${rsh[@]}" 'sudo tail -n 8 /var/log/cloud-gaming-watchdog.log 2>/dev/null' 2>/dev/null | sed 's/^/    /' \
-        || echo "    (no log yet)"
-      } | cg_report "🔒" "Off-site watchdog"
-      ;;
-    logs)
-      if (( WATCH )); then "${rsh[@]}" 'sudo tail -f /var/log/cloud-gaming-watchdog.log'
-      else "${rsh[@]}" 'sudo tail -n 40 /var/log/cloud-gaming-watchdog.log' 2>/dev/null | sed 's/^/  /'; fi ;;
-    remove)
-      # Also removes the IAM user, since cg created it. Keys first: a user with
-      # keys cannot be deleted, and leaving a stray key is worse than leaving a
-      # stray user.
-      local u="${TS_HOST}-watchdog" k
-      if aws iam get-user --user-name "$u" >/dev/null 2>&1; then
-        say "removing the scoped IAM user $u"
-        for k in $(aws iam list-access-keys --user-name "$u" \
-                   --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null); do
-          [[ -n $k && $k != None ]] && aws iam delete-access-key --user-name "$u" --access-key-id "$k" >/dev/null 2>&1 \
-            && log "deleted key $k"
-        done
-        aws iam delete-user-policy --user-name "$u" --policy-name idle-stop >/dev/null 2>&1 || true
-        aws iam delete-user --user-name "$u" >/dev/null 2>&1 && log "deleted $u" \
-          || log "could not delete $u"
-      fi
-      local tmp; tmp=$(mktemp)
-      grep -vE '^GAME_WATCHDOG_AWS_(KEY_ID|SECRET)=' .env 2>/dev/null > "$tmp" || true
-      cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
-      say "removing the off-site watchdog from $host"
-      "${rsh[@]}" 'sudo systemctl disable --now remote-watchdog.timer 2>/dev/null;
-        sudo rm -f /etc/systemd/system/remote-watchdog.{service,timer} \
-          /usr/local/bin/remote-watchdog.sh /etc/cloud-gaming-watchdog.conf;
-        sudo systemctl daemon-reload;
-        shred -u ~/.aws/credentials 2>/dev/null || rm -f ~/.aws/credentials' 2>/dev/null
-      log "removed" ;;
-    *) die "usage: cg watchdog [install|status|logs [--watch]|remove]" ;;
+    install) say "installing the cloud watchdog"
+             cw_install || die "the cloud watchdog was not installed"
+             cw_prove ;;
+    check)   cw_prove ;;
+    status)  cw_status | cg_report "🔒" "Cloud watchdog" ;;
+    logs)    cw_logs ;;
+    remove)  say "removing the cloud watchdog"
+             cw_remove ;;
+    *) die "usage: cg watchdog [status|check|logs [--watch]|install|remove]" ;;
   esac
 }
 
@@ -1372,33 +1022,11 @@ cmd_watcher() {
   else
     log_as info "on-host watchdog  (box not reachable)"
   fi
-  # Layer 4, off site. The comment here used to claim layers 3 AND 4 were
-  # reported below, while only the alarm was - so the one guard that keeps
-  # working when everything else is gone was the one nothing displayed. It had
-  # been running blind on a revoked key with nobody able to see it, because
-  # only `cg init` ever checked.
+  # Layer 4. The comment here once claimed layers 3 AND 4 were reported below
+  # while only the alarm was - so the one guard that keeps working when the box
+  # is gone was the one nothing displayed.
   cg_gap
-  if [[ -n ${GAME_WATCHDOG_HOST:-} ]]; then
-    wd_rsh_init
-    local wst wline
-    # `systemctl is-active` PRINTS its answer and EXITS non-zero when the unit
-    # is not active, so `$(ssh ... || echo unreachable)` yields "inactive" AND
-    # "unreachable" on two lines. This is the same shape as `$(grep -c ... ||
-    # echo 0)` producing "0\n0" - fixed in lib/setup one commit earlier and
-    # then written again here. Tolerate the exit status, read the text, and
-    # treat only EMPTY output as "could not reach the host".
-    wst=$("${WD_RSH[@]}" 'systemctl is-active remote-watchdog.timer 2>/dev/null' 2>/dev/null) || true
-    wst=${wst//[$'\r\n']/}
-    log_as "$([[ $wst == active ]] && echo ok || echo warn)" "off-site watchdog ${wst:-unreachable}  on ${GAME_WATCHDOG_HOST#*@}"
-    wline=$("${WD_RSH[@]}" 'sudo tail -1 /var/log/cloud-gaming-watchdog.log 2>/dev/null' 2>/dev/null)
-    [[ -n ${wline:-} ]] && log "  last            ${wline#* }"
-    if [[ ${wline:-} == *"CANNOT QUERY AWS"* ]]; then
-      log_as fail "  ^ BLIND - its credentials do not work, so layer 4 is decoration"
-      log "    cg init reissues the key and pushes it; or: cg watchdog install"
-    fi
-  else
-    log_as info "off-site watchdog not configured (set GAME_WATCHDOG_HOST in .env)"
-  fi
+  cw_watcher_lines
 
   cg_gap
   local al bud
@@ -1456,8 +1084,8 @@ info (read-only)
   cg log [what] [--watch]    build | steam | watchdog | disk | sunshine
   cg ssh [cmd]               shell on the box
   cg watcher [--watch]       all four guards, and whether each is armed
-  cg watchdog [install|status|logs|remove]
-                             layer 4: the same watchdog, on an always-on host
+  cg watchdog [status|check|logs|install|remove]
+                             layer 4: the cloud watchdog (Lambda); check is a dry run
   cg ping [--watch]          latency, and direct vs DERP relay
 
 flags

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # The rest of the reports: cg library list, cg watchdog status, cg snapshot --list.
 #
+# cg watchdog status reports the cloud watchdog; its expected output below was
+# written for it rather than captured from an earlier cg.
+#
 # Same rule as every other report: on a terminal they are boxed and coloured by
 # cg_report; anywhere else they print exactly what they did. The expected plain
 # outputs below were captured from the cg BEFORE they were wired through
@@ -23,7 +26,6 @@ cat > "$T/.env" <<'EOF'
 GAME_REGION=ap-south-2
 GAME_TS_HOST=gamevps
 GAME_S3_BUCKET=cg-library-example
-GAME_WATCHDOG_HOST=ubuntu@203.0.113.10
 EOF
 cat > "$T/bin/aws" <<'FAKE'
 #!/usr/bin/env bash
@@ -36,23 +38,18 @@ case "$*" in
     [[ ${ORPHAN:-0} == 1 ]] && echo "2026-09-13 09:00:00   1073741824 steam/steamapps/common/Old Game/data.pak"
     true ;;
   *"s3 ls s3://cg-library-example/steam/ --recursive --summarize"*) printf 'Total Objects: 6218\n   Total Size: 171985878943\n' ;;
+  *get-function-configuration*) printf 'Active\tpython3.13\n' ;;
+  *"events describe-rule"*) echo ENABLED ;;
+  *filter-log-events*)
+    printf '1789412159000\tcg-watchdog: i-0123456789abcdef0 quiet (peak 0.9 MB per 5 min), but watched for only 25m of the 30m needed\n'
+    printf '1789412484000\tcg-watchdog: no running instance tagged gamevps - nothing to do\n' ;;
   *describe-images*)
     if [[ ${IMAGES:-0} == 1 ]]; then echo '[{"id":"ami-0123456789abcdef0","name":"gamevps-2026-09-14","created":"2026-09-14T10:00:00.000Z","state":"available","gb":50}]'
     else echo '[]'; fi ;;
   *) exit 1 ;;
 esac
 FAKE
-cat > "$T/bin/ssh" <<'FAKE'
-#!/usr/bin/env bash
-case "$*" in
-  *"is-enabled remote-watchdog"*) echo enabled ;;
-  *"list-timers remote-watchdog"*) echo "Mon 2026-09-14 19:25:06 UTC 1min 5s Mon 2026-09-14 19:20:06 UTC 3min 54s ago remote-watchdog.timer remote-watchdog.service" ;;
-  *"tail -n 8"*)
-    echo "2026-09-14T18:55:59+00:00 i-0123456789abcdef0 quiet: in=268827.0B out=730385.0B total=999212B < 10485760B idle=3/6"
-    echo "2026-09-14T19:01:24+00:00 no running instance tagged gamevps - nothing to do" ;;
-  *) exit 1 ;;
-esac
-FAKE
+printf '#!/usr/bin/env bash\nexit 1\n' > "$T/bin/ssh"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$T/bin/tailscale"
 chmod +x "$T/bin"/*
 cg() { ( cd "$T" && HOME="$T/home" PATH="$T/bin:$PATH" COLUMNS=90 bash ./cg "$@" 2>&1 ); }
@@ -89,13 +86,15 @@ check "library list, with an orphan" "$(CG_COLOR=never ORPHAN=1 cg library list)
   costing $0.03/month and unusable - remove them: cg library clean
 EXP
 )"
-check "watchdog status"             "$(CG_COLOR=never cg watchdog status)" "$(cat <<'EXP'
-  host    ubuntu@203.0.113.10
-  timer   enabled
-  next    Mon 2026-09-14 19:25:06 UTC 1min 5s Mon 2026-09-14 19:20:06 UTC 3min 54s ago remote-watchdog.timer remote-watchdog.service
+# Local time, as the command prints it - computed here so the case holds in any timezone.
+t1=$(date -d @1789412159 '+%Y-%m-%d %H:%M:%S'); t2=$(date -d @1789412484 '+%Y-%m-%d %H:%M:%S')
+check "watchdog status"             "$(CG_COLOR=never cg watchdog status)" "$(cat <<EXP
+  function  gamevps-cloud-watchdog  Active python3.13
+  schedule  every 5 minutes, ENABLED
+  can end   only the instance tagged gamevps
   recent decisions:
-    2026-09-14T18:55:59+00:00 i-0123456789abcdef0 quiet: in=268827.0B out=730385.0B total=999212B < 10485760B idle=3/6
-    2026-09-14T19:01:24+00:00 no running instance tagged gamevps - nothing to do
+    $t1 i-0123456789abcdef0 quiet (peak 0.9 MB per 5 min), but watched for only 25m of the 30m needed
+    $t2 no running instance tagged gamevps - nothing to do
 EXP
 )"
 check "snapshot --list, none"       "$(CG_COLOR=never cg snapshot --list)" "$(cat <<'EXP'
@@ -119,7 +118,7 @@ check    "  rows survive"                 "$(survives "$(CG_COLOR=never cg libra
 raw=$(CG_COLOR=always ORPHAN=1 cg library list)
 contains "  ORPHANED is red"              "$raw" $'\e[38;5;203mORPHANED'
 out=$(CG_COLOR=always cg watchdog status | strip)
-contains "watchdog status: 🔒 box"        "$out" "╭─ 🔒 Off-site watchdog"
+contains "watchdog status: 🔒 box"        "$out" "╭─ 🔒 Cloud watchdog"
 check    "  rows survive"                 "$(survives "$(CG_COLOR=never cg watchdog status)" "$out" 0)" "same"
 out=$(CG_COLOR=always IMAGES=1 cg snapshot --list | strip)
 contains "snapshot --list: 💿 box"        "$out" "╭─ 💿 Saved images"

@@ -2,9 +2,10 @@
 Description=Mirror the Steam library to S3 before the machine goes down
 # This is what makes the box safe to stop AUTOMATICALLY. Three things stop it
 # without anyone typing a command - the on-host idle watchdog's `shutdown -h`,
-# the CloudWatch alarm, and the off-site watchdog - and the last two call
-# StopInstances, which AWS turns into a graceful OS shutdown. All three
-# therefore arrive here, which is why one unit covers all of them.
+# the CloudWatch alarm, and the cloud watchdog - and the last two ask AWS
+# to terminate (or, on demand, stop) the instance, which AWS turns into a
+# graceful OS shutdown. All three therefore arrive here, which is why one unit
+# covers all of them.
 #
 # There is deliberately no periodic timer beside it: this only ever runs when
 # the machine is already going away, never while you are playing.
@@ -33,8 +34,18 @@ ExecStop=/usr/local/bin/cg-library push
 #
 # Still bounded, because a doomed upload should not hang a shutdown forever, and
 # after an explicit `cg stop` or a watchdog push there is nothing left to send -
-# seconds, not minutes.
-TimeoutStopSec=600
+# seconds, not minutes. 30 minutes is room for a session's worth of new files
+# when an external guard terminates the box. AWS may power off an instance it
+# was asked to terminate before this runs out, and a spot interruption gives
+# two minutes whatever this says.
+#
+# If the idle watchdog's own push is still running when the shutdown begins,
+# systemd stops it and this push waits on cg-library's lock, then carries on
+# from the files already uploaded.
+#
+# A box still going down an hour later, whatever started it, is forced by the
+# cloud watchdog - by then this has had its 30 minutes.
+TimeoutStopSec=1800
 
 [Install]
 WantedBy=multi-user.target

@@ -61,40 +61,18 @@ archive_line() {
 # mentioned it. Anything that can act on the account, or cost money, belongs in
 # a status view - "free" is not a reason to hide a credential.
 iam_lines() {
-  local role="${TS_HOST}-box" wd="${TS_HOST}-watchdog" keys envk
+  local role="${TS_HOST}-box" cw="${TS_HOST}-cloud-watchdog"
   if aws iam get-role --role-name "$role" >/dev/null 2>&1; then
     printf '  instance role   %s  (lets the box read/write its library bucket)\n' "$role"
   else
     printf '  instance role   none - cg init creates it\n'
   fi
-
-  if aws iam get-user --user-name "$wd" >/dev/null 2>&1; then
-    keys=$(aws iam list-access-keys --user-name "$wd" \
-      --query 'AccessKeyMetadata[?Status==`Active`].AccessKeyId' --output text 2>/dev/null)
-    # `grep -c` PRINTS 0 and EXITS 1 when nothing matches, so the obvious
-    # `$(grep -c ... || echo 0)` yields "0\n0" - which is never equal to "0",
-    # and the orphan check below could not fire at all. Let grep report the
-    # count, tolerate its exit status, and compare numerically.
-    envk=$(grep -c '^GAME_WATCHDOG_AWS_KEY_ID=' .env 2>/dev/null || true)
-    if [[ -n ${keys:-} && $keys != None ]]; then
-      printf '  watchdog key    %s  ACTIVE: %s  (can stop instances)\n' "$wd" "$keys"
-      # A key AWS still honours but that we no longer hold is unusable and
-      # unauditable - it can only be revoked, never used again.
-      #
-      # `if`, not `[[ ]] && printf`. As the LAST statement of a function, that
-      # compound returns 1 whenever the test is false, the function returns 1,
-      # and `set -e` kills the caller. It did: `cg status` and `cg cost` both
-      # exited 1 with no output past this line, but only once a watchdog key
-      # existed in .env - the condition under which the printf is skipped.
-      if [[ ${envk:-0} -eq 0 ]]; then
-        printf '                  not in .env - orphaned; revoke it: cg destroy --all\n'
-      fi
-    else
-      printf '  watchdog key    %s exists but has no active key\n' "$wd"
-    fi
+  if aws iam get-role --role-name "$cw" >/dev/null 2>&1; then
+    printf '  watchdog role   %s  (the cloud watchdog: ends only the %s box)\n' "$cw" "$TS_HOST"
   else
-    printf '  watchdog key    none\n'
+    printf '  watchdog role   none - cg init creates it\n'
   fi
+  return 0
 }
 
 status() {
@@ -939,8 +917,8 @@ fi
 # Snapshot the tailnet before anything launches, so the new node can be
 # identified by *being new* rather than by having an expected name.
 NODES_BEFORE=$(mktemp); trap 'rm -f "$NODES_BEFORE"' EXIT
-tailnet_nodes > "$NODES_BEFORE"
-stale=$(grep -cx "$TS_HOST" "$NODES_BEFORE" || true)
+tailnet_node_keys > "$NODES_BEFORE"
+stale=$(tailnet_nodes | grep -cx "$TS_HOST" || true)
 (( stale )) && log "note: a node named '$TS_HOST' already exists; if a new box is launched it joins under a suffixed name, which is handled"
 
 # Whether provision.sh will reuse an instance or launch one decides how to find

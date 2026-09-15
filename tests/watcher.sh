@@ -26,26 +26,21 @@ cat > "$T/.env" <<'EOF'
 GAME_INSTANCE_ID=i-test
 GAME_REGION=ap-south-2
 GAME_TS_HOST=gamevps
-GAME_WATCHDOG_HOST=ubuntu@203.0.113.10
 EOF
 cat > "$T/bin/aws" <<'FAKE'
 #!/usr/bin/env bash
 case "$*" in
   *describe-instances*)  exit 1 ;;
   *describe-alarms*)     printf '%s\t%s\n' "ALARM" "${ACTIONS:-False}" ;;
+  *"events describe-rule"*) [[ ${RULE:-ENABLED} == none ]] && exit 254; echo "${RULE:-ENABLED}" ;;
+  *filter-log-events*)   printf '%s\tcg-watchdog: %s\n' "$(( ($(date +%s) - 120) * 1000 ))" \
+                           "${LAST:-no running instance tagged gamevps - nothing to do}" ;;
   *get-caller-identity*) echo 123456789012 ;;
   *describe-budgets*)    echo 57.0 ;;
   *)                     exit 1 ;;
 esac
 FAKE
-cat > "$T/bin/ssh" <<'FAKE'
-#!/usr/bin/env bash
-case "$*" in
-  *"is-active remote-watchdog"*) echo "${WD_STATE:-active}" ;;
-  *"tail -1"*)                   echo "2026-09-14T19:11:45+00:00 no running instance tagged gamevps - nothing to do" ;;
-  *) exit 1 ;;
-esac
-FAKE
+printf '#!/usr/bin/env bash\nexit 1\n' > "$T/bin/ssh"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$T/bin/tailscale"
 chmod +x "$T/bin"/*
 cg() { ( cd "$T" && HOME="$T/home" PATH="$T/bin:$PATH" COLUMNS=90 bash ./cg "$@" 2>&1 ); }
@@ -58,8 +53,8 @@ TS  ==> guards
 TS      instance          none
 TS      on-host watchdog  (box not reachable)
 
-TS      off-site watchdog active  on 203.0.113.10
-TS        last            no running instance tagged gamevps - nothing to do
+TS      cloud watchdog    ENABLED  (Lambda gamevps-cloud-watchdog, every 5 min)
+TS        last            2 min ago: no running instance tagged gamevps - nothing to do
 
 TS      idle alarm        ALARM False  <- state, actions-enabled
 TS      budget            57.0
@@ -70,12 +65,16 @@ echo "2. styled: each row carries the meaning it states, not one read from its w
 out=$(CG_COLOR=always cg watcher | strip)
 contains "actions off: information, and says so"  "$out" "· idle alarm        ALARM, disarmed (cg open arms it for a session)"
 lacks    "  and never a tick"                     "$out" "✓ idle alarm"
-contains "off-site watchdog active: a tick"       "$out" "✓ off-site watchdog active"
+contains "cloud watchdog enabled: a tick"         "$out" "✓ cloud watchdog    ENABLED"
 contains "budget present: a tick"                 "$out" "✓ budget            57.0"
 out=$(CG_COLOR=always ACTIONS=True cg watcher | strip)
 contains "actions on: a tick, armed"              "$out" "✓ idle alarm        ALARM, armed"
-out=$(CG_COLOR=always WD_STATE=inactive cg watcher | strip)
-contains "off-site watchdog inactive: a warning"  "$out" "! off-site watchdog inactive"
+out=$(CG_COLOR=always RULE=DISABLED cg watcher | strip)
+contains "cloud watchdog disabled: a warning"     "$out" "! cloud watchdog    DISABLED"
+out=$(CG_COLOR=always RULE=none cg watcher | strip)
+contains "cloud watchdog absent: a warning"       "$out" "! cloud watchdog    not installed"
+out=$(CG_COLOR=always LAST="CANNOT QUERY AWS - this watchdog is blind: AccessDenied" cg watcher | strip)
+contains "a blind watchdog: a failure"            "$out" "✗   ^ it cannot act on your account"
 
 echo "3. styled: a gap inside the box keeps the gutter"
 out=$(CG_COLOR=always cg watcher | strip)

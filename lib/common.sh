@@ -613,16 +613,39 @@ _stream_build_styled() {
 # tailnet_nodes  - one hostname per line
 tailnet_nodes() { tailscale status 2>/dev/null | awk 'NF>1 && $1 ~ /^100\./ {print $2}'; }
 
-# wait_new_node <nodes-before-file> <timeout-seconds>
-# Prints the hostname of the node that appeared. Matching on "something new
-# showed up" rather than on an expected name is what makes this immune to the
-# suffix problem entirely.
+# tailnet_node_keys - "<node key>\t<tailnet name>" per peer.
+# The KEY is a node's identity; its name is not. The prune before a build deletes
+# an offline node, which frees its name, and the new box then joins under
+# exactly that name - so a list of names taken before the launch already
+# contains the new box's name, and nothing new ever appears in it. That waited
+# the full 30 minutes on a box that had joined in 47 seconds.
+tailnet_node_keys() {
+  tailscale status --json 2>/dev/null | python3 -c '
+import json, sys
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+for k, p in (d.get("Peer") or {}).items():
+    name = (p.get("DNSName") or "").split(".")[0] or p.get("HostName") or ""
+    if name: print("%s\t%s" % (p.get("PublicKey") or k, name))' 2>/dev/null || true
+}
+
+# wait_new_node <node-keys-before-file> <timeout-seconds>
+# Prints the tailnet name of the node that appeared. Matching on "a node key that
+# was not there before" rather than on an expected name is what makes this immune
+# to the suffix problem - and to the pruned-name problem above. Only a name this
+# host could take counts ($TS_HOST or $TS_HOST-N), so a phone joining the tailnet
+# meanwhile is not mistaken for the box.
+new_node() { # new_node <node-keys-before-file>
+  tailnet_node_keys | awk -F'\t' -v f="$1" -v host="${TS_HOST:-}" '
+    BEGIN { while ((getline l < f) > 0) { split(l, a, "\t"); seen[a[1]] = 1 } }
+    !($1 in seen) && (host == "" || $2 == host || $2 ~ ("^" host "-[0-9]+$")) { print $2; exit }'
+}
 wait_new_node() {
   local before=$1 timeout=${2:-1800} waited=0 beat=0 found
   if _cg_styled 2; then
     while (( waited < timeout )); do
       if (( waited % 10 == 0 )); then
-        found=$(tailnet_nodes | grep -vxF -f "$before" 2>/dev/null | head -1 || true)
+        found=$(new_node "$before" || true)
         if [[ -n $found ]]; then
           _cg_line ok "joined as '$found' after $(_cg_dur "$waited")" >&2
           printf '%s' "$found"
@@ -636,7 +659,7 @@ wait_new_node() {
     return 1
   fi
   while (( waited < timeout )); do
-    found=$(tailnet_nodes | grep -vxF -f "$before" 2>/dev/null | head -1 || true)
+    found=$(new_node "$before" || true)
     if [[ -n $found ]]; then
       log "joined as '$found' after ${waited}s" >&2
       printf '%s' "$found"
@@ -731,7 +754,7 @@ wait_for_steam() {
 # never come back while its root volume keeps charging.
 #
 # Every cost guard produces exactly this state: the on-host watchdog's
-# `shutdown -h`, the CloudWatch alarm's ec2:stop action, and the off-site
+# `shutdown -h`, the CloudWatch alarm's ec2:stop action, and the external
 # watchdog's StopInstances. They cannot terminate instead - a persistent spot
 # request relaunches the moment its instance dies, and no guard can cancel the
 # request first (the on-host one holds no credentials at all). So stop is the

@@ -107,7 +107,7 @@ echo "==> idle-stop alarm"
 #
 # That is survivable because it is not the layer that covers downloads:
 #   layer 2 (on-host)  counts in AND out, and is armed the whole time
-#   layer 4 (off-site) counts in AND out, via its own API calls
+#   layer 4 (cloud)    counts in AND out, from the same metrics
 # and this alarm is armed only for the duration of a session - see game up -
 # precisely because outside one, low egress is a normal state.
 #

@@ -23,15 +23,13 @@ contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 
 mkdir -p "$T/bin" "$T/home/.ssh" "$T/lib"
 cp "$REPO/cg" "$T/cg"
-cp "$REPO/lib/common.sh" "$T/lib/common.sh"
+cp "$REPO/lib/common.sh" "$REPO/lib/cloud-watchdog.sh" "$T/lib/"
 seed_env() {
   cat > "$T/.env" <<EOF
 GAME_INSTANCE_ID=i-test
 GAME_REGION=ap-south-2
 GAME_TS_HOST=gamevps
 GAME_S3_BUCKET=bucket-test
-GAME_WATCHDOG_AWS_KEY_ID=AKIAFAKE
-GAME_WATCHDOG_AWS_SECRET=secretfake
 EOF
 }
 seed_env
@@ -53,7 +51,12 @@ case "$args" in
   *"s3 ls"*)            printf 'Total Objects: 13271\n   Total Size: 3106357075\n' ;;
   *describe-instances*) echo "${BOX_STATE:-stopped}" ;;
   *describe-volumes*)   echo "None	None" ;;
-  *"iam get-user"*)     [[ ${WD_USER:-1} == 1 ]] || exit 1; echo "gamevps-watchdog" ;;
+  # The cloud watchdog: its pieces exist only when CW_EXISTS=1, and deleting one
+  # that does not exist fails, as it does in AWS.
+  *"get-role --role-name gamevps-cloud-watchdog"*|*get-function-configuration*|*"events delete-rule"*|\
+  *"events remove-targets"*|*"lambda delete-function"*|*"logs delete-log-group"*|\
+  *"delete-role-policy --role-name gamevps-cloud-watchdog"*|*"delete-role --role-name gamevps-cloud-watchdog"*)
+                        [[ ${CW_EXISTS:-0} == 1 ]] || exit 254; echo "{}" ;;
   *"iam get-role"*)     [[ ${ROLE_EXISTS:-1} == 1 ]] || exit 1; echo "gamevps-box" ;;
   *put-role-policy*)    [[ ${IAM_FAILS:-0} == 1 ]] && exit 1; : ;;
   *list-access-keys*)   echo "AKIAFAKE" ;;
@@ -82,8 +85,8 @@ run() { # run <stdin> <args...>
   local input=$1; shift
   LOG="$T/log" rm -f "$T/log"
   printf '%s\n' "$input" | ( cd "$T" && HOME="$T/home" LOG="$T/log" PATH="$T/bin:$PATH" \
-    BOX_STATE="${BOX_STATE:-stopped}" WD_USER="${WD_USER:-1}" \
-    ROLE_EXISTS="${ROLE_EXISTS:-1}" IAM_FAILS="${IAM_FAILS:-0}" \
+    BOX_STATE="${BOX_STATE:-stopped}" \
+    ROLE_EXISTS="${ROLE_EXISTS:-1}" IAM_FAILS="${IAM_FAILS:-0}" CW_EXISTS="${CW_EXISTS:-0}" \
     bash ./cg destroy "$@" 2>&1 )
 }
 did()   { grep -q "$1" "$T/log" 2>/dev/null && echo yes || echo no; }
@@ -100,21 +103,25 @@ check "names the archive"     "$(grep -c 's3://bucket-test/steam' <<<"$out")" "1
 check "shows the count"       "$(grep -c '13271 objects' <<<"$out")" "1"
 check "warns it is the only copy" "$(grep -c 'ONLY COPY' <<<"$out")" "1"
 
-echo "3. --all with the typed word removes the box, the bucket and the IAM role"
-out=$(run "DESTROY-ALL" --all)
+echo "3. --all with the typed word removes the box, the bucket, the IAM role and the cloud watchdog"
+out=$(CW_EXISTS=1 run "DESTROY-ALL" --all)
 check "box destroyed"         "$(did SETUP-DESTROY-CALLED)" "yes"
 check "bucket removed"        "$(did 's3 rb')" "yes"
 check "instance profile gone" "$(did 'delete-instance-profile')" "yes"
 check "role policy gone"      "$(did 'delete-role-policy')" "yes"
-check "role gone"             "$(did 'delete-role')" "yes"
+check "role gone"             "$(did 'delete-role --role-name gamevps-box')" "yes"
+check "watchdog schedule gone" "$(did 'events delete-rule')" "yes"
+check "watchdog function gone" "$(did 'lambda delete-function')" "yes"
+check "watchdog logs gone"    "$(did 'logs delete-log-group')" "yes"
+check "watchdog role gone"    "$(did 'delete-role --role-name gamevps-cloud-watchdog')" "yes"
+# The schedule goes first, so nothing invokes a half-deleted function.
+first=$(grep -n 'events delete-rule' "$T/log" | cut -d: -f1); fn=$(grep -n 'lambda delete-function' "$T/log" | cut -d: -f1)
+check "schedule removed before the function" "$(( first < fn ))" "1"
 # A bucket name left in .env would have status printing a name for something
 # that no longer exists - which is the bug that prompted deleting it at all.
 check "bucket cleared from .env" "$(grep -c GAME_S3_BUCKET "$T/.env")" "0"
-# Not about cost: this user holds a long-lived key that can stop instances, on
-# an internet-facing host. It survived --all until someone audited IAM by hand.
-check "watchdog key revoked"  "$(did 'delete-access-key')" "yes"
-check "watchdog user deleted" "$(did 'delete-user --user-name')" "yes"
-check "watchdog key cleared from .env" "$(grep -c GAME_WATCHDOG_AWS "$T/.env")" "0"
+# Nothing in this design is an IAM user, so nothing looks for one.
+check "no IAM user looked up" "$(did 'iam get-user')" "no"
 # The reassurance that games are safe must NOT be printed on the path that
 # deletes them.
 check "setup told games go too" "$(did 'CG_DESTROY_ALL=1')" "no"
@@ -133,45 +140,32 @@ check "box destroyed"         "$(did SETUP-DESTROY-CALLED)" "yes"
 check "archive UNTOUCHED"     "$(did 's3 rm')" "no"
 check "bucket UNTOUCHED"      "$(did 's3 rb')" "no"
 check "role UNTOUCHED"        "$(did 'delete-role')" "no"
-check "watchdog user UNTOUCHED" "$(did 'delete-user --user-name')" "no"
+check "cloud watchdog UNTOUCHED" "$(did 'delete-function|delete-rule')" "no"
 check "bucket kept in .env"   "$(grep -c GAME_S3_BUCKET "$T/.env")" "1"
-check "watchdog key kept in .env" "$(grep -c GAME_WATCHDOG_AWS "$T/.env")" "2"
 check "no prompt was shown"   "$(grep -c 'DESTROY-ALL' <<<"$out")" "0"
-
-echo "6. with an off-site host configured, --all removes the REMOTE units too"
-# This used to reimplement the IAM half and skip the remote half, leaving a
-# timer running on the VPS every few minutes against a key that no longer
-# existed. It now calls `cg watchdog remove`, which does both.
-seed_env; printf 'GAME_WATCHDOG_HOST=ubuntu@10.0.0.1\n' >> "$T/.env"
-out=$(run "" --all --force)
-check "watchdog user deleted"   "$(did 'delete-user --user-name')" "yes"
-check "remote units removed"    "$(did 'remote-watchdog.timer')" "yes"
-check "remote conf removed"     "$(did 'cloud-gaming-watchdog.conf')" "yes"
 
 echo "8. the summary lists only IAM objects that actually exist"
 # It used to announce the role and the watchdog user unconditionally, so a run
 # with neither present read as though both were about to be deleted - and then
 # said nothing more about the watchdog.
 seed_env
-out=$(WD_USER=0 ROLE_EXISTS=0 run "no" --all)
+out=$(ROLE_EXISTS=0 run "no" --all)
 check "says there is no IAM to remove" "$(grep -c 'IAM             nothing' <<<"$out")" "1"
-lacks_out=$(grep -c 'watchdog key    gamevps-watchdog' <<<"$out" || true)
-check "does not list a watchdog that is absent" "$lacks_out" "0"
+check "does not list a watchdog that is absent" "$(grep -c 'cloud watchdog  ' <<<"$out" || true)" "0"
 
 echo "9. every step reports an outcome, including doing nothing"
 # A step listed in the summary that then prints nothing is indistinguishable
 # from a step that silently failed.
 seed_env
-out=$(WD_USER=0 ROLE_EXISTS=0 run "" --all --force)
-check "says why the watchdog was skipped" \
-  "$(grep -c 'nothing to remove' <<<"$out")" "1"
+out=$(ROLE_EXISTS=0 run "" --all --force)
+check "says there was no cloud watchdog" \
+  "$(grep -c 'cloud watchdog: nothing to remove' <<<"$out")" "1"
 
-echo "10. an existing watchdog IS listed, with what its key can do"
+echo "10. an existing cloud watchdog IS listed"
 seed_env
-out=$(WD_USER=1 ROLE_EXISTS=1 run "no" --all)
+out=$(ROLE_EXISTS=1 CW_EXISTS=1 run "no" --all)
 check "lists the role"     "$(grep -c 'instance role   gamevps-box' <<<"$out")" "1"
-check "lists the key"      "$(grep -c 'watchdog key    gamevps-watchdog' <<<"$out")" "1"
-check "says what it can do" "$(grep -c 'can stop' <<<"$out")" "1"
+check "lists the cloud watchdog" "$(grep -c 'cloud watchdog  gamevps-cloud-watchdog' <<<"$out")" "1"
 
 echo "11. --no-push locks the archive before terminating"
 # Skipping the laptop-side push is only half the job: the box runs its own

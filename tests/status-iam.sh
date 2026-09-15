@@ -21,15 +21,15 @@ lacks()    { if [[ $2 != *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 check()    { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: got '$2' want '$3'"; fail=$((fail+1)); fi; }
 
-# ROLE=1 the instance role exists; USER=1 the watchdog user exists;
-# KEY= the active key id it reports ("None" for a user with no active key).
+# ROLE=1 the instance role exists; CWROLE=1 the cloud watchdog's role exists.
+# Every call is recorded, so "never looks up an IAM user" can be asserted.
 cat > "$T/bin/aws" <<'FAKE'
 #!/usr/bin/env bash
 args="$*"
+echo "$args" >> "$CALLS"
 case "$args" in
+  *"get-role --role-name gamevps-cloud-watchdog"*) [[ ${CWROLE:-0} == 1 ]] || exit 1; echo "role" ;;
   *"get-role"*) [[ ${ROLE:-0} == 1 ]] || exit 1; echo "role" ;;
-  *"get-user"*) [[ ${USER_EXISTS:-0} == 1 ]] || exit 1; echo "user" ;;
-  *list-access-keys*) echo "${KEY:-None}" ;;
   *) echo None ;;
 esac
 FAKE
@@ -39,7 +39,7 @@ RC=0
 run() {
   local out
   out=$( cd "$T" && PATH="$T/bin:$PATH" TS_HOST=gamevps \
-      ROLE="${ROLE:-0}" USER_EXISTS="${USER_EXISTS:-0}" KEY="${KEY:-None}" \
+      ROLE="${ROLE:-0}" CWROLE="${CWROLE:-0}" CALLS="$T/calls" \
       bash -c 'source "$1"; iam_lines' _ "$T/fn.sh" 2>&1 )
   RC=$?
   printf '%s' "$out"
@@ -49,48 +49,31 @@ sed -n '/^iam_lines() {/,/^}/p' lib/setup > "$T/fn.sh"
 
 echo "1. nothing exists yet"
 : > "$T/.env"
-out=$(ROLE=0 USER_EXISTS=0 run)
+out=$(ROLE=0 run)
 contains "role reported absent" "$out" "instance role   none"
-contains "no watchdog key"      "$out" "watchdog key    none"
+contains "watchdog role absent" "$out" "watchdog role   none - cg init creates it"
 
-echo "2. role present"
-out=$(ROLE=1 USER_EXISTS=0 run)
+echo "2. roles present"
+out=$(ROLE=1 run)
 contains "names the role" "$out" "gamevps-box"
-
-echo "3. an ACTIVE watchdog key is shown, with what it can do"
-printf 'GAME_WATCHDOG_AWS_KEY_ID=AKIAFAKE\n' > "$T/.env"
-out=$(ROLE=1 USER_EXISTS=1 KEY=AKIAFAKE run)
-contains "shows the key id"     "$out" "AKIAFAKE"
-contains "says it is active"    "$out" "ACTIVE"
-contains "says what it can do"  "$out" "can stop instances"
-lacks    "not called orphaned"  "$out" "orphaned"
-
-echo "4. a key AWS honours but .env does not hold is flagged as orphaned"
-# Unusable and unauditable: it can never be used again, only revoked.
-: > "$T/.env"
-out=$(ROLE=1 USER_EXISTS=1 KEY=AKIAFAKE run)
-contains "flagged orphaned"     "$out" "orphaned"
-contains "says how to revoke"   "$out" "cg destroy --all"
-
-echo "5. a user with no active key is not reported as a live credential"
-out=$(ROLE=1 USER_EXISTS=1 KEY=None run)
-contains "says it has no key"   "$out" "no active key"
-lacks    "not called ACTIVE"    "$out" "ACTIVE"
+out=$(ROLE=1 CWROLE=1 run)
+contains "names the watchdog role, and what it may do" "$out" "watchdog role   gamevps-cloud-watchdog  (the cloud watchdog: ends only the gamevps box)"
 
 # Exit status, on every path. The function runs inside `set -e` callers, so a
 # non-zero return kills `cg status` and `cg cost` outright - which is exactly
 # what happened: `[[ ... ]] && printf` as the last statement returned 1 whenever
 # its test was false. The output assertions above all passed while that was
 # live, because they captured stdout and ignored $?.
-echo "6. iam_lines returns 0 on every path"
-for spec in "0 0 None" "1 0 None" "1 1 AKIAFAKE" "1 1 None"; do
+echo "3. no IAM user or access key is ever looked up - nothing here uses one"
+: > "$T/calls"
+ROLE=1 CWROLE=1 run >/dev/null
+check "no get-user, no access keys" "$(grep -cE 'get-user|access-key' "$T/calls" || true)" "0"
+
+echo "4. iam_lines returns 0 on every path"
+for spec in "0 0" "1 0" "0 1" "1 1"; do
   set -- $spec
-  : > "$T/.env"
-  ROLE=$1 USER_EXISTS=$2 KEY=$3 run >/dev/null
-  check "role=$1 user=$2 key=$3 (no .env entry)" "$RC" "0"
-  printf 'GAME_WATCHDOG_AWS_KEY_ID=AKIAFAKE\n' > "$T/.env"
-  ROLE=$1 USER_EXISTS=$2 KEY=$3 run >/dev/null
-  check "role=$1 user=$2 key=$3 (key in .env)"   "$RC" "0"
+  ROLE=$1 CWROLE=$2 run >/dev/null
+  check "role=$1 watchdog-role=$2" "$RC" "0"
 done
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

@@ -485,6 +485,24 @@ account_pull() {
 }
 
 # --- push --------------------------------------------------------------------
+# One push at a time. Two can otherwise overlap - AWS terminating the box while
+# the idle watchdog is mid-push, or `cg destroy` pushing over ssh at the same
+# moment - and each would upload the same files and rewrite index.json from its
+# own stale read, dropping the other's entry. The second WAITS rather than
+# giving up: the shutdown push must still run once the first is killed, and it
+# resumes from whatever the first already landed. The lock is released when the
+# process exits, however it exits.
+push_lock() {
+  if ! exec 9>>"$STATE/push.lock"; then
+    log "WARNING: cannot open $STATE/push.lock - pushing without a lock"
+    return 0
+  fi
+  if ! flock -n 9; then
+    log "another push is running - waiting for it to finish"
+    flock 9
+  fi
+}
+
 cmd_push() {
   local force=0 verify=0 a
   for a in "$@"; do
@@ -494,6 +512,7 @@ cmd_push() {
       *) die "unknown option '$a' for push" ;;
     esac
   done
+  push_lock
   [[ -d $LIB ]] || die "$LIB does not exist - nothing to push"
   mountpoint -q "$(dirname "$LIB")" || die "$(dirname "$LIB") is not a mountpoint - refusing to push"
 

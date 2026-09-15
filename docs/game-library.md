@@ -35,10 +35,22 @@ restored immediately afterwards, and `cg init` rewrites the policy on every buil
 thing that just lost your games; `--force` overrides and says what it costs.
 
 (3) is not redundant cover. The box stops itself **three ways nobody typed** - the on-host idle
-watchdog's `shutdown -h`, the CloudWatch alarm, and the off-site watchdog - and the last two call
-`StopInstances`, which AWS turns into a graceful OS shutdown. All three arrive at `ExecStop`, so
-one unit covers all of them. Without it, every automatic stop would wipe the instance store and
-lose whatever was installed since the last explicit stop.
+watchdog's `shutdown -h`, the CloudWatch alarm, and the cloud watchdog - and the last two ask
+AWS to terminate the instance (stop, on demand), which AWS turns into a graceful OS shutdown. All
+three arrive at `ExecStop`, so one unit covers all of them. Without it, every automatic stop would
+wipe the instance store and lose whatever was installed since the last explicit stop.
+
+That push is allowed **30 minutes** (`TimeoutStopSec=1800`). AWS may power off a box it was asked
+to terminate before then, which is why the on-host watchdog pushes *before* it shuts down, where
+no timeout applies, and why `cg destroy` pushes before it deletes anything. A box still going down
+an hour later is forced by the cloud watchdog.
+
+**Only one push runs at a time.** `cg-library push` takes a lock in `/var/lib/cg-library`, and a
+second push waits for the first instead of racing it. Two can otherwise meet - AWS terminating the
+box while the watchdog is mid-push, or `cg destroy` pushing at the same moment - and both would
+upload the same files and rewrite `index.json` from their own stale copies, losing an entry. The
+waiting push skips whatever the first already uploaded. If the external guards both fire, the box
+still shuts down only once, so they cause a single push.
 
 There is deliberately **no periodic timer**. An earlier version pushed every 10 minutes; nothing
 should be uploading a game library, and propagating deletions while doing it, while you are

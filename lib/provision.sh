@@ -116,14 +116,12 @@ else
     # 409 bytes left.
     # host/ is injected as a tarball so those scripts have one home, and so the
     # watchdog is installed by the build itself rather than over ssh afterwards.
-    # The remote watchdog runs on an always-on VPS, not on the box, so it must
-    # not ride along in user-data - it cost ~2 KB of a 16 KB budget.
     # The same comment-stripping as above, for the same reason and with one
     # extra: base64 of a gzip is incompressible, so every byte of host/ costs a
     # full byte of the 16 KB budget while the modules around it cost ~40% of
     # one. Stripping host/ is worth roughly four times as much per line.
     HOST_SRC=$(mktemp -d)
-    tar -c -C host --exclude='remote-watchdog.*' -f - . | tar -x -C "$HOST_SRC"
+    tar -c -C host -f - . | tar -x -C "$HOST_SRC"
     for f in "$HOST_SRC"/*; do
       [[ -f $f ]] || continue
       grep -vE '^[[:space:]]*#([^!]|$)' "$f" > "$f.stripped" && mv "$f.stripped" "$f"

@@ -63,7 +63,7 @@ install -d -o ubuntu -g ubuntu -m 755 /var/lib/cg-library
 # deliberately NO periodic push timer - nothing uploads while you are playing.
 #
 # The shutdown unit is not optional cover. The box stops itself three ways (the
-# on-host idle watchdog, the CloudWatch alarm, and the off-site watchdog) and
+# on-host idle watchdog, the CloudWatch alarm, and the cloud watchdog) and
 # every one of them ends in a graceful OS shutdown, so without this unit all
 # three would wipe the instance store and lose every game installed since the
 # last explicit `cg stop`.

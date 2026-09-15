@@ -108,7 +108,7 @@ and nothing else. Under the old EBS-volume design, `stop` was the only way to ke
 paying for an instance, which is exactly why the old design used a persistent request.
 
 **The guards terminate now, not stop.** All three - the on-host watchdog, the CloudWatch alarm,
-and the off-site watchdog - previously had to issue a stop, because a persistent request
+and the external watchdog, now the cloud watchdog - previously had to issue a stop, because a persistent request
 relaunches on termination and none of them can cancel a request first. Every guard firing
 therefore stranded a box at ~INR 400/month. A one-time request cannot relaunch, so they
 terminate, and `cg status` / `cg watcher` flag any stranded box left over from the old design

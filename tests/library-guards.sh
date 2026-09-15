@@ -125,4 +125,30 @@ out=$(run status)
 n=$(grep -c 'downloading - excluded' <<<"$out" || true)
 check "stays quiet" "${n:-0}" "0"
 
+echo "8. a second push waits for the push already running, then runs"
+# AWS can terminate the box while the idle watchdog is mid-push, and cg destroy
+# can push over ssh at the same moment. Unserialised, both upload the same files
+# and each rewrites index.json from its own stale read. The second must WAIT -
+# not skip - because the shutdown push is the one that has to finish.
+reset; echo "boot-aaaa" > "$T/state/restored"; fill 0; mkdir -p "$T/home"
+rm -f "$T/held"
+( flock 9; touch "$T/held"; sleep 2 ) 9>>"$T/state/push.lock" &
+holder=$!
+while [[ ! -e $T/held ]]; do sleep 0.05; done
+t0=$(date +%s%N)
+out=$(HOME="$T/home" CG_STEAM_SHUTDOWN=0 run push); rc=$?
+waited=$(( ($(date +%s%N) - t0) / 1000000 ))
+wait "$holder"
+contains "says it is waiting" "$out" "another push is running"
+check "then runs to completion" "$rc" "0"
+contains "does the push after waiting" "$out" "no games installed"
+check "did not start until the first let go" "$(( waited >= 1500 ))" "1"
+
+echo "9. a push with nobody else running does not wait"
+reset; echo "boot-aaaa" > "$T/state/restored"; fill 0
+out=$(HOME="$T/home" CG_STEAM_SHUTDOWN=0 run push); rc=$?
+check "exits cleanly" "$rc" "0"
+n=$(grep -c 'another push is running' <<<"$out" || true)
+check "does not claim to wait" "${n:-0}" "0"
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

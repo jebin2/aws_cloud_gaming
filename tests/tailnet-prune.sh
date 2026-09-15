@@ -81,7 +81,7 @@ echo "2b. a node whose connection state is not reported is left alone"
 check "field absent: not deleted" "$(cnt 'DELETE 666')" "0"
 
 echo "3. other machines on the tailnet are never touched"
-check "left the off-site VPS alone" "$(cnt 'DELETE 444')" "0"
+check "left another server alone"  "$(cnt 'DELETE 444')" "0"
 check "left the laptop alone"       "$(cnt 'DELETE 555')" "0"
 
 echo "4. no API token: silent no-op, not an error"

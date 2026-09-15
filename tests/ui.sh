@@ -225,7 +225,7 @@ RESOURCES in ap-south-2
   security group  sg-0123456789abcdef0
   game library    s3://cg-library-example  6218 objects, 161GB  ($4.00/mo)
   instance role   gamevps-box  (lets the box read/write its library bucket)
-  watchdog key    gamevps-watchdog  ACTIVE: AKIAEXAMPLEEXAMPLE00  (can stop instances)
+  watchdog role   gamevps-cloud-watchdog  (the cloud watchdog: ends only the gamevps box)
     inbound       udp/41641 from 0.0.0.0/0
 
 COST GUARDS
@@ -275,7 +275,7 @@ resources in ap-south-2:
   security group  gamevps-sg
   game library    s3://cg-library-example  6218 objects, 161GB  ($4.00/mo)
   instance role   gamevps-box  (lets the box read/write its library bucket)
-  watchdog key    gamevps-watchdog  ACTIVE: AKIAEXAMPLEEXAMPLE00  (can stop instances)
+  watchdog role   gamevps-cloud-watchdog  (the cloud watchdog: ends only the gamevps box)
   idle alarm      present
   budget          $57/month
 not yet billed (Cost Explorer lags about a day):

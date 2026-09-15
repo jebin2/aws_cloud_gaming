@@ -16,8 +16,7 @@
 | **Monthly budget** | **kept** | gone |
 | **S3 archive and its bucket** | **kept** | gone |
 | **`<host>-box` role + instance profile** | **kept** | gone |
-| **`<host>-watchdog` user, its key, the `.env` entries** | **kept** | gone |
-| **Off-site watchdog units on the VPS** | **kept** | gone |
+| **Cloud watchdog: function, schedule, role, logs** | **kept** | gone |
 | Old EBS game volume, if you still have one | **kept** | gone |
 
 **A plain destroy removes only what bills.** The security group, the key pair, the idle-stop

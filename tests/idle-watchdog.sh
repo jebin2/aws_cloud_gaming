@@ -35,7 +35,14 @@ chmod +x "$T/bin"/*
 run() { # run <idle-start> [PUSH_RC]
   rm -f "$T/log"; mkdir -p "$T/state"
   echo "${1:-0}" > "$T/state/idle"
+  # Thresholds no real traffic reaches. The script reads the REAL counters of lo
+  # and of this machine's default-route interface, and keeps them between runs -
+  # so anything the laptop sent or received between two cases counted as use,
+  # reset the idle counter, and "just shuts down" got nothing. It failed a full
+  # suite run while a build was streaming beside it, and failed 4 of 7 every time
+  # with loopback traffic running. These cases test what happens AT the limit.
   LOG="$T/log" PATH="$T/bin:$PATH" PUSH_RC="${2:-0}" \
+  THRESHOLD=999999999999999 RX_THRESHOLD=999999999999999 \
   STATE="$T/state" IDLE_LIMIT=3 BOOT_GRACE=0 IFACE=lo \
   CG_LIBRARY_BIN="$T/bin/cg-library" SHUTDOWN_BIN="$T/bin/shutdown" \
     bash "$SRC" >/dev/null 2>&1
