@@ -1,8 +1,9 @@
 # aws_cloud_gaming
 
 Your own Linux gaming desktop on an AWS GPU instance, streamed to any device over Tailscale with
-Moonlight. Build it when you want to play, destroy it when you stop - your games and your Steam
-login are saved to S3 and come back on the next build.
+[Sunshine](https://github.com/LizardByte/Sunshine) and [Moonlight](https://github.com/moonlight-stream).
+Build it when you want to play, destroy it when you stop - your games and your Steam login are saved
+to S3 and come back on the next build.
 
 > **⚠️ This spends real money on your AWS account.** Measured in `ap-south-2`: a `g6.xlarge` spot
 > instance is about **INR 20/hour** while it exists (on-demand about INR 85/hour); streaming past
@@ -17,7 +18,7 @@ login are saved to S3 and come back on the next build.
   instances at all, and quota approval can take days - start this first.
   [Step-by-step setup](docs/aws-account-setup.md)
 - **[Tailscale](https://tailscale.com)**, installed and logged in, plus a pre-auth key
-- **[Moonlight](https://moonlight-stream.org)** on the device you play from
+- **[Moonlight](https://github.com/moonlight-stream)** on the device you play from
 - `aws` CLI v2, `python3`, `curl` and OpenSSH
 
 ## Get started
