@@ -70,7 +70,11 @@ working AWS profile and a Tailscale account.
 missing. It provisions the instance, arms the cost guards, installs the watchdog, and hands you
 a pairing URL. After that, `cg open` is the whole workflow.
 
-Use `cg check` to run every check and stop before anything is created.
+Use `cg check` to run every check and stop before anything is created. It lists everything the
+laptop is missing at once, and `cg check --fix` installs it: the AWS CLI v2, Tailscale, Moonlight,
+OpenSSH, `curl` and `python3`, through pacman, apt, dnf or zypper. It shows what it will run and
+asks once before using sudo, then starts the Tailscale sign-in and asks for an AWS access key if
+there is none. It creates nothing in AWS and costs nothing.
 
 The build takes about 10-20 minutes - most of it the NVIDIA driver, with the game restore
 running alongside it - and streams its progress, so a slow step looks slow rather than

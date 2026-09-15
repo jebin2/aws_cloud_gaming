@@ -11,16 +11,19 @@ over Tailscale. Build it to play, destroy it when done - your games come back ne
 - **An AWS account on a paid plan, with an approved GPU quota.** The Free Plan cannot launch GPU
   instances at all, and quota approval can take days - start this first.
   [Step-by-step setup](docs/aws-account-setup.md)
-- **[Tailscale](https://tailscale.com)**, installed and logged in, plus a pre-auth key
-- **[Moonlight](https://github.com/moonlight-stream)** on the device you play from
-- `aws` CLI v2, `python3`, `curl` and OpenSSH
+- **A [Tailscale](https://tailscale.com) account**, plus a pre-auth key
+- **[Moonlight](https://github.com/moonlight-stream)** on the device you play from, if that is not
+  this laptop
+
+Everything else the laptop needs - the AWS CLI, Tailscale, Moonlight, OpenSSH, `curl` and
+`python3` - `./cg check --fix` installs after asking, on Linux with pacman, apt, dnf or zypper.
 
 ## Get started
 
     git clone git@github.com:jebin2/aws_cloud_gaming.git
     cd aws_cloud_gaming
     cp .env.example .env     # Tailscale key, alert email, region
-    ./cg check               # every prerequisite - creates nothing
+    ./cg check --fix         # install what the laptop is missing, then check everything
     ./cg init                # build the box and pair Moonlight (10-20 min)
     ./cg open                # play
 

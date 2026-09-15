@@ -29,7 +29,7 @@ reimplementing them.
 | `cg destroy --force` | Destroy even if the mirror failed - **loses the games** |
 | `cg destroy --no-push` | Destroy and leave the archive exactly as it is - locks it first |
 | `cg destroy --all` | The box **and the whole account footprint** - archive, bucket, IAM, budget. Asks you to type `DESTROY-ALL` |
-| `cg check` | Every preflight check, creates nothing |
+| `cg check [--fix]` | Every preflight check, creates nothing. `--fix` first installs what the laptop is missing - AWS CLI v2, Tailscale, Moonlight, OpenSSH, curl, python3 - and signs in to Tailscale and AWS, after asking once |
 | `cg cost` | Month-to-date spend and what still bills |
 | `cg log [what] [--watch]` | `build` \| `steam` \| `watchdog` \| `disk` \| `sunshine` |
 | `cg ssh [cmd]` | Shell on the box - resolves the suffixed tailnet name for you |

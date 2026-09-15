@@ -1081,7 +1081,8 @@ build (changes things)
   cg destroy --no-push       destroy and leave the archive untouched (locks it first)
 
 info (read-only)
-  cg check                   every preflight check, creates nothing
+  cg check [--fix]           every preflight check, creates nothing; --fix installs
+                             what the laptop is missing
   cg cost                    month-to-date spend and what still bills
   cg log [what] [--watch]    build | steam | watchdog | disk | sunshine
   cg ssh [cmd]               shell on the box
@@ -1099,7 +1100,7 @@ EOF
 
 case "$CMD" in
   init)      watchdog_ensure; choose_games; exec lib/setup ;;
-  check)     exec lib/setup check ;;
+  check)     exec lib/setup check "$@" ;;
   # Reports go through cg_report: on a terminal it boxes and colours them, and
   # anywhere else it is `cat`, so a redirected report is byte-for-byte as before.
   status)    { lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true

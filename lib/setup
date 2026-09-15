@@ -706,16 +706,21 @@ for d in devs:
   fi
 }
 
-CHECK_ONLY=0
+CHECK_ONLY=0 FIX=0
 case "${1:-}" in
-  check)   CHECK_ONLY=1 ;;
+  check)   CHECK_ONLY=1
+           case "${2:-}" in
+             "")    ;;
+             --fix) FIX=1 ;;
+             *) echo "usage: setup [check [--fix]|status|cost|clean|rebuild|destroy]" >&2; exit 1 ;;
+           esac ;;
   status)  status; exit 0 ;;
   cost)    cost; exit 0 ;;
   clean)   clean; exit 0 ;;
   rebuild) rebuild ;;
   destroy) destroy_all; exit 0 ;;
   "")      ;;
-  *) echo "usage: setup [check|status|cost|clean|rebuild|destroy]" >&2; exit 1 ;;
+  *) echo "usage: setup [check [--fix]|status|cost|clean|rebuild|destroy]" >&2; exit 1 ;;
 esac
 
 say "preflight"
@@ -723,22 +728,15 @@ say "preflight"
 # --- local tools --------------------------------------------------------------
 # Checked by name, because a missing binary otherwise surfaces as a confusing
 # downstream error - a missing `aws` reads as "credentials not configured".
-need() { command -v "$1" >/dev/null || die "$1 is not installed. $2"; }
-need aws     "Install the AWS CLI v2: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
-need python3 "Install python3 - used to parse AWS pricing responses."
-need ssh     "Install OpenSSH (openssh-client) - the watchdog is installed over ssh."
-need scp     "Install OpenSSH (openssh-client) - host files are copied with scp."
-need curl    "Install curl."
-need tailscale "Install Tailscale: https://tailscale.com/download"
-tailscale status >/dev/null 2>&1 || die "tailscale is installed but not up. Run: sudo tailscale up"
-
-# Streaming needs it, building the box does not - so warn rather than stop, and
-# do not assume a package manager.
-if ! command -v moonlight >/dev/null; then
-  log "WARNING: moonlight not found. You will need it to stream:"
-  log "  Arch/CachyOS  sudo pacman -S moonlight-qt"
-  log "  Debian/Ubuntu sudo apt install moonlight-qt   (or the Flatpak)"
-  log "  Flatpak       flatpak install flathub com.moonlight_stream.Moonlight"
+# All of them at once, and `cg check --fix` installs them.
+# shellcheck source=lib/laptop.sh
+source lib/laptop.sh
+if (( FIX )); then
+  laptop_fix || true
+fi
+if ! laptop_report; then
+  (( FIX )) && die "the laptop is still not ready - see above."
+  die "the laptop is not ready - see above."
 fi
 
 # --- aws access ---------------------------------------------------------------
@@ -793,6 +791,13 @@ if ! aws sts get-caller-identity >/dev/null 2>&1; then
     fi
   fi
 
+  # --fix: the access key is the one thing it cannot install, so ask for it.
+  if (( FIX )) && ! aws sts get-caller-identity >/dev/null 2>&1 && laptop_tty; then
+    log "AWS credentials: paste an access key (IAM > Users > Security credentials > Create access key)"
+    aws configure set region "$REGION"
+    aws configure || true
+  fi
+
   aws sts get-caller-identity >/dev/null 2>&1 || die "AWS credentials are not working.
        Configure them with:  aws configure
        Or point at the .csv AWS gave you:  AWS_KEY_CSV=/path/to/CLI_accessKeys.csv cg init"
@@ -809,6 +814,7 @@ if [[ $plan == FREE ]]; then
        Upgrade to a paid plan: https://console.aws.amazon.com/billing/
        (root user; the upgrade is not reversible)"
 fi
+log_as ok "AWS credentials work"
 log "account plan: $plan"
 
 # --- region, instance type, quota ---------------------------------------------
@@ -887,6 +893,19 @@ if [[ -z ${GAME_ALERT_EMAIL:-} ]]; then
   read -rp "  email for billing alerts (comma-separated for several): " GAME_ALERT_EMAIL
   [[ -n $GAME_ALERT_EMAIL ]] || die "no email given"
   export GAME_ALERT_EMAIL
+fi
+
+# What .env provides - never the values.
+log_as ok "Tailscale auth key and alert email set"
+if [[ -n ${TAILSCALE_API_KEY:-} ]]; then
+  log_as ok "Tailscale API key set - old nodes are pruned and key expiry is turned off"
+else
+  log_as warn "no TAILSCALE_API_KEY - old nodes and key expiry stay manual"
+fi
+if [[ -n ${GAME_NTFY_URL:-} ]]; then
+  log_as ok "notifications on (GAME_NTFY_URL set)"
+else
+  log_as info "notifications off - GAME_NTFY_URL not set"
 fi
 
 if (( CHECK_ONLY )); then
