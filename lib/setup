@@ -793,9 +793,7 @@ if ! aws sts get-caller-identity >/dev/null 2>&1; then
 
   # --fix: the access key is the one thing it cannot install, so ask for it.
   if (( FIX )) && ! aws sts get-caller-identity >/dev/null 2>&1 && laptop_tty; then
-    log "AWS credentials: paste an access key (IAM > Users > Security credentials > Create access key)"
-    aws configure set region "$REGION"
-    aws configure || true
+    laptop_aws_keys "$REGION" || true
   fi
 
   aws sts get-caller-identity >/dev/null 2>&1 || die "AWS credentials are not working.

@@ -131,6 +131,25 @@ laptop_tailscale_up() {
   sudo tailscale up
 }
 
+# laptop_aws_keys <region>: an access key, for --fix when no AWS credentials work.
+# Asks for the two things only a person has - `aws configure` also asked for a
+# default region and an output format, and cg sets the region itself and passes
+# --output on every call. The secret is read without echo.
+laptop_aws_keys() {
+  local region=$1 key_id secret
+  log "AWS credentials: paste an access key (IAM > Users > Security credentials > Create access key)"
+  read -rp "    access key id: " key_id || true
+  read -rsp "    secret access key: " secret || true
+  echo >&2
+  if [[ -z ${key_id:-} || -z ${secret:-} ]]; then
+    log "no key given - nothing saved"
+    return 1
+  fi
+  aws configure set aws_access_key_id "$key_id" \
+    && aws configure set aws_secret_access_key "$secret" \
+    && aws configure set region "$region"
+}
+
 # What is missing, all at once. Returns 0 when nothing is. Moonlight stops it too:
 # cg init pairs it and cg open streams with it.
 # laptop_report 1: after --fix, so what is left is for you to install - suggesting

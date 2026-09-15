@@ -211,4 +211,22 @@ contains "  and stops before AWS"            "$r" "the laptop is not ready"
 contains "  failing"                         "$(sed -n '$p' <<<"$r")" "rc=1"
 check    "cg passes --fix through"           "$(grep -c 'check)     exec lib/setup check "$@"' cg)" "1"
 
+echo "11. --fix asks for an AWS access key: the key and the secret, nothing else"
+fresh python3 ssh curl tailscale moonlight
+fake aws 'exit 0'
+r=$(run 'laptop_aws_keys ap-south-2; echo "rc=$?"' $'AKIDEXAMPLE\nsecretEXAMPLEvalue\n')
+contains "saves the key id"                  "$(cat "$T/log")" "aws configure set aws_access_key_id AKIDEXAMPLE"
+contains "  the secret"                      "$(cat "$T/log")" "aws configure set aws_secret_access_key secretEXAMPLEvalue"
+contains "  and the region cg uses"          "$(cat "$T/log")" "aws configure set region ap-south-2"
+lacks    "never runs aws configure's own prompts" "$(grep -v 'configure set' "$T/log")" "aws configure"
+lacks    "the secret is not printed"         "$r" "secretEXAMPLEvalue"
+contains "  and it succeeds"                 "$r" "rc=0"
+fresh python3 ssh curl tailscale moonlight
+fake aws 'exit 0'
+r=$(run 'laptop_aws_keys ap-south-2; echo "rc=$?"' $'\n\n')
+contains "no key given: said"                "$r" "nothing saved"
+lacks    "  nothing written"                 "$(cat "$T/log")" "configure set"
+contains "  and it fails"                    "$r" "rc=1"
+check    "setup uses it, not aws configure"  "$(grep -c '^    aws configure || true' lib/setup)" "0"
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]
