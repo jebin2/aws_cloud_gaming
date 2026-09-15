@@ -39,8 +39,10 @@ cw_env() { # cw_env <account>
   local idle stuck
   idle=$(cw_int "${GAME_WATCHDOG_IDLE_MIN:-}" 30); (( idle < 10 )) && idle=10
   stuck=$(cw_int "${GAME_WATCHDOG_STUCK_MIN:-}" 60); (( stuck < 40 )) && stuck=40
-  printf 'Variables={CG_TS_HOST=%s,CG_IDLE_MINUTES=%s,CG_BOOT_GRACE_MINUTES=20,CG_STUCK_MINUTES=%s,CG_BUCKET=%s,CG_ARCHIVE_EXPIRY_DAYS=%s}' \
-    "$TS_HOST" "$idle" "$stuck" "$(cw_bucket "$1")" "$(cw_expiry_days)"
+  # CG_NTFY_URL only when set: an unset notification URL is simply absent.
+  local ntfy; ntfy=$(cg_ntfy_url)
+  printf 'Variables={CG_TS_HOST=%s,CG_IDLE_MINUTES=%s,CG_BOOT_GRACE_MINUTES=20,CG_STUCK_MINUTES=%s,CG_BUCKET=%s,CG_ARCHIVE_EXPIRY_DAYS=%s%s}' \
+    "$TS_HOST" "$idle" "$stuck" "$(cw_bucket "$1")" "$(cw_expiry_days)" "${ntfy:+,CG_NTFY_URL=$ntfy}"
 }
 
 # Describe and read metrics anywhere; stop, terminate and tag ONLY the instance

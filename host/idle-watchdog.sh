@@ -21,6 +21,17 @@ STATE="${STATE:-/var/lib/idle-watchdog}"
 # to power off a machine is not something to verify by running it for real.
 CG_LIBRARY_BIN="${CG_LIBRARY_BIN:-/usr/local/bin/cg-library}"
 SHUTDOWN_BIN="${SHUTDOWN_BIN:-/sbin/shutdown}"
+# From /etc/cg-notify.conf, via the unit's EnvironmentFile. Unset is off.
+CG_NTFY_URL="${CG_NTFY_URL:-}"
+
+# Best effort, never fatal: nothing about a notification may stop a shutdown.
+notify() { # notify <title> <message>
+  [[ -n $CG_NTFY_URL ]] || return 0
+  curl -fsS -m 5 -H "Title: $(hostname -s 2>/dev/null || echo box): $1" -H "Priority: high" \
+       -H "Tags: zzz" -d "$2" "$CG_NTFY_URL" >/dev/null 2>&1 \
+    || logger -t idle-watchdog "notification not sent (ignored)"
+  return 0
+}
 
 mkdir -p "$STATE"
 
@@ -74,14 +85,18 @@ if (( idle >= IDLE_LIMIT )); then
   # takes, and the extra minutes cost a few rupees of spot time against a
   # re-download measured in hours. ExecStop stays as the backstop for stops this
   # watchdog did not initiate.
+  mirrored="no game mirror on this box"
   if [[ -x $CG_LIBRARY_BIN ]]; then
     logger -t idle-watchdog "idle limit reached - mirroring the library before shutdown"
     if runuser -u ubuntu -- "$CG_LIBRARY_BIN" push 2>&1 | logger -t idle-watchdog; then
       logger -t idle-watchdog "mirror complete"
+      mirrored="games mirrored to S3"
     else
       logger -t idle-watchdog "mirror FAILED - shutting down anyway; games since the last push are lost"
+      mirrored="the game mirror FAILED - games since the last push are lost"
     fi
   fi
+  notify "idle box shutting down" "No stream or download for ${IDLE_LIMIT} minutes; $mirrored."
   logger -t idle-watchdog "shutting down"
   "$SHUTDOWN_BIN" -h now "idle watchdog"
 fi

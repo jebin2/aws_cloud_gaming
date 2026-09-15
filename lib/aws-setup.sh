@@ -4,7 +4,9 @@ set -euo pipefail
 
 # .env is written by provision.sh. Anything already exported wins over it.
 if [[ -f "$(dirname "$0")/../.env" ]]; then
-  while IFS='=' read -r k v; do
+  # `|| [[ -n ... ]]`: `read` returns non-zero on a last line with no newline, so
+  # without it the final entry of .env - usually the one just added - was ignored.
+  while IFS='=' read -r k v || [[ -n $k ]]; do
     [[ $k == GAME_* && -z ${!k:-} ]] && export "$k=$v"
   done < "$(dirname "$0")/../.env"
 fi

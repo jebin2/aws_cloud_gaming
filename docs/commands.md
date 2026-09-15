@@ -35,6 +35,7 @@ reimplementing them.
 | `cg ssh [cmd]` | Shell on the box - resolves the suffixed tailnet name for you |
 | `cg watcher [--watch]` | Every guard, and whether each is genuinely armed - including what the cloud watchdog last decided, and when |
 | `cg watchdog [status\|check\|logs\|install\|remove]` | The cloud watchdog: schedule and recent decisions; `check` runs it now as a dry run |
+| `cg notify` | Send a test push notification to `GAME_NTFY_URL` |
 | `cg ping [--watch]` | Latency, and **direct vs DERP relay** - the usual cause of a bad session |
 
 `--region` and `--host` override `.env` without editing it; `--json` works on `ping` and

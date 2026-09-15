@@ -49,6 +49,11 @@ SINCE_TAG = "cg-going-down-since"
 BUCKET = os.environ.get("CG_BUCKET", "")
 EXPIRY_DAYS = int(os.environ.get("CG_ARCHIVE_EXPIRY_DAYS", "0") or 0)
 LAST_SEEN_TAG = "cg-last-seen"
+# Records which countdown the 24-hour warning was sent for, so it goes out once.
+WARNED_TAG = "cg-warned"
+
+# ntfy push notifications. Off unless cg passed a URL.
+NTFY_URL = os.environ.get("CG_NTFY_URL", "")
 # A launch history longer than this is treated as unreadable, not as empty.
 TRAIL_PAGES = 40
 DELETE_ROUNDS = 1000
@@ -56,6 +61,27 @@ DELETE_ROUNDS = 1000
 
 def say(msg):
     print("cg-watchdog: " + msg, flush=True)
+
+
+def send(url, title, message, priority, tags):
+    import urllib.request
+    req = urllib.request.Request(url, data=message.encode("utf-8"), method="POST",
+                                 headers={"Title": title, "Priority": priority, "Tags": tags})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        resp.read()
+
+
+def notify(title, message, priority="default", tags=""):
+    """Best effort. A notification that cannot be sent is logged and ignored: it
+    must never change what a guard decides or does."""
+    if not NTFY_URL:
+        return False
+    try:
+        send(NTFY_URL, "%s: %s" % (TS_HOST, title), message, priority, tags)
+        return True
+    except Exception as exc:
+        say("notification not sent (ignored): %s" % exc)
+        return False
 
 
 def handler(event, context):
@@ -79,6 +105,9 @@ def run_all(ec2, cw, s3, trail, now, dry=False):
         say("archive: check FAILED - nothing deleted: %s" % exc)
         failure = failure or exc
     if failure:
+        # At most hourly: a watchdog that is failing fails every 5 minutes.
+        if not dry and now.minute < 5:
+            notify("cloud watchdog failing", str(failure)[:300], "urgent", "rotating_light")
         raise failure
     return result
 
@@ -185,6 +214,8 @@ def decide(ec2, cw, inst, now, dry):
     call(ec2, verb, iid)
     say("%s %s - %s issued; the box mirrors its games to S3 as it shuts down"
         % (iid, why, verb))
+    notify("idle box %s" % ("terminated" if verb == "terminate" else "stopped"),
+           "%s %s. Its games are mirrored to S3 as it shuts down." % (iid, why), "high", "zzz")
     return {"instance": iid, "action": verb, "reason": why}
 
 
@@ -234,6 +265,8 @@ def going_down(ec2, inst, now, dry):
         return {"instance": iid, "action": "would-force-" + verb, "reason": why}
     call(ec2, verb, iid, force=True)
     say("%s %s - FORCED %s, skipping the OS shutdown" % (iid, why, verb))
+    notify("stuck shutdown forced", "%s %s - forced %s, skipping the OS shutdown." % (iid, why, verb),
+           "high", "warning")
     return {"instance": iid, "action": "force-" + verb, "reason": why}
 
 
@@ -344,11 +377,28 @@ def last_seen(tags):
     return None
 
 
-def stamp(s3, tags, when):
+def set_tag(s3, tags, key, value):
     # put_bucket_tagging REPLACES the whole set, so keep every other tag.
-    kept = [t for t in tags if t.get("Key") != LAST_SEEN_TAG]
-    s3.put_bucket_tagging(Bucket=BUCKET, Tagging={
-        "TagSet": kept + [{"Key": LAST_SEEN_TAG, "Value": iso(when)}]})
+    kept = [t for t in tags if t.get("Key") != key]
+    s3.put_bucket_tagging(Bucket=BUCKET, Tagging={"TagSet": kept + [{"Key": key, "Value": value}]})
+
+
+def stamp(s3, tags, when):
+    set_tag(s3, tags, LAST_SEEN_TAG, iso(when))
+
+
+def warn_once(s3, tags, seen, idle, left):
+    """The 24-hour warning, once per countdown. It is recorded on the bucket against
+    the last-seen mark it was sent for, so a new box - a new mark - arms it again,
+    and a send that failed is retried at the next hourly check."""
+    if not NTFY_URL:
+        return
+    if any(t.get("Key") == WARNED_TAG and t.get("Value") == iso(seen) for t in tags):
+        return
+    if notify("game archive deleted in %s" % span(left),
+              "No box for %s. Launch one to keep the games, or set GAME_ARCHIVE_EXPIRY_DAYS=0."
+              % span(idle), "high", "warning"):
+        set_tag(s3, tags, WARNED_TAG, iso(seen))
 
 
 def last_launch(trail, since, now):
@@ -440,8 +490,11 @@ def expire_archive(ec2, s3, trail, now, dry=False):
         say("archive: no last-seen mark yet - counting %d days from now" % EXPIRY_DAYS)
         return "started"
     if now - seen < window:
+        left = window - (now - seen)
         say("archive: kept - last used %s ago; deleted in %s unless a box is launched"
-            % (span(now - seen), span(window - (now - seen))))
+            % (span(now - seen), span(left)))
+        if not dry and left <= timedelta(hours=24):
+            warn_once(s3, tags, seen, now - seen, left)
         return "kept"
 
     launched = last_launch(trail, now - window, now)
@@ -460,4 +513,7 @@ def expire_archive(ec2, s3, trail, now, dry=False):
         return "would-delete"
     removed = empty_and_delete(s3)
     say("archive: unused for %s - DELETED s3://%s (%d objects)" % (span(now - seen), BUCKET, removed))
+    notify("game archive deleted",
+           "Unused for %s: %d objects removed from S3. The next cg init starts empty, and Steam "
+           "downloads the games again." % (span(now - seen), removed), "high", "wastebasket")
     return "deleted"

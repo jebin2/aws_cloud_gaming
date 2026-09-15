@@ -135,6 +135,10 @@ else
     #
     # A presigned GET, valid two hours, so the box needs no credentials at the
     # point in the build where it has none. The URL is ~600 bytes.
+    # The notification URL rides in this bundle rather than in user-data: the
+    # bundle is a private object behind a two-hour presigned URL, and
+    # install-watchdog.sh turns the file into a root-only config. Absent is off.
+    [[ -n ${CG_NTFY_URL:-} ]] && printf '%s\n' "$CG_NTFY_URL" > "$HOST_SRC/notify.url"
     HOST_TGZ=$(mktemp); tar -cz -C "$HOST_SRC" . > "$HOST_TGZ" 2>/dev/null
     aws s3 cp "$HOST_TGZ" "s3://$S3_BUCKET/boot/host.tgz" --region "$REGION" >/dev/null \
       || { echo "could not upload host/ to s3://$S3_BUCKET/boot/host.tgz"; exit 1; }

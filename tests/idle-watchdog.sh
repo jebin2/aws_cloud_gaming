@@ -82,4 +82,19 @@ echo "4. no cg-library installed: shut down without pretending to mirror"
 rm -f "$T/bin/cg-library"
 check "just shuts down" "$(run 3)" "SHUTDOWN "
 
+echo "5. a notification before shutting down - only when a URL is configured"
+printf '#!/usr/bin/env bash\necho "CURL $*" >> "$LOG"\nexit ${CURL_RC:-0}\n' > "$T/bin/curl"
+printf '#!/usr/bin/env bash\ntrue\n' > "$T/bin/cg-library"
+chmod +x "$T/bin/curl" "$T/bin/cg-library"
+run 3 >/dev/null
+check "no URL: no request"              "$(grep -c '^CURL' "$T/log" || true)" "0"
+CG_NTFY_URL=https://ntfy.sh/t run 3 >/dev/null
+check "URL: one request, to it"         "$(grep -c '^CURL.*https://ntfy.sh/t' "$T/log")" "1"
+check "  sent before the shutdown"      "$(grep -oE '^(CURL|SHUTDOWN)' "$T/log" | tr '\n' ' ')" "CURL SHUTDOWN "
+check "  and says the games were mirrored" "$(grep -c '^CURL.*games mirrored to S3' "$T/log")" "1"
+CG_NTFY_URL=https://ntfy.sh/t CURL_RC=7 run 3 >/dev/null
+check "a failed request still shuts down" "$(grep -c '^SHUTDOWN' "$T/log")" "1"
+CG_NTFY_URL=https://ntfy.sh/t run 0 >/dev/null
+check "below the limit: nothing sent"   "$(grep -c '^CURL' "$T/log" || true)" "0"
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

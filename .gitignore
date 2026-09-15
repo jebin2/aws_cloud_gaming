@@ -19,3 +19,7 @@ clauderesumeid.txt
 # Cached Cost Explorer figures, so cg status can show the month without
 # paying $0.01 per call. Local, regenerable, and account-specific.
 .cg-cache/
+
+# The ntfy URL, written beside the host scripts for a box. Never in the repo: on
+# ntfy.sh the topic is all it takes to read and post.
+host/notify.url

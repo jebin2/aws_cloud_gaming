@@ -25,6 +25,11 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, "lambda")
 import cloud_watchdog as w
 w.IDLE_MINUTES, w.BOOT_GRACE_MINUTES, w.STUCK_MINUTES, w.THRESHOLD = 30, 20, 60, 10485760
+w.NTFY_URL = ""; SEND_FAILS = False
+def fake_send(url, title, message, priority, tags):
+    if SEND_FAILS: raise Exception("network down")
+    calls.append("notify:" + title)
+w.send = fake_send
 
 NOW = datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc)
 def ago(m): return NOW - timedelta(minutes=m)
@@ -209,6 +214,11 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, "lambda")
 import cloud_watchdog as w
 w.TS_HOST, w.BUCKET, w.EXPIRY_DAYS, w.TRAIL_PAGES = "gamevps", "cg-library-test", 14, 3
+w.NTFY_URL = ""; SEND_FAILS = False
+def fake_send(url, title, message, priority, tags):
+    if SEND_FAILS: raise Exception("network down")
+    calls.append("notify:" + title)
+w.send = fake_send
 NOW = datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc)
 def ago(days=0, hours=0, minutes=0): return NOW - timedelta(days=days, hours=hours, minutes=minutes)
 def iso(t): return t.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -240,9 +250,12 @@ class S3:
         if s.tags is None: raise AwsError("NoSuchTagSet")
         return {"TagSet": s.tags}
     def put_bucket_tagging(s, Bucket, Tagging):
+        old = {t["Key"]: t["Value"] for t in (s.tags or [])}
         s.tags = Tagging["TagSet"]
-        calls.append("stamp:" + [t["Value"] for t in s.tags if t["Key"] == "cg-last-seen"][0])
-        if len(s.tags) > 1: calls.append("keys:" + "+".join(t["Key"] for t in s.tags))
+        new = {t["Key"]: t["Value"] for t in s.tags}
+        if new.get("cg-last-seen") != old.get("cg-last-seen"): calls.append("stamp:" + new["cg-last-seen"])
+        if new.get("cg-warned") != old.get("cg-warned"): calls.append("warned:" + new["cg-warned"])
+        if len(s.tags) > 1 and "cg-warned" not in new: calls.append("keys:" + "+".join(t["Key"] for t in s.tags))
     def list_objects_v2(s, Bucket, MaxKeys=1000):
         n = min(MaxKeys, s.objects)
         return {"Contents": [{"Key": "k%d" % i} for i in range(n)]} if n else {}
@@ -386,5 +399,46 @@ check "on: delete is scoped to that bucket" "$(pol 14 | grep -c '"Resource":"arn
 pol 14 | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null \
   && { echo "  ok   on: the policy is valid JSON"; pass=$((pass+1)); } \
   || { echo "  FAIL on: the policy is not valid JSON"; fail=$((fail+1)); }
+
+echo "34. notifications from the idle check - only when a URL is set"
+r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; ec2 = EC2([inst(spot=True)]); cw = CW(QUIET)')
+check "terminated, then notified" "$(field 2 "$r")" "terminate:i-a,notify:gamevps: idle box terminated"
+r=$(case_ 'ec2 = EC2([inst(spot=True)]); cw = CW(QUIET)')
+lacks "no URL: no notification" "$(field 2 "$r")" "notify"
+r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; ec2 = EC2([inst(spot=False)]); cw = CW(QUIET)')
+check "on demand says stopped" "$(field 2 "$r")" "stop:i-a,notify:gamevps: idle box stopped"
+r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; ec2 = EC2([inst()]); cw = CW(QUIET); dry = True')
+lacks "a dry run never notifies" "$(field 2 "$r")" "notify"
+r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; ec2 = EC2([inst(state="shutting-down", reason="User initiated (2026-09-15 10:00:00 GMT)")]); cw = CW()')
+check "forced, then notified" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown,notify:gamevps: stuck shutdown forced"
+r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; SEND_FAILS = True; ec2 = EC2([inst()]); cw = CW(QUIET)')
+check "a failed send changes nothing" "$(field 1 "$r")|$(field 2 "$r")" "terminate|terminate:i-a"
+contains "  and is logged" "$r" "notification not sent (ignored)"
+
+echo "35. the 24-hour archive warning - once per countdown"
+MARK='s3 = S3(tags=[{"Key": "cg-last-seen", "Value": iso(ago(hours=3))}])'
+r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; $MARK")
+check "warned, and recorded against that mark" "$(field 1 "$r")|$(field 2 "$r")" \
+  "kept|notify:gamevps: game archive deleted in 21h,warned:2026-09-15T09:00:00Z"
+r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; s3 = S3(tags=[{'Key': 'cg-last-seen', 'Value': iso(ago(hours=3))}, {'Key': 'cg-warned', 'Value': iso(ago(hours=3))}])")
+check "already warned for this mark: silent" "$(field 2 "$r")" "-"
+r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; s3 = S3(tags=[{'Key': 'cg-last-seen', 'Value': iso(ago(hours=3))}, {'Key': 'cg-warned', 'Value': iso(ago(days=9))}])")
+contains "a warning for an OLD mark does not count" "$(field 2 "$r")" "notify:gamevps: game archive deleted in 21h"
+r=$(arch_ "w.NTFY_URL = 'u'; s3 = S3(tags=[{'Key': 'cg-last-seen', 'Value': iso(ago(days=3))}])")
+check "more than 24h left: silent" "$(field 2 "$r")" "-"
+r=$(arch_ "w.NTFY_URL = 'u'; SEND_FAILS = True; w.EXPIRY_DAYS = 1; $MARK")
+check "a failed send is not recorded, so the next hour retries" "$(field 2 "$r")" "-"
+r=$(arch_ "w.EXPIRY_DAYS = 1; $MARK")
+check "no URL: no warning, no tag" "$(field 2 "$r")" "-"
+r=$(arch_ "w.NTFY_URL = 'u'; dry = True; w.EXPIRY_DAYS = 1; $MARK")
+check "a dry run: no warning, no tag" "$(field 2 "$r")" "-"
+
+echo "36. archive deleted, and a failing watchdog, are notified"
+r=$(arch_ "w.NTFY_URL = 'u'")
+contains "deleted, then notified" "$(field 2 "$r")" "delete-bucket,notify:gamevps: game archive deleted"
+r=$(arch_ "w.NTFY_URL = 'u'; mode = 'all'; ec2 = EC2([('i-a', 'running')], fail_idle=True)")
+contains "failing: notified" "$(field 2 "$r")" "notify:gamevps: cloud watchdog failing"
+r=$(arch_ "w.NTFY_URL = 'u'; mode = 'all'; now = NOW + timedelta(minutes=17); ec2 = EC2([('i-a', 'running')], fail_idle=True)")
+lacks "but at most once an hour" "$(field 2 "$r")" "notify"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

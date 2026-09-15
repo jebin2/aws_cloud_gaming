@@ -25,7 +25,9 @@ C_INIT="cg init"; C_OPEN="cg open"; C_STOP="cg stop"
 C_STATUS="cg status"; C_COST="cg cost"
 
 if [[ -f .env ]]; then
-  while IFS= read -r line; do
+  # `|| [[ -n ... ]]`: `read` returns non-zero on a last line with no newline, so
+  # without it the final entry of .env - usually the one just added - was ignored.
+  while IFS= read -r line || [[ -n $line ]]; do
     [[ $line =~ ^[[:space:]]*# ]] && continue
     [[ $line =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
     export "${line%%=*}=${line#*=}"
@@ -932,6 +934,14 @@ fi
 say "arming the budget before anything launches"
 lib/aws-setup.sh budget 2>&1 | cg_relay '    ' || log "budget setup failed - continuing"
 
+# Notifications are off unless GAME_NTFY_URL is set. A value that is set but
+# malformed is said once, here, rather than silently sending nothing.
+if [[ -n ${GAME_NTFY_URL:-} && -z $(cg_ntfy_url) ]]; then
+  log "GAME_NTFY_URL is not a valid ntfy topic or URL - notifications are off (test with: cg notify)"
+fi
+# provision.sh does not source common.sh; it puts this beside the on-host watchdog.
+CG_NTFY_URL=$(cg_ntfy_url); export CG_NTFY_URL
+
 say "provisioning instance"
 # On a terminal, stderr joins the relay too. provision.sh's children report on
 # stderr - library-aws.sh must, because its stdout is captured as the bucket
@@ -1027,6 +1037,13 @@ grep -v '^GAME_TS_NODE=' .env 2>/dev/null > "$tmp" || true
 echo "GAME_TS_NODE=$TS_NODE" >> "$tmp"
 cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
 
+# Key expiry used to be a manual step after every build (see STEP 2 at the end).
+# The API token that prunes stale nodes can turn it off, so it is done here, as
+# soon as the node exists - and shown as a step only when it could not be.
+EXPIRY_OFF=0
+say "turning off Tailscale key expiry for '$TS_NODE'"
+if lib/tailnet-expiry.sh "$TS_NODE" 2>&1 | cg_relay ''; then EXPIRY_OFF=1; fi
+
 # The Steam library lives on local NVMe, mirrored to S3 (see 16-library.sh).
 # Defined once: the last time this path moved, three hardcoded copies went stale
 # and reported a correctly registered library as "NOT registered".
@@ -1069,8 +1086,9 @@ fi
 
 say "building the box - live progress below (10-20 min)"
 stream_build "ubuntu@$TS_NODE" "$KEY" \
-  || die "the build did not finish. The instance is still running and still
-       billing - stop it with $C_STOP once you have looked at the log."
+  || { cg_notify "build failed" "The box is still running and billing. Look at: cg log build" high warning
+       die "the build did not finish. The instance is still running and still
+       billing - stop it with $C_STOP once you have looked at the log."; }
 
 # The build already installed this (15-watchdog.sh), so the box has been
 # guarded since minute one. This pass refreshes it from the local host/ - which
@@ -1078,6 +1096,13 @@ stream_build "ubuntu@$TS_NODE" "$KEY" \
 say "refreshing the on-host watchdog"
 log "copying host/ ..."
 scp -q -i "$KEY" -o StrictHostKeyChecking=accept-new -r host "ubuntu@$TS_NODE:"
+# The notification URL goes beside the scripts, as the build put it there; removing
+# it here is what turns notifications off on a box that already had them.
+if [[ -n $CG_NTFY_URL ]]; then
+  printf '%s\n' "$CG_NTFY_URL" | $SSH 'cat > host/notify.url'
+else
+  $SSH 'rm -f host/notify.url'
+fi
 log "installing units ..."
 $SSH 'cd host && sudo ./install-watchdog.sh' 2>&1 | cg_relay '    '
 
@@ -1188,7 +1213,6 @@ if wait_for_steam "ubuntu@$TS_NODE" "$KEY" 1500; then
 fi
 
 if (( ${PAIRED:-0} )); then
-  REMAINING="One step remains - it is a Tailscale setting, not an AWS one."
   STEP1="  STEP 1 - pair Moonlight   [DONE automatically]
   ------------------------------------------------------------------
   Nothing to do - Sunshine has an account and Moonlight is paired, both
@@ -1199,7 +1223,6 @@ if (( ${PAIRED:-0} )); then
   Steam: $STEAM_MSG
 "
 else
-  REMAINING="Two steps remain."
   STEP1="  STEP 1 - pair Moonlight   [ACTION NEEDED]
   ------------------------------------------------------------------
   a) Run this. It prints a 4-digit PIN and waits:
@@ -1217,25 +1240,43 @@ else
 "
 fi
 
+if (( ${EXPIRY_OFF:-0} )); then
+  STEP2="  STEP 2 - Tailscale key expiry   [DONE automatically]
+  ------------------------------------------------------------------
+  Turned off through the Tailscale API, so '$TS_NODE' will not drop off
+  the tailnet when its key would have expired.
+"
+else
+  STEP2="  STEP 2 - stop the Tailscale key expiring   [ACTION NEEDED]
+  ------------------------------------------------------------------
+  Tailscale keys expire after ~180 days by default. When this one does,
+  the node drops off the tailnet and $C_OPEN hangs waiting for it.
+  cg init does this itself when TAILSCALE_API_KEY is set and valid; why it
+  could not this time is under "turning off Tailscale key expiry" above.
+
+       https://login.tailscale.com/admin/machines
+
+  Find \"$TS_NODE\" -> the \"...\" menu -> Disable key expiry.
+
+  To skip this on every future rebuild: define a tag in your tailnet
+  ACL policy and generate the auth key with it. Tagged nodes do not
+  expire at all, so this step disappears permanently.
+"
+fi
+case $(( (${PAIRED:-0} ? 0 : 1) + (${EXPIRY_OFF:-0} ? 0 : 1) )) in
+  0) REMAINING="Nothing is left to do." ;;
+  1) REMAINING="One step remains." ;;
+  *) REMAINING="Two steps remain." ;;
+esac
+
+cg_notify "box ready" "Built, paired and running - it bills by the hour. Play with: cg open" default video_game
 _cg_section_end 0
 cat <<EOF | cg_block "🎉" "Setup complete"
 
 setup complete. $REMAINING
 
 $STEP1
-  STEP 2 - stop the Tailscale key expiring
-  ------------------------------------------------------------------
-  Tailscale keys expire after ~180 days by default. When this one does,
-  the node drops off the tailnet and $C_OPEN hangs waiting for it.
-
-       https://login.tailscale.com/admin/machines
-
-  Find "$TS_NODE" -> the "..." menu -> Disable key expiry.
-
-  To skip this on every future rebuild: define a tag in your tailnet
-  ACL policy and generate the auth key with it. Tagged nodes do not
-  expire at all, so this step disappears permanently.
-
+$STEP2
   Budget alerts are already configured and need no confirmation - see
   $C_STATUS. AWS Budgets emails you directly, which is why this no
   longer needs the root-only "Receive Billing Alerts" toggle or an SNS

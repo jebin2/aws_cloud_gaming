@@ -180,3 +180,33 @@ anything else in the account.
 **Why "a box", not "an access".** Seeing every S3 read would need CloudTrail data events, which are
 billed. A box launched or running is the free signal that the archive is still wanted, and a box
 kept running longer than 14 days holds the archive the whole time.
+
+## Notifications
+
+Push notifications through [ntfy](https://ntfy.sh), **off unless `GAME_NTFY_URL` is set** in
+`.env` - a topic name, or a full URL for a self-hosted ntfy. `cg notify` sends a test.
+
+| Event | Sent by |
+|---|---|
+| an idle box terminated or stopped | the cloud watchdog |
+| an idle box shutting down, and whether its games were mirrored | the on-host watchdog |
+| a stuck shutdown forced | the cloud watchdog |
+| the game archive 24 hours from deletion - once per countdown | the cloud watchdog |
+| the game archive deleted | the cloud watchdog |
+| the cloud watchdog failing - at most once an hour | the cloud watchdog |
+| a build finished, or failed | `cg init` |
+
+**Never load-bearing.** A notification that cannot be sent is logged and ignored: it never
+changes what a guard decides, and a dry run sends nothing. Delivery is best effort, so nothing
+relies on one arriving.
+
+**The topic is a secret.** On ntfy.sh, anyone who knows a topic can read and post to it. Use a
+long random name, keep it in `.env` (gitignored), and never commit it; `cg` never prints it. The
+messages carry nothing sensitive - the host name, an instance id, what happened. For a private
+channel, self-host ntfy and set its URL instead.
+
+**How it reaches each sender.** The cloud watchdog gets it as an environment variable, so the
+next `cg init` or `cg watchdog install` applies a change. The box gets it inside its private host
+bundle, as a root-only `/etc/cg-notify.conf`; `cg init` refreshes it, and removing the setting
+removes the file. The 24-hour warning is recorded on the archive bucket as `cg-warned`, so the
+hourly check sends it once, and retries next hour if the send failed.

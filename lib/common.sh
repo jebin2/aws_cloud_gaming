@@ -788,3 +788,26 @@ stranded_spot_note() {  # stranded_spot_note <region> <instance-id>; prints noth
     printf "                 reclaim it: cg destroy\n";
   }'
 }
+
+# --- notifications ---------------------------------------------------------------
+# GAME_NTFY_URL: a topic on ntfy.sh, or a full URL for any ntfy server. Prints the
+# URL to post to, or nothing - unset and malformed are both "off".
+cg_ntfy_url() {
+  local v="${GAME_NTFY_URL:-}"
+  [[ -n $v ]] || return 0
+  [[ $v == http://* || $v == https://* ]] || v="https://ntfy.sh/$v"
+  [[ $v =~ ^https?://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9_-]{1,64}$ ]] || return 0
+  printf '%s' "$v"
+}
+
+# Best effort, and never fatal: a notification that cannot be sent is logged and
+# the command carries on. The URL is never printed - on ntfy.sh, the topic is all
+# it takes to read and post.
+cg_notify() { # cg_notify <title> <message> [priority] [tags]
+  local url; url=$(cg_ntfy_url)
+  [[ -n $url ]] || return 0
+  curl -fsS -m 5 -H "Title: ${TS_HOST:-gamevps}: $1" -H "Priority: ${3:-default}" \
+       -H "Tags: ${4:-}" -d "$2" "$url" >/dev/null 2>&1 \
+    || log "notification not sent (ignored)"
+  return 0
+}

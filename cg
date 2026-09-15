@@ -31,7 +31,9 @@ done
 # .env, parsed rather than sourced: a malformed line in a sourced file executes
 # as a command. Anything already exported wins, so --region/--host stick.
 if [[ -f .env ]]; then
-  while IFS= read -r line; do
+  # `|| [[ -n ... ]]`: `read` returns non-zero on a last line with no newline, so
+  # without it the final entry of .env - usually the one just added - was ignored.
+  while IFS= read -r line || [[ -n $line ]]; do
     [[ $line =~ ^[[:space:]]*# ]] && continue
     [[ $line =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
     k="${line%%=*}"; [[ -n ${!k:-} ]] && continue
@@ -718,6 +720,23 @@ watchdog_ensure() {
   return 0
 }
 
+# A test message, to check the phone end before relying on it. The topic is not
+# printed: on ntfy.sh, anyone who knows it can read and post to it.
+cmd_notify() {
+  [[ -n ${GAME_NTFY_URL:-} ]] || die "set GAME_NTFY_URL in .env - a long random topic name, or a full ntfy URL"
+  local url host
+  url=$(cg_ntfy_url)
+  [[ -n $url ]] || die "GAME_NTFY_URL is not a topic (letters, digits, - and _, up to 64) or an http(s)://host/topic URL"
+  host=${url#*://}; host=${host%%/*}
+  say "sending a test notification"
+  if curl -fsS -m 10 -H "Title: $TS_HOST: test" -H "Tags: bell" \
+       -d "Notifications from cloud_gaming reach this device." "$url" >/dev/null 2>&1; then
+    log "sent to $host - check the ntfy app"
+  else
+    die "could not send to $host - check the URL, and that this machine can reach it"
+  fi
+}
+
 cmd_watchdog() {
   case "${1:-status}" in
     install) say "installing the cloud watchdog"
@@ -1069,6 +1088,7 @@ info (read-only)
   cg watcher [--watch]       every guard, and whether each is armed
   cg watchdog [status|check|logs|install|remove]
                              layer 3: the cloud watchdog (Lambda); check is a dry run
+  cg notify                  send a test notification to GAME_NTFY_URL
   cg ping [--watch]          latency, and direct vs DERP relay
 
 flags
@@ -1104,6 +1124,7 @@ case "$CMD" in
   pair)      cmd_pair ;;
   library|lib) cmd_library "$@" ;;
   watchdog)  cmd_watchdog "$@" ;;
+  notify)    cmd_notify ;;
   log|logs)  cmd_log "$@" ;;
   ssh)       if [[ $# -gt 0 ]]; then box "$@"; else need_node; exec ssh -i "$KEY" \
                -o StrictHostKeyChecking=accept-new "ubuntu@$(tailscale ip -4 "$TS_NODE")"; fi ;;

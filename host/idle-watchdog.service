@@ -4,4 +4,6 @@ After=tailscaled.service
 
 [Service]
 Type=oneshot
+# Written by install-watchdog.sh only when notifications are configured.
+EnvironmentFile=-/etc/cg-notify.conf
 ExecStart=/usr/local/bin/idle-watchdog.sh

@@ -33,9 +33,11 @@ And locally:
 - optionally a **Tailscale API access token** (a different credential, from the same page) as
   `TAILSCALE_API_KEY`. With it, `cg init` prunes offline nodes before each launch (and
   `cg destroy --all` deletes them), so rebuilds keep the clean hostname instead of climbing
-  `gamevps-1`, `-2`, `-3`. Only nodes named exactly `<GAME_TS_HOST>` or `<GAME_TS_HOST>-<number>`
-  are ever touched. These tokens expire after 90 days; when one does, the prune says so plainly
-  rather than skipping the cleanup silently
+  `gamevps-1`, `-2`, `-3` - and turns off key expiry on the new box, which would otherwise drop
+  off the tailnet after ~180 days. Only nodes named exactly `<GAME_TS_HOST>` or
+  `<GAME_TS_HOST>-<number>` are ever touched, and only a connected one gets its expiry turned off.
+  These tokens expire after 90 days; when one does, `cg init` says so plainly, and key expiry
+  shows as a manual step again
 - **Moonlight** (`moonlight-qt`) - only needed to stream, so `setup` warns rather than stops
 - `aws` CLI v2 configured, `python3`, `curl`, and OpenSSH (`ssh`/`scp`)
 
