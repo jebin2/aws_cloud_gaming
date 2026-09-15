@@ -21,21 +21,53 @@ cw_aws() { aws --region "$REGION" "$@"; }
 
 cw_int() { [[ ${1:-} =~ ^[0-9]+$ ]] && printf '%s' "$1" || printf '%s' "$2"; }
 
+# Days with no box before the game archive is deleted. 0 turns it off; any other
+# value is floored at 7, so a typo cannot delete every game the next morning.
+cw_expiry_days() {
+  local v; v=$(cw_int "${GAME_ARCHIVE_EXPIRY_DAYS:-}" 14)
+  (( v > 0 && v < 7 )) && v=7
+  printf '%s' "$v"
+}
+
+# The archive bucket, named exactly as lib/library-aws.sh names it.
+cw_bucket() { # cw_bucket <account>
+  if [[ -n ${GAME_S3_BUCKET:-} ]]; then printf '%s' "$GAME_S3_BUCKET"
+  else printf 'cg-library-%s' "$(printf '%s' "$1-$TS_HOST" | sha256sum | cut -c1-12)"; fi
+}
+
 # Floors, not just defaults. A stuck limit under the shutdown push's 30 minutes
 # would force a box down while it is still mirroring its games.
-cw_env() {
+cw_env() { # cw_env <account>
   local idle stuck
   idle=$(cw_int "${GAME_WATCHDOG_IDLE_MIN:-}" 30); (( idle < 10 )) && idle=10
   stuck=$(cw_int "${GAME_WATCHDOG_STUCK_MIN:-}" 60); (( stuck < 40 )) && stuck=40
-  printf 'Variables={CG_TS_HOST=%s,CG_IDLE_MINUTES=%s,CG_BOOT_GRACE_MINUTES=20,CG_STUCK_MINUTES=%s}' \
-    "$TS_HOST" "$idle" "$stuck"
+  printf 'Variables={CG_TS_HOST=%s,CG_IDLE_MINUTES=%s,CG_BOOT_GRACE_MINUTES=20,CG_STUCK_MINUTES=%s,CG_BUCKET=%s,CG_ARCHIVE_EXPIRY_DAYS=%s}' \
+    "$TS_HOST" "$idle" "$stuck" "$(cw_bucket "$1")" "$(cw_expiry_days)"
 }
 
 # Describe and read metrics anywhere; stop, terminate and tag ONLY the instance
 # tagged with this host name, and tag it only with the one key the watchdog
 # uses; write only its own log group. It cannot launch anything, read the game
-# archive, or touch IAM.
+# archive beyond expiring it, or touch IAM.
+#
+# Archive expiry adds CloudTrail lookups and list/tag/delete on the ONE archive
+# bucket - and only while expiry is on. With GAME_ARCHIVE_EXPIRY_DAYS=0 the role
+# cannot delete a single game.
 cw_policy() { # cw_policy <account>
+  local b extra=""
+  b=$(cw_bucket "$1")
+  if (( $(cw_expiry_days) > 0 )); then
+    extra=$(cat <<JSON
+,
+ {"Sid":"ArchiveExpiryLookups","Effect":"Allow","Action":"cloudtrail:LookupEvents","Resource":"*"},
+ {"Sid":"ArchiveExpiryBucket","Effect":"Allow",
+  "Action":["s3:ListBucket","s3:ListBucketMultipartUploads","s3:GetBucketTagging","s3:PutBucketTagging","s3:DeleteBucket"],
+  "Resource":"arn:aws:s3:::$b"},
+ {"Sid":"ArchiveExpiryObjects","Effect":"Allow","Action":["s3:DeleteObject","s3:AbortMultipartUpload"],
+  "Resource":"arn:aws:s3:::$b/*"}
+JSON
+)
+  fi
   cat <<JSON
 {"Version":"2012-10-17","Statement":[
  {"Sid":"Look","Effect":"Allow",
@@ -49,7 +81,7 @@ cw_policy() { # cw_policy <account>
   "Condition":{"StringEquals":{"ec2:ResourceTag/Name":"$TS_HOST"},
                "ForAllValues:StringEquals":{"aws:TagKeys":["cg-going-down-since"]}}},
  {"Sid":"OwnLogs","Effect":"Allow","Action":["logs:CreateLogStream","logs:PutLogEvents"],
-  "Resource":"arn:aws:logs:$REGION:$1:log-group:$CW_LOGS:*"}
+  "Resource":"arn:aws:logs:$REGION:$1:log-group:$CW_LOGS:*"}$extra
 ]}
 JSON
 }
@@ -72,7 +104,8 @@ PY
 # Everything about the function that is not its code, as one short hash kept in
 # its description - so drift in any of it reads as "not current".
 cw_fp() { # cw_fp <role-arn>
-  printf '%s|%s|%s|60|128|%s\n' "$CW_RUNTIME" "cloud_watchdog.handler" "$1" "$(cw_env)" \
+  local acct; acct=$(sed -nE 's/^arn:aws:iam::([0-9]+):role\/.*/\1/p' <<<"$1")
+  printf '%s|%s|%s|300|128|%s\n' "$CW_RUNTIME" "cloud_watchdog.handler" "$1" "$(cw_env "$acct")" \
     | sha256sum | cut -c1-12
 }
 
@@ -85,7 +118,7 @@ except Exception: sys.exit(1)' "$1" "$(cw_policy "$2")"
 # One parallel round of read-only calls: is every piece there and as this repo
 # would make it? Sets CW_DRIFT to what is not, and CW_LAST_* to the last
 # decision logged in the past hour.
-CW_DRIFT="" CW_LAST_MS="" CW_LAST_MSG=""
+CW_DRIFT="" CW_LAST_MS="" CW_LAST_MSG="" CW_ARCH_MS="" CW_ARCH_MSG=""
 cw_current() {
   local d; d=$(mktemp -d)
   cw_aws lambda get-function-configuration --function-name "$CW_NAME" \
@@ -102,6 +135,7 @@ cw_current() {
       --start-time "$(( ($(date +%s) - 3600) * 1000 ))" --filter-pattern '"cg-watchdog:"' \
       --query 'events[-1].[timestamp,message]' --output text > "$d/last" 2>/dev/null \
       || echo NOGROUP > "$d/last"; } &
+  cw_archive_query > "$d/archive" 2>/dev/null &
   local sha; sha=$(cw_zip "$d/fn.zip")
   wait
 
@@ -127,6 +161,7 @@ cw_current() {
     IFS=$'\t' read -r CW_LAST_MS CW_LAST_MSG < "$d/last" || true
     CW_LAST_MSG=${CW_LAST_MSG#cg-watchdog: }
   fi
+  cw_archive_parse "$(cat "$d/archive" 2>/dev/null)"
   rm -rf "$d"
   [[ -z $CW_DRIFT ]]
 }
@@ -147,7 +182,44 @@ cw_report_last() {
   (( $(date +%s) - CW_LAST_MS / 1000 > 900 )) \
     && log "  ^ nothing for $(( ($(date +%s) - CW_LAST_MS / 1000) / 60 )) min but it runs every 5 - it is not running. Check: cg watchdog status"
   cw_blind_note "$CW_LAST_MSG"
+  log "game archive: $(cw_archive_text)"
   return 0
+}
+
+# What the archive check last decided, from the Lambda's own log - so what init
+# and status say is exactly what the check will do, not a second opinion.
+cw_archive_query() {
+  cw_aws logs filter-log-events --log-group-name "$CW_LOGS" \
+    --start-time "$(( ($(date +%s) - 7200) * 1000 ))" --filter-pattern '"cg-watchdog: archive"' \
+    --query 'events[-1].[timestamp,message]' --output text
+}
+
+cw_archive_parse() { # cw_archive_parse "<ms>\t<message>"
+  local ms msg
+  CW_ARCH_MS="" CW_ARCH_MSG=""
+  IFS=$'\t' read -r ms msg <<<"${1:-}"
+  if [[ ${ms:-} =~ ^[0-9]+$ && ${msg:-} == "cg-watchdog: archive:"* ]]; then
+    CW_ARCH_MS=$ms CW_ARCH_MSG=${msg#cg-watchdog: archive: }
+  fi
+  return 0
+}
+
+# One line: off, the latest decision and its age, or not checked yet.
+cw_archive_text() {
+  local days; days=$(cw_expiry_days)
+  if (( days == 0 )); then
+    printf 'kept forever (GAME_ARCHIVE_EXPIRY_DAYS=0)'
+  elif [[ -n $CW_ARCH_MS ]]; then
+    printf '%s  (checked %s ago)' "$CW_ARCH_MSG" "$(cw_age "$CW_ARCH_MS")"
+  else
+    printf 'deleted after %s days with no box - not checked yet (hourly)' "$days"
+  fi
+}
+
+# For reports that did not run cw_current: fetch, then describe.
+cw_archive_line() {
+  (( $(cw_expiry_days) == 0 )) || cw_archive_parse "$(cw_archive_query 2>/dev/null)"
+  cw_archive_text
 }
 
 cw_blind_note() {
@@ -198,7 +270,7 @@ cw_install() {
       log "updating the function settings"
       cw_aws lambda update-function-configuration --function-name "$CW_NAME" \
         --runtime "$CW_RUNTIME" --handler cloud_watchdog.handler --role "$role_arn" \
-        --timeout 60 --memory-size 128 --environment "$(cw_env)" \
+        --timeout 300 --memory-size 128 --environment "$(cw_env "$acct")" \
         --description "cloud_gaming layer 3 idle watchdog cfg=$fp" >/dev/null 2>&1 \
         || { log "could not update the settings of $CW_NAME"; rm -rf "$d"; return 1; }
       cw_aws lambda wait function-updated-v2 --function-name "$CW_NAME" 2>/dev/null || true
@@ -210,7 +282,7 @@ cw_install() {
     for i in $(seq 1 12); do
       if out=$(cw_aws lambda create-function --function-name "$CW_NAME" \
             --runtime "$CW_RUNTIME" --handler cloud_watchdog.handler --role "$role_arn" \
-            --timeout 60 --memory-size 128 --environment "$(cw_env)" \
+            --timeout 300 --memory-size 128 --environment "$(cw_env "$acct")" \
             --description "cloud_gaming layer 3 idle watchdog cfg=$fp" \
             --zip-file "fileb://$d/fn.zip" 2>&1 >/dev/null); then
         break
@@ -303,6 +375,7 @@ cw_status() {
   if [[ -n $rule ]]; then printf '  schedule  every 5 minutes, %s\n' "$rule"
   else printf '  schedule  none\n'; fi
   printf '  can end   only the instance tagged %s\n' "$TS_HOST"
+  printf '  archive   %s\n' "$(cw_archive_line)"
   echo "  recent decisions:"
   local ev ms msg n=0
   ev=$(cw_aws logs filter-log-events --log-group-name "$CW_LOGS" \

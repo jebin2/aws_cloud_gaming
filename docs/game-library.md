@@ -301,3 +301,12 @@ which was safe when the games were on a separate volume and is now the fastest w
 The NVIDIA and DXVK shader caches sit on the root volume (`~/.cache`), so they survive a reboot
 but not a destroy. The Fossilize cache that matters most is *inside* the library, at
 `steamapps/shadercache`, and is mirrored with it.
+
+## The archive expires after 14 days unused
+
+With no box, the archive is the only thing that bills - about INR 350 a month for 160 GB. After
+14 days with no box launched or running, the cloud watchdog empties and deletes the bucket. The
+next `cg init` recreates it empty: Steam downloads the games fresh, and asks you to sign in again
+because the saved login lived in the archive too. `GAME_ARCHIVE_EXPIRY_DAYS=0` in `.env` keeps it
+forever. `cg status` shows the countdown. How it decides, and why it errs towards keeping:
+[cost-guards.md](cost-guards.md#game-archive-expiry).

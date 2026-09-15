@@ -132,3 +132,51 @@ The budget is an **AWS Budget**, not a CloudWatch `EstimatedCharges` alarm. That
 subscription every recipient must confirm by email. Miss either and it sits in
 `INSUFFICIENT_DATA` forever - armed in appearance only, which is worse than no alarm. A budget
 emails its subscribers directly and works the moment it is created.
+
+## Game archive expiry
+
+With no box, the only thing that bills is the S3 game archive: about **$4 a month (INR 350)** for
+160 GB. Everything else left behind - the cloud watchdog, the budget, IAM roles, the security group
+and key pair - costs nothing. So after **14 days with no box**, the cloud watchdog deletes the
+archive.
+
+| `.env` | Effect |
+|---|---|
+| unset | 14 days |
+| `GAME_ARCHIVE_EXPIRY_DAYS=30` | 30 days |
+| `GAME_ARCHIVE_EXPIRY_DAYS=3` | 7 days - the floor, so a typo cannot delete every game overnight |
+| `GAME_ARCHIVE_EXPIRY_DAYS=0` | **off**: kept forever, and the role loses every delete permission |
+
+The next `cg init` applies a change. `cg status`, `cg init` and `cg watchdog status` show what the
+check last decided, in its own words:
+
+    game archive    kept - last used 3d ago; deleted in 11d unless a box is launched  (checked 12 min ago)
+
+**What is lost.** Every archived game, which Steam then downloads fresh; the saved Steam login, so
+the next box asks for Steam Guard; and saves of any game without Steam Cloud. `cg init` recreates
+the empty bucket by itself.
+
+**How it decides.** Once an hour, and deleting only when two independent records agree:
+
+1. A `gamevps` instance exists in any state, stopped included: **kept**, and the bucket's
+   `cg-last-seen` tag is set to now.
+2. No bucket: nothing to do.
+3. No `cg-last-seen` tag yet: **kept**, and counting starts now.
+4. The tag is under 14 days old: **kept**, with the countdown.
+5. CloudTrail's free 90-day history shows a successful `RunInstances` of an instance tagged
+   `gamevps` in the window: **kept**, and the tag moves to that launch.
+6. One more look for an instance, then: **deleted** - objects, abandoned multipart uploads, and the
+   bucket.
+
+**It fails closed.** A CloudTrail error, a history too long to read in full, an unreadable event or
+tag, or S3 refusing a delete all stop it with nothing removed - and the invocation is recorded as an
+error, which `cg watchdog status` shows. A dry run (`cg watchdog check`) runs every step and deletes
+nothing.
+
+**The permissions it adds**, only while expiry is on: `cloudtrail:LookupEvents`, and list, tag,
+delete and abort-upload on **the one archive bucket**. It still cannot touch IAM, the budget, or
+anything else in the account.
+
+**Why "a box", not "an access".** Seeing every S3 read would need CloudTrail data events, which are
+billed. A box launched or running is the free signal that the archive is still wanted, and a box
+kept running longer than 14 days holds the archive the whole time.

@@ -92,6 +92,7 @@ check "watchdog status"             "$(CG_COLOR=never cg watchdog status)" "$(ca
   function  gamevps-cloud-watchdog  Active python3.13
   schedule  every 5 minutes, ENABLED
   can end   only the instance tagged gamevps
+  archive   deleted after 14 days with no box - not checked yet (hourly)
   recent decisions:
     $t1 i-0123456789abcdef0 quiet (peak 0.9 MB per 5 min), but watched for only 25m of the 30m needed
     $t2 no running instance tagged gamevps - nothing to do

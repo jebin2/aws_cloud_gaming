@@ -45,3 +45,7 @@ of it, and because the bucket name is derived from your account id it comes back
 One consequence of that identical name: S3 holds a deleted bucket name for a few minutes, and
 recreating it fails with `OperationAborted` in the meantime. `library-aws.sh` waits that out
 (8 attempts, 15s apart) rather than failing an init that would have worked on the second run.
+
+**A kept archive does not stay forever.** After 14 days with no box, the cloud watchdog deletes
+the S3 archive, because it is the only thing still billing. `GAME_ARCHIVE_EXPIRY_DAYS=0` keeps it;
+[cost-guards.md](cost-guards.md#game-archive-expiry) has how it decides.

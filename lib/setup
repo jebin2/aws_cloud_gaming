@@ -31,6 +31,9 @@ if [[ -f .env ]]; then
     export "${line%%=*}=${line#*=}"
   done < .env
 fi
+# For the game archive's expiry line in status. Needs REGION and TS_HOST.
+# shellcheck source=lib/cloud-watchdog.sh
+source lib/cloud-watchdog.sh
 
 box() {
   ssh -i "$HOME/.ssh/${TS_HOST}.pem" -o StrictHostKeyChecking=accept-new \
@@ -182,6 +185,8 @@ status() {
   # Budget notifications go straight to the address - there is no confirmation
   # step to get stuck on, which is the whole reason for using them.
   printf '  budget alerts   %s configured\n' "${nsubs:-0}"
+  # What the cloud watchdog will do to the game archive, in its own words.
+  printf '  game archive    %s\n' "$(cw_archive_line)"
 
   echo
   echo "LOCAL"

@@ -88,7 +88,7 @@ flowchart TB
 | | Lives on | Survives `cg destroy`? |
 |---|---|---|
 | OS, driver, Sunshine, Steam client | root EBS | no - rebuilt by the next `cg init` |
-| Your games, their saves and shader caches | NVMe, archived to S3 | **yes**, in S3 |
+| Your games, their saves and shader caches | NVMe, archived to S3 | **yes**, in S3 - deleted after 14 days with no box ([why](cost-guards.md#game-archive-expiry)) |
 | Steam login | root EBS, archived to S3 | **yes**, in S3 |
 | Proton and the Steam runtime | NVMe | no - Steam re-downloads them in under a minute |
 | Security group, key pair, budget, S3 bucket | AWS | **yes** - free, reused |

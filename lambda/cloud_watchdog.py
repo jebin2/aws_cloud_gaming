@@ -20,7 +20,15 @@ still stuck going down an hour later is forced, whichever guard started it.
 
 Every decision is printed with the numbers behind it, prefixed "cg-watchdog:",
 which is what `cg watchdog logs` filters on.
+
+It also expires the GAME ARCHIVE. Once no box has existed for EXPIRY_DAYS, the
+S3 bucket - the only thing that bills while no box exists - is emptied and
+deleted. Deleting the only copy of every game is not something to get wrong, so
+the check fails closed: two independent records must both say "unused" - the
+bucket's own last-seen mark, refreshed while a box exists, and CloudTrail's
+RunInstances history - and any error, gap or unreadable answer keeps it.
 """
+import json
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -37,16 +45,42 @@ PERIOD = 300
 # in-guest `shutdown -h`), so the next run can tell how long it has been stuck.
 SINCE_TAG = "cg-going-down-since"
 
+# Archive expiry. 0 turns it off; cg floors any other value at 7 days.
+BUCKET = os.environ.get("CG_BUCKET", "")
+EXPIRY_DAYS = int(os.environ.get("CG_ARCHIVE_EXPIRY_DAYS", "0") or 0)
+LAST_SEEN_TAG = "cg-last-seen"
+# A launch history longer than this is treated as unreadable, not as empty.
+TRAIL_PAGES = 40
+DELETE_ROUNDS = 1000
+
 
 def say(msg):
     print("cg-watchdog: " + msg, flush=True)
 
 
 def handler(event, context):
-    import boto3  # in the Lambda runtime; the tests pass fakes to run() instead
+    import boto3  # in the Lambda runtime; the tests pass fakes instead
     dry = isinstance(event, dict) and bool(event.get("dry_run"))
-    return run(boto3.client("ec2"), boto3.client("cloudwatch"),
-               datetime.now(timezone.utc), dry)
+    return run_all(boto3.client("ec2"), boto3.client("cloudwatch"), boto3.client("s3"),
+                   boto3.client("cloudtrail"), datetime.now(timezone.utc), dry)
+
+
+def run_all(ec2, cw, s3, trail, now, dry=False):
+    """The idle check, then the archive check. The second runs even when the
+    first fails, and the invocation still counts as an error afterwards."""
+    failure = None
+    try:
+        result = run(ec2, cw, now, dry)
+    except Exception as exc:
+        failure, result = exc, {"decisions": []}
+    try:
+        result["archive"] = expire_archive(ec2, s3, trail, now, dry)
+    except Exception as exc:
+        say("archive: check FAILED - nothing deleted: %s" % exc)
+        failure = failure or exc
+    if failure:
+        raise failure
+    return result
 
 
 def error_code(exc):
@@ -266,3 +300,164 @@ def tag_time(inst):
             return None
         return t
     return None
+
+
+# --- archive expiry ------------------------------------------------------------
+
+def iso(t):
+    return t.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def span(delta):
+    hours = max(0, int(delta.total_seconds() // 3600))
+    if hours < 24:
+        return "%dh" % hours
+    return "%dd" % (hours // 24) if hours % 24 == 0 else "%dd %dh" % (hours // 24, hours % 24)
+
+
+def boxes(ec2):
+    """Every instance of this host that still exists, stopped ones included."""
+    resp = ec2.describe_instances(Filters=[
+        {"Name": "tag:Name", "Values": [TS_HOST]},
+        {"Name": "instance-state-name",
+         "Values": ["pending", "running", "shutting-down", "stopping", "stopped"]}])
+    return [i["InstanceId"] for r in resp.get("Reservations", []) for i in r.get("Instances", [])]
+
+
+def read_tags(s3):
+    try:
+        return s3.get_bucket_tagging(Bucket=BUCKET).get("TagSet", [])
+    except Exception as exc:
+        if error_code(exc) == "NoSuchTagSet":
+            return []
+        raise
+
+
+def last_seen(tags):
+    for tag in tags:
+        if tag.get("Key") == LAST_SEEN_TAG:
+            try:
+                return datetime.strptime(tag["Value"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            except (KeyError, ValueError):
+                # Unreadable is not "never": refuse rather than guess.
+                raise RuntimeError("unreadable %s tag %r" % (LAST_SEEN_TAG, tag.get("Value")))
+    return None
+
+
+def stamp(s3, tags, when):
+    # put_bucket_tagging REPLACES the whole set, so keep every other tag.
+    kept = [t for t in tags if t.get("Key") != LAST_SEEN_TAG]
+    s3.put_bucket_tagging(Bucket=BUCKET, Tagging={
+        "TagSet": kept + [{"Key": LAST_SEEN_TAG, "Value": iso(when)}]})
+
+
+def last_launch(trail, since, now):
+    """When this host's box was last launched since `since`, or None. Raises when
+    the history cannot be read in full - an unfinished lookup is not an empty one."""
+    kwargs = {"LookupAttributes": [{"AttributeKey": "EventName", "AttributeValue": "RunInstances"}],
+              "StartTime": since, "EndTime": now, "MaxResults": 50}
+    for _ in range(TRAIL_PAGES):
+        resp = trail.lookup_events(**kwargs)
+        for event in resp.get("Events", []):
+            try:
+                detail = json.loads(event["CloudTrailEvent"])
+            except (KeyError, TypeError, ValueError):
+                raise RuntimeError("unreadable CloudTrail event")
+            if detail.get("errorCode"):
+                continue                      # a launch that failed launched nothing
+            specs = ((detail.get("requestParameters") or {}).get("tagSpecificationSet") or {}).get("items", [])
+            for spec in specs:
+                if spec.get("resourceType", "instance") != "instance":
+                    continue
+                if any(t.get("key") == "Name" and t.get("value") == TS_HOST for t in spec.get("tags", [])):
+                    return event["EventTime"]
+        if not resp.get("NextToken"):
+            return None
+        kwargs["NextToken"] = resp["NextToken"]
+    raise RuntimeError("CloudTrail launch history longer than %d pages" % TRAIL_PAGES)
+
+
+def empty_and_delete(s3):
+    removed = 0
+    for _ in range(DELETE_ROUNDS):
+        page = s3.list_objects_v2(Bucket=BUCKET, MaxKeys=1000)
+        keys = [{"Key": o["Key"]} for o in page.get("Contents", [])]
+        if not keys:
+            break
+        out = s3.delete_objects(Bucket=BUCKET, Delete={"Objects": keys, "Quiet": True})
+        if out.get("Errors"):
+            raise RuntimeError("S3 refused to delete %d objects" % len(out["Errors"]))
+        removed += len(keys)
+    else:
+        raise RuntimeError("bucket still not empty after %d rounds" % DELETE_ROUNDS)
+    # Incomplete multipart uploads appear in no listing and block the delete.
+    for _ in range(DELETE_ROUNDS):
+        uploads = s3.list_multipart_uploads(Bucket=BUCKET).get("Uploads", [])
+        if not uploads:
+            break
+        for up in uploads:
+            s3.abort_multipart_upload(Bucket=BUCKET, Key=up["Key"], UploadId=up["UploadId"])
+    s3.delete_bucket(Bucket=BUCKET)
+    return removed
+
+
+def expire_archive(ec2, s3, trail, now, dry=False):
+    if EXPIRY_DAYS <= 0 or not BUCKET:
+        return None
+    # Hourly: one invocation in twelve lands in the first 5 minutes of an hour.
+    # A dry run always looks, so `cg watchdog check` can show the countdown.
+    if not dry and now.minute >= 5:
+        return None
+    window = timedelta(days=EXPIRY_DAYS)
+
+    live = boxes(ec2)
+    if live:
+        if not dry:
+            try:
+                tags = read_tags(s3)
+                seen = last_seen(tags)
+                if seen is None or now - seen >= timedelta(hours=1):
+                    stamp(s3, tags, now)
+            except Exception as exc:
+                if error_code(exc) not in ("NoSuchBucket", "404", "NotFound"):
+                    raise
+        say("archive: kept - a box exists (%s)" % ", ".join(live))
+        return "in-use"
+
+    try:
+        s3.head_bucket(Bucket=BUCKET)
+    except Exception as exc:
+        if error_code(exc) in ("404", "NoSuchBucket", "NotFound"):
+            say("archive: none in s3://%s - nothing to expire" % BUCKET)
+            return "absent"
+        raise
+
+    tags = read_tags(s3)
+    seen = last_seen(tags)
+    if seen is None:
+        if not dry:
+            stamp(s3, tags, now)
+        say("archive: no last-seen mark yet - counting %d days from now" % EXPIRY_DAYS)
+        return "started"
+    if now - seen < window:
+        say("archive: kept - last used %s ago; deleted in %s unless a box is launched"
+            % (span(now - seen), span(window - (now - seen))))
+        return "kept"
+
+    launched = last_launch(trail, now - window, now)
+    if launched is not None:
+        if not dry and launched > seen:
+            stamp(s3, tags, launched)
+        say("archive: kept - a box was launched %s ago (CloudTrail)" % span(now - launched))
+        return "kept"
+
+    # Both records say unused. One last look, in case a box started meanwhile.
+    if boxes(ec2):
+        say("archive: kept - a box appeared during the check")
+        return "in-use"
+    if dry:
+        say("archive: unused for %s - WOULD DELETE s3://%s (dry run)" % (span(now - seen), BUCKET))
+        return "would-delete"
+    removed = empty_and_delete(s3)
+    say("archive: unused for %s - DELETED s3://%s (%d objects)" % (span(now - seen), BUCKET, removed))
+    return "deleted"
