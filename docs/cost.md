@@ -5,7 +5,7 @@ guards keep those charges bounded is in [cost-guards.md](cost-guards.md).
 
 ## What things cost
 
-Four separate charges. The third surprises people, and the fourth is the only API that bills.
+Five separate charges. The fourth surprises people, and the fifth is the only API that bills.
 
 **Per hour running.** `g6.xlarge` in `ap-south-2` is $0.9664/hr plus $0.005/hr for the public
 IPv4 while it runs.
@@ -13,6 +13,12 @@ IPv4 while it runs.
 **Per month regardless.** A gp3 volume is $0.0912/GB-month: 50 GB is about **$4.50/month,
 charged while the instance is stopped**. `GAME_DISK_GB` is the only lever, and it is far easier
 to choose at launch than to resize later - EBS volumes cannot be shrunk.
+
+**Per month, even with no box.** The game archive in S3 is $0.025/GB-month: a 160 GB game is
+about **$4/month (INR 350)**, and it is the one thing that keeps billing after `cg destroy`. After
+**14 days with no box, the cloud watchdog deletes it** - games, the saved Steam sign-in, and saves
+of games without Steam Cloud. `GAME_ARCHIVE_EXPIRY_DAYS` sets the days, and `0` turns deletion
+off. How it decides: [cost-guards.md](cost-guards.md#game-archive-expiry).
 
 **Per hour streaming.** Streaming video is data transfer out. At 20 Mbps you push ~9 GB/hour.
 The first 100 GB/month is free - about 11 hours - and after that it is $0.1093/GB, or

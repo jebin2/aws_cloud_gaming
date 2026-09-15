@@ -4,12 +4,7 @@ Your own Linux gaming desktop on an AWS GPU, streamed to any device with
 [Sunshine](https://github.com/LizardByte/Sunshine) and [Moonlight](https://github.com/moonlight-stream)
 over Tailscale. Build it to play, destroy it when done - your games come back next time.
 
-> **⚠️ This spends real money on your AWS account.** Measured in `ap-south-2`: a `g6.xlarge` spot
-> instance is about **INR 20/hour** while it exists (on-demand about INR 85/hour); streaming past
-> AWS's free 100 GB a month adds about **INR 86/hour**; and the game archive is about
-> **INR 350/month** for a 160 GB game. `cg init` sets up a budget that emails you and four
-> independent guards that stop a forgotten box, but they are software - check `cg cost`.
-> No warranty, see [LICENSE](LICENSE). Details: [docs/cost.md](docs/cost.md).
+> **⚠️ This spends real money on your AWS account.** No warranty, see [LICENSE](LICENSE). Details: [docs/cost.md](docs/cost.md).
 
 ## What you need
 
