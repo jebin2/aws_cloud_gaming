@@ -100,13 +100,13 @@ def handler(event, context):
     # else runs for these: they answer "is the box really gone", not "is it idle".
     if isinstance(event, dict) and event.get("detail-type") in (STATE_EVENT, SPOT_EVENT):
         return state_changed(boto3.client("ec2"), event, boto3.client("cloudwatch"),
-                             datetime.now(timezone.utc))
+                             datetime.now(timezone.utc), boto3.client("ssm"))
     dry = isinstance(event, dict) and bool(event.get("dry_run"))
     return run_all(boto3.client("ec2"), boto3.client("cloudwatch"), boto3.client("s3"),
                    boto3.client("ssm"), boto3.client("cloudtrail"), datetime.now(timezone.utc), dry)
 
 
-def state_changed(ec2, event, cw=None, now=None):
+def state_changed(ec2, event, cw=None, now=None, ssm=None):
     """An instance finished stopping or terminating. The box cannot report its own
     end - by then it is gone - so this is the notification that says it really is,
     however it ended: a watchdog, cg destroy, a spot interruption, the console.
@@ -126,6 +126,9 @@ def state_changed(ec2, event, cw=None, now=None):
              for t in i.get("Tags", []) if t.get("Key") == "Name"]
     if TS_HOST not in names:
         return {"state": "not-ours"}
+    now = now or datetime.now(timezone.utc)
+    if state in ("terminated", "stopped"):
+        mark_gone(ssm, now)
     if state == "interruption":
         say("%s spot interruption warning - AWS reclaims it in about 2 minutes" % iid)
         notify("spot box being reclaimed",
@@ -133,12 +136,12 @@ def state_changed(ec2, event, cw=None, now=None):
                % iid, "urgent", "warning")
     elif state == "terminated":
         # "No longer bills" was half true while the games sit in S3, so say what still does.
-        note = archive_note(cw, now or datetime.now(timezone.utc))
+        note = archive_note(cw, now)
         say("%s terminated - compute no longer bills.%s" % (iid, note))
         notify("box terminated", "%s is gone - compute no longer bills.%s" % (iid, note),
                "default", "white_check_mark")
     else:
-        note = archive_note(cw, now or datetime.now(timezone.utc))
+        note = archive_note(cw, now)
         say("%s stopped - compute no longer bills, its disk still does.%s" % (iid, note))
         notify("box stopped", "%s is stopped - compute no longer bills, its disk still does.%s" % (iid, note),
                "default", "white_check_mark")
@@ -494,6 +497,18 @@ def archive_note(cw, now):
     else:
         note += " Kept until you delete it: cg destroy --all."
     return note
+
+
+def mark_gone(ssm, now):
+    """The archive's countdown starts when the box really ended. Otherwise it starts at
+    the last hourly check that happened to see it - up to an hour earlier. A write
+    that fails is said and ignored: the hourly mark still stands."""
+    if EXPIRY_DAYS <= 0 or not BUCKET or ssm is None:
+        return
+    try:
+        mark_put(ssm, "archive-last-seen", iso(now))
+    except Exception as exc:
+        say("could not record when the box ended - the hourly mark stands: %s" % exc)
 
 
 def warn_once(ssm, seen, idle, left):

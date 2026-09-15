@@ -241,7 +241,8 @@ flowchart TB
 With no box, the S3 archive is the only thing still billing, so it is deleted after 14 days
 unused. That deletes the only copy of every game, so both records must agree first - the mark the
 watchdog keeps fresh while a box exists, and CloudTrail's launch history - and anything uncertain
-keeps it. Until it deletes, it makes no S3 request at all: its marks are free SSM parameters, and
+keeps it. The countdown starts when AWS reports the box gone, not at the last hourly look. Until it
+deletes, it makes no S3 request at all: its marks are free SSM parameters, and
 whether there is an archive comes from S3's free daily size metric. `cg watchdog check` runs every
 step as a dry run. Details, and what is lost:
 [cost-guards.md](cost-guards.md#game-archive-expiry).

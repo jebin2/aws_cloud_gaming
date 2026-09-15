@@ -512,7 +512,12 @@ class CWS:
         if s.fails: raise AwsError("Throttling")
         if s.gb is None: return {"Datapoints": []}
         return {"Datapoints": [{"Timestamp": datetime(2026, 9, 14, tzinfo=timezone.utc), "Average": s.gb * 1073741824}]}
-ec2 = EC2(); cw = CWS(); ev = event("terminated"); mode = "direct"
+class SSMS:
+    def __init__(s): s.fails = False
+    def put_parameter(s, Name, Value, Type, Overwrite):
+        if s.fails: raise AwsError("AccessDeniedException")
+        calls.append("%s=%s" % (Name.rsplit("/", 1)[1].replace("archive-", ""), Value))
+ec2 = EC2(); cw = CWS(); ssm = SSMS(); ev = event("terminated"); mode = "direct"
 exec(sys.argv[1])
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
@@ -522,12 +527,12 @@ with contextlib.redirect_stdout(buf):
             class Boto3:
                 def client(s, name):
                     made.append(name)
-                    return ec2 if name == "ec2" else cw if name == "cloudwatch" else object()
+                    return ec2 if name == "ec2" else cw if name == "cloudwatch" else ssm if name == "ssm" else object()
             sys.modules["boto3"] = Boto3()
             res = w.handler(ev, None)
             calls.append("clients:" + "+".join(made))
         else:
-            res = w.state_changed(ec2, ev, cw, NOW)
+            res = w.state_changed(ec2, ev, cw, NOW, ssm)
         res = res.get("state", "-")
     except Exception as e:
         res = "RAISED"; print("error: %s" % e)
@@ -537,9 +542,9 @@ PY
 
 echo "37. the box confirmed gone, from EC2's own state-change event"
 r=$(state_ '')
-check "terminated: notified" "$(field 1 "$r")|$(field 2 "$r")" "terminated|describe:i-a,metric,notify:gamevps: box terminated"
+check "terminated: notified" "$(field 1 "$r")|$(field 2 "$r")" "terminated|describe:i-a,last-seen=2026-09-15T12:00:00Z,metric,notify:gamevps: box terminated"
 r=$(state_ 'ev = event("stopped")')
-check "stopped: notified" "$(field 2 "$r")" "describe:i-a,metric,notify:gamevps: box stopped"
+check "stopped: notified" "$(field 2 "$r")" "describe:i-a,last-seen=2026-09-15T12:00:00Z,metric,notify:gamevps: box stopped"
 r=$(state_ 'ec2 = EC2(name="someone-else")')
 check "another instance in the account: silent" "$(field 1 "$r")|$(field 2 "$r")" "not-ours|describe:i-a"
 r=$(state_ 'ec2 = EC2(fails=True)')
@@ -548,18 +553,34 @@ contains "  and says why" "$r" "could not be described"
 r=$(state_ 'ev = event("running")')
 check "a state that is not an end: ignored" "$(field 1 "$r")|$(field 2 "$r")" "ignored|-"
 r=$(state_ 'w.NTFY_URL = ""')
-check "no URL: logged, nothing sent" "$(field 2 "$r")" "describe:i-a,metric"
+check "no URL: logged, nothing sent" "$(field 2 "$r")" "describe:i-a,last-seen=2026-09-15T12:00:00Z,metric"
 contains "  logged" "$r" "i-a terminated - compute no longer bills."
 r=$(state_ 'mode = "handler"')
-check "the handler routes it, and runs no idle or archive check" "$(field 2 "$r")" \
-  "describe:i-a,metric,notify:gamevps: box terminated,clients:ec2+cloudwatch"
+# The handler uses the real clock, so the mark's value is not asserted here.
+contains "the handler routes it, and runs no idle or archive check" "$(field 2 "$r")" "describe:i-a,last-seen="
+contains "  with its clients" "$(field 2 "$r")" "notify:gamevps: box terminated,clients:ec2+cloudwatch+ssm"
 
 r=$(state_ 'ev = spot()')
 check "a spot interruption warning: notified" "$(field 1 "$r")|$(field 2 "$r")" "interruption|describe:i-a,notify:gamevps: spot box being reclaimed"
 r=$(state_ 'ev = spot(); ec2 = EC2(name="someone-else")')
 check "another instance's warning: silent" "$(field 1 "$r")|$(field 2 "$r")" "not-ours|describe:i-a"
 r=$(state_ 'ev = spot(); mode = "handler"')
-check "the handler routes a warning too" "$(field 2 "$r")" "describe:i-a,notify:gamevps: spot box being reclaimed,clients:ec2+cloudwatch"
+check "the handler routes a warning too" "$(field 2 "$r")" "describe:i-a,notify:gamevps: spot box being reclaimed,clients:ec2+cloudwatch+ssm"
+
+echo "37c. the archive countdown starts when the box really ended"
+r=$(state_ '')
+contains "terminated: last-seen set to that moment" "$(field 2 "$r")" "last-seen=2026-09-15T12:00:00Z"
+r=$(state_ 'ev = event("stopped")')
+contains "stopped: the same" "$(field 2 "$r")" "last-seen=2026-09-15T12:00:00Z"
+r=$(state_ 'w.EXPIRY_DAYS = 0')
+lacks "expiry off: nothing written" "$(field 2 "$r")" "last-seen"
+r=$(state_ 'ec2 = EC2(name="someone-else")')
+lacks "another instance: nothing written" "$(field 2 "$r")" "last-seen"
+r=$(state_ 'ev = spot()')
+lacks "a spot warning is not an end" "$(field 2 "$r")" "last-seen"
+r=$(state_ 'ssm.fails = True')
+contains "SSM refusing: said" "$r" "could not record when the box ended"
+contains "  and the notification still sent" "$(field 2 "$r")" "notify:gamevps: box terminated"
 
 echo "37b. 'box gone' says what still bills in S3 - from the free size metric"
 r=$(state_ '')

@@ -159,7 +159,8 @@ the empty bucket by itself.
 **How it decides.** Once an hour, and deleting only when two independent records agree:
 
 1. A `gamevps` instance exists in any state, stopped included: **kept**, and the last-seen mark is
-   set to now.
+   set to now. When AWS reports the box terminated or stopped, the mark is set to that moment too,
+   so the countdown starts when the box really ended rather than at the last hourly look.
 2. S3's daily size metric shows no archive: nothing to do.
 3. No last-seen mark yet: **kept**, and counting starts now.
 4. The mark is under 14 days old: **kept**, with the countdown.
