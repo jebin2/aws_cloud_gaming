@@ -147,7 +147,33 @@ laptop_aws_keys() {
   fi
   aws configure set aws_access_key_id "$key_id" \
     && aws configure set aws_secret_access_key "$secret" \
-    && aws configure set region "$region"
+    && aws configure set region "$region" \
+    && log "saved to ~/.aws/credentials, profile ${AWS_PROFILE:-default} - not to .env (.env.example says why)"
+}
+
+# laptop_aws_source - where the working AWS key comes from, in words, for cg
+# check's line. From `aws configure list`, which shows the key masked. It prints
+# "NAME : VALUE : TYPE : LOCATION"; older CLI versions pad with spaces instead.
+laptop_aws_source() {
+  local out type profile file=${AWS_SHARED_CREDENTIALS_FILE:-"~/.aws/credentials"}
+  out=$(aws configure list 2>/dev/null) || return 1
+  IFS=$'\t' read -r type profile < <(awk '
+    { line = $0
+      if (line ~ / : /) gsub(/[[:space:]]*:[[:space:]]*/, "\t", line)
+      else { gsub(/<not set>/, "-", line); gsub(/[[:space:]]+/, "\t", line); sub(/^\t/, "", line) }
+      split(line, f, "\t")
+      if (f[1] == "access_key") t = f[3]
+      if (f[1] == "profile")    p = f[2] }
+    END { printf "%s\t%s\n", t, p }' <<<"$out")
+  [[ -z $profile || $profile == "-" || $profile == "<not set>" ]] && profile=${AWS_PROFILE:-default}
+  case $type in
+    shared-credentials-file) echo "$file, profile $profile" ;;
+    config-file)             echo "~/.aws/config, profile $profile" ;;
+    # cg loads .env into the environment, so a key there would silently win.
+    env)                     echo "AWS_ACCESS_KEY_ID in the environment - it wins over ~/.aws/credentials" ;;
+    "")                      return 1 ;;
+    *)                       echo "$type, profile $profile" ;;
+  esac
 }
 
 # What is missing, all at once. Returns 0 when nothing is. Moonlight stops it too:

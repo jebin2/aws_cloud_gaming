@@ -812,7 +812,7 @@ if [[ $plan == FREE ]]; then
        Upgrade to a paid plan: https://console.aws.amazon.com/billing/
        (root user; the upgrade is not reversible)"
 fi
-log_as ok "AWS credentials work"
+log_as ok "AWS credentials work ($(laptop_aws_source || echo "source not known"))"
 log "account plan: $plan"
 
 # --- region, instance type, quota ---------------------------------------------

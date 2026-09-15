@@ -229,4 +229,36 @@ lacks    "  nothing written"                 "$(cat "$T/log")" "configure set"
 contains "  and it fails"                    "$r" "rc=1"
 check    "setup uses it, not aws configure"  "$(grep -c '^    aws configure || true' lib/setup)" "0"
 
+contains "--fix says where the key went"      "$(run 'laptop_aws_keys ap-south-2' $'AKIDEXAMPLE\nsecretEXAMPLEvalue\n')" "saved to ~/.aws/credentials, profile default - not to .env"
+
+echo "12. where the working AWS key comes from, for cg check's line"
+src() { # src <aws configure list output> [code]
+  fresh python3 ssh curl tailscale moonlight
+  printf '%s\n' "$1" > "$T/awslist"
+  fake aws "cat \"$T/awslist\""
+  run "${2:-laptop_aws_source; echo \"rc=\$?\"}"
+}
+NEW='NAME       : VALUE                    : TYPE             : LOCATION
+profile    : <not set>                : None             : None
+access_key : ****************ABCD     : shared-credentials-file :
+secret_key : ****************WXYZ     : shared-credentials-file :
+region     : ap-south-2               : config-file      : ~/.aws/config'
+contains "the credentials file, default profile" "$(src "$NEW")" "~/.aws/credentials, profile default"
+contains "  and says so"                     "$(src "$NEW")" "rc=0"
+contains "a key in the environment: said, with what that means" \
+  "$(src "${NEW//shared-credentials-file/env}")" "AWS_ACCESS_KEY_ID in the environment - it wins over ~/.aws/credentials"
+OLD='      Name                    Value             Type    Location
+      ----                    -----             ----    --------
+   profile                   gaming           manual    --profile
+access_key     ****************ABCD shared-credentials-file
+secret_key     ****************WXYZ shared-credentials-file
+    region               ap-south-2      config-file    ~/.aws/config'
+contains "older CLI layout, a named profile"  "$(src "$OLD")" "~/.aws/credentials, profile gaming"
+contains "SSO: named as it is"               "$(src "${NEW//shared-credentials-file/sso}")" "sso, profile default"
+fresh python3 ssh curl tailscale moonlight
+fake aws 'exit 255'
+contains "AWS CLI failing: no answer"         "$(run 'laptop_aws_source; echo "rc=$?"')" "rc=1"
+lacks    "  rather than a wrong one"          "$(run 'laptop_aws_source; echo "rc=$?"')" "credentials"
+check    "cg check's line uses it"            "$(grep -c 'AWS credentials work ($(laptop_aws_source' lib/setup)" "1"
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]
