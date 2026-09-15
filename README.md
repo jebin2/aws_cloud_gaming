@@ -47,17 +47,6 @@ prints (the user it shows, and `SUNSHINE_PASS` from `.env`).
 quit Moonlight, `cg open` offers to destroy the box: that saves your games and Steam sign-in to S3
 and stops the bill. The next `cg init` brings everything back.
 
-### Copying your setup
-
-1. Clone the repo and copy `.env` from your first laptop - it holds your keys and is not in git. Skip
-   `cp .env.example .env`, which would give you an empty one.
-2. Run `./cg check --fix`.
-3. Then, depending on whether a box exists:
-   - **No box:** run `./cg init` as usual. It makes a new ssh key for this laptop, and the first
-     laptop's key stops working until that laptop runs `cg init` again.
-   - **A box exists:** copy `~/.ssh/gamevps.pem` from the laptop that built it and `chmod 600` it,
-     then run `./cg pair` to pair Moonlight on this laptop.
-
 ## Everyday commands
 
 | Command | What it does |
