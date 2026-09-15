@@ -83,7 +83,15 @@ def run(ec2, cw, now, dry=False):
         iid = inst.get("InstanceId", "?")
         # One instance failing must not stop the others being handled.
         try:
-            decisions.append(decide(ec2, cw, inst, now, dry))
+            d = decide(ec2, cw, inst, now, dry)
+            # A dry run proves the permission on EVERY running box, not only on
+            # one it would end. Otherwise `cg watchdog check` during a session -
+            # a busy box, the one time anyone runs it - proves nothing about
+            # whether this role can actually terminate the instance.
+            if dry and d["action"] == "none" and inst["State"]["Name"] == "running":
+                verb = "terminate" if inst.get("InstanceLifecycle") == "spot" else "stop"
+                say("%s dry run: %s" % (iid, permission(ec2, verb, iid)))
+            decisions.append(d)
         except Exception as exc:
             say("%s FAILED: %s" % (iid, exc))
             decisions.append({"instance": iid, "action": "error", "reason": str(exc)})

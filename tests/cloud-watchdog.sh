@@ -136,6 +136,20 @@ contains "permission ok" "$r" "permission to terminate: ok"
 r=$(case_ 'ec2 = EC2([inst()], deny=True); cw = CW(QUIET); dry = True')
 contains "a denied permission is reported" "$r" "DENIED"
 
+echo "10b. a dry run proves the permission on a box it would NOT end"
+# The case that matters in practice: `cg watchdog check` is run during a
+# session, on a busy box - and used to say nothing about the permission.
+r=$(case_ 'ec2 = EC2([inst()]); cw = CW({"NetworkIn": [(10, 50*1048576)]}); dry = True')
+check "left alone, but the permission tested" "$(field 1 "$r")|$(field 2 "$r")" "none|terminate(dry)"
+contains "and reported" "$r" "dry run: permission to terminate: ok"
+r=$(case_ 'ec2 = EC2([inst(age=5, spot=False)]); cw = CW(); dry = True')
+check "on demand, in the boot grace: stop tested" "$(field 1 "$r")|$(field 2 "$r")" "none|stop(dry)"
+r=$(case_ 'ec2 = EC2([inst()], deny=True); cw = CW({"NetworkIn": [(10, 50*1048576)]}); dry = True')
+contains "a denied permission on a busy box is reported" "$r" "DENIED"
+echo "10c. a real run on a busy box makes no permission call"
+r=$(case_ 'ec2 = EC2([inst()]); cw = CW({"NetworkIn": [(10, 50*1048576)]})')
+check "no DryRun outside a dry run" "$(field 2 "$r")" "-"
+
 echo "11. cannot read metrics: NOT idle - raise, act on nothing"
 r=$(case_ 'ec2 = EC2([inst()]); cw = CW(fails=True)')
 check "raised, no calls" "$(field 1 "$r")|$(field 2 "$r")" "RAISED|-"
