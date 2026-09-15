@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Layers 3 & 4: cloud-side backstops. Run once, locally, after the instance exists.
+# Account-side guard setup: the shutdown behaviour check and the budget. Run locally.
 set -euo pipefail
 
 # .env is written by provision.sh. Anything already exported wins over it.
@@ -10,7 +10,7 @@ if [[ -f "$(dirname "$0")/../.env" ]]; then
 fi
 
 INSTANCE_ID="${GAME_INSTANCE_ID:-i-CHANGEME}"
-# `budget` mode arms layer 4 BEFORE anything is launched: it is account-level and
+# `budget` mode arms the budget BEFORE anything is launched: it is account-level and
 # needs no instance, and a build that dies with the laptop should not leave an
 # unwatched bill. The instance-level guards necessarily come after the launch.
 MODE="${1:-all}"
@@ -25,7 +25,7 @@ EMAIL="${GAME_ALERT_EMAIL:?set GAME_ALERT_EMAIL}"
 #             and its only action is `shutdown -h`, so whether that stops the
 #             instance or TERMINATES it must be confirmed before it can fire.
 #   budget    before anything launches - account-level, needs no instance.
-#   all       after the build, for the parts that need a running box.
+#   all       both.
 
 if [[ $MODE == shutdown || $MODE == all ]]; then
 # --- CRITICAL: make an in-guest `shutdown -h` STOP the instance, not destroy it.
@@ -79,59 +79,6 @@ if [[ $behavior != "$WANT" ]]; then
   echo "    Do not leave it running. Destroy and rebuild:  cg destroy && cg init" >&2
   exit 1
 fi
-
-fi
-
-if [[ $MODE == all ]]; then
-# The alarm action must match the purchase model for the same reason as the
-# shutdown behaviour: ec2:stop on a spot instance strands it permanently.
-ALARM_LIFECYCLE=$(aws ec2 describe-instances --region "$REGION" \
-  --instance-ids "$INSTANCE_ID" \
-  --query 'Reservations[0].Instances[0].InstanceLifecycle' --output text 2>/dev/null)
-if [[ $ALARM_LIFECYCLE == spot ]]; then ALARM_VERB=terminate; else ALARM_VERB=stop; fi
-
-# --- Layer 3: stop the instance if it stops pushing video for 30 min.
-# Catches a hung OS, a dead watchdog, a wedged Sunshine.
-# Streaming at 20 Mbps moves ~750 MB per 5-min period; 10 MB is comfortably idle.
-echo "==> idle-stop alarm"
-# NetworkOut only, and NOT because that is the right measure - it is not. A
-# Steam download is almost entirely INBOUND, so this metric reads a 140 GB
-# download as an idle box. The obvious fix, a metric-math alarm on
-# NetworkIn+NetworkOut, is impossible:
-#
-#   ValidationError: EC2 actions are not available for Metric Math monitors
-#
-# CloudWatch will not attach the ec2:stop action to a math expression, and
-# composite alarms cannot take EC2 actions either. So this layer is stuck
-# watching one direction.
-#
-# That is survivable because it is not the layer that covers downloads:
-#   layer 2 (on-host)  counts in AND out, and is armed the whole time
-#   layer 4 (cloud)    counts in AND out, from the same metrics
-# and this alarm is armed only for the duration of a session - see game up -
-# precisely because outside one, low egress is a normal state.
-#
-# treat-missing-data breaching is kept deliberately: an instance wedged hard
-# enough to stop publishing metrics is otherwise invisible to every layer.
-aws cloudwatch put-metric-alarm --region "$REGION" \
-  --alarm-name "${TS_HOST}-idle-stop" \
-  --alarm-description "Stop the game host when it stops pushing video for 30 minutes" \
-  --namespace AWS/EC2 --metric-name NetworkOut \
-  --dimensions "Name=InstanceId,Value=$INSTANCE_ID" \
-  --statistic Sum --period 300 --evaluation-periods 6 \
-  --threshold 10000000 --comparison-operator LessThanThreshold \
-  --treat-missing-data breaching \
-  --alarm-actions "arn:aws:automate:${REGION}:ec2:${ALARM_VERB}"
-
-# Leave the stop action disarmed. A new alarm is judged against the *previous*
-# 30 minutes immediately, so arming it here stops the box mid-setup - the
-# install window looks exactly like an idle one. `set-alarm-state` does not
-# help: CloudWatch re-evaluates the same history and returns to ALARM.
-# `game up` arms it once a session actually starts, which is the only time
-# this layer is meant to be watching.
-aws cloudwatch disable-alarm-actions --region "$REGION" --alarm-name "${TS_HOST}-idle-stop"
-echo "    idle-stop action stays disarmed until 'game up' arms it"
-
 
 fi
 

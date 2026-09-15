@@ -45,7 +45,7 @@ TS_NODE="${GAME_TS_NODE:-$TS_HOST}"
 INSTANCE_ID="${GAME_INSTANCE_ID:-}"
 KEY="$HOME/.ssh/${TS_HOST}.pem"
 ec2() { aws ec2 "$@" --region "$REGION"; }
-# Layer 4, the cloud watchdog: needs REGION and TS_HOST, so sourced after them.
+# Layer 3, the cloud watchdog: needs REGION and TS_HOST, so sourced after them.
 source lib/cloud-watchdog.sh
 
 # lib/setup and lib/game are dispatch targets, not commands - see docs/commands.md
@@ -690,7 +690,7 @@ destroy_everything() {
   fi
 }
 
-# Layer 4: the cloud watchdog. The pieces are in lib/cloud-watchdog.sh.
+# Layer 3: the cloud watchdog. The pieces are in lib/cloud-watchdog.sh.
 #
 # Called by `cg init` before anything launches. It watches by TAG, so it does
 # not need the instance to exist - and the point of an independent guard is that
@@ -711,7 +711,7 @@ watchdog_ensure() {
     if ( cw_install ); then
       cw_prove
     else
-      log "cloud watchdog not installed - the other three layers still apply"
+      log "cloud watchdog not installed - the on-host watchdog and the budget still apply"
       return 0
     fi
   fi
@@ -992,7 +992,7 @@ cmd_watcher() {
   s=$(ec2 describe-instances --instance-ids "${INSTANCE_ID:-x}" \
       --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "none")
   # Rows say what they mean rather than having it read from their words:
-  # "ALARM False  <- state, actions-enabled" contains "enabled" and got a tick.
+  # a row saying something was NOT enabled contained "enabled", and got a tick.
   log_as "$([[ $s == running ]] && echo ok || echo info)" "instance          $s"
   stranded_spot_note "$REGION" "${INSTANCE_ID:-}"
   # Layer 2, on the box.
@@ -1022,29 +1022,12 @@ cmd_watcher() {
   else
     log_as info "on-host watchdog  (box not reachable)"
   fi
-  # Layer 4. The comment here once claimed layers 3 AND 4 were reported below
-  # while only the alarm was - so the one guard that keeps working when the box
-  # is gone was the one nothing displayed.
+  # Layer 3, the cloud watchdog: the guard that keeps working when the box is gone.
   cg_gap
   cw_watcher_lines
 
   cg_gap
-  local al bud
-  al=$(aws cloudwatch describe-alarms --region "$REGION" \
-        --alarm-names "${TS_HOST}-idle-stop" \
-        --query 'MetricAlarms[0].[StateValue,ActionsEnabled]' \
-        --output text 2>/dev/null | tr '\t' ' ' || echo absent)
-  if _cg_styled; then
-    # Actions off is the NORMAL state between sessions - cg open arms it - so it
-    # is information: not a warning, and certainly not a tick.
-    case "$al" in
-      *" True")  log_as ok   "idle alarm        ${al% *}, armed" ;;
-      *" False") log_as info "idle alarm        ${al% *}, disarmed (cg open arms it for a session)" ;;
-      *)         log_as warn "idle alarm        ${al:-absent}" ;;
-    esac
-  else
-    log "idle alarm        $al  <- state, actions-enabled"
-  fi
+  local bud
   bud=$(aws budgets describe-budgets --account-id \
         "$(aws sts get-caller-identity --query Account --output text)" \
         --query "Budgets[?BudgetName=='${TS_HOST}-monthly'].BudgetLimit.Amount" \
@@ -1083,9 +1066,9 @@ info (read-only)
   cg cost                    month-to-date spend and what still bills
   cg log [what] [--watch]    build | steam | watchdog | disk | sunshine
   cg ssh [cmd]               shell on the box
-  cg watcher [--watch]       all four guards, and whether each is armed
+  cg watcher [--watch]       every guard, and whether each is armed
   cg watchdog [status|check|logs|install|remove]
-                             layer 4: the cloud watchdog (Lambda); check is a dry run
+                             layer 3: the cloud watchdog (Lambda); check is a dry run
   cg ping [--watch]          latency, and direct vs DERP relay
 
 flags

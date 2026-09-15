@@ -188,7 +188,7 @@ sys.stdout.write(s)' > "$USERDATA" \
   #   - a persistent request RELAUNCHES the moment its instance is terminated,
   #     so nothing may terminate the box without cancelling the request first.
   #     No cost guard can do that (the on-host watchdog holds no credentials),
-  #     which is why all three had to stop instead.
+  #     which is why every guard had to stop instead.
   #   - and stopping a spot instance disables its request permanently, leaving
   #     a box that can never start again while its root volume keeps billing.
   #

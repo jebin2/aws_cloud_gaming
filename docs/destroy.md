@@ -8,7 +8,6 @@
 |---|---|---|
 | Mirror the games to S3 first | **yes**, and refuses if it fails | no - they are being deleted |
 | Instance (terminate + cancel the spot request) | gone | gone |
-| Idle-stop alarm | **kept** - `cg init` rewrites it | gone |
 | Security group, key pair, `~/.ssh/<host>.pem` | **kept** - `cg init` reuses them | gone |
 | Tailnet nodes | **kept** offline - `cg init` prunes them | gone |
 | Per-box `.env` lines (instance id, node, Sunshine login) | cleared | cleared |
@@ -19,10 +18,9 @@
 | **Cloud watchdog: function, schedule, role, logs** | **kept** | gone |
 | Old EBS game volume, if you still have one | **kept** | gone |
 
-**A plain destroy removes only what bills.** The security group, the key pair, the idle-stop
-alarm and the tailnet node cost nothing, and the next build reuses or rewrites each of them:
-`provision.sh` reuses a security group and key pair of the same name, `put-metric-alarm`
-overwrites the alarm, and offline nodes are pruned before launch. Deleting them bought nothing
+**A plain destroy removes only what bills.** The security group, the key pair and the
+tailnet node cost nothing, and the next build reuses each of them: `provision.sh` reuses a
+security group and key pair of the same name, and offline nodes are pruned before launch. Deleting them bought nothing
 and cost time - the security group step alone waited up to a minute for the network interface
 to be released. The `.pem` is kept *with* the key pair on purpose: AWS hands out a private key
 exactly once, so a surviving key pair whose `.pem` had been deleted would be reused by the next

@@ -229,7 +229,6 @@ RESOURCES in ap-south-2
     inbound       udp/41641 from 0.0.0.0/0
 
 COST GUARDS
-  idle-stop alarm OK, disarmed   (cg open arms it for a session)
   budget          $57 limit, AWS reports $0.00 spent - not calculated yet
                   (Budgets lags up to 24h after creation; real spend: cg cost)
   budget alerts   2 configured
@@ -276,7 +275,6 @@ resources in ap-south-2:
   game library    s3://cg-library-example  6218 objects, 161GB  ($4.00/mo)
   instance role   gamevps-box  (lets the box read/write its library bucket)
   watchdog role   gamevps-cloud-watchdog  (the cloud watchdog: ends only the gamevps box)
-  idle alarm      present
   budget          $57/month
 not yet billed (Cost Explorer lags about a day):
   compute      1.0 hrs  $  0.97  (INR    85)  THIS instance only
@@ -329,9 +327,11 @@ lacks    "  and no [ok] is left"          "$out" "[ok]"
 lacks    "  nor a bare OK where it was"   "$out" "│    OK "
 raw=$(report < "$T/status.txt")
 contains "'running' is green"             "$raw" $'\e[38;5;78mrunning'
-contains "'disarmed' is yellow"           "$raw" $'\e[38;5;220mdisarmed'
+contains "'not calculated yet' is yellow" "$raw" $'\e[38;5;220mnot calculated yet'
 contains "'<- what AWS bills' is yellow"  "$raw" $'\e[38;5;220m<- what AWS bills'
 # 'armed' must not match inside 'disarmed'.
+raw=$(printf '  schedule  disarmed\n' | report "🔒" "Guards")
+contains "'disarmed' is yellow"           "$raw" $'\e[38;5;220mdisarmed'
 lacks    "'armed' is not matched inside 'disarmed'" "$raw" $'dis\e[38;5;78marmed'
 # ...but that case passes with no boundary at all: "disarmed" is a rule checked
 # earlier and claims those characters first. A word inside one that NO rule
@@ -370,11 +370,11 @@ else:
 done
 
 echo "9. rows that state their meaning, and gaps that keep the box"
-matches "log_as plain is exactly log"        "$(sh_ 'log_as ok "idle alarm        ALARM False"')" "^${ISO}      idle alarm        ALARM False$"
+matches "log_as plain is exactly log"        "$(sh_ 'log_as ok "cloud watchdog    DISABLED"')" "^${ISO}      cloud watchdog    DISABLED$"
 check   "cg_gap plain is an empty line"      "$(sh_ 'cg_gap' | od -c | head -1)" "$(echo | od -c | head -1)"
 # The words say "enabled"; the caller says it is information. The caller wins.
-out=$(styled 'log_as info "idle alarm        ALARM False  <- state, actions-enabled"' | strip)
-contains "log_as: the stated kind wins over the words" "$out" "· idle alarm"
+out=$(styled 'log_as info "cloud watchdog    DISABLED  <- not enabled"' | strip)
+contains "log_as: the stated kind wins over the words" "$out" "· cloud watchdog"
 lacks    "  no tick from 'enabled'"          "$out" "✓"
 out=$(styled 'say "guards"; log "a"; cg_gap; log "b"' | strip)
 # Counted, not addressed by line number: the header starts with a blank line.

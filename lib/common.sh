@@ -154,8 +154,8 @@ die() {
 }
 
 # A log line whose meaning the caller states, instead of it being read from the
-# words. For report-like rows where the words mislead: "ALARM False  <-
-# state, actions-enabled" contains "enabled", and read as a success. Plain: log.
+# words. For report-like rows where the words mislead: a row saying something is
+# NOT enabled still contains "enabled", and read as a success. Plain: log.
 log_as() { # log_as <ok|fail|warn|wait|kept|skip|info|cont> <text>
   if ! _cg_styled; then log "$2"; return; fi
   _cg_line "$1" "$2"
@@ -754,8 +754,7 @@ wait_for_steam() {
 # never come back while its root volume keeps charging.
 #
 # Every cost guard produces exactly this state: the on-host watchdog's
-# `shutdown -h`, the CloudWatch alarm's ec2:stop action, and the external
-# watchdog's StopInstances. They cannot terminate instead - a persistent spot
+# `shutdown -h`, and the external guards' ec2:stop actions. They cannot terminate instead - a persistent spot
 # request relaunches the moment its instance dies, and no guard can cancel the
 # request first (the on-host one holds no credentials at all). So stop is the
 # right action there, and this is the leak it leaves behind.

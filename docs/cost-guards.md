@@ -1,40 +1,39 @@
 # Cost guards
 
-What stops a GPU instance billing when you forget it: four independent layers and a budget that
+What stops a GPU instance billing when you forget it: three layers and a budget that
 emails you. What each charge actually is lives in [cost.md](cost.md).
 
-## The four layers
+## The three layers
 
 Numbered by **independence** - how likely each one is to survive the failure it exists to catch.
-Layer 1 is the fastest and the least reliable; layer 4 is the slowest to write but the hardest
+Layer 1 is the fastest and the least reliable; layer 3 is the slowest to react but the hardest
 to take down.
 
 | # | Mechanism | Dies with | Catches | Reaction |
 |---|-----------|-----------|---------|----------|
 | 1 | `cg open` | your laptop, your network | normal use | on Moonlight exit |
 | 2 | on-host watchdog | the box it protects | forgotten disconnect, client crash | 15 min idle |
-| 3 | CloudWatch alarm on NetworkIn+**Out** | a wrong metric, a disarmed action | hung OS, dead watchdog, closed laptop | 30 min idle |
-| 4 | cloud watchdog (Lambda) | a deleted or disabled schedule | a wedged box, a box left running outside a session, a box stuck going down | 30 min idle; forced after 1 h stuck |
+| 3 | cloud watchdog (Lambda) | a deleted or disabled schedule | a wedged box, a box left running outside a session, a box stuck going down | 30 min idle; forced after 1 h stuck |
 
 The **AWS budget is not in that list**, because it stops nothing - it emails you. It is the
-backstop for everything the four layers miss, not a layer.
+backstop for everything the three layers miss, not a layer.
 
 They are **armed in roughly the reverse order**: the budget and the cloud watchdog before
-anything launches, the on-host watchdog during the build, the CloudWatch alarm at the end of
-`cg init`. A guard that only exists after the build cannot protect the build.
+anything launches, and the on-host watchdog during the build. A guard that only exists after
+the build cannot protect the build.
 
-Worst-case leak with all four armed is about 30 minutes of runtime.
+Worst-case leak with all three armed is about 30 minutes of runtime.
 
-## Layer 4: the cloud watchdog
+## Layer 3: the cloud watchdog
 
 An AWS Lambda, `<host>-cloud-watchdog`, run every 5 minutes by an EventBridge schedule. It covers
 what the other layers structurally cannot:
 
 - **layer 2 dies with the box it protects.** A wedged instance takes its own watchdog with it.
-- **layer 3 is armed only during `cg open`.** A box left running after `cg init`, or after
-  "leave it running", has no alarm at all.
-- **neither explains itself.** The CloudWatch alarm stopped a box mid-build early in this
-  project and said nothing about why; that had to be inferred.
+- **nothing else watches from outside the box**, in a session or out of one. A box left running
+  after `cg init`, or after "leave it running", would bill until the budget emailed you.
+- **a guard should explain itself.** A CloudWatch alarm once stopped a box mid-build here and
+  said nothing about why; that had to be inferred.
 
 **What it decides**, for each instance tagged with your host name:
 
@@ -118,25 +117,15 @@ stalled build left a GPU instance running with nothing to stop it. The watchdog 
 early because it has a 20-minute boot grace and counts inbound bytes as activity, so it cannot
 shut down a build in progress.
 
-Layer 3 can only watch **NetworkOut**, and that is a CloudWatch limitation rather than a choice.
-An alarm on `NetworkIn + NetworkOut` is the obviously correct measure - a Steam download is
-almost entirely inbound - but AWS refuses it:
+**Why not a CloudWatch alarm.** An earlier version had one as a separate layer. CloudWatch will not
+take an EC2 action on `NetworkIn + NetworkOut`:
 
     ValidationError: EC2 actions are not available for Metric Math monitors
 
-The `ec2:stop` action cannot be attached to a math expression, and composite alarms cannot take
-EC2 actions either. So this layer watches one direction, and is armed **only for the duration of
-a session**: outside one, low egress is a normal state, and a game downloading with nobody
-connected looks exactly like an idle box. Layers 2 and 4 both count traffic in both directions
-and are armed the whole time, which is what actually covers downloads.
-
-It does use `treat-missing-data breaching`, deliberately. An instance wedged hard enough to stop
-publishing metrics is invisible to the default `notBreaching` - every guard stays green while it
-bills indefinitely. A false positive costs a two-minute restart; a miss costs money.
-
-Layer 3 is also not armed *during* the build, because a freshly created alarm is
-evaluated against the previous 30 minutes and would otherwise stop the box mid-build - see
-[docs/troubleshooting.md](troubleshooting.md).
+so the alarm watched outbound traffic only, and read a game download as an idle box. That forced
+it to be armed only during a session - where it duplicated this watchdog on half the traffic -
+and it terminated two boxes mid-download before it was. It was removed once the cloud watchdog
+covered everything it did.
 
 The budget is an **AWS Budget**, not a CloudWatch `EstimatedCharges` alarm. That alarm needs
 "Receive Billing Alerts" switched on by the *root* user, for which there is no API, plus an SNS

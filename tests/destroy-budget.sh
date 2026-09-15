@@ -13,9 +13,9 @@
 # moment it was most needed - no instance running, the user away - was exactly
 # when destroy removed it.
 #
-# The same now holds for the security group, the key pair (with its .pem), the
-# idle-stop alarm and the tailnet node: all free, all reused or rewritten by
-# cg init, so a plain destroy terminates only what bills.
+# The same now holds for the security group, the key pair (with its .pem) and
+# the tailnet node: all free, all reused by cg init, so a plain destroy
+# terminates only what bills.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 REPO=$PWD
@@ -39,7 +39,7 @@ cp -r "$REPO/lib" "$T/lib"
 #
 # describe-instances must print NOTHING, not "None": destroy iterates its output
 # as a list of instance ids, so "None" became an instance it then waited to see
-# terminate - and the run never reached the alarm and budget section.
+# terminate - and the run never reached the budget section.
 cat > "$T/bin/aws" <<'FAKE'
 #!/usr/bin/env bash
 echo "aws $*" >> "$LOG"
@@ -98,11 +98,10 @@ echo "2. a plain destroy KEEPS every free resource cg init reuses"
 check "security group not deleted"   "$(did 'delete-security-group')" "no"
 check "key pair not deleted"         "$(did 'delete-key-pair')" "no"
 check "the .pem kept WITH the key"   "$(exists "$T/home/.ssh/gamevps.pem")" "yes"
-check "idle alarm not deleted"       "$(did 'delete-alarms')" "no"
 check "tailnet node not deleted"     "$(did '-X DELETE')" "no"
 # Not even looked up: the describes were only there to feed the deletes.
 check "security group not queried"   "$(did 'describe-security-groups')" "no"
-contains "says what it kept"         "$out" "security group, key pair, alarm and tailnet node kept"
+contains "says what it kept"         "$out" "security group, key pair and tailnet node kept"
 
 echo "3. the listing does not promise to delete something it keeps"
 head=$(sed -n '/This permanently deletes/,/^$/p' <<<"$out")
@@ -124,7 +123,7 @@ check    "budget deleted"          "$(did 'delete-budget')" "yes"
 contains "listing says it goes"    "$out" "budget          gamevps-monthly"
 check    "security group deleted"  "$(did 'delete-security-group')" "yes"
 check    "key pair deleted"        "$(did 'delete-key-pair')" "yes"
-check    "idle alarm deleted"      "$(did 'delete-alarms')" "yes"
+check    "no CloudWatch alarm call" "$(did 'cloudwatch')" "no"
 check    "tailnet node deleted"    "$(did '-X DELETE')" "yes"
 
 echo "6. the sandbox really is isolated from the real home"

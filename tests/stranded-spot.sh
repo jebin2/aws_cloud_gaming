@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A stopped spot instance can never restart, and still bills for its root
 # volume. Every cost guard produces exactly that state - the on-host watchdog's
-# `shutdown -h`, the CloudWatch ec2:stop action, the external watchdog's StopInstances -
+# `shutdown -h` and the external guards' stop actions -
 # and none of them can terminate instead, because a persistent spot request
 # relaunches the moment its instance dies and no guard can cancel the request
 # first.

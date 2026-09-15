@@ -19,7 +19,7 @@ provisioning step now asserts its effect rather than its execution.
 | NVMe library vanishes after a stop | `/scratch` is reformatted at every start, destroying the marker Steam uses as proof the library is real |
 | Build hangs with no output, then "host rebooting" | A rebuilt box reclaims its hostname, and `known_hosts` still held the old key. ssh's stderr was being discarded, so a refusal looked like silence |
 | Re-running `cg init` hangs 30 minutes | It waited for a *new* tailnet node against a box that joined long ago - gated on a 2s ping that a cold WireGuard path loses |
-| CloudWatch alarm stops the box mid-build | A new alarm is evaluated against the previous 30 minutes, so it fires immediately. It is created **disarmed** and armed by `cg open` |
+| CloudWatch alarm stops the box mid-build | A new alarm is evaluated against the previous 30 minutes, so it fires immediately. It was created **disarmed** and armed by `cg open`; the alarm has since been removed |
 | Billing looks like zero while spending | Credits are booked as a matching negative line; without filtering to `RECORD_TYPE=Usage` every figure nets out |
 
 ## Getting a GPU instance to launch at all
@@ -1162,7 +1162,7 @@ corrupts it**, so the reason for not using sed is demonstrable rather than asser
 before tailscale - so the box never got a network identity. No ssh, no log streaming, nothing but
 `get-console-output`, for a failure whose whole cause was one visible line of the rendered script.
 It is non-fatal now: the build continues, the box stays reachable, the `verify` lines report the
-missing layer, and layers 3 and 4 - armed before launch - still bound the spend.
+missing layer, and the guards armed before launch still bound the spend.
 
 Ordering a fatal check before the thing that makes a machine reachable turns any bug in it into a
 blind one. If a step must be fatal, it belongs after the network, not before it.
@@ -1462,3 +1462,16 @@ counters - `lo`, and the default-route interface - and the test kept them betwee
 whatever this laptop sent in between counted as use and reset the idle counter. Loopback traffic
 made 4 of its 7 checks fail every time. The cases test what happens at the idle limit, so they now
 run with thresholds no real traffic reaches.
+
+### The CloudWatch alarm was removed
+
+The idle-stop alarm had been a separate layer since the start, and it was the least reliable one.
+CloudWatch will not attach an EC2 action to a metric-math expression, so it could only watch
+`NetworkOut` and read every game download as an idle box. It stopped one box mid-build and
+terminated two mid-download, and the fix for those was to arm it only while a session ran.
+
+Once the cloud watchdog existed, that narrow window was the only place the alarm still watched -
+and there it duplicated the Lambda on half the traffic, from the same metrics. Its one unique case
+was the Lambda failing during a session with the on-host watchdog also dead. It was removed, with
+the arming around every session, its rows in `cg status`, `cg cost` and `cg watcher`, and
+`tests/alarm-arming.sh`.

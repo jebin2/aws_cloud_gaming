@@ -42,8 +42,8 @@ Measured on a real month:
     AWS Cost Explorer     25 requests    $0.25   (INR 22)
 
 Everything else this project calls is free at this volume - EC2 describe/run/terminate, STS,
-IAM, the Pricing API (where the S3 per-GB figure comes from), CloudWatch metrics and alarms
-(1M requests and 10 alarms free), AWS Budgets (first two free), and the Free Tier API.
+IAM, the Pricing API (where the S3 per-GB figure comes from), CloudWatch metrics
+(1M requests free), AWS Budgets (first two free), and the Free Tier API.
 
 **S3 requests are small but not free**, and this claim used to say they were. Measured over two
 days of pushing a ~140 GB game:
@@ -81,7 +81,7 @@ they believe they deleted.
     QUOTAS       on-demand and spot GPU quota against what your instance type needs
     RESOURCES    instance, volumes, snapshots, images, elastic IPs, key pair,
                  security group and its inbound rules
-    COST GUARDS  both alarm states, and whether alert emails are confirmed
+    COST GUARDS  the budget, and whether its alert emails are configured
     LOCAL        tailscale, moonlight, ssh key, auth key, tailnet node
 
 Run it before a build to see what is missing, and after one to check the guards actually
@@ -107,8 +107,7 @@ That is only acceptable because the games are in S3: destroying costs a 10-20 mi
 and nothing else. Under the old EBS-volume design, `stop` was the only way to keep a library without
 paying for an instance, which is exactly why the old design used a persistent request.
 
-**The guards terminate now, not stop.** All three - the on-host watchdog, the CloudWatch alarm,
-and the external watchdog, now the cloud watchdog - previously had to issue a stop, because a persistent request
+**The guards terminate now, not stop.** They previously had to issue a stop, because a persistent request
 relaunches on termination and none of them can cancel a request first. Every guard firing
 therefore stranded a box at ~INR 400/month. A one-time request cannot relaunch, so they
 terminate, and `cg status` / `cg watcher` flag any stranded box left over from the old design

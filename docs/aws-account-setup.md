@@ -250,8 +250,8 @@ AWS staff who replied are not named.
 > **They describe this setup as it was in September 2026, and some of it has changed since.** At
 > the time the spot plan was a persistent request with `InstanceInterruptionBehavior=stop` on an EBS
 > root volume, the budget was $70 with a Budget Action, and the CloudWatch alarm stopped the box.
-> Today a spot box is one-time and terminates, the games live in S3, the budget is $57 and the alarm
-> is armed only during a session - see [cost-guards.md](cost-guards.md). Write yours about what you
+> Today a spot box is one-time and terminates, the games live in S3, the budget is $57, and the
+> CloudWatch alarm is gone, replaced by a Lambda watchdog - see [cost-guards.md](cost-guards.md). Write yours about what you
 > actually run.
 
 ### On-demand: `Running On-Demand G and VT instances` - granted in two regions

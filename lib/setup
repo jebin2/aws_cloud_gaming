@@ -154,22 +154,6 @@ status() {
 
   echo
   echo "COST GUARDS"
-  local a3 a4
-  a3=$(aws cloudwatch describe-alarms --region "$REGION" --alarm-names "${TS_HOST}-idle-stop" \
-    --query 'MetricAlarms[0].[StateValue,ActionsEnabled]' --output text 2>/dev/null || echo "missing -")
-  # a3 is "STATE\tActionsEnabled"; printing it raw reads like "ALARM False",
-  # which looks broken when it is exactly right - in ALARM because the box is
-  # idle, disarmed because no session is running.
-  local a3_state a3_armed
-  a3_state=$(awk '{print $1}' <<<"$a3")
-  a3_armed=$(awk '{print $2}' <<<"$a3")
-  if [[ $a3_state == None || -z $a3_state || $a3_state == missing ]]; then
-    printf '  idle-stop alarm missing\n'
-  else
-    printf '  idle-stop alarm %s, %s   (%s arms it for a session)\n' \
-      "$a3_state" "$([[ $a3_armed == True ]] && echo armed || echo disarmed)" "$C_OPEN"
-  fi
-
   local acct budget limit
   acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
   budget=$(aws budgets describe-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" \
@@ -226,7 +210,7 @@ status() {
 }
 
 cost() {
-  local id state rate hours disk_gb snap_gb imgs alarms budget key sg
+  local id state rate hours disk_gb snap_gb imgs budget key sg
   ec2() { aws ec2 "$@" --region "$REGION"; }
 
   # Find the instance by tag rather than trusting .env: after a destroy the
@@ -247,8 +231,6 @@ cost() {
   key=$(ec2 describe-key-pairs --key-names "$TS_HOST" --query 'length(KeyPairs)' --output text 2>/dev/null || echo 0)
   sg=$(ec2 describe-security-groups --filters "Name=group-name,Values=${TS_HOST}-sg" \
         --query 'length(SecurityGroups)' --output text 2>/dev/null || echo 0)
-  alarms=$(aws cloudwatch describe-alarms --region "$REGION" --alarm-names "${TS_HOST}-idle-stop" \
-    --query 'length(MetricAlarms)' --output text 2>/dev/null || echo 0)
   budget=$(aws budgets describe-budget \
     --account-id "$(aws sts get-caller-identity --query Account --output text 2>/dev/null)" \
     --budget-name "${TS_HOST}-monthly" --query 'Budget.BudgetLimit.Amount' --output text 2>/dev/null || echo "")
@@ -273,7 +255,6 @@ cost() {
     iam_lines
     stranded_spot_note "$REGION" "${INSTANCE_ID:-}"
   fi
-  printf '  idle alarm      %s\n' "$([[ ${alarms:-0} == 0 ]] && echo none || echo present)"
   printf '  budget          %s\n' "$([[ -z $budget || $budget == None ]] && echo none || printf '$%.0f/month' "$budget")"
 
   if [[ -z $id && ${disk_gb:-0} == 0 && ${snap_gb:-0} == 0 && $imgs == 0 ]]; then
@@ -459,7 +440,7 @@ rebuild() {
   exec "$0"
 }
 
-# Remove every trace: instance, disk, images, alarms, topic, security group,
+# Remove every trace: instance, disk, images, security group,
 # key pair, local key and .env entries. Nothing is kept, nothing is saved.
 destroy_all() {
   ec2() { aws ec2 "$@" --region "$REGION"; }
@@ -471,14 +452,12 @@ destroy_all() {
     --query 'Reservations[].Instances[].InstanceId' --output text)
   img=$(ec2 describe-images --owners self --query 'Images[].ImageId' --output text)
 
-  # A plain destroy removes only what BILLS. The security group, the key pair,
-  # the idle-stop alarm and the tailnet node cost nothing, and cg init reuses or
-  # rewrites every one of them:
+  # A plain destroy removes only what BILLS. The security group, the key pair
+  # and the tailnet node cost nothing, and cg init reuses every one of them:
   #   security group  provision.sh reuses one of that name
   #   key pair        provision.sh reuses it; the .pem is kept WITH it, because
   #                   AWS hands out the private key only once - an AWS key whose
   #                   .pem is gone would be reused with no way to log in
-  #   alarm           aws-setup.sh put-metric-alarm overwrites it by name
   #   tailnet node    provision.sh prunes offline nodes before the next launch
   # Deleting them bought nothing and cost time: the security group alone waited
   # up to a minute for the network interface to be released.
@@ -498,7 +477,6 @@ destroy_all() {
   if (( all )); then
     echo "  security group  ${sg:-none}"
     echo "  key pair        ${key:-none}  (and ~/.ssh/${TS_HOST}.pem)"
-    echo "  alarms          ${TS_HOST}-idle-stop"
     echo "  tailnet nodes   ${TS_HOST}, ${TS_HOST}-N"
     echo "  budget          ${TS_HOST}-monthly"
   else
@@ -506,7 +484,6 @@ destroy_all() {
     echo "Kept, because they are free and cg init reuses them:"
     echo "  security group  ${TS_HOST}-sg"
     echo "  key pair        ${TS_HOST}, with ~/.ssh/${TS_HOST}.pem"
-    echo "  alarm           ${TS_HOST}-idle-stop - rewritten for the next instance"
     echo "  tailnet node    left offline - pruned before the next launch"
     echo "  budget          guards the account, not the box"
     echo "  (cg destroy --all removes all of these)"
@@ -573,9 +550,7 @@ exception - nothing here touches it."
              --query 'Volumes[].[VolumeId,Tags[?Key==`Name`]|[0].Value]' --output text)
 
   if (( all )); then
-  say "removing alarms and notifications"
-  # The idle-stop alarm names one instance, so it goes with it.
-  aws cloudwatch delete-alarms --region "$REGION" --alarm-names "${TS_HOST}-idle-stop" 2>/dev/null || true
+  say "removing the budget"
   local acct
   acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
   # The BUDGET stays. It guards the account, not the instance - and deleting it
@@ -597,14 +572,7 @@ exception - nothing here touches it."
     log "keeping the budget ${TS_HOST}-monthly - it guards the account, not the box"
     log "  (deleting it on every destroy is why it always reported \$0.00 spent)"
   fi
-  # Older versions used an SNS topic and a second alarm; clean those up too.
-  aws cloudwatch delete-alarms --region us-east-1 --alarm-names "${TS_HOST}-monthly-spend" 2>/dev/null || true
-  local topic
-  topic=$(aws sns list-topics --region us-east-1 \
-    --query "Topics[?contains(TopicArn,'${TS_HOST}-billing')].TopicArn | [0]" --output text 2>/dev/null || true)
-  [[ -n $topic && $topic != None ]] && aws sns delete-topic --region us-east-1 --topic-arn "$topic" || true
   else
-    log "keeping the idle-stop alarm - free, and cg init rewrites it for the next instance"
     log "keeping the budget ${TS_HOST}-monthly - it guards the account, not the box"
   fi
 
@@ -633,7 +601,7 @@ exception - nothing here touches it."
   sed -i '/^GAME_INSTANCE_ID=/d;/^GAME_REGION=/d;/^GAME_TS_HOST=/d;/^GAME_TS_NODE=/d;/^SUNSHINE_USER=/d;/^SUNSHINE_PASS=/d' .env 2>/dev/null || true
 
   if (( ! all )); then
-    say "box deleted - security group, key pair, alarm and tailnet node kept for cg init"
+    say "box deleted - security group, key pair and tailnet node kept for cg init"
     return 0
   fi
   say "everything deleted"
@@ -932,7 +900,7 @@ if [[ -n $(aws ec2 describe-instances --region "$REGION" \
   REUSED=1
 fi
 
-# Layer 4 first: it is account-level, costs nothing, and needs no instance. If
+# The budget first: it is account-level, costs nothing, and needs no instance. If
 # the build dies - or the laptop does - the bill is still being watched.
 say "arming the budget before anything launches"
 lib/aws-setup.sh budget 2>&1 | cg_relay '    ' || log "budget setup failed - continuing"
@@ -1076,9 +1044,6 @@ say "building the box - live progress below (10-20 min)"
 stream_build "ubuntu@$TS_NODE" "$KEY" \
   || die "the build did not finish. The instance is still running and still
        billing - stop it with $C_STOP once you have looked at the log."
-
-say "arming cloud-side backstops"
-lib/aws-setup.sh | cg_relay ''
 
 # The build already installed this (15-watchdog.sh), so the box has been
 # guarded since minute one. This pass refreshes it from the local host/ - which
@@ -1224,13 +1189,6 @@ else
        moonlight list $IP
 "
 fi
-
-# Layer 3 is NOT armed here. It can only watch NetworkOut - CloudWatch refuses
-# EC2 actions on a metric-math alarm - and outside a session low egress is
-# normal: a game downloading with nobody connected looks exactly like an idle
-# box. Arming it here would stop downloads. `cg open` arms it for the duration
-# of a session, which is the only window where low egress really means idle.
-# Layers 2 and 4 cover the rest, and both count traffic in both directions.
 
 _cg_section_end 0
 cat <<EOF | cg_block "🎉" "Setup complete"

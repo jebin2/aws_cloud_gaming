@@ -55,7 +55,7 @@ Every command, and what is safe to run twice: [docs/commands.md](docs/commands.m
 | [Getting started](docs/getting-started.md) | Credentials, configuration, the first build and pairing |
 | [Commands](docs/commands.md) | Every command, the terminal output, running things twice |
 | [Cost](docs/cost.md) | What every charge is, measured, and why spot is the default |
-| [Cost guards](docs/cost-guards.md) | The four layers that stop a forgotten box, and the cloud watchdog's IAM role |
+| [Cost guards](docs/cost-guards.md) | The guards that stop a forgotten box, and the cloud watchdog's IAM role |
 | [Destroy](docs/destroy.md) | What `cg destroy` and `cg destroy --all` remove, and what they keep |
 | [Game library](docs/game-library.md) | How games and the Steam login persist in S3 |
 | [Streaming](docs/streaming.md) | Moonlight and Steam settings, GPU performance, anti-cheat |

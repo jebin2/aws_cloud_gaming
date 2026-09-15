@@ -1,11 +1,10 @@
-"""Layer 4: the cloud watchdog. An AWS Lambda, run every 5 minutes by an
+"""Layer 3: the cloud watchdog. An AWS Lambda, run every 5 minutes by an
 EventBridge rule, that ends a game instance nobody is using.
 
 It exists for the cases the other layers cannot cover:
   - the on-host watchdog dies with the box it protects - a wedged instance
     takes its own watchdog with it
-  - the CloudWatch alarm is armed only during `cg open`, so a box left running
-    after `cg init`, or after "leave it running", has no alarm at all
+  - nothing else watches from outside the box, in a session or out of one
 
 It runs inside the account on an IAM role, so no long-lived key exists for it
 anywhere, and there is no second machine to keep alive.

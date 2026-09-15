@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Layer 4: the cloud watchdog. Sourced by cg - not run directly.
+# Layer 3: the cloud watchdog. Sourced by cg - not run directly.
 #
 # lambda/cloud_watchdog.py, run every 5 minutes by an EventBridge rule, on an
 # IAM role that can end only the instance tagged $TS_HOST - no access key exists
@@ -152,7 +152,7 @@ cw_report_last() {
 
 cw_blind_note() {
   [[ $1 == *"CANNOT QUERY AWS"* || $1 == *DENIED* || $1 == *FAILED* ]] \
-    && log "  ^ it cannot act on your account - fix this or layer 4 is decoration"
+    && log "  ^ it cannot act on your account - fix this or layer 3 is decoration"
   return 0
 }
 
@@ -165,7 +165,7 @@ cw_install() {
   if ! aws iam get-role --role-name "$CW_NAME" >/dev/null 2>&1; then
     log "creating the role $CW_NAME"
     aws iam create-role --role-name "$CW_NAME" \
-      --description "cloud_gaming layer 4: end the idle $TS_HOST instance" \
+      --description "cloud_gaming layer 3: end the idle $TS_HOST instance" \
       --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
       >/dev/null 2>&1 || { log "could not create the role $CW_NAME (needs iam:CreateRole)"; return 1; }
   fi
@@ -199,7 +199,7 @@ cw_install() {
       cw_aws lambda update-function-configuration --function-name "$CW_NAME" \
         --runtime "$CW_RUNTIME" --handler cloud_watchdog.handler --role "$role_arn" \
         --timeout 60 --memory-size 128 --environment "$(cw_env)" \
-        --description "cloud_gaming layer 4 idle watchdog cfg=$fp" >/dev/null 2>&1 \
+        --description "cloud_gaming layer 3 idle watchdog cfg=$fp" >/dev/null 2>&1 \
         || { log "could not update the settings of $CW_NAME"; rm -rf "$d"; return 1; }
       cw_aws lambda wait function-updated-v2 --function-name "$CW_NAME" 2>/dev/null || true
     fi
@@ -211,7 +211,7 @@ cw_install() {
       if out=$(cw_aws lambda create-function --function-name "$CW_NAME" \
             --runtime "$CW_RUNTIME" --handler cloud_watchdog.handler --role "$role_arn" \
             --timeout 60 --memory-size 128 --environment "$(cw_env)" \
-            --description "cloud_gaming layer 4 idle watchdog cfg=$fp" \
+            --description "cloud_gaming layer 3 idle watchdog cfg=$fp" \
             --zip-file "fileb://$d/fn.zip" 2>&1 >/dev/null); then
         break
       fi
@@ -336,7 +336,7 @@ cw_watcher_lines() {
   if [[ ${ms:-} =~ ^[0-9]+$ ]]; then
     log "  last            $(cw_age "$ms") ago: ${msg#cg-watchdog: }"
     [[ $msg == *"CANNOT QUERY AWS"* || $msg == *DENIED* || $msg == *FAILED* ]] \
-      && log_as fail "  ^ it cannot act on your account, so layer 4 is decoration"
+      && log_as fail "  ^ it cannot act on your account, so layer 3 is decoration"
   elif [[ $rule == ENABLED ]]; then
     log_as warn "  ^ nothing logged in the last hour, but it runs every 5 min"
   fi

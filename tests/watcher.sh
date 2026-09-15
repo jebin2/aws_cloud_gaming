@@ -2,8 +2,8 @@
 # cg watcher and cg ping: the guard summary and the tailnet path, as reports.
 #
 # watcher's rows went through log, which picks a symbol from a line's words -
-# and "ALARM False  <- state, actions-enabled" contains "enabled", so an alarm
-# whose actions were OFF showed a green tick. Its rows now state what they mean
+# and a row saying something was NOT enabled contains "enabled", so it showed a
+# green tick. Its rows now state what they mean
 # (log_as). The plain output is pinned to what it printed before that change,
 # captured from the previous cg with the same stubs, so a styling edit cannot
 # quietly change a redirected report.
@@ -31,7 +31,6 @@ cat > "$T/bin/aws" <<'FAKE'
 #!/usr/bin/env bash
 case "$*" in
   *describe-instances*)  exit 1 ;;
-  *describe-alarms*)     printf '%s\t%s\n' "ALARM" "${ACTIONS:-False}" ;;
   *"events describe-rule"*) [[ ${RULE:-ENABLED} == none ]] && exit 254; echo "${RULE:-ENABLED}" ;;
   *filter-log-events*)   printf '%s\tcg-watchdog: %s\n' "$(( ($(date +%s) - 120) * 1000 ))" \
                            "${LAST:-no running instance tagged gamevps - nothing to do}" ;;
@@ -56,19 +55,15 @@ TS      on-host watchdog  (box not reachable)
 TS      cloud watchdog    ENABLED  (Lambda gamevps-cloud-watchdog, every 5 min)
 TS        last            2 min ago: no running instance tagged gamevps - nothing to do
 
-TS      idle alarm        ALARM False  <- state, actions-enabled
 TS      budget            57.0
 BASE
 )"
 
 echo "2. styled: each row carries the meaning it states, not one read from its words"
 out=$(CG_COLOR=always cg watcher | strip)
-contains "actions off: information, and says so"  "$out" "· idle alarm        ALARM, disarmed (cg open arms it for a session)"
-lacks    "  and never a tick"                     "$out" "✓ idle alarm"
 contains "cloud watchdog enabled: a tick"         "$out" "✓ cloud watchdog    ENABLED"
 contains "budget present: a tick"                 "$out" "✓ budget            57.0"
-out=$(CG_COLOR=always ACTIONS=True cg watcher | strip)
-contains "actions on: a tick, armed"              "$out" "✓ idle alarm        ALARM, armed"
+lacks    "no CloudWatch alarm row"                "$out" "idle alarm"
 out=$(CG_COLOR=always RULE=DISABLED cg watcher | strip)
 contains "cloud watchdog disabled: a warning"     "$out" "! cloud watchdog    DISABLED"
 out=$(CG_COLOR=always RULE=none cg watcher | strip)

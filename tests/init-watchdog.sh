@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drives `cg init`'s pre-launch arming of the cloud watchdog (layer 4) against a
+# Drives `cg init`'s pre-launch arming of the cloud watchdog (layer 3) against a
 # fake AWS CLI that KEEPS STATE - a function created on one run is there on the
 # next - so "nothing changed" is tested against what an install actually wrote,
 # not against a copy of how it is computed.
@@ -179,7 +179,7 @@ contains "no decision at all in the hour is flagged too" "$out" "logged nothing 
 
 echo "4. a blind last decision is flagged on the fast path"
 out=$(LAST_MS=$(now_ms 60) LAST_MSG="CANNOT QUERY AWS - this watchdog is blind: AccessDenied" run)
-contains "says it cannot act"        "$out" "layer 4 is decoration"
+contains "says it cannot act"        "$out" "layer 3 is decoration"
 
 echo "5. changed code: only the code is redeployed"
 echo "# changed" >> "$T/lambda/cloud_watchdog.py"
@@ -227,13 +227,13 @@ lacks    "no failure reported"       "$out" "not installed"
 echo "11. a dry run that cannot see the account is flagged"
 rm -rf "$T/aws"; mkdir -p "$T/aws"
 out=$(PROVE_MSG="CANNOT QUERY AWS - this watchdog is blind: AccessDenied" run)
-contains "says it cannot act"        "$out" "layer 4 is decoration"
+contains "says it cannot act"        "$out" "layer 3 is decoration"
 check    "retried the check first"   "$(cnt 'lambda invoke')" "3"
 
 echo "12. AWS unreachable: not fatal"
 rm -rf "$T/aws"; mkdir -p "$T/aws"
 out=$(AWS_DOWN=1 run)
-contains "says the layer is missing" "$out" "cloud watchdog not installed - the other three layers still apply"
+contains "says the layer is missing" "$out" "cloud watchdog not installed - the on-host watchdog and the budget still apply"
 check    "REACHED the launch"        "$(did SETUP-REACHED)" "yes"
 
 echo "13. no permission to create the role: not fatal either"

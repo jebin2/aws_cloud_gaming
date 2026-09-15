@@ -31,26 +31,24 @@ flowchart LR
   sun --- desk
 ```
 
-**What runs where.** The box is disposable; S3 keeps your games, and three independent guards can
-terminate a box nobody is using.
+**What runs where.** The box is disposable; S3 keeps your games, and a cloud watchdog
+terminates a box nobody is using.
 
 ```mermaid
 flowchart LR
   cg["💻 cg on your laptop"]
   ec2["🖥️ EC2 box<br/>one-time spot · ap-south-2"]
   s3[("🪣 S3<br/>games + Steam login")]
-  cw["⏰ CloudWatch alarm"]
   bud["💰 AWS Budget"]
   lam["⚡ Lambda<br/>cloud watchdog"]
 
   cg -->|"launch · terminate"| ec2
   ec2 <-->|"restore at boot<br/>push on destroy"| s3
-  cw -.->|"terminate if idle"| ec2
   lam -.->|"terminate if idle"| ec2
   bud -.->|"email"| cg
 ```
 
-The third guard, a watchdog on the box itself, is in [Flow 4](#flow-4---you-forget-the-box).
+The other guard, a watchdog on the box itself, is in [Flow 4](#flow-4---you-forget-the-box).
 Nothing on the box is reachable from the internet: the security group allows one inbound port,
 UDP 41641, and that is Tailscale's.
 
@@ -71,7 +69,7 @@ UDP 41641, and that is Tailscale's.
 | Games | Steam (Valve's `.deb`) and Proton | box | Windows games on Linux |
 | Game storage | local NVMe at `/scratch`, archived per game to S3 with `s5cmd` | box + S3 | fast and free locally, durable in S3 |
 | S3 access | EC2 instance role | box | no access key on the box to leak |
-| Guards | on-host watchdog, CloudWatch alarm, cloud watchdog (Lambda + EventBridge), AWS Budget | box, AWS | four independent ways to stop a forgotten box |
+| Guards | on-host watchdog, cloud watchdog (Lambda + EventBridge), AWS Budget | box, AWS | two independent ways to stop a forgotten box, and an email |
 | Spend | Cost Explorer (for `cg cost`) | AWS | the only billed API here, $0.01 a call |
 
 ## Where things live
@@ -121,7 +119,6 @@ sequenceDiagram
   S3-->>EC2: games and Steam login land on the NVMe
   EC2->>EC2: reboot for the driver, restore resumes
   cg->>EC2: follow the build log over ssh
-  cg->>AWS: create the idle alarm (disarmed)
   cg->>EC2: create the Sunshine account, pair Moonlight
   cg-->>You: ready - about 10 to 20 minutes
 ```
@@ -136,16 +133,13 @@ sequenceDiagram
   autonumber
   actor You
   participant cg as cg (laptop)
-  participant AWS
   participant EC2 as EC2 box
 
   You->>cg: ./cg open
-  cg->>AWS: arm the idle alarm for this session
   cg->>EC2: wait for Tailscale and Sunshine
   cg->>EC2: moonlight stream Desktop
   You->>EC2: play - video down, input up, over WireGuard
   You->>cg: quit Moonlight
-  cg->>AWS: disarm the idle alarm
   cg-->>You: [d] destroy (recommended) or [n] leave it running
 ```
 
@@ -170,7 +164,7 @@ sequenceDiagram
   cg->>AWS: cancel the spot request, terminate the instance
   EC2->>S3: shutdown push - nothing left to send
   AWS-->>cg: terminated, root disk deleted
-  Note over cg,AWS: Kept for next time - S3 archive, budget,<br/>security group, key pair, alarm
+  Note over cg,AWS: Kept for next time - S3 archive, budget,<br/>security group, key pair
 ```
 
 If the push fails, `cg destroy` stops and deletes nothing. What it removes and keeps:
@@ -183,12 +177,10 @@ flowchart TB
   idle["Box left running<br/>with no traffic"]
 
   idle --> g2["On-host watchdog<br/>checks every minute<br/>15 idle minutes<br/>under 200 KB/min"]
-  idle --> g3["CloudWatch alarm<br/>NetworkOut under 10 MB<br/>per 5 min, 6 times<br/>armed only during cg open"]
   idle --> g4["Cloud watchdog<br/>Lambda, every 5 min<br/>30 idle minutes<br/>in + out under 10 MB"]
 
   g2 --> p2["push games to S3<br/>then shutdown -h"]
-  g3 --> api["AWS terminates the instance"]
-  g4 -->|"its own IAM role"| api
+  g4 -->|"its own IAM role"| api["AWS terminates the instance"]
 
   p2 --> os["Graceful OS shutdown"]
   api --> os
@@ -200,20 +192,18 @@ flowchart TB
   bud["AWS Budget · $57 a month"] -.->|"email at 80% spent<br/>and 100% forecast"| you["You"]
 ```
 
-All three guards end in the **same place**: a graceful OS shutdown, where
+Both guards end in the **same place**: a graceful OS shutdown, where
 `cg-library-shutdown.service` pushes the games to S3 before the machine goes down. The on-host
 watchdog also pushes before it calls `shutdown`, so its shutdown push finds nothing left to send;
-the other two run outside the box and can only ask AWS to terminate it, which AWS turns into
+the cloud watchdog runs outside the box and can only ask AWS to terminate it, which AWS turns into
 that same graceful shutdown. Two pushes never run at once - a second one waits for the first.
 
 The shutdown push is allowed 30 minutes (`TimeoutStopSec=1800`). When AWS itself terminates the
 box it may cut the power sooner than that, and a spot interruption gives only two minutes, so
 `cg destroy` - which pushes first and deletes nothing if that fails - stays the safe way out.
 
-Each guard is independent, so one failing is caught by another. The two watchdogs wait 20
-minutes after boot before they arm, so a build is never mistaken for idleness; the CloudWatch
-alarm needs no such grace, because it is only ever armed during `cg open`. If both the alarm and
-the cloud watchdog fire, the box still shuts down once. A box still going down an hour later -
+Each guard is independent, so one failing is caught by the other. Both wait 20 minutes after
+boot before they arm, so a build is never mistaken for idleness. A box still going down an hour later -
 whichever guard started it - is forced by the cloud watchdog. The budget stops nothing - it is the
 backstop that tells you. Details: [cost-guards.md](cost-guards.md).
 

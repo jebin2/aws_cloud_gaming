@@ -1,11 +1,10 @@
 [Unit]
 Description=Mirror the Steam library to S3 before the machine goes down
-# This is what makes the box safe to stop AUTOMATICALLY. Three things stop it
+# This is what makes the box safe to stop AUTOMATICALLY. Two things stop it
 # without anyone typing a command - the on-host idle watchdog's `shutdown -h`,
-# the CloudWatch alarm, and the cloud watchdog - and the last two ask AWS
-# to terminate (or, on demand, stop) the instance, which AWS turns into a
-# graceful OS shutdown. All three therefore arrive here, which is why one unit
-# covers all of them.
+# and the cloud watchdog, which asks AWS to terminate (or, on demand, stop) the
+# instance, which AWS turns into a graceful OS shutdown. Both therefore arrive
+# here, which is why one unit covers them.
 #
 # There is deliberately no periodic timer beside it: this only ever runs when
 # the machine is already going away, never while you are playing.

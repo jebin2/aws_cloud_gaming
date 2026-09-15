@@ -18,7 +18,7 @@ mkdir -p /opt/cloud-gaming-host
 # box with no network identity: unreachable by ssh, no log streaming, only
 # console output - which is exactly the state a corrupted URL produced once, and
 # the hardest possible thing to debug. Carrying on costs layer 2 and leaves the
-# box reachable; layers 3 and 4 are armed before launch and still bound the
+# box reachable; the cloud watchdog and budget are armed before launch and bound the
 # spend. The verify lines below report the loss, and `cg init` streams them.
 if curl -fsSL --retry 5 --retry-delay 3 '__HOST_TGZ_URL__' -o /tmp/host.tgz; then
   tar -xz -C /opt/cloud-gaming-host -f /tmp/host.tgz
@@ -26,7 +26,7 @@ if curl -fsSL --retry 5 --retry-delay 3 '__HOST_TGZ_URL__' -o /tmp/host.tgz; the
 else
   echo ">>> FAILED: could not download the host bundle from S3"
   echo ">>>         layer 2 (on-host watchdog) and the S3 library mirror will be MISSING"
-  echo ">>>         the box is still reachable; layers 3 and 4 still stop it"
+  echo ">>>         the box is still reachable; the cloud watchdog still stops it"
 fi
 ( cd /opt/cloud-gaming-host && bash ./install-watchdog.sh ) >/dev/null 2>&1 \
   || echo "watchdog install failed - the box is UNGUARDED"
