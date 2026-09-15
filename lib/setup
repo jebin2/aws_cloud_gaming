@@ -502,11 +502,22 @@ destroy_all() {
     echo "The desktop, its configuration AND the S3 game archive all go.
 There is no undo, no image and no versioning behind the archive."
   else
-    echo "The desktop and its configuration go. The GAMES do not: they were
-mirrored to S3 before this started, and the next cg init restores them.
+    echo "The desktop and its configuration go. The GAMES stay in S3: they were
+mirrored before this started, and the next cg init restores them.
 Check with: cg library"
-    echo "There is no undo and no image is kept. The S3 archive is the single
-exception - nothing here touches it."
+    # The archive is not kept for good: the cloud watchdog deletes it after the
+    # expiry window with no box. Saying "nothing touches it" here was true until
+    # that existed, and is the sentence someone would rely on.
+    local keep_days
+    keep_days=$(cw_expiry_days)
+    if (( keep_days == 0 )); then
+      echo "There is no undo and no image is kept. The S3 archive is kept - nothing here
+touches it, and GAME_ARCHIVE_EXPIRY_DAYS=0 keeps it forever."
+    else
+      printf '%s\n' "There is no undo and no image is kept. The S3 archive is kept for now, but" \
+        "it is DELETED after $keep_days days with no box - around $(date -d "+$keep_days days" +%Y-%m-%d)." \
+        "Launch a box before then to keep it, or set GAME_ARCHIVE_EXPIRY_DAYS=0 in .env."
+    fi
   fi
   echo
   } | cg_block "🧾" "What this destroy does"
@@ -892,7 +903,6 @@ fi
 NODES_BEFORE=$(mktemp); trap 'rm -f "$NODES_BEFORE"' EXIT
 tailnet_node_keys > "$NODES_BEFORE"
 stale=$(tailnet_nodes | grep -cx "$TS_HOST" || true)
-(( stale )) && log "note: a node named '$TS_HOST' already exists; if a new box is launched it joins under a suffixed name, which is handled"
 
 # Whether provision.sh will reuse an instance or launch one decides how to find
 # the box on the tailnet afterwards, and it has to be known BEFORE it runs.
@@ -903,6 +913,18 @@ if [[ -n $(aws ec2 describe-instances --region "$REGION" \
       --query 'Reservations[0].Instances[0].InstanceId' --output text 2>/dev/null \
       | grep -v '^None$' || true) ]]; then
   REUSED=1
+fi
+
+# Only about a NEW box, and only saying what will actually happen. An offline
+# node of that name is pruned seconds from now, so the box takes the name - the
+# note used to predict a suffix there, and then the prune made it wrong. Only a
+# node that is still online forces one.
+if (( stale && ! REUSED )); then
+  if tailscale status 2>/dev/null | awk -v h="$TS_HOST" '$2 == h' | grep -q offline; then
+    log "note: an offline '$TS_HOST' node is left from an earlier box - it is pruned before launch, so the new box takes the name"
+  else
+    log "note: a node named '$TS_HOST' is online, so a new box joins as '$TS_HOST-1' - which is handled"
+  fi
 fi
 
 # The budget first: it is account-level, costs nothing, and needs no instance. If

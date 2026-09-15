@@ -78,6 +78,7 @@ run() { # run <CG_DESTROY_ALL value>
   rm -f "$T/log"
   mkdir -p "$T/home/.ssh"
   printf 'GAME_REGION=ap-south-2\nGAME_TS_HOST=gamevps\nGAME_INSTANCE_ID=i-old\nGAME_TS_NODE=gamevps\nSUNSHINE_USER=admin\nSUNSHINE_PASS=old-pass\nGAME_S3_BUCKET=bucket-kept\n' > "$T/.env"
+  printf "${EXTRA_ENV:-}" >> "$T/.env"
   ( cd "$T" && HOME="$T/home" LOG="$T/log" PATH="$T/bin:$PATH" TAILSCALE_API_KEY=tskey-api-test \
       CG_DESTROY_ALL="${1:-0}" timeout 60 bash ./lib/setup destroy 2>&1 )
 }
@@ -132,5 +133,19 @@ echo "6. the sandbox really is isolated from the real home"
 check "deleted the sandboxed key"      "$(exists "$T/home/.ssh/gamevps.pem")" "no"
 check "left unrelated files alone"     "$(exists "$T/home/.ssh/gamevss.pem")" "yes"
 check "HOME was redirected, not real"  "$([[ $T/home != "$HOME" ]] && echo yes || echo no)" "yes"
+
+echo "7. a plain destroy says when the archive will be deleted - or that it never will"
+# It used to say the archive was "the single exception - nothing here touches
+# it", which stopped being true when the cloud watchdog began expiring it.
+out=$(run 0)
+contains "names the expiry, and a date" "$out" "DELETED after 14 days with no box - around $(date -d '+14 days' +%Y-%m-%d)"
+lacks    "no longer claims nothing touches it" "$out" "single"
+out=$(EXTRA_ENV='GAME_ARCHIVE_EXPIRY_DAYS=0\n' run 0)
+contains "off: kept forever"          "$out" "GAME_ARCHIVE_EXPIRY_DAYS=0 keeps it forever"
+lacks    "off: no deletion date"      "$out" "DELETED after"
+out=$(EXTRA_ENV='GAME_ARCHIVE_EXPIRY_DAYS=30\n' run 0)
+contains "30 days is 30 days"         "$out" "DELETED after 30 days"
+out=$(run 1)
+lacks    "--all makes no expiry promise" "$out" "DELETED after"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]
