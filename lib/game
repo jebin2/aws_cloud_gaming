@@ -104,7 +104,7 @@ up() {
         echo
         echo "  Your games are in S3, so throwing this box away costs nothing:"
         echo
-        echo "      cg destroy && cg init          # rebuild, ~6 min, games restored"
+        echo "      cg destroy && cg init          # rebuild, 10-20 min, games restored"
         echo
         echo "  To get stop/start back, build on demand instead - dearer per hour,"
         echo "  but it can be stopped and restarted as often as you like:"
@@ -174,7 +174,7 @@ end_session() {
     echo "  - stopping a persistent one disables its request, and it can then"
     echo "    NEVER start again while its root volume keeps billing"
     echo
-    echo "Your games are mirrored to S3, so destroying costs a ~6 min rebuild"
+    echo "Your games are mirrored to S3, so destroying costs a 10-20 min rebuild"
     echo "and nothing else."
     echo
     } | cg_block "💡" "Nothing to stop on a spot box"
@@ -246,7 +246,7 @@ destroy() {
   # An image costs roughly a tenth of the live volume per month.
   echo
   echo "An image keeps the installed desktop so `cg init` can restore it in minutes"
-  echo "instead of rebuilding (~20 min). It costs ~10% of the volume's monthly price."
+  echo "instead of rebuilding (10-20 min). It costs ~10% of the volume's monthly price."
   read -rp "save an image first? [Y/n] " snap
   if [[ ! ${snap:-Y} =~ ^[Nn]$ ]]; then
     # A stopped instance gives a consistent image without --no-reboot games.

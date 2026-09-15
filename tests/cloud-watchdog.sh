@@ -452,10 +452,13 @@ contains "  and is logged" "$r" "notification not sent (ignored)"
 echo "35. the 24-hour archive warning - once per countdown, recorded in SSM"
 MARK='ssm = SSM(last_seen=ago(hours=3))'
 r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; $MARK")
-check "warned, and recorded against that mark" "$(field 1 "$r")|$(field 2 "$r")" \
-  "kept|notify:gamevps: game archive deleted in 21h,warned=2026-09-15T09:00:00Z"
-r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; ssm = SSM(last_seen=ago(hours=3), warned=ago(hours=3))")
-check "already warned for this mark: silent" "$(field 2 "$r")" "-"
+check "warned, and recorded against the deletion time" "$(field 1 "$r")|$(field 2 "$r")" \
+  "kept|notify:gamevps: game archive deleted in 21h,warned=2026-09-16T09:00:00Z"
+r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; ssm = SSM(last_seen=ago(hours=3), warned=ago(hours=-21))")
+check "already warned for this deletion: silent" "$(field 2 "$r")" "-"
+# Warned under 1 day, then the days were raised: the same mark, a later deletion.
+r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 14; ssm = SSM(last_seen=ago(days=13, hours=3), warned=ago(days=12, hours=3))")
+contains "days changed after a warning: warned again" "$(field 2 "$r")" "notify:gamevps: game archive deleted in 21h"
 r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; ssm = SSM(last_seen=ago(hours=3), warned=ago(days=9))")
 contains "a warning for an OLD mark does not count" "$(field 2 "$r")" "notify:gamevps: game archive deleted in 21h"
 r=$(arch_ "w.NTFY_URL = 'u'; ssm = SSM(last_seen=ago(days=3))")

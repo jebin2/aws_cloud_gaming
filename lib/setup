@@ -435,7 +435,7 @@ clean() {
 
 # The nuclear option. Kept separate from `clean` so it can never be a surprise.
 rebuild() {
-  echo "This destroys the instance and its disk, then builds a new one (~20 min)."
+  echo "This destroys the instance and its disk, then builds a new one (10-20 min)."
   echo "You will have to pair Moonlight again. No image is saved - the point is"
   echo "a clean 50 GB baseline."
   echo

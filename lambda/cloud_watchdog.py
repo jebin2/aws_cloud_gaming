@@ -512,17 +512,20 @@ def mark_gone(ssm, now):
 
 
 def warn_once(ssm, seen, idle, left):
-    """The 24-hour warning, once per countdown. It is recorded against the last-seen
-    mark it was sent for, so a new box - a new mark - arms it again, and a send that
-    failed is retried at the next hourly check."""
+    """The 24-hour warning, once per countdown. It is recorded against the deletion
+    time it warned of, so a new box (a new mark) or a changed GAME_ARCHIVE_EXPIRY_DAYS
+    arms it again, and a send that failed is retried at the next hourly check.
+    Recording the mark alone kept a warning sent under 1 day from ever being
+    repeated after the days were raised to 14."""
     if not NTFY_URL:
         return
-    if mark_get(ssm, "archive-warned") == iso(seen):
+    due = iso(seen + idle + left)
+    if mark_get(ssm, "archive-warned") == due:
         return
     if notify("game archive deleted in %s" % span(left),
               "No box for %s. Launch one to keep the games, or set GAME_ARCHIVE_EXPIRY_DAYS=0."
               % span(idle), "high", "warning"):
-        mark_put(ssm, "archive-warned", iso(seen))
+        mark_put(ssm, "archive-warned", due)
 
 
 def last_launch(trail, since, now):

@@ -221,7 +221,7 @@ channel, self-host ntfy and set its URL instead.
 **How it reaches each sender.** The cloud watchdog gets it as an environment variable, so the
 next `cg init` or `cg watchdog install` applies a change. The box gets it inside its private host
 bundle, as a root-only `/etc/cg-notify.conf`; `cg init` refreshes it, and removing the setting
-removes the file. The 24-hour warning is recorded as a free SSM parameter, so the
+removes the file. The 24-hour warning is recorded, against the deletion time it warned of, as a free SSM parameter, so the
 hourly check sends it once, and retries next hour if the send failed.
 The confirmation that a box is gone comes from a second EventBridge rule,
 `<host>-cloud-watchdog-state`, which hands EC2's state changes and spot interruption warnings to

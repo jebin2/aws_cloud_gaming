@@ -11,7 +11,7 @@ source lib/ssh-key.sh
 REGION="${GAME_REGION:-ap-south-2}"
 TS_HOST="${GAME_TS_HOST:-gamevps}"
 TYPE="${GAME_INSTANCE_TYPE:-g6.xlarge}"
-DISK_GB="${GAME_DISK_GB:-100}"
+DISK_GB="${GAME_DISK_GB:-50}"
 SPOT="${GAME_SPOT:-0}"
 # Persistent game library. Held in S3 and restored onto the instance store at
 # boot - see lib/library-aws.sh for why, and 16-library.sh for how. It used to

@@ -98,7 +98,7 @@ flowchart TB
 | Proton and the Steam runtime | NVMe | no - Steam re-downloads them in under a minute |
 | Security group, key pair, budget | AWS | **yes** - free, reused |
 
-The root disk size is `GAME_DISK_GB`: 100 GB by default, set to 50 here in `.env`. The NVMe is
+The root disk size is `GAME_DISK_GB`, 50 GB by default. The NVMe is
 wiped whenever the instance stops, which is why S3 holds the durable copy. Details:
 [game-library.md](game-library.md).
 

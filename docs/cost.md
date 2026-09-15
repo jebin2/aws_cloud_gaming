@@ -12,8 +12,8 @@ Five separate charges. The third surprises people.
 zones on 2026-09-15, and measured on a real bill at **INR 19.8/hr**. Spot prices move; on-demand
 is a fixed **$0.9664/hr (INR 85)**. Either way add $0.005/hr for the public IPv4.
 
-**Per hour the root volume exists.** gp3 is $0.0912/GB-month. `GAME_DISK_GB` is unset by default,
-which launches **100 GB: about $9/month (INR 800), or $0.0125/hr**. A spot box deletes its volume
+**Per hour the root volume exists.** gp3 is $0.0912/GB-month. `GAME_DISK_GB` defaults to
+**50 GB: about $4.56/month (INR 400), or $0.0063/hr**. A spot box deletes its volume
 with the box, so this bills only while it exists. An on-demand box keeps its volume **while
 stopped**, so a stopped box bills the full month. EBS volumes cannot be shrunk, so choose the size
 at launch.
