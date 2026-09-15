@@ -144,7 +144,7 @@ archive.
 |---|---|
 | unset | 14 days |
 | `GAME_ARCHIVE_EXPIRY_DAYS=30` | 30 days |
-| `GAME_ARCHIVE_EXPIRY_DAYS=3` | 7 days - the floor, so a typo cannot delete every game overnight |
+| `GAME_ARCHIVE_EXPIRY_DAYS=3` | 3 days - any number is used as written, so check it |
 | `GAME_ARCHIVE_EXPIRY_DAYS=0` | **off**: kept forever, and the role loses every delete permission |
 
 The next `cg init` applies a change. `cg status`, `cg init` and `cg watchdog status` show what the

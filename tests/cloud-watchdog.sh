@@ -373,10 +373,11 @@ check "same name" "$cw_name" "$lib_name"
 check "GAME_S3_BUCKET wins, as it does there" \
   "$(TS_HOST=gamevps GAME_S3_BUCKET=my-bucket bash -c 'source lib/cloud-watchdog.sh; cw_bucket 123456789012')" "my-bucket"
 
-echo "33. the off switch, and the floor"
+echo "33. the off switch, and values used as written"
 days() { TS_HOST=gamevps GAME_ARCHIVE_EXPIRY_DAYS="$1" bash -c 'source lib/cloud-watchdog.sh; cw_expiry_days'; }
 check "0 is off"            "$(days 0)" "0"
-check "3 is floored to 7"   "$(days 3)" "7"
+check "3 is 3, not raised"  "$(days 3)" "3"
+check "1 is 1"              "$(days 1)" "1"
 check "30 is 30"            "$(days 30)" "30"
 check "unset is 14"         "$(days '')" "14"
 pol() { TS_HOST=gamevps REGION=ap-south-2 GAME_S3_BUCKET=b GAME_ARCHIVE_EXPIRY_DAYS="$1" bash -c 'source lib/cloud-watchdog.sh; cw_policy 123456789012'; }

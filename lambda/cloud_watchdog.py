@@ -45,7 +45,7 @@ PERIOD = 300
 # in-guest `shutdown -h`), so the next run can tell how long it has been stuck.
 SINCE_TAG = "cg-going-down-since"
 
-# Archive expiry. 0 turns it off; cg floors any other value at 7 days.
+# Archive expiry, in days with no box. 0 turns it off.
 BUCKET = os.environ.get("CG_BUCKET", "")
 EXPIRY_DAYS = int(os.environ.get("CG_ARCHIVE_EXPIRY_DAYS", "0") or 0)
 LAST_SEEN_TAG = "cg-last-seen"

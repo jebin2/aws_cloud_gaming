@@ -21,12 +21,10 @@ cw_aws() { aws --region "$REGION" "$@"; }
 
 cw_int() { [[ ${1:-} =~ ^[0-9]+$ ]] && printf '%s' "$1" || printf '%s' "$2"; }
 
-# Days with no box before the game archive is deleted. 0 turns it off; any other
-# value is floored at 7, so a typo cannot delete every game the next morning.
+# Days with no box before the game archive is deleted: 14 unless set, 0 turns it
+# off, and any other number is used as written.
 cw_expiry_days() {
-  local v; v=$(cw_int "${GAME_ARCHIVE_EXPIRY_DAYS:-}" 14)
-  (( v > 0 && v < 7 )) && v=7
-  printf '%s' "$v"
+  cw_int "${GAME_ARCHIVE_EXPIRY_DAYS:-}" 14
 }
 
 # The archive bucket, named exactly as lib/library-aws.sh names it.
