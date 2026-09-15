@@ -872,6 +872,11 @@ awk -v q="$quota" -v v="$vcpus" 'BEGIN{exit !(q>=v)}' \
        about the other. Drop GAME_SPOT to use the on-demand pool instead."
 log "$QUOTA_KIND quota ${quota%.*} vCPU covers $TYPE (${vcpus})"
 
+# --- ssh key --------------------------------------------------------------------
+# shellcheck source=lib/ssh-key.sh
+source lib/ssh-key.sh
+key_report "$REGION" "$TS_HOST" "$HOME/.ssh/${TS_HOST}.pem"
+
 # Accept the names these are commonly already exported under.
 : "${GAME_TS_AUTHKEY:=${TAILSCALE_AUTH_KEY:-}}"
 : "${GAME_ALERT_EMAIL:=${EMAIL_ALERTS:-}}"
@@ -924,7 +929,7 @@ fi
 
 # Snapshot the tailnet before anything launches, so the new node can be
 # identified by *being new* rather than by having an expected name.
-NODES_BEFORE=$(mktemp); trap 'rm -f "$NODES_BEFORE"' EXIT
+NODES_BEFORE=$(mktemp); cg_on_exit 'rm -f "$NODES_BEFORE"'
 tailnet_node_keys > "$NODES_BEFORE"
 stale=$(tailnet_nodes | grep -cx "$TS_HOST" || true)
 

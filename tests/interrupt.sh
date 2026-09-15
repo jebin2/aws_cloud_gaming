@@ -68,6 +68,21 @@ out = re.sub(r"\x1b\[[0-9;]*m", "", p.stdout.decode() + p.stderr.decode())
 check("done", "done in" in out and "stopped" not in out, out[-200:])
 check("  exit 0", p.returncode == 0, p.returncode)
 
+print("7. a script's own cleanup no longer hides the closing line")
+import tempfile
+mark = os.path.join(tempfile.mkdtemp(), "cleaned")
+p = subprocess.run(["bash", "-c", PRELUDE + 'cg_on_exit "touch %s"; log "finished"' % mark],
+                   capture_output=True, env=dict(os.environ, CG_COLOR="always"))
+out = re.sub(r"\x1b\[[0-9;]*m", "", p.stdout.decode() + p.stderr.decode())
+check("the cleanup ran", os.path.exists(mark))
+check("  and the step still closed", "done in" in out, out[-200:])
+if os.path.exists(mark): os.remove(mark)
+rc, out = interrupt('cg_on_exit "touch %s"; sleep 8' % mark)
+check("on Ctrl+C: the cleanup ran", os.path.exists(mark))
+check("  and the step says stopped", "stopped after" in out, out[-200:])
+setup = open("lib/setup").read()
+check("lib/setup sets no EXIT trap of its own", re.search(r"^\s*[^#\n]*\btrap\b[^\n]*\bEXIT\b", setup, re.M) is None)
+
 print("\npassed %d, failed %d" % (passed, failed))
 sys.exit(1 if failed else 0)
 PY

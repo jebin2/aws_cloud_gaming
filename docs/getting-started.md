@@ -76,6 +76,13 @@ OpenSSH, `curl` and `python3`, through pacman, apt, dnf or zypper. It shows what
 asks once before using sudo, then starts the Tailscale sign-in and asks for an AWS access key if
 there is none. It creates nothing in AWS and costs nothing.
 
+**On a second laptop,** copy `.env` across: it holds your keys and is not in git. The ssh key
+sorts itself out. `cg check` compares `~/.ssh/<host>.pem` with the key pair in AWS, and when the
+file is missing or is a different key and no box exists, `cg init` replaces the pair. That is
+free, and any old file is kept as `<host>-replaced-<time>.pem`, but the `.pem` on the other laptop
+stops working. While a box exists, copy the `.pem` from the laptop that built it instead - `cg
+check` stops and says so.
+
 The build takes about 10-20 minutes - most of it the NVIDIA driver, with the game restore
 running alongside it - and streams its progress, so a slow step looks slow rather than
 hung. Each step asserts its *effect* rather than merely running, because nearly every failure

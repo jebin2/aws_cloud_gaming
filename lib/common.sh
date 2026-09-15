@@ -114,7 +114,17 @@ _cg_section_end() { # _cg_section_end [exit-code]
     printf '%s%s╰─%s %s✗ stopped after %s%s\n' "$_CG_PAD" "$_CG_SEC_COL" "$_CG_R" "$_CG_RED" "$d" "$_CG_R"
   fi
 }
-_cg_on_exit() { local rc=$?; (( ${_CG_INT:-0} )) && rc=130; _cg_section_end "$rc"; return "$rc"; }
+_cg_on_exit() {
+  local rc=$? c
+  (( ${_CG_INT:-0} )) && rc=130
+  for c in "${_CG_ON_EXIT[@]}"; do eval "$c" || true; done
+  _cg_section_end "$rc"
+  return "$rc"
+}
+# Cleanup for exit. A script's own `trap ... EXIT` replaced the one below, and
+# every step after it then ended with no closing line - even on Ctrl+C.
+_CG_ON_EXIT=()
+cg_on_exit() { _CG_ON_EXIT+=("$1"); trap _cg_on_exit EXIT; }
 # Ctrl+C. Without a trap, the EXIT trap saw the status of the last command - often
 # 0 - so a cancelled run closed its step with "done". Trapping it also stops a
 # script whose child swallowed the signal: sudo and pacman catch it and exit 1,

@@ -5,6 +5,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."   # lib/ -> repo root; .env and paths live there
+# shellcheck source=lib/ssh-key.sh
+source lib/ssh-key.sh
 
 REGION="${GAME_REGION:-ap-south-2}"
 TS_HOST="${GAME_TS_HOST:-gamevps}"
@@ -66,13 +68,8 @@ else
     echo "    $AMI"
   fi
 
-  if ! ec2 describe-key-pairs --key-names "$KEY_NAME" &>/dev/null; then
-    echo "==> creating key pair -> $KEY_FILE"
-    mkdir -p "$(dirname "$KEY_FILE")"
-    ec2 create-key-pair --key-name "$KEY_NAME" \
-      --query KeyMaterial --output text > "$KEY_FILE"
-    chmod 600 "$KEY_FILE"
-  fi
+  # Reused only if this laptop holds its private key; replaced otherwise.
+  key_ensure "$REGION" "$KEY_NAME" "$KEY_FILE" || { echo "could not set up the ssh key pair"; exit 1; }
 
   # The only inbound rule is Tailscale's UDP port. Without it, Tailscale cannot
   # negotiate a direct path and silently falls back to a DERP relay - which
