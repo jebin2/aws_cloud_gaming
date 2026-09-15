@@ -21,10 +21,13 @@ Type=oneshot
 RemainAfterExit=yes
 User=ubuntu
 Group=ubuntu
+# The ntfy URL, when notifications are configured - for a push that fails or is
+# cut off as the box goes down.
+EnvironmentFile=-/etc/cg-notify.conf
 # Nothing happens at start. The work is in ExecStop, which systemd runs as the
 # machine goes down, while the network is still up.
 ExecStart=/bin/true
-ExecStop=/usr/local/bin/cg-library push
+ExecStop=/usr/local/bin/cg-shutdown-push
 # The backstop, for stops this box did not initiate - an external StopInstances,
 # a console terminate. The on-host watchdog now pushes BEFORE calling shutdown,
 # where there is no timeout at all, because a first upload of a 140 GB game

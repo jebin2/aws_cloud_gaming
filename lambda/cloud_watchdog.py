@@ -44,6 +44,14 @@ PERIOD = 300
 # Written on an instance going down with no timestamp in its state reason (an
 # in-guest `shutdown -h`), so the next run can tell how long it has been stuck.
 SINCE_TAG = "cg-going-down-since"
+# Notifications about one shutdown, recorded on the instance so each is sent once.
+# Their value starts with when that shutdown began, so an earlier one never counts.
+SLOW_MINUTES = 30
+SLOW_TAG = "cg-slow-noted"
+FORCED_TAG = "cg-forced"
+
+STATE_EVENT = "EC2 Instance State-change Notification"
+SPOT_EVENT = "EC2 Spot Instance Interruption Warning"
 
 # Archive expiry, in days with no box. 0 turns it off.
 BUCKET = os.environ.get("CG_BUCKET", "")
@@ -86,9 +94,48 @@ def notify(title, message, priority="default", tags=""):
 
 def handler(event, context):
     import boto3  # in the Lambda runtime; the tests pass fakes instead
+    # EC2's own state-change events, from the second EventBridge rule. Nothing
+    # else runs for these: they answer "is the box really gone", not "is it idle".
+    if isinstance(event, dict) and event.get("detail-type") in (STATE_EVENT, SPOT_EVENT):
+        return state_changed(boto3.client("ec2"), event)
     dry = isinstance(event, dict) and bool(event.get("dry_run"))
     return run_all(boto3.client("ec2"), boto3.client("cloudwatch"), boto3.client("s3"),
                    boto3.client("cloudtrail"), datetime.now(timezone.utc), dry)
+
+
+def state_changed(ec2, event):
+    """An instance finished stopping or terminating. The box cannot report its own
+    end - by then it is gone - so this is the notification that says it really is,
+    however it ended: a watchdog, cg destroy, a spot interruption, the console.
+    EventBridge sends every instance in the region, so only this host's counts."""
+    detail = event.get("detail") or {}
+    iid = detail.get("instance-id", "")
+    state = "interruption" if event.get("detail-type") == SPOT_EVENT else detail.get("state", "")
+    # The rule delivers every state change; only an end, or a spot warning, matters.
+    if not iid or state not in ("stopped", "terminated", "interruption"):
+        return {"state": "ignored"}
+    try:
+        resp = ec2.describe_instances(InstanceIds=[iid])
+    except Exception as exc:
+        say("%s %s, but it could not be described - not notified: %s" % (iid, state, exc))
+        return {"state": "unknown"}
+    names = [t.get("Value") for r in resp.get("Reservations", []) for i in r.get("Instances", [])
+             for t in i.get("Tags", []) if t.get("Key") == "Name"]
+    if TS_HOST not in names:
+        return {"state": "not-ours"}
+    if state == "interruption":
+        say("%s spot interruption warning - AWS reclaims it in about 2 minutes" % iid)
+        notify("spot box being reclaimed",
+               "AWS takes %s back in about 2 minutes. Games since the last push may not finish mirroring."
+               % iid, "urgent", "warning")
+    elif state == "terminated":
+        say("%s terminated - it no longer bills" % iid)
+        notify("box terminated", "%s is gone, and no longer bills." % iid, "default", "white_check_mark")
+    else:
+        say("%s stopped - compute no longer bills" % iid)
+        notify("box stopped", "%s is stopped: compute no longer bills, its disk still does." % iid,
+               "default", "white_check_mark")
+    return {"state": state, "instance": iid}
 
 
 def run_all(ec2, cw, s3, trail, now, dry=False):
@@ -253,9 +300,15 @@ def going_down(ec2, inst, now, dry):
         return {"instance": iid, "action": "none", "reason": "going down, first seen"}
 
     took = minutes(now - since)
+    mark = iso(since)
     if took < STUCK_MINUTES:
         say("%s %s for %dm - letting it finish (the games are mirrored on the way down; forced at %dm)"
             % (iid, state, took, STUCK_MINUTES))
+        if not dry and took >= SLOW_MINUTES and tag_value(inst, SLOW_TAG) != mark:
+            if notify("shutdown slow",
+                      "%s has been %s for %dm - probably still mirroring its games. Forced at %dm."
+                      % (iid, state, took, STUCK_MINUTES), "default", "hourglass"):
+                ec2.create_tags(Resources=[iid], Tags=[{"Key": SLOW_TAG, "Value": mark}])
         return {"instance": iid, "action": "none", "reason": "going down"}
 
     verb = "terminate" if state == "shutting-down" else "stop"
@@ -263,10 +316,20 @@ def going_down(ec2, inst, now, dry):
     if dry:
         say("%s %s - WOULD force %s (dry run)" % (iid, why, verb))
         return {"instance": iid, "action": "would-force-" + verb, "reason": why}
+    # Forced again on every run while it stays stuck - that is harmless - but told
+    # once, then hourly: the tag holds when this shutdown began and when it was
+    # first forced.
+    forced = (tag_value(inst, FORCED_TAG) or "").split("/")
     call(ec2, verb, iid, force=True)
     say("%s %s - FORCED %s, skipping the OS shutdown" % (iid, why, verb))
-    notify("stuck shutdown forced", "%s %s - forced %s, skipping the OS shutdown." % (iid, why, verb),
-           "high", "warning")
+    if forced[0] != mark:
+        if notify("stuck shutdown forced", "%s %s - forced %s, skipping the OS shutdown." % (iid, why, verb),
+                  "high", "warning"):
+            ec2.create_tags(Resources=[iid], Tags=[{"Key": FORCED_TAG, "Value": "%s/%s" % (mark, iso(now))}])
+    elif len(forced) > 1 and now.minute < 5 and forced[1] <= iso(now - timedelta(hours=1)):
+        notify("box still stuck after forcing",
+               "%s has been %s for %dm, and forcing it has not ended it. Check the EC2 console - it may "
+               "still bill." % (iid, state, took), "urgent", "rotating_light")
     return {"instance": iid, "action": "force-" + verb, "reason": why}
 
 
@@ -316,6 +379,10 @@ def transition_time(reason):
     if not m:
         return None
     return datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+
+
+def tag_value(inst, key):
+    return next((t.get("Value") for t in inst.get("Tags", []) if t.get("Key") == key), None)
 
 
 def tag_time(inst):

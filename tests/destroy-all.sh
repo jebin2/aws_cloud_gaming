@@ -110,12 +110,13 @@ check "bucket removed"        "$(did 's3 rb')" "yes"
 check "instance profile gone" "$(did 'delete-instance-profile')" "yes"
 check "role policy gone"      "$(did 'delete-role-policy')" "yes"
 check "role gone"             "$(did 'delete-role --role-name gamevps-box')" "yes"
-check "watchdog schedule gone" "$(did 'events delete-rule')" "yes"
+check "watchdog schedule gone" "$(did 'events delete-rule --name gamevps-cloud-watchdog$')" "yes"
+check "state-change rule gone" "$(did 'events delete-rule --name gamevps-cloud-watchdog-state')" "yes"
 check "watchdog function gone" "$(did 'lambda delete-function')" "yes"
 check "watchdog logs gone"    "$(did 'logs delete-log-group')" "yes"
 check "watchdog role gone"    "$(did 'delete-role --role-name gamevps-cloud-watchdog')" "yes"
 # The schedule goes first, so nothing invokes a half-deleted function.
-first=$(grep -n 'events delete-rule' "$T/log" | cut -d: -f1); fn=$(grep -n 'lambda delete-function' "$T/log" | cut -d: -f1)
+first=$(grep -n 'events delete-rule' "$T/log" | head -1 | cut -d: -f1); fn=$(grep -n 'lambda delete-function' "$T/log" | cut -d: -f1)
 check "schedule removed before the function" "$(( first < fn ))" "1"
 # A bucket name left in .env would have status printing a name for something
 # that no longer exists - which is the bug that prompted deleting it at all.

@@ -190,9 +190,15 @@ Push notifications through [ntfy](https://ntfy.sh), **off unless `GAME_NTFY_URL`
 |---|---|
 | an idle box terminated or stopped | the cloud watchdog |
 | an idle box shutting down, and whether its games were mirrored | the on-host watchdog |
-| a stuck shutdown forced | the cloud watchdog |
+| its upload before shutdown still running after an hour - then hourly | the on-host watchdog |
+| the upload on the way down failing, or cut off by the shutdown timeout | the box, as it goes down |
+| a shutdown still going after 30 minutes - once | the cloud watchdog |
+| a stuck shutdown forced - once | the cloud watchdog |
+| a box still stuck an hour after forcing - then hourly | the cloud watchdog |
 | the game archive 24 hours from deletion - once per countdown | the cloud watchdog |
 | the game archive deleted | the cloud watchdog |
+| the box confirmed gone - terminated or stopped, however it ended | the cloud watchdog, from EC2's events |
+| a spot box about to be reclaimed - AWS's 2-minute warning | the cloud watchdog, from EC2's events |
 | the cloud watchdog failing - at most once an hour | the cloud watchdog |
 | a build finished, or failed | `cg init` |
 
@@ -210,3 +216,9 @@ next `cg init` or `cg watchdog install` applies a change. The box gets it inside
 bundle, as a root-only `/etc/cg-notify.conf`; `cg init` refreshes it, and removing the setting
 removes the file. The 24-hour warning is recorded on the archive bucket as `cg-warned`, so the
 hourly check sends it once, and retries next hour if the send failed.
+The confirmation that a box is gone comes from a second EventBridge rule,
+`<host>-cloud-watchdog-state`, which hands EC2's state changes and spot interruption warnings to
+the same function; it ignores every state that is not an end. The box cannot report its own end.
+A shutdown's notices are recorded as tags on the instance, stamped with when that shutdown began,
+so each is sent once and an earlier shutdown's never counts. None of this adds a cost: EC2's own
+events, the extra invocations, the tags and the requests all fall inside AWS's free allowances.

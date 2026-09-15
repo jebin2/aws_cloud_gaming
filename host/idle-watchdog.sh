@@ -21,15 +21,17 @@ STATE="${STATE:-/var/lib/idle-watchdog}"
 # to power off a machine is not something to verify by running it for real.
 CG_LIBRARY_BIN="${CG_LIBRARY_BIN:-/usr/local/bin/cg-library}"
 SHUTDOWN_BIN="${SHUTDOWN_BIN:-/sbin/shutdown}"
-# From /etc/cg-notify.conf, via the unit's EnvironmentFile. Unset is off.
-CG_NTFY_URL="${CG_NTFY_URL:-}"
+# Notifications go through cg-notify, which is off unless CG_NTFY_URL is set
+# (from /etc/cg-notify.conf, via the unit's EnvironmentFile).
+CG_NOTIFY_BIN="${CG_NOTIFY_BIN:-/usr/local/bin/cg-notify}"
+# The push before shutdown has no clock, but it is watched: still running after
+# this long, and every hour after that, it sends a notification.
+UPLOAD_WARN_SEC="${UPLOAD_WARN_SEC:-3600}"
+UPLOAD_POLL_SEC="${UPLOAD_POLL_SEC:-10}"
 
 # Best effort, never fatal: nothing about a notification may stop a shutdown.
 notify() { # notify <title> <message>
-  [[ -n $CG_NTFY_URL ]] || return 0
-  curl -fsS -m 5 -H "Title: $(hostname -s 2>/dev/null || echo box): $1" -H "Priority: high" \
-       -H "Tags: zzz" -d "$2" "$CG_NTFY_URL" >/dev/null 2>&1 \
-    || logger -t idle-watchdog "notification not sent (ignored)"
+  [[ -x $CG_NOTIFY_BIN ]] && "$CG_NOTIFY_BIN" "$1" "$2" high zzz
   return 0
 }
 
@@ -88,7 +90,28 @@ if (( idle >= IDLE_LIMIT )); then
   mirrored="no game mirror on this box"
   if [[ -x $CG_LIBRARY_BIN ]]; then
     logger -t idle-watchdog "idle limit reached - mirroring the library before shutdown"
-    if runuser -u ubuntu -- "$CG_LIBRARY_BIN" push 2>&1 | logger -t idle-watchdog; then
+    # In the background, so it can be watched. A push that hangs keeps the box
+    # up and billing - and its own traffic looks like use to the cloud watchdog -
+    # so one still running is said out loud, hourly.
+    #
+    # Output reaches logger through a process substitution, not a pipe: with a
+    # pipe, $! is logger's pid, and logger can exit before the push - the watch
+    # then ends early and a good push reads as failed. The exit status goes to a
+    # file for the same reason a pipeline's would be logger's.
+    rcfile="$STATE/mirror.rc"; rm -f "$rcfile"
+    { if runuser -u ubuntu -- "$CG_LIBRARY_BIN" push 2>&1; then echo 0 > "$rcfile"; else echo 1 > "$rcfile"; fi; } \
+      > >(logger -t idle-watchdog) 2>&1 &
+    pushjob=$! started=$SECONDS next_warn=$UPLOAD_WARN_SEC
+    while kill -0 "$pushjob" 2>/dev/null; do
+      sleep "$UPLOAD_POLL_SEC"
+      if (( SECONDS - started >= next_warn )) && kill -0 "$pushjob" 2>/dev/null; then
+        notify "upload before shutdown still running" \
+          "Mirroring games for $(( (SECONDS - started) / 60 )) min - the box stays up, and bills, until it ends."
+        next_warn=$(( next_warn + 3600 ))
+      fi
+    done
+    wait "$pushjob" 2>/dev/null || true
+    if [[ $(cat "$rcfile" 2>/dev/null) == 0 ]]; then
       logger -t idle-watchdog "mirror complete"
       mirrored="games mirrored to S3"
     else

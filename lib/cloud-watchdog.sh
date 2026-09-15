@@ -16,6 +16,11 @@ CW_LOGS="/aws/lambda/$CW_NAME"
 CW_SRC="lambda/cloud_watchdog.py"
 CW_RUNTIME="python3.13"
 CW_POLICY_NAME="idle-guard"
+# EC2's own events: state changes, so the watchdog can confirm a box is gone, and
+# spot interruption warnings. One rule for both - a detail filter would have to
+# exclude the warning - and the function ignores every state that is not an end.
+CW_STATE_RULE="${CW_NAME}-state"
+CW_STATE_PATTERN='{"source":["aws.ec2"],"detail-type":["EC2 Instance State-change Notification","EC2 Spot Instance Interruption Warning"]}'
 
 cw_aws() { aws --region "$REGION" "$@"; }
 
@@ -79,7 +84,7 @@ JSON
  {"Sid":"MarkWhenFirstSeenGoingDown","Effect":"Allow","Action":"ec2:CreateTags",
   "Resource":"arn:aws:ec2:$REGION:$1:instance/*",
   "Condition":{"StringEquals":{"ec2:ResourceTag/Name":"$TS_HOST"},
-               "ForAllValues:StringEquals":{"aws:TagKeys":["cg-going-down-since"]}}},
+               "ForAllValues:StringEquals":{"aws:TagKeys":["cg-going-down-since","cg-slow-noted","cg-forced"]}}},
  {"Sid":"OwnLogs","Effect":"Allow","Action":["logs:CreateLogStream","logs:PutLogEvents"],
   "Resource":"arn:aws:logs:$REGION:$1:log-group:$CW_LOGS:*"}$extra
 ]}
@@ -127,6 +132,10 @@ cw_current() {
     --query '[State,ScheduleExpression]' --output text > "$d/rule" 2>/dev/null &
   cw_aws events list-targets-by-rule --rule "$CW_NAME" \
     --query 'Targets[0].Arn' --output text > "$d/target" 2>/dev/null &
+  cw_aws events describe-rule --name "$CW_STATE_RULE" \
+    --query State --output text > "$d/staterule" 2>/dev/null &
+  cw_aws events list-targets-by-rule --rule "$CW_STATE_RULE" \
+    --query 'Targets[0].Arn' --output text > "$d/statetarget" 2>/dev/null &
   cw_aws lambda get-policy --function-name "$CW_NAME" \
     --query Policy --output text > "$d/perm" 2>/dev/null &
   aws iam get-role-policy --role-name "$CW_NAME" --policy-name "$CW_POLICY_NAME" \
@@ -151,7 +160,12 @@ cw_current() {
     [[ $fstate == Active && $fupd == Successful ]] || drift+=("function $fstate/$fupd")
     [[ $(cat "$d/rule") == $'ENABLED\trate(5 minutes)' ]] || drift+=("schedule not enabled")
     [[ $(cat "$d/target") == "arn:aws:lambda:$REGION:$acct:function:$CW_NAME" ]] || drift+=("schedule has no target")
-    grep -qF "arn:aws:events:$REGION:$acct:rule/$CW_NAME" "$d/perm" 2>/dev/null || drift+=("schedule cannot invoke it")
+    # The closing quote matters: the schedule's ARN is a prefix of the
+    # state-change rule's, and without it one permission passed for both.
+    grep -qF "arn:aws:events:$REGION:$acct:rule/$CW_NAME\"" "$d/perm" 2>/dev/null || drift+=("schedule cannot invoke it")
+    [[ $(cat "$d/staterule") == ENABLED ]] || drift+=("state-change rule not enabled")
+    [[ $(cat "$d/statetarget") == "arn:aws:lambda:$REGION:$acct:function:$CW_NAME" ]] || drift+=("state-change rule has no target")
+    grep -qF "arn:aws:events:$REGION:$acct:rule/$CW_STATE_RULE\"" "$d/perm" 2>/dev/null || drift+=("state-change rule cannot invoke it")
     cw_policy_matches "$d/policy" "$acct" || drift+=("role policy changed")
     [[ $(cat "$d/last") != NOGROUP ]] || drift+=("no log group")
   fi
@@ -303,13 +317,31 @@ cw_install() {
         --query FailedEntryCount --output text 2>/dev/null) == 0 ]] \
     || { log "could not point the schedule at $CW_NAME"; return 1; }
   if ! cw_aws lambda get-policy --function-name "$CW_NAME" --query Policy --output text 2>/dev/null \
-       | grep -qF "$rule_arn"; then
+       | grep -qF "$rule_arn\""; then
     cw_aws lambda remove-permission --function-name "$CW_NAME" --statement-id cg-schedule >/dev/null 2>&1 || true
     cw_aws lambda add-permission --function-name "$CW_NAME" --statement-id cg-schedule \
       --action lambda:InvokeFunction --principal events.amazonaws.com --source-arn "$rule_arn" \
       >/dev/null 2>&1 || { log "could not let the schedule invoke $CW_NAME"; return 1; }
   fi
-  log "armed: $CW_NAME runs every 5 minutes"
+
+  # EC2's stopped/terminated events, handed to the same function, so it can
+  # confirm a box is gone - the one thing the box cannot say about itself.
+  local state_arn
+  state_arn=$(cw_aws events put-rule --name "$CW_STATE_RULE" --event-pattern "$CW_STATE_PATTERN" \
+      --state ENABLED --description "EC2 state changes and spot interruption warnings, for the cloud_gaming watchdog" \
+      --query RuleArn --output text 2>/dev/null) \
+    || { log "could not create the rule $CW_STATE_RULE"; return 1; }
+  [[ $(cw_aws events put-targets --rule "$CW_STATE_RULE" --targets "Id=watchdog,Arn=$fn_arn" \
+        --query FailedEntryCount --output text 2>/dev/null) == 0 ]] \
+    || { log "could not point $CW_STATE_RULE at $CW_NAME"; return 1; }
+  if ! cw_aws lambda get-policy --function-name "$CW_NAME" --query Policy --output text 2>/dev/null \
+       | grep -qF "$state_arn\""; then
+    cw_aws lambda remove-permission --function-name "$CW_NAME" --statement-id cg-state >/dev/null 2>&1 || true
+    cw_aws lambda add-permission --function-name "$CW_NAME" --statement-id cg-state \
+      --action lambda:InvokeFunction --principal events.amazonaws.com --source-arn "$state_arn" \
+      >/dev/null 2>&1 || { log "could not let $CW_STATE_RULE invoke $CW_NAME"; return 1; }
+  fi
+  log "armed: $CW_NAME runs every 5 minutes, and hears when a box stops or terminates"
   return 0
 }
 
@@ -355,6 +387,8 @@ cw_remove() {
   local any=0
   cw_aws events remove-targets --rule "$CW_NAME" --ids watchdog >/dev/null 2>&1 && any=1
   cw_aws events delete-rule --name "$CW_NAME" >/dev/null 2>&1 && { any=1; log "deleted the schedule $CW_NAME"; }
+  cw_aws events remove-targets --rule "$CW_STATE_RULE" --ids watchdog >/dev/null 2>&1 && any=1
+  cw_aws events delete-rule --name "$CW_STATE_RULE" >/dev/null 2>&1 && { any=1; log "deleted the rule $CW_STATE_RULE"; }
   cw_aws lambda delete-function --function-name "$CW_NAME" >/dev/null 2>&1 && { any=1; log "deleted the function $CW_NAME"; }
   cw_aws logs delete-log-group --log-group-name "$CW_LOGS" >/dev/null 2>&1 && { any=1; log "deleted its logs"; }
   aws iam delete-role-policy --role-name "$CW_NAME" --policy-name "$CW_POLICY_NAME" >/dev/null 2>&1 && any=1

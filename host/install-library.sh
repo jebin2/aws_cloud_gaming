@@ -68,6 +68,7 @@ install -d -o ubuntu -g ubuntu -m 755 /var/lib/cg-library
 # last explicit `cg stop`.
 install -m 644 cg-library-restore.service /etc/systemd/system/
 install -m 644 cg-library-shutdown.service /etc/systemd/system/
+install -m 755 cg-shutdown-push.sh /usr/local/bin/cg-shutdown-push
 # Remove the periodic timer if an earlier build installed one.
 systemctl disable --now cg-library-push.timer >/dev/null 2>&1 || true
 rm -f /etc/systemd/system/cg-library-push.service \

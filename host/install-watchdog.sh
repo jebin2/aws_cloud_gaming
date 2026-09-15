@@ -2,6 +2,7 @@
 # Run this ON THE GAME BOX, as root. The build does: lib/bootstrap.d/15-watchdog.sh.
 set -euo pipefail
 install -m 755 idle-watchdog.sh /usr/local/bin/idle-watchdog.sh
+install -m 755 cg-notify /usr/local/bin/cg-notify
 install -m 644 idle-watchdog.service /etc/systemd/system/
 install -m 644 idle-watchdog.timer   /etc/systemd/system/
 install -m 755 disk-monitor.sh /usr/local/bin/disk-monitor.sh

@@ -28,7 +28,7 @@ printf '#!/usr/bin/env bash\necho "SHUTDOWN" >> "$LOG"\n' > "$T/bin/shutdown"
 # terminal forever.
 printf '#!/usr/bin/env bash\necho "LOG $*" >> "$LOG"\nexit 0\n' > "$T/bin/logger"
 # runuser -u ubuntu -- <cmd> push
-printf '#!/usr/bin/env bash\nshift 3\necho "PUSH" >> "$LOG"\nexit ${PUSH_RC:-0}\n' > "$T/bin/runuser"
+printf '#!/usr/bin/env bash\nshift 3\necho "PUSH" >> "$LOG"\nsleep ${PUSH_SLEEP:-0}\nexit ${PUSH_RC:-0}\n' > "$T/bin/runuser"
 printf '#!/usr/bin/env bash\ntrue\n' > "$T/bin/cg-library"
 chmod +x "$T/bin"/*
 
@@ -43,6 +43,7 @@ run() { # run <idle-start> [PUSH_RC]
   # with loopback traffic running. These cases test what happens AT the limit.
   LOG="$T/log" PATH="$T/bin:$PATH" PUSH_RC="${2:-0}" \
   THRESHOLD=999999999999999 RX_THRESHOLD=999999999999999 \
+  CG_NOTIFY_BIN="$PWD/host/cg-notify" UPLOAD_POLL_SEC=0.1 UPLOAD_WARN_SEC="${UPLOAD_WARN_SEC:-3600}" \
   STATE="$T/state" IDLE_LIMIT=3 BOOT_GRACE=0 IFACE=lo \
   CG_LIBRARY_BIN="$T/bin/cg-library" SHUTDOWN_BIN="$T/bin/shutdown" \
     bash "$SRC" >/dev/null 2>&1
@@ -59,12 +60,11 @@ echo "3. a failed mirror still shuts the box down, and SAYS it failed"
 # The box is idle and billing. Refusing to stop because the upload failed would
 # turn a lost download into a lost download AND a running GPU instance.
 #
-# The message matters as much as the order. The push is piped into logger, so
-# `if runuser ... | logger` tests the PIPELINE - which is logger's status, not
-# the push's. It reports the failure only because `set -o pipefail` is on at the
-# top of the script. That is load-bearing and invisible, so it gets asserted:
-# without pipefail this prints "mirror complete" over a failed upload, which is
-# the exact shape of every exit-code-as-evidence bug in this project.
+# The message matters as much as the order. The push is piped into logger, and a
+# pipeline's status is logger's, not the push's - so the push records its own exit
+# status, and that decides the message. Asserted, because getting it wrong prints
+# "mirror complete" over a failed upload: the exact shape of every
+# exit-code-as-evidence bug in this project.
 out=$(run 3 1)
 check "shuts down anyway" "$out" "PUSH SHUTDOWN "
 if grep -q 'mirror FAILED' "$T/log"; then echo "  ok   reported the failure"; pass=$((pass+1));
@@ -96,5 +96,14 @@ CG_NTFY_URL=https://ntfy.sh/t CURL_RC=7 run 3 >/dev/null
 check "a failed request still shuts down" "$(grep -c '^SHUTDOWN' "$T/log")" "1"
 CG_NTFY_URL=https://ntfy.sh/t run 0 >/dev/null
 check "below the limit: nothing sent"   "$(grep -c '^CURL' "$T/log" || true)" "0"
+
+echo "6. an upload before shutdown that runs long is said out loud - and still ends in a shutdown"
+CG_NTFY_URL=https://ntfy.sh/t PUSH_SLEEP=2 UPLOAD_WARN_SEC=1 run 3 >/dev/null
+check "one 'still running' notification"  "$(grep -c '^CURL.*upload before shutdown still running' "$T/log")" "1"
+check "  then the usual one, then the shutdown" "$(grep -oE '^(CURL|SHUTDOWN)' "$T/log" | tr '\n' ' ')" "CURL CURL SHUTDOWN "
+CG_NTFY_URL=https://ntfy.sh/t run 3 >/dev/null
+check "a quick upload says nothing of the kind" "$(grep -c 'still running' "$T/log" || true)" "0"
+PUSH_SLEEP=2 UPLOAD_WARN_SEC=1 run 3 >/dev/null
+check "no URL: no request, however long"  "$(grep -c '^CURL' "$T/log" || true)" "0"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

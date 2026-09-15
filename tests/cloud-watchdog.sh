@@ -410,7 +410,7 @@ check "on demand says stopped" "$(field 2 "$r")" "stop:i-a,notify:gamevps: idle 
 r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; ec2 = EC2([inst()]); cw = CW(QUIET); dry = True')
 lacks "a dry run never notifies" "$(field 2 "$r")" "notify"
 r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; ec2 = EC2([inst(state="shutting-down", reason="User initiated (2026-09-15 10:00:00 GMT)")]); cw = CW()')
-check "forced, then notified" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown,notify:gamevps: stuck shutdown forced"
+check "forced, then notified, and recorded" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown,notify:gamevps: stuck shutdown forced,tag:i-a=2026-09-15T10:00:00Z/2026-09-15T12:00:00Z"
 r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; SEND_FAILS = True; ec2 = EC2([inst()]); cw = CW(QUIET)')
 check "a failed send changes nothing" "$(field 1 "$r")|$(field 2 "$r")" "terminate|terminate:i-a"
 contains "  and is logged" "$r" "notification not sent (ignored)"
@@ -440,5 +440,102 @@ r=$(arch_ "w.NTFY_URL = 'u'; mode = 'all'; ec2 = EC2([('i-a', 'running')], fail_
 contains "failing: notified" "$(field 2 "$r")" "notify:gamevps: cloud watchdog failing"
 r=$(arch_ "w.NTFY_URL = 'u'; mode = 'all'; now = NOW + timedelta(minutes=17); ec2 = EC2([('i-a', 'running')], fail_idle=True)")
 lacks "but at most once an hour" "$(field 2 "$r")" "notify"
+
+# --- the box confirmed gone ----------------------------------------------------
+state_() {
+  PYTHONDONTWRITEBYTECODE=1 python3 - "$1" <<'PY' 2>&1
+import sys, io, contextlib
+sys.path.insert(0, "lambda")
+import cloud_watchdog as w
+w.TS_HOST, w.NTFY_URL = "gamevps", "https://ntfy.sh/t"
+calls = []
+def fake_send(url, title, message, priority, tags): calls.append("notify:" + title)
+w.send = fake_send
+class AwsError(Exception):
+    def __init__(s, code):
+        super().__init__(code); s.response = {"Error": {"Code": code}}
+class EC2:
+    def __init__(s, name="gamevps", fails=False): s.name, s.fails = name, fails
+    def describe_instances(s, InstanceIds=None, Filters=None):
+        calls.append("describe:%s" % (InstanceIds or ["by-filter"])[0])
+        if s.fails: raise AwsError("InvalidInstanceID.NotFound")
+        return {"Reservations": [{"Instances": [{"InstanceId": InstanceIds[0],
+                "Tags": [{"Key": "Name", "Value": s.name}]}]}]}
+def event(state, iid="i-a"):
+    return {"source": "aws.ec2", "detail-type": "EC2 Instance State-change Notification",
+            "detail": {"instance-id": iid, "state": state}}
+def spot(iid="i-a"):
+    return {"source": "aws.ec2", "detail-type": "EC2 Spot Instance Interruption Warning",
+            "detail": {"instance-id": iid, "instance-action": "terminate"}}
+ec2 = EC2(); ev = event("terminated"); mode = "direct"
+exec(sys.argv[1])
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    try:
+        if mode == "handler":
+            made = []
+            class Boto3:
+                def client(s, name):
+                    made.append(name)
+                    return ec2 if name == "ec2" else object()
+            sys.modules["boto3"] = Boto3()
+            res = w.handler(ev, None)
+            calls.append("clients:" + "+".join(made))
+        else:
+            res = w.state_changed(ec2, ev)
+        res = res.get("state", "-")
+    except Exception as e:
+        res = "RAISED"; print("error: %s" % e)
+print("%s | %s | %s" % (res, ",".join(calls) or "-", buf.getvalue().replace("\n", " / ").strip()))
+PY
+}
+
+echo "37. the box confirmed gone, from EC2's own state-change event"
+r=$(state_ '')
+check "terminated: notified" "$(field 1 "$r")|$(field 2 "$r")" "terminated|describe:i-a,notify:gamevps: box terminated"
+r=$(state_ 'ev = event("stopped")')
+check "stopped: notified" "$(field 2 "$r")" "describe:i-a,notify:gamevps: box stopped"
+r=$(state_ 'ec2 = EC2(name="someone-else")')
+check "another instance in the account: silent" "$(field 1 "$r")|$(field 2 "$r")" "not-ours|describe:i-a"
+r=$(state_ 'ec2 = EC2(fails=True)')
+check "cannot describe it: silent" "$(field 1 "$r")|$(field 2 "$r")" "unknown|describe:i-a"
+contains "  and says why" "$r" "could not be described"
+r=$(state_ 'ev = event("running")')
+check "a state that is not an end: ignored" "$(field 1 "$r")|$(field 2 "$r")" "ignored|-"
+r=$(state_ 'w.NTFY_URL = ""')
+check "no URL: logged, nothing sent" "$(field 2 "$r")" "describe:i-a"
+contains "  logged" "$r" "i-a terminated - it no longer bills"
+r=$(state_ 'mode = "handler"')
+check "the handler routes it, and runs no idle or archive check" "$(field 2 "$r")" \
+  "describe:i-a,notify:gamevps: box terminated,clients:ec2"
+
+r=$(state_ 'ev = spot()')
+check "a spot interruption warning: notified" "$(field 1 "$r")|$(field 2 "$r")" "interruption|describe:i-a,notify:gamevps: spot box being reclaimed"
+r=$(state_ 'ev = spot(); ec2 = EC2(name="someone-else")')
+check "another instance's warning: silent" "$(field 1 "$r")|$(field 2 "$r")" "not-ours|describe:i-a"
+r=$(state_ 'ev = spot(); mode = "handler"')
+check "the handler routes a warning too" "$(field 2 "$r")" "describe:i-a,notify:gamevps: spot box being reclaimed,clients:ec2"
+
+echo "38. a slow, then a stuck, shutdown - each said once, then hourly while it lasts"
+SD="inst(state='shutting-down', reason='User initiated (2026-09-15 11:25:00 GMT)'"
+r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([$SD)]); cw = CW()")
+check "35 min: a heads-up, recorded against this shutdown" "$(field 2 "$r")" "notify:gamevps: shutdown slow,tag:i-a=2026-09-15T11:25:00Z"
+r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([$SD, tags=[{'Key': 'cg-slow-noted', 'Value': '2026-09-15T11:25:00Z'}])]); cw = CW()")
+check "  already sent for this shutdown: silent" "$(field 2 "$r")" "-"
+r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([$SD, tags=[{'Key': 'cg-slow-noted', 'Value': '2026-09-01T08:00:00Z'}])]); cw = CW()")
+contains "  a mark from an EARLIER shutdown does not count" "$(field 2 "$r")" "notify:gamevps: shutdown slow"
+r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([inst(state='shutting-down', reason='User initiated (2026-09-15 11:45:00 GMT)')]); cw = CW()")
+check "15 min: nothing yet" "$(field 2 "$r")" "-"
+r=$(case_ "w.NTFY_URL = 'u'; dry = True; ec2 = EC2([$SD)]); cw = CW()")
+check "a dry run: no heads-up, no tag" "$(field 2 "$r")" "-"
+r=$(case_ "ec2 = EC2([$SD)]); cw = CW()")
+check "no URL: no heads-up, no tag" "$(field 2 "$r")" "-"
+FD="inst(state='shutting-down', reason='User initiated (2026-09-15 10:00:00 GMT)', tags=[{'Key': 'cg-forced', 'Value': '2026-09-15T10:00:00Z/2026-09-15T12:00:00Z'}])"
+r=$(case_ "w.NTFY_URL = 'u'; NOW = NOW + timedelta(minutes=3); ec2 = EC2([$FD]); cw = CW()")
+check "forced again 3 min later: silent" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown"
+r=$(case_ "w.NTFY_URL = 'u'; NOW = NOW + timedelta(minutes=30); ec2 = EC2([$FD]); cw = CW()")
+check "still stuck half an hour later: silent" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown"
+r=$(case_ "w.NTFY_URL = 'u'; NOW = NOW + timedelta(minutes=60); ec2 = EC2([$FD]); cw = CW()")
+check "an hour after forcing: the hourly reminder" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown,notify:gamevps: box still stuck after forcing"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

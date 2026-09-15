@@ -109,24 +109,29 @@ elif cmd in ("lambda create-function", "lambda update-function-code", "lambda up
 elif cmd == "lambda wait": pass
 elif cmd == "lambda delete-function": rm("fn") or gone()
 elif cmd == "lambda get-policy":
-    p = get("perm") or gone()
-    print(json.dumps({"Statement": [{"Condition": {"ArnLike": {"AWS:SourceArn": p}}}]}))
-elif cmd == "lambda add-permission": put("perm", opt("--source-arn"))
-elif cmd == "lambda remove-permission": rm("perm") or gone()
+    ps = json.loads(get("perms") or "{}")
+    if not ps: gone()
+    print(json.dumps({"Statement": [{"Sid": k, "Condition": {"ArnLike": {"AWS:SourceArn": v}}} for k, v in ps.items()]}))
+elif cmd == "lambda add-permission":
+    ps = json.loads(get("perms") or "{}"); ps[opt("--statement-id")] = opt("--source-arn"); put("perms", json.dumps(ps))
+elif cmd == "lambda remove-permission":
+    ps = json.loads(get("perms") or "{}")
+    if opt("--statement-id") not in ps: gone()
+    del ps[opt("--statement-id")]; put("perms", json.dumps(ps))
 elif cmd == "lambda invoke":
     open(a[-1], "w").write("{}")
     msg = os.environ.get("PROVE_MSG", "i-abc quiet for 30m: peak 0.0 MB per 5 min over 6 periods, under 10.0 MB - WOULD terminate (dry run; permission to terminate: ok)")
     tail = base64.b64encode(("START RequestId: x\ncg-watchdog: %s\nEND RequestId: x\n" % msg).encode()).decode()
     print("%s\t%s" % (os.environ.get("PROVE_ERR", "None"), tail))
 elif cmd == "events put-rule":
-    put("rule", opt("--state")); print("arn:aws:events:%s:%s:rule/%s" % (R, ACCT, NAME))
+    n = opt("--name"); put("rule-" + n, opt("--state")); print("arn:aws:events:%s:%s:rule/%s" % (R, ACCT, n))
 elif cmd == "events describe-rule":
-    r = get("rule") or gone()
+    r = get("rule-" + opt("--name")) or gone()
     print("%s\trate(5 minutes)" % r if "Schedule" in opt("--query", "") else r)
-elif cmd == "events put-targets": put("target", opt("--targets").split("Arn=", 1)[1]); print("0")
-elif cmd == "events list-targets-by-rule": print(get("target", "None"))
-elif cmd == "events remove-targets": rm("target") or gone()
-elif cmd == "events delete-rule": rm("rule") or gone()
+elif cmd == "events put-targets": put("target-" + opt("--rule"), opt("--targets").split("Arn=", 1)[1]); print("0")
+elif cmd == "events list-targets-by-rule": print(get("target-" + opt("--rule"), "None"))
+elif cmd == "events remove-targets": rm("target-" + opt("--rule")) or gone()
+elif cmd == "events delete-rule": rm("rule-" + opt("--name")) or gone()
 else: print("None")
 FAKE
 chmod +x "$T/bin/aws"
@@ -147,6 +152,8 @@ run() {
 did()  { grep -qE -- "$1" "$T/log" 2>/dev/null && echo yes || echo no; }
 cnt()  { grep -cE -- "$1" "$T/log" 2>/dev/null || true; }
 now_ms() { echo $(( $(date +%s) * 1000 - ${1:-60} * 1000 )); }
+perm() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))' "$T/aws/perms" "$1" 2>/dev/null; }
+FN_ARN="arn:aws:lambda:ap-south-2:123456789012:function:gamevps-cloud-watchdog"
 WRITES='create-role|put-role-policy|create-log-group|create-function|update-function|put-rule|put-targets|add-permission|lambda invoke'
 
 echo "1. nothing exists yet: every piece is built, proved with a dry run, and init launches"
@@ -158,8 +165,12 @@ check    "attached the scoped policy" "$(did 'put-role-policy')|$(grep -c '"ec2:
 check    "log group, with a retention" "$(did 'create-log-group')|$(cat "$T/aws/retention" 2>/dev/null)" "yes|14"
 check    "created the function"      "$(did 'create-function')" "yes"
 check    "schedule enabled, every 5 min" "$(did "put-rule .*rate\(5 minutes\) --state ENABLED")" "yes"
-check    "schedule targets the function" "$(cat "$T/aws/target")" "arn:aws:lambda:ap-south-2:123456789012:function:gamevps-cloud-watchdog"
-check    "schedule may invoke it"    "$(cat "$T/aws/perm")" "arn:aws:events:ap-south-2:123456789012:rule/gamevps-cloud-watchdog"
+check    "schedule targets the function" "$(cat "$T/aws/target-gamevps-cloud-watchdog")" "$FN_ARN"
+check    "schedule may invoke it"    "$(perm cg-schedule)" "arn:aws:events:ap-south-2:123456789012:rule/gamevps-cloud-watchdog"
+check    "event rule: state changes and spot warnings" "$(did 'put-rule --name gamevps-cloud-watchdog-state --event-pattern .*EC2 Instance State-change Notification.*EC2 Spot Instance Interruption Warning')" "yes"
+check    "  enabled"                 "$(cat "$T/aws/rule-gamevps-cloud-watchdog-state")" "ENABLED"
+check    "  targets the function"    "$(cat "$T/aws/target-gamevps-cloud-watchdog-state")" "$FN_ARN"
+check    "  may invoke it"           "$(perm cg-state)" "arn:aws:events:ap-south-2:123456789012:rule/gamevps-cloud-watchdog-state"
 check    "proved with a DRY run"     "$(did 'lambda invoke .*"dry_run":true')" "yes"
 contains "shows what the check decided" "$out" "cloud watchdog: i-abc quiet for 30m"
 check    "REACHED the launch"        "$(did SETUP-REACHED)" "yes"
@@ -201,10 +212,14 @@ check    "code NOT redeployed"       "$(did 'update-function-code')" "no"
 seed_env; out=$(LAST_MS=$(now_ms 60) run)
 
 echo "7. a schedule disabled by hand is re-enabled"
-echo DISABLED > "$T/aws/rule"
+echo DISABLED > "$T/aws/rule-gamevps-cloud-watchdog"
 out=$(LAST_MS=$(now_ms 60) run)
 contains "names the drift"           "$out" "schedule not enabled"
-check    "enabled again"             "$(cat "$T/aws/rule")" "ENABLED"
+check    "enabled again"             "$(cat "$T/aws/rule-gamevps-cloud-watchdog")" "ENABLED"
+echo DISABLED > "$T/aws/rule-gamevps-cloud-watchdog-state"
+out=$(LAST_MS=$(now_ms 60) run)
+contains "a disabled state-change rule too" "$out" "state-change rule not enabled"
+check    "  enabled again"           "$(cat "$T/aws/rule-gamevps-cloud-watchdog-state")" "ENABLED"
 
 echo "8. a role policy edited by hand is put back"
 echo '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}' > "$T/aws/policy"
@@ -213,7 +228,9 @@ contains "names the drift"           "$out" "role policy changed"
 check    "scoped policy restored"    "$(grep -c 'EndOnlyTheTaggedBox' "$T/aws/policy")" "1"
 
 echo "9. a removed invoke permission is restored"
-rm -f "$T/aws/perm"
+# Only the schedule's permission goes; the state-change rule's stays. Its ARN
+# starts with the schedule's, so a prefix match would call this current.
+python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d.pop("cg-schedule"); json.dump(d, open(p, "w"))' "$T/aws/perms"
 out=$(LAST_MS=$(now_ms 60) run)
 contains "names the drift"           "$out" "schedule cannot invoke it"
 check    "permission back"           "$(did 'add-permission')" "yes"

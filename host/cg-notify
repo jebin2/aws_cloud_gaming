@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# cg-notify <title> <message> [priority] [tags]
+#
+# One ntfy notification from the box. Off unless CG_NTFY_URL is set - the units
+# that use it load /etc/cg-notify.conf, which install-watchdog.sh writes only
+# when GAME_NTFY_URL is configured. Best effort and never fails: nothing about a
+# notification may stop a shutdown or an upload.
+[[ -n ${CG_NTFY_URL:-} ]] || exit 0
+curl -fsS -m 5 -H "Title: $(hostname -s 2>/dev/null || echo box): $1" \
+     -H "Priority: ${3:-high}" -H "Tags: ${4:-}" -d "$2" "$CG_NTFY_URL" >/dev/null 2>&1 \
+  || logger -t cg-notify "notification not sent (ignored)" 2>/dev/null
+exit 0
