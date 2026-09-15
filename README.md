@@ -13,16 +13,26 @@ over Tailscale. Build it to play, destroy it when done - your games come back ne
   [Step-by-step setup](docs/aws-account-setup.md)
 - **A [Tailscale](https://tailscale.com) account**, plus a pre-auth key
 
-That is all you set up by hand. Everything the laptop needs - the AWS CLI, Tailscale,
-[Moonlight](https://github.com/moonlight-stream), OpenSSH, `curl` and `python3` - `./cg check --fix`
-installs after asking, on Linux with pacman, apt, dnf or zypper. Moonlight comes from the distro's
-`moonlight-qt` package, which Arch-based distros have; where a distro has none, `--fix` says so and
-links the download.
+Everything else is automatic:
 
-`cg init` pairs Moonlight on this laptop. To play on a phone or TV as well, install Tailscale and
-Moonlight there and sign in to the same tailnet. Add the box in Moonlight by its Tailscale name; it
-shows a PIN, which you enter on the Sunshine page `cg init` prints. Log in there with the user it
-shows and the password in `.env` (`SUNSHINE_PASS`).
+- **Laptop tools** - `./cg check --fix` installs the AWS CLI, Tailscale,
+  [Moonlight](https://github.com/moonlight-stream), OpenSSH, `curl` and `python3` after asking, with
+  pacman, apt, dnf or zypper. Moonlight needs the distro's `moonlight-qt` package, which Arch-based
+  distros have; where there is none, `--fix` links the download
+- **Sign-ins** - `--fix` starts the Tailscale login and asks for an AWS access key if none works
+- **AWS setup** - `cg init` creates the ssh key pair, the S3 bucket for your games, the box's IAM
+  role, the budget alert and the cloud watchdog
+- **Tailnet** - with `TAILSCALE_API_KEY` set, old box entries are removed and the box's key never
+  expires
+- **The box** - NVIDIA driver, desktop, audio, Sunshine, Steam and Tailscale, plus the idle
+  watchdog that shuts it down when you stop playing
+- **Moonlight pairing** on this laptop
+- **Your games and Steam sign-in** - restored from S3 on every build, saved back when you destroy
+- **Notifications** - to your phone through ntfy, when `GAME_NTFY_URL` is set
+
+To play on a phone or TV too, install Tailscale and Moonlight there and join the same tailnet. Add
+the box in Moonlight by its Tailscale name, then enter the PIN it shows on the Sunshine page `cg init`
+prints (the user it shows, and `SUNSHINE_PASS` from `.env`).
 
 ## Get started
 
