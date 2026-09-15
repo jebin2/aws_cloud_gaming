@@ -114,7 +114,13 @@ _cg_section_end() { # _cg_section_end [exit-code]
     printf '%s%s╰─%s %s✗ stopped after %s%s\n' "$_CG_PAD" "$_CG_SEC_COL" "$_CG_R" "$_CG_RED" "$d" "$_CG_R"
   fi
 }
-_cg_on_exit() { local rc=$?; _cg_section_end "$rc"; return "$rc"; }
+_cg_on_exit() { local rc=$?; (( ${_CG_INT:-0} )) && rc=130; _cg_section_end "$rc"; return "$rc"; }
+# Ctrl+C. Without a trap, the EXIT trap saw the status of the last command - often
+# 0 - so a cancelled run closed its step with "done". Trapping it also stops a
+# script whose child swallowed the signal: sudo and pacman catch it and exit 1,
+# and the script carried on to the next install; bash runs this once they return.
+_cg_on_int() { _CG_INT=1; printf '\n' >&2; exit 130; }
+trap _cg_on_int INT
 _cg_styled && trap _cg_on_exit EXIT
 
 # Progress and action output. Reports (status, cost) deliberately do not go
