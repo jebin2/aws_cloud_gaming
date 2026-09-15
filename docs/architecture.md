@@ -278,6 +278,8 @@ allowances. The full list: [cost-guards.md](cost-guards.md#notifications).
 
 ## Key decisions
 
+### Access and display
+
 - **Tailscale is the only way in.** Each machine gets a stable `100.x` address that survives the
   AWS public IP changing, so there is no Elastic IP to pay for. The single inbound rule, UDP 41641,
   is what lets Tailscale build a direct path: without it, traffic falls back to a relay at
@@ -294,6 +296,42 @@ allowances. The full list: [cost-guards.md](cost-guards.md#notifications).
 - **Sunshine tuned for the tunnel.** `packet_size = 1024` because Tailscale's MTU is 1280 and
   Sunshine's default of 1392 fragments into stutter; `csrf_allowed_origins` so its web UI accepts
   requests from the tailnet.
+
+### Guards and shutdown
+
+- **Two watchdogs, and no CloudWatch alarm.** An alarm cannot take an EC2 action on
+  `NetworkIn + NetworkOut`, so it watched outbound traffic only and read a game download as an idle
+  box; that forced it to be armed only during a session, where it duplicated the cloud watchdog. It
+  was removed. The on-host watchdog is the fast one; the cloud watchdog survives the box being
+  wedged. See [Flow 4](#flow-4---you-forget-the-box).
+- **A Lambda, not a machine to keep alive.** The cloud watchdog runs every 5 minutes on an IAM role,
+  and keeps no state: every run reads the last 30 minutes of metrics rather than counting idle
+  checks, so a missed run cannot corrupt a counter and a dry run (`cg watchdog check`) changes
+  nothing. It replaced a watchdog on an always-on VPS that needed a long-lived AWS key.
+- **Every guard ends in the same graceful shutdown.** Terminating through the API gives the OS its
+  shutdown, where the games are mirrored to S3 with up to 30 minutes (`TimeoutStopSec=1800`). A box
+  still going down an hour later is forced, whichever guard started it - by then the upload has had
+  its window.
+- **One upload at a time.** `cg-library push` takes a lock and a second push waits, so a shutdown
+  push that starts while a watchdog push is running resumes from what the first landed instead of
+  racing it and rewriting `index.json` from a stale copy.
+- **Where the limits come from.**
+
+  | Limit | Default | Set by |
+  |---|---|---|
+  | on-host watchdog idle | 15 min | fixed |
+  | cloud watchdog idle | 30 min | `GAME_WATCHDOG_IDLE_MIN` |
+  | boot grace, both watchdogs | 20 min | fixed |
+  | shutdown upload window | 30 min | `TimeoutStopSec` in `host/cg-library-shutdown.service` |
+  | stuck shutdown forced after | 60 min | `GAME_WATCHDOG_STUCK_MIN` (at least 40) |
+  | game archive kept with no box | 14 days | `GAME_ARCHIVE_EXPIRY_DAYS` (0 is off) |
+
+### Storage and cost
+
+- **Cost first.** Everything added around the box fits inside AWS's free allowances, and anything
+  that would bill is designed out rather than accepted as small: the archive-expiry marks are free
+  SSM parameters rather than bucket tags, and the archive's size comes from S3's free daily
+  CloudWatch metric rather than an S3 request. With no box, the S3 archive is the only charge.
 - **Games on local NVMe, kept in S3.** The instance store is the fastest disk on the box and free,
   and S3 pins no availability zone. It replaced an EBS volume costing INR 1,284 a month. See
   [game-library.md](game-library.md).
@@ -304,11 +342,28 @@ allowances. The full list: [cost-guards.md](cost-guards.md#notifications).
   |---|---|---|
   | on demand (`GAME_SPOT=0`) | `stop` | a misfiring watchdog parks the box and you restart it |
   | spot (default) | `terminate` | a stopped spot box can never start again, and its root disk would bill forever |
-
+- **The archive expires, and errs towards keeping.** After 14 days with no box, the cloud watchdog
+  deletes the archive - but only when two independent records agree it is unused (its last-seen
+  mark and CloudTrail's launch history), and any error, gap or unreadable answer keeps it. See
+  [Flow 5](#flow-5---nobody-plays-for-two-weeks).
 - **Roles, not keys.** The box reads and writes its bucket through an instance role, and the
   cloud watchdog runs on a Lambda role allowed only to describe, stop or terminate the
   `gamevps`-tagged instance. Nothing holds a long-lived AWS secret. See
   [cost-guards.md](cost-guards.md).
+
+### Automation and notifications
+
+- **Tailscale through its API.** With `TAILSCALE_API_KEY`, `cg init` prunes offline nodes of earlier
+  boxes before launch and turns off key expiry on the new one. The new box is recognised by its node
+  key, not its name: a pruned node's name is free for the next box to take. A rejected token turns
+  both into manual steps rather than stopping the build. See [Flow 1](#flow-1---cg-init-build-a-box).
+- **Notifications are never load-bearing.** ntfy is optional (`GAME_NTFY_URL`), a send that fails is
+  logged and ignored, and no guard's decision depends on one. The box cannot report its own end, so
+  "box gone" comes from EC2's own events. The topic is a secret: `cg` never prints it. See
+  [Notifications](#notifications---what-reaches-your-phone).
+- **`cg init` ends with a summary, not chores.** Pairing and key expiry happen on their own, so the
+  build ends with what the box has - Steam login and games checked on the box itself - and lists a
+  step only when one is genuinely left. The Sunshine password is never printed; it stays in `.env`.
 
 ## Go deeper
 
