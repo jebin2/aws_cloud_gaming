@@ -36,6 +36,9 @@ fi
 # For the game archive's expiry line in status. Needs REGION and TS_HOST.
 # shellcheck source=lib/cloud-watchdog.sh
 source lib/cloud-watchdog.sh
+# The end-of-init summary.
+# shellcheck source=lib/summary.sh
+source lib/summary.sh
 
 box() {
   ssh -i "$HOME/.ssh/${TS_HOST}.pem" -o StrictHostKeyChecking=accept-new \
@@ -1212,87 +1215,9 @@ if wait_for_steam "ubuntu@$TS_NODE" "$KEY" 1500; then
   fi
 fi
 
-if (( ${PAIRED:-0} )); then
-  STEP1="  STEP 1 - pair Moonlight   [DONE automatically]
-  ------------------------------------------------------------------
-  Nothing to do - Sunshine has an account and Moonlight is paired, both
-  without a browser. Credentials are in .env if you ever want the web UI:
-
-       https://$IP:47990
-
-  Steam: $STEAM_MSG
-"
-else
-  STEP1="  STEP 1 - pair Moonlight   [ACTION NEEDED]
-  ------------------------------------------------------------------
-  a) Run this. It prints a 4-digit PIN and waits:
-
-       moonlight pair $IP
-
-  b) Open this, log in with SUNSHINE_USER / SUNSHINE_PASS from .env,
-     go to 'PIN', and enter that PIN. Accept the certificate warning.
-
-       https://$IP:47990
-
-  c) Confirm - this should list Desktop:
-
-       moonlight list $IP
-"
-fi
-
-if (( ${EXPIRY_OFF:-0} )); then
-  STEP2="  STEP 2 - Tailscale key expiry   [DONE automatically]
-  ------------------------------------------------------------------
-  Turned off through the Tailscale API, so '$TS_NODE' will not drop off
-  the tailnet when its key would have expired.
-"
-else
-  STEP2="  STEP 2 - stop the Tailscale key expiring   [ACTION NEEDED]
-  ------------------------------------------------------------------
-  Tailscale keys expire after ~180 days by default. When this one does,
-  the node drops off the tailnet and $C_OPEN hangs waiting for it.
-  cg init does this itself when TAILSCALE_API_KEY is set and valid; why it
-  could not this time is under "turning off Tailscale key expiry" above.
-
-       https://login.tailscale.com/admin/machines
-
-  Find \"$TS_NODE\" -> the \"...\" menu -> Disable key expiry.
-
-  To skip this on every future rebuild: define a tag in your tailnet
-  ACL policy and generate the auth key with it. Tagged nodes do not
-  expire at all, so this step disappears permanently.
-"
-fi
-case $(( (${PAIRED:-0} ? 0 : 1) + (${EXPIRY_OFF:-0} ? 0 : 1) )) in
-  0) REMAINING="Nothing is left to do." ;;
-  1) REMAINING="One step remains." ;;
-  *) REMAINING="Two steps remain." ;;
-esac
-
 cg_notify "box ready" "Built, paired and running - it bills by the hour. Play with: cg open" default video_game
 _cg_section_end 0
-cat <<EOF | cg_block "🎉" "Setup complete"
-
-setup complete. $REMAINING
-
-$STEP1
-$STEP2
-  Budget alerts are already configured and need no confirmation - see
-  $C_STATUS. AWS Budgets emails you directly, which is why this no
-  longer needs the root-only "Receive Billing Alerts" toggle or an SNS
-  subscription you have to confirm.
-
-That is it. From now on:
-
-       $(printf '%-14s' "$C_OPEN")start, stream, stop on exit
-       $(printf '%-14s' "$C_STOP")stop now (this is what stops the billing)
-       $(printf '%-14s' "$C_STATUS")what exists and whether the guards are armed
-       $(printf '%-14s' "$C_COST")what you have spent this month
-
-The box is RUNNING right now and billing by the hour. Stop it when you
-are done: $C_STOP
-
-EOF
+init_summary
 
 # See the note at the end of cg: bash reads a script incrementally and returns
 # for more input after the last command, so a file edited while this runs can
