@@ -45,6 +45,7 @@ flowchart LR
   cg -->|"launch · terminate"| ec2
   ec2 <-->|"restore at boot<br/>push on destroy"| s3
   lam -.->|"terminate if idle"| ec2
+  lam -.->|"delete after 14 days<br/>with no box"| s3
   bud -.->|"email"| cg
 ```
 
@@ -91,7 +92,7 @@ flowchart TB
 | Your games, their saves and shader caches | NVMe, archived to S3 | **yes**, in S3 - deleted after 14 days with no box ([why](cost-guards.md#game-archive-expiry)) |
 | Steam login | root EBS, archived to S3 | **yes**, in S3 |
 | Proton and the Steam runtime | NVMe | no - Steam re-downloads them in under a minute |
-| Security group, key pair, budget, S3 bucket | AWS | **yes** - free, reused |
+| Security group, key pair, budget | AWS | **yes** - free, reused |
 
 The root disk size is `GAME_DISK_GB`: 100 GB by default, set to 50 here in `.env`. The NVMe is
 wiped whenever the instance stops, which is why S3 holds the durable copy. Details:
@@ -164,7 +165,7 @@ sequenceDiagram
   cg->>AWS: cancel the spot request, terminate the instance
   EC2->>S3: shutdown push - nothing left to send
   AWS-->>cg: terminated, root disk deleted
-  Note over cg,AWS: Kept for next time - S3 archive, budget,<br/>security group, key pair
+  Note over cg,AWS: Kept for next time - S3 archive (14 days with no box),<br/>budget, security group, key pair
 ```
 
 If the push fails, `cg destroy` stops and deletes nothing. What it removes and keeps:
@@ -206,6 +207,35 @@ Each guard is independent, so one failing is caught by the other. Both wait 20 m
 boot before they arm, so a build is never mistaken for idleness. A box still going down an hour later -
 whichever guard started it - is forced by the cloud watchdog. The budget stops nothing - it is the
 backstop that tells you. Details: [cost-guards.md](cost-guards.md).
+
+## Flow 5 - nobody plays for two weeks
+
+```mermaid
+flowchart TB
+  tick["Cloud watchdog<br/>once an hour"] --> off{"GAME_ARCHIVE_EXPIRY_DAYS<br/>set to 0?"}
+  off -->|yes| forever["Kept forever"]
+  off -->|no| box{"A gamevps box exists?<br/>running or stopped"}
+  box -->|yes| stamp["Kept<br/>cg-last-seen set to now"]
+  box -->|no| bucket{"Archive bucket<br/>exists?"}
+  bucket -->|no| none["Nothing to do"]
+  bucket -->|yes| mark{"cg-last-seen tag<br/>on the bucket"}
+  mark -->|missing| start["Kept<br/>counting starts now"]
+  mark -->|under 14 days old| count["Kept<br/>countdown in cg status"]
+  mark -->|14 days or older| trail{"CloudTrail: a gamevps<br/>launch in 14 days?"}
+  trail -->|yes| moved["Kept<br/>tag moves to that launch"]
+  trail -->|no| again{"One last look:<br/>a box now?"}
+  again -->|yes| kept["Kept"]
+  again -->|no| del["Empty and delete<br/>the S3 bucket"]
+  del --> next["Next cg init: empty bucket,<br/>Steam downloads games,<br/>sign in to Steam again"]
+
+  err["Any error, gap or<br/>unreadable answer"] -.->|"stops the check"| safe["Kept - nothing deleted"]
+```
+
+With no box, the S3 archive is the only thing still billing, so it is deleted after 14 days
+unused. That deletes the only copy of every game, so both records must agree first - the tag the
+watchdog keeps fresh while a box exists, and CloudTrail's launch history - and anything uncertain
+keeps it. `cg watchdog check` runs every step as a dry run. Details, and what is lost:
+[cost-guards.md](cost-guards.md#game-archive-expiry).
 
 ## Key decisions
 
