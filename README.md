@@ -12,11 +12,17 @@ over Tailscale. Build it to play, destroy it when done - your games come back ne
   instances at all, and quota approval can take days - start this first.
   [Step-by-step setup](docs/aws-account-setup.md)
 - **A [Tailscale](https://tailscale.com) account**, plus a pre-auth key
-- **[Moonlight](https://github.com/moonlight-stream)** on the device you play from, if that is not
-  this laptop
 
-Everything else the laptop needs - the AWS CLI, Tailscale, Moonlight, OpenSSH, `curl` and
-`python3` - `./cg check --fix` installs after asking, on Linux with pacman, apt, dnf or zypper.
+That is all you set up by hand. Everything the laptop needs - the AWS CLI, Tailscale,
+[Moonlight](https://github.com/moonlight-stream), OpenSSH, `curl` and `python3` - `./cg check --fix`
+installs after asking, on Linux with pacman, apt, dnf or zypper. Moonlight comes from the distro's
+`moonlight-qt` package, which Arch-based distros have; where a distro has none, `--fix` says so and
+links the download.
+
+`cg init` pairs Moonlight on this laptop. To play on a phone or TV as well, install Tailscale and
+Moonlight there and sign in to the same tailnet. Add the box in Moonlight by its Tailscale name; it
+shows a PIN, which you enter on the Sunshine page `cg init` prints. Log in there with the user it
+shows and the password in `.env` (`SUNSHINE_PASS`).
 
 ## Get started
 
@@ -28,8 +34,11 @@ Everything else the laptop needs - the AWS CLI, Tailscale, Moonlight, OpenSSH, `
     ./cg open                # play
 
 `cg init` asks which archived games to restore, then builds the box while restoring them. When you
-quit Moonlight, `cg open` offers to destroy the box: that saves your games and Steam login to S3
+quit Moonlight, `cg open` offers to destroy the box: that saves your games and Steam sign-in to S3
 and stops the bill. The next `cg init` brings everything back.
+
+On a second laptop, copy `.env` across - it holds your keys and is not in git - and run the same
+steps. The ssh key is handled: while no box exists, `cg init` makes a new one.
 
 ## Everyday commands
 
