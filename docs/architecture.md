@@ -47,6 +47,9 @@ flowchart LR
   lam -.->|"terminate if idle"| ec2
   lam -.->|"delete after 14 days<br/>with no box"| s3
   bud -.->|"email"| cg
+  ntfy(["📱 ntfy · your phone"])
+  lam -.->|"notifications"| ntfy
+  ec2 -.->|"notifications"| ntfy
 ```
 
 The other guard, a watchdog on the box itself, is in [Flow 4](#flow-4---you-forget-the-box).
@@ -71,6 +74,7 @@ UDP 41641, and that is Tailscale's.
 | Game storage | local NVMe at `/scratch`, archived per game to S3 with `s5cmd` | box + S3 | fast and free locally, durable in S3 |
 | S3 access | EC2 instance role | box | no access key on the box to leak |
 | Guards | on-host watchdog, cloud watchdog (Lambda + EventBridge), AWS Budget | box, AWS | two independent ways to stop a forgotten box, and an email |
+| Notifications | ntfy (optional, `GAME_NTFY_URL`) | box, Lambda, laptop | push to a phone with no account and nothing to confirm |
 | Spend | Cost Explorer (for `cg cost`) | AWS | the only billed API here, $0.01 a call |
 
 ## Where things live
@@ -108,20 +112,23 @@ sequenceDiagram
   participant AWS
   participant EC2 as EC2 box
   participant S3
+  participant TS as Tailscale API
 
   You->>cg: ./cg init
   cg->>AWS: is the cloud watchdog current? arm or repair it
   cg->>You: which archived games to restore?
   cg->>AWS: preflight - plan, GPU quota, region
+  cg->>TS: prune offline nodes of earlier boxes
   cg->>AWS: budget, bucket and role, launch one-time spot with user-data
   EC2->>EC2: install Tailscale, join the tailnet
+  cg->>TS: turn off key expiry for the new node
   EC2->>S3: start restoring games in the background
   EC2->>EC2: desktop, NVIDIA driver, Xorg, Steam, Sunshine
   S3-->>EC2: games and Steam login land on the NVMe
   EC2->>EC2: reboot for the driver, restore resumes
   cg->>EC2: follow the build log over ssh
   cg->>EC2: create the Sunshine account, pair Moonlight
-  cg-->>You: ready - about 10 to 20 minutes
+  cg-->>You: summary - box, games, Steam login, guards (10 to 20 min)
 ```
 
 The game restore runs **alongside** the build, so a 160 GB game is usually on disk by the time
@@ -236,6 +243,36 @@ unused. That deletes the only copy of every game, so both records must agree fir
 watchdog keeps fresh while a box exists, and CloudTrail's launch history - and anything uncertain
 keeps it. `cg watchdog check` runs every step as a dry run. Details, and what is lost:
 [cost-guards.md](cost-guards.md#game-archive-expiry).
+
+## Notifications - what reaches your phone
+
+```mermaid
+flowchart LR
+  subgraph box["🖥️ EC2 box"]
+    ohw["On-host watchdog"]
+    sp["Shutdown upload"]
+  end
+  subgraph aws["☁️ AWS"]
+    ev["EventBridge<br/>EC2's own events"]
+    lam["⚡ Cloud watchdog"]
+  end
+  cg["💻 cg init"]
+  ntfy(["🔔 ntfy topic"])
+  phone["📱 Your phone"]
+
+  ev -->|"box gone<br/>spot warning"| lam
+  lam -->|"idle box ended · slow or stuck shutdown<br/>archive expiring · watchdog failing"| ntfy
+  ohw -->|"idle shutdown<br/>upload hanging"| ntfy
+  sp -->|"upload failed<br/>or cut off"| ntfy
+  cg -->|"box ready<br/>build failed"| ntfy
+  ntfy --> phone
+```
+
+Off unless `GAME_NTFY_URL` is set. A notification is never load-bearing: one that cannot be sent
+is logged and ignored, and it never changes what a guard decides. The box cannot report its own
+end, so "box gone" comes from EC2's own events rather than from the box. None of it costs
+anything - EC2's events, the extra invocations and the requests are all inside AWS's free
+allowances. The full list: [cost-guards.md](cost-guards.md#notifications).
 
 ## Key decisions
 
