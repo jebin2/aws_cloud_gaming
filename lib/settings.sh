@@ -60,11 +60,32 @@ settings_secret() {
   return 1
 }
 
+# settings_number <KEY> <default> <min> <prompt> - a whole number, asked with its
+# default shown. Enter keeps the default, and either way the value is saved, so it
+# is not asked again. Three tries; end of input saves nothing.
+settings_number() {
+  local key=$1 def=$2 min=$3 prompt=$4 v try
+  for try in 1 2 3; do
+    # The prompt is printed here, not by read -p, which shows it only on a terminal.
+    printf '%s [%s]: ' "$prompt" "$def" >&2
+    IFS= read -r v || { echo >&2; return 1; }
+    v=${v//[[:space:]]/}; v=${v:-$def}
+    if [[ $v =~ ^[0-9]+$ ]] && (( 10#$v >= min )); then
+      v=$((10#$v))
+      env_set "$key" "$v"
+      export "$key=$v"
+      return 0
+    fi
+    echo "    a whole number, at least $min - try again" >&2
+  done
+  return 1
+}
+
 # settings_prompts <fix: 0|1>
 #   required  TAILSCALE_AUTH_KEY, EMAIL_ALERTS - asked whenever missing
-#   optional  TAILSCALE_API_KEY, GAME_NTFY_URL - asked by --fix, and only when .env
-#             does not mention them: an empty KEY= is a choice to go without, so
-#             it is not asked again
+#   optional  TAILSCALE_API_KEY, GAME_DISK_GB, GAME_ARCHIVE_EXPIRY_DAYS, GAME_NTFY_URL -
+#             asked by --fix, with the default shown, and only when .env does not
+#             mention them: whatever is answered is saved, so it is not asked again
 # Values are saved to .env and never printed.
 settings_prompts() {
   local fix=${1:-0} v
@@ -110,10 +131,33 @@ settings_prompts() {
     log_as warn "no TAILSCALE_API_KEY - old nodes and key expiry stay manual"
   fi
 
+  if [[ -z ${GAME_DISK_GB+set} ]] && (( fix )) && settings_tty; then
+    echo
+    echo "Root disk, in GB: the OS, the driver and Steam - games live on the box's own NVMe."
+    echo "About INR 8 per GB a month while the box exists, and it cannot be shrunk later."
+    settings_number GAME_DISK_GB 50 30 "  root disk GB" \
+      || log_as fail "no disk size saved - the default, 50 GB, is used, and cg check --fix asks again"
+  fi
+  log_as info "root disk ${GAME_DISK_GB:-50} GB$([[ -z ${GAME_DISK_GB:-} ]] && echo " (the default)")"
+
+  if [[ -z ${GAME_ARCHIVE_EXPIRY_DAYS+set} ]] && (( fix )) && settings_tty; then
+    echo
+    echo "Days with no box before the cloud watchdog deletes your game archive in S3 (about"
+    echo "INR 350 a month for 160 GB). 0 keeps it forever. The next cg init applies a change."
+    settings_number GAME_ARCHIVE_EXPIRY_DAYS 14 0 "  delete the archive after how many days" \
+      || log_as fail "no expiry saved - the default, 14 days, is used, and cg check --fix asks again"
+  fi
+  if [[ ${GAME_ARCHIVE_EXPIRY_DAYS:-14} == 0 ]]; then
+    log_as info "game archive: kept forever (GAME_ARCHIVE_EXPIRY_DAYS=0)"
+  else
+    log_as info "game archive: deleted after ${GAME_ARCHIVE_EXPIRY_DAYS:-14} days with no box"
+  fi
+
   cw_adopt_ntfy
   if [[ -z ${GAME_NTFY_URL+set} ]] && (( fix )) && settings_tty; then
     echo
-    echo "Optional: phone notifications through ntfy - a long random topic name, or a full ntfy URL."
+    echo "Optional: notifications on your phone. Install the ntfy app, subscribe to a long random"
+    echo "topic name, and paste that name (or a full ntfy URL) here. Enter skips."
     v=$(settings_secret "  ntfy topic or URL (Enter to skip): " '^[A-Za-z0-9:/._-]+$' \
           "ntfy topic or URL" optional) || v="-"
     if [[ $v == "-" || ( -n $v && -z $(GAME_NTFY_URL="$v" cg_ntfy_url) ) ]]; then

@@ -83,15 +83,20 @@ contains "  and it carries on"                "$r" "rc=0"
 
 echo "4. cg check --fix: the optional ones too, and a skip is remembered"
 fresh
-r=$(run 'settings_prompts 1; echo "rc=$?"' 'tskey-auth-1\nme@example.com\ntskey-api-9\n\n')
+r=$(run 'settings_prompts 1; echo "rc=$?"' 'tskey-auth-1\nme@example.com\ntskey-api-9\n\n\n\n')
 contains "API token saved"                    "$(envfile)" "TAILSCALE_API_KEY=tskey-api-9"
 lacks    "  and not printed"                  "$r" "tskey-api-9"
 contains "  and used"                         "$r" "Tailscale API key set"
 check    "ntfy skipped: saved as empty, so not asked again" "$(grep -c '^GAME_NTFY_URL=$' "$T/repo/.env")" "1"
+contains "Enter on the disk size: the default, saved" "$(envfile)" "GAME_DISK_GB=50"
+contains "Enter on the expiry: the default, saved"    "$(envfile)" "GAME_ARCHIVE_EXPIRY_DAYS=14"
+contains "  the disk asked with its default shown"    "$r" "root disk GB [50]"
+contains "  and the expiry"                           "$r" "after how many days [14]"
 contains "  notifications off"                "$r" "notifications off"
 fresh
-r=$(EXTRA="TAILSCALE_AUTH_KEY=k EMAIL_ALERTS=e TAILSCALE_API_KEY= GAME_NTFY_URL=" run 'settings_prompts 1; echo "rc=$?"')
+r=$(EXTRA="TAILSCALE_AUTH_KEY=k EMAIL_ALERTS=e TAILSCALE_API_KEY= GAME_NTFY_URL= GAME_DISK_GB=50 GAME_ARCHIVE_EXPIRY_DAYS=14" run 'settings_prompts 1; echo "rc=$?"')
 lacks    "everything mentioned: nothing asked" "$r" "paste"
+lacks    "  nor the disk"                     "$r" "root disk GB ["
 lacks    "  nor the ntfy question"            "$r" "ntfy topic or URL"
 check    "  nothing written"                  "$(envfile)" ""
 
@@ -104,7 +109,7 @@ contains "  and notifications stay on"        "$r" "notifications on"
 
 echo "6. a wrong ntfy value is not saved"
 fresh
-r=$(EXTRA="TAILSCALE_AUTH_KEY=k EMAIL_ALERTS=e TAILSCALE_API_KEY=" run 'settings_prompts 1' 'not a url!\n')
+r=$(EXTRA="TAILSCALE_AUTH_KEY=k EMAIL_ALERTS=e TAILSCALE_API_KEY= GAME_DISK_GB=50 GAME_ARCHIVE_EXPIRY_DAYS=14" run 'settings_prompts 1' 'not a url!\n')
 contains "said"                               "$r" "not a valid ntfy topic or URL"
 lacks    "  not saved"                        "$(envfile)" "GAME_NTFY_URL"
 
@@ -134,7 +139,7 @@ r=$(run 'settings_prompts 0' '\ntskey-auth-3\nme@example.com\n')
 contains "nothing pasted: how to paste"       "$r" "Ctrl+Shift+V"
 check    "  and asked again"                  "$(grep '^TAILSCALE_AUTH_KEY=' "$T/repo/.env")" "TAILSCALE_AUTH_KEY=tskey-auth-3"
 fresh
-r=$(EXTRA="TAILSCALE_AUTH_KEY=k EMAIL_ALERTS=e GAME_NTFY_URL=" run 'settings_prompts 1' 'nope\nnope\nnope\n')
+r=$(EXTRA="TAILSCALE_AUTH_KEY=k EMAIL_ALERTS=e GAME_NTFY_URL= GAME_DISK_GB=50 GAME_ARCHIVE_EXPIRY_DAYS=14" run 'settings_prompts 1' 'nope\nnope\nnope\n')
 contains "a wrong API token three times: said" "$r" "no valid API token - not saved"
 lacks    "  and not saved"                    "$(envfile)" "TAILSCALE_API_KEY"
 
@@ -142,6 +147,30 @@ echo "10. typing: backspace removes a character"
 fresh
 run 'settings_prompts 0' 'tskey-auth-abX\x7fc\nme@example.com\n' >/dev/null
 check    "the deleted character is gone"      "$(grep '^TAILSCALE_AUTH_KEY=' "$T/repo/.env")" "TAILSCALE_AUTH_KEY=tskey-auth-abc"
+
+echo "11. disk size and archive expiry: asked with defaults, checked, and reported"
+BASE="TAILSCALE_AUTH_KEY=k EMAIL_ALERTS=e TAILSCALE_API_KEY= GAME_NTFY_URL="
+fresh
+r=$(EXTRA="$BASE GAME_ARCHIVE_EXPIRY_DAYS=14" run 'settings_prompts 1' '80\n')
+contains "a disk size typed: saved"           "$(envfile)" "GAME_DISK_GB=80"
+contains "  and reported"                     "$r" "root disk 80 GB"
+fresh
+r=$(EXTRA="$BASE GAME_ARCHIVE_EXPIRY_DAYS=14" run 'settings_prompts 1' 'abc\n10\n60\n')
+contains "not a number, or under 30: said"    "$r" "a whole number, at least 30"
+contains "  and asked again"                  "$(envfile)" "GAME_DISK_GB=60"
+fresh
+r=$(EXTRA="$BASE GAME_DISK_GB=50" run 'settings_prompts 1' '0\n')
+contains "expiry 0: saved"                    "$(envfile)" "GAME_ARCHIVE_EXPIRY_DAYS=0"
+contains "  and reported as kept forever"     "$r" "kept forever"
+fresh
+r=$(EXTRA="$BASE GAME_DISK_GB=50" run 'settings_prompts 1')
+lacks    "no answer at all: nothing saved"    "$(envfile)" "GAME_ARCHIVE_EXPIRY_DAYS"
+contains "  and said"                         "$r" "no expiry saved - the default, 14 days, is used"
+fresh
+r=$(EXTRA="TAILSCALE_AUTH_KEY=k EMAIL_ALERTS=e" run 'settings_prompts 0')
+lacks    "without --fix: not asked"           "$r" "root disk GB ["
+contains "  but the defaults are reported"    "$r" "root disk 50 GB (the default)"
+contains "  both of them"                     "$r" "deleted after 14 days with no box"
 
 echo "8. wired in"
 check "setup asks through it"                 "$(grep -c '^settings_prompts "$FIX"' lib/setup)" "1"
