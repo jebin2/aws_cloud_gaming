@@ -11,9 +11,8 @@ longer switches and the client scales the picture instead. Set Moonlight to **19
 
 ## Moonlight client settings
 
-Two settings on the **client**, both easy to miss:
-
-`cg open` now sets the first of these for you, so Alt+Tab works out of the box:
+One setting on the **client**, easy to miss - and `cg open` sets it for you, so Alt+Tab works out
+of the box:
 
 - **Input Settings → Capture system keyboard shortcuts** → on. Without it Alt+Tab and Super are
   swallowed by your own desktop and never reach the stream. This is the setting that matters -
@@ -28,6 +27,20 @@ GUI - so there is no settings page to reach from it. Run `moonlight` on its own 
 
 And a running Moonlight does not notice config edits; it also rewrites the file on exit,
 discarding them. Change the setting in the GUI, or close Moonlight before editing the file.
+
+## Client settings from `.env`
+
+`cg open` passes these to Moonlight as launch flags, so there is no GUI to visit. A setting left
+unset passes no flag, leaving whatever Moonlight has saved:
+
+| `.env` | Flag | Example |
+|---|---|---|
+| `GAME_RES` | `--resolution` | `1920x1080` |
+| `GAME_FPS` | `--fps` | `60` |
+| `GAME_BITRATE_KBPS` | `--bitrate` | `20000` |
+| `GAME_DISPLAY_MODE` | `--display-mode` | `borderless`, `fullscreen`, `windowed` |
+| `GAME_VIDEO_CODEC` | `--video-codec` | `h264`, `hevc` |
+| `GAME_PERF_OVERLAY=1` | `--performance-overlay` | - |
 
 ## One thing to turn off in Steam
 

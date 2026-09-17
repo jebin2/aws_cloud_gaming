@@ -51,10 +51,12 @@ mirrors the games to S3 on the way, with up to 30 minutes to do it. The one-hour
 box that never finishes going down, **whichever guard started it** - by then the push has had its
 30 minutes.
 
-It **keeps no state**. Every run reads the last 30 minutes of `NetworkIn` and `NetworkOut`, so a
-missed or repeated run cannot corrupt a counter, and a dry run changes nothing. The only thing it
-writes is a `cg-going-down-since` tag, on an instance going down with no timestamp to measure from
-(an in-guest `shutdown -h` leaves none).
+**The idle decision keeps no state.** Every run reads the last 30 minutes of `NetworkIn` and
+`NetworkOut`, so a missed or repeated run cannot corrupt a counter, and a dry run changes nothing.
+What it does write exists only so a message is not repeated: tags on the instance
+(`cg-going-down-since`, on one going down with no timestamp to measure from - an in-guest
+`shutdown -h` leaves none - plus `cg-slow-noted` and `cg-forced`), and, for the archive countdown,
+free SSM parameters under `/cloud-gaming/<host>/`.
 
 **Every decision is logged with the numbers behind it:**
 
@@ -94,14 +96,18 @@ them.
  {"Sid":"MarkWhenFirstSeenGoingDown","Effect":"Allow","Action":"ec2:CreateTags",
   "Resource":"arn:aws:ec2:REGION:ACCOUNT:instance/*",
   "Condition":{"StringEquals":{"ec2:ResourceTag/Name":"gamevps"},
-               "ForAllValues:StringEquals":{"aws:TagKeys":["cg-going-down-since"]}}},
+               "ForAllValues:StringEquals":{"aws:TagKeys":["cg-going-down-since","cg-slow-noted","cg-forced"]}}},
  {"Sid":"OwnLogs","Effect":"Allow","Action":["logs:CreateLogStream","logs:PutLogEvents"],
   "Resource":"arn:aws:logs:REGION:ACCOUNT:log-group:/aws/lambda/gamevps-cloud-watchdog:*"}
 ]}
 ```
 
-IAM Access Analyzer reports no findings for it. It cannot launch anything, read the game archive,
-or touch IAM.
+While archive expiry is on - the default - four more statements are added, listed under
+[Game archive expiry](#game-archive-expiry): `cloudtrail:LookupEvents`, its own parameters under
+`/cloud-gaming/<host>/`, and list, delete and abort-upload on the one archive bucket.
+
+IAM Access Analyzer reports no findings for it. It cannot launch anything, read the game archive's
+contents, or touch IAM.
 
 **Cost: nothing.** About 8,640 runs a month against Lambda's always-free 1 million requests and
 400,000 GB-seconds, a few MB of logs (kept 14 days) against 5 GB, and EventBridge schedules are

@@ -24,7 +24,8 @@ security group and key pair of the same name, and offline nodes are pruned befor
 and cost time - the security group step alone waited up to a minute for the network interface
 to be released. The `.pem` is kept *with* the key pair on purpose: AWS hands out a private key
 exactly once, so a surviving key pair whose `.pem` had been deleted would be reused by the next
-build with no way to log in. The per-box `.env` lines are still cleared - they are not resources,
+build with no way to log in. If that `.pem` is lost anyway, `cg check` says so and the next
+`cg init` replaces the key pair - free, and only while no box is using it. The per-box `.env` lines are still cleared - they are not resources,
 and left in place `cg ssh` and `cg status` would point at a terminated instance.
 
 `--all` asks you to type `DESTROY-ALL`, because the archive is the only copy of the games and

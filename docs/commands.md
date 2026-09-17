@@ -6,15 +6,11 @@ rather than reimplementing them.
 
 ## Every command
 
-`cg` is the front door. It dispatches into `setup` and `game`, which both keep working - the
-odd-looking lines in those scripts are scars from real failures, so `cg` calls them rather than
-reimplementing them.
-
 | Command | What it does |
 |---|---|
 | `cg init` | Build everything; reuses an existing box. **Costs money** |
-| `cg open` | Start, stream, stop on exit. **Costs money** |
-| `cg stop` | Mirror the games to S3, then stop the instance - ends hourly billing |
+| `cg open` | Start, stream, and on exit offer to end the box. **Costs money** |
+| `cg stop` | Mirror the games to S3, then end the box - destroy on spot (a spot box cannot be stopped), stop on demand |
 | `cg status` | Instance, disks, guards, tailnet, game library, local tools |
 | `cg library` | What is on the box vs in S3, and what the archive costs |
 | `cg library push` | Mirror the games to S3 now (`--verify` for a full comparison) |
@@ -25,11 +21,12 @@ reimplementing them.
 | `cg snapshot --list` | What images exist and what they cost |
 | `cg snapshot --delete <id>` | Delete an image **and its backing snapshots** |
 | `cg clean` | Free space: apt caches, logs, `/scratch/tmp`. Games are not touched |
+| `cg pair` | Redo the Moonlight handshake - no rebuild needed |
 | `cg destroy` | Mirror the games to S3, then delete the box. **Refuses if the mirror fails**. Keeps the budget |
 | `cg destroy --force` | Destroy even if the mirror failed - **loses the games** |
 | `cg destroy --no-push` | Destroy and leave the archive exactly as it is - locks it first |
 | `cg destroy --all` | The box **and the whole account footprint** - archive, bucket, IAM, budget. Asks you to type `DESTROY-ALL` |
-| `cg check [--fix]` | Every preflight check, creates nothing. `--fix` first installs what the laptop is missing - AWS CLI v2, Tailscale, Moonlight, OpenSSH, curl, python3 - and signs in to Tailscale and AWS, after asking once |
+| `cg check [--fix]` | Every preflight check, creates nothing. `--fix` first installs what the laptop is missing - AWS CLI v2, Tailscale, Moonlight, OpenSSH, curl, python3 - and signs in to Tailscale and AWS, after asking once. Any missing `.env` setting is asked for with its default shown and saved there |
 | `cg cost` | Month-to-date spend and what still bills |
 | `cg log [what] [--watch]` | `build` \| `steam` \| `watchdog` \| `disk` \| `sunshine` |
 | `cg ssh [cmd]` | Shell on the box - resolves the suffixed tailnet name for you |
@@ -86,7 +83,7 @@ Everything is safe to run again. The ones worth knowing:
 |---|---|
 | `cg init` | Reuses the instance and skips what is done - **but it starts a stopped box, so it costs money** |
 | `cg open` | Connects again if already running |
-| `cg stop` | Says "already stopped" |
+| `cg stop` | On spot, offers destroy again; on demand, says "already stopped" |
 | `cg clean` | Frees less each time; needs the box running |
 | `cg destroy` | No-op. The first run keeps nothing and asks nothing |
 | `cg cost` | Each run makes one Cost Explorer call ($0.01) |

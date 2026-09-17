@@ -75,7 +75,7 @@ UDP 41641, and that is Tailscale's.
 | S3 access | EC2 instance role | box | no access key on the box to leak |
 | Guards | on-host watchdog, cloud watchdog (Lambda + EventBridge), AWS Budget | box, AWS | two independent ways to stop a forgotten box, and an email |
 | Notifications | ntfy (optional, `GAME_NTFY_URL`) | box, Lambda, laptop | push to a phone with no account and nothing to confirm |
-| Spend | Cost Explorer (for `cg cost`) | AWS | the only billed API here, $0.01 a call |
+| Spend | Cost Explorer (for `cg cost`) | AWS | $0.01 a call - that and S3 requests are the only charges beyond the box |
 
 ## Where things live
 
@@ -306,9 +306,10 @@ allowances. The full list: [cost-guards.md](cost-guards.md#notifications).
   was removed. The on-host watchdog is the fast one; the cloud watchdog survives the box being
   wedged. See [Flow 4](#flow-4---you-forget-the-box).
 - **A Lambda, not a machine to keep alive.** The cloud watchdog runs every 5 minutes on an IAM role,
-  and keeps no state: every run reads the last 30 minutes of metrics rather than counting idle
-  checks, so a missed run cannot corrupt a counter and a dry run (`cg watchdog check`) changes
-  nothing. It replaced a watchdog on an always-on VPS that needed a long-lived AWS key.
+  and its idle decision keeps no state: every run reads the last 30 minutes of metrics rather than
+  counting idle checks, so a missed run cannot corrupt a counter and a dry run
+  (`cg watchdog check`) changes nothing. What it does keep - the archive's last-seen mark, and
+  which notices it has already sent - is a free SSM parameter or a tag. It replaced a watchdog on an always-on VPS that needed a long-lived AWS key.
 - **Every guard ends in the same graceful shutdown.** Terminating through the API gives the OS its
   shutdown, where the games are mirrored to S3 with up to 30 minutes (`TimeoutStopSec=1800`). A box
   still going down an hour later is forced, whichever guard started it - by then the upload has had
@@ -348,8 +349,9 @@ allowances. The full list: [cost-guards.md](cost-guards.md#notifications).
   mark and CloudTrail's launch history), and any error, gap or unreadable answer keeps it. See
   [Flow 5](#flow-5---nobody-plays-for-two-weeks).
 - **Roles, not keys.** The box reads and writes its bucket through an instance role, and the
-  cloud watchdog runs on a Lambda role allowed only to describe, stop or terminate the
-  `gamevps`-tagged instance. Nothing holds a long-lived AWS secret. See
+  cloud watchdog runs on a Lambda role allowed only to describe, tag, stop or terminate the
+  `gamevps`-tagged instance - plus, while archive expiry is on, its own marks and the one archive
+  bucket. Nothing holds a long-lived AWS secret. See
   [cost-guards.md](cost-guards.md).
 
 ### Automation and notifications

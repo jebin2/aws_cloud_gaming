@@ -38,8 +38,13 @@ And locally:
   `<GAME_TS_HOST>-<number>` are ever touched, and only a connected one gets its expiry turned off.
   These tokens expire after 90 days; when one does, `cg init` says so plainly, and key expiry
   shows as a manual step again
-- **Moonlight** (`moonlight-qt`) - only needed to stream, so `setup` warns rather than stops
+- **Moonlight** (`moonlight-qt`) - `cg check` stops without it, since `cg init` pairs it and
+  `cg open` streams with it
 - `aws` CLI v2 configured, `python3`, `curl`, and OpenSSH (`ssh`/`scp`)
+
+`./cg check --fix` installs every local tool in that list - on Linux, through pacman, apt, dnf or
+zypper - starts the Tailscale sign-in, and asks for an AWS access key if none works. See
+[The first build](#the-first-build).
 
 ### AWS credentials
 
@@ -61,7 +66,8 @@ does not help it sitting in `~/Downloads`.
 ## Configuration
 
 Everything lives in `.env` - see [.env.example](../.env.example), which documents every variable.
-`cg init` prompts for the Tailscale key and alert email if they are absent, so the minimum is a
+`cg init` prompts for the Tailscale key and alert email if they are absent and saves them to `.env`,
+so each is asked once; `cg check --fix` also asks for the optional settings. The minimum is a
 working AWS profile and a Tailscale account.
 
 ## The first build

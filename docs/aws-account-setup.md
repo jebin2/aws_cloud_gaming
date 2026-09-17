@@ -224,10 +224,17 @@ nothing:
 **Passes when** it ends like this:
 
     ╭─ 🧭 preflight
+    │  ✓ installed: python3, OpenSSH (ssh, scp), curl, AWS CLI v2, Tailscale, Moonlight
+    │  ✓ Tailscale signed in
+    │  ✓ AWS credentials work (~/.aws/credentials, profile default)
     │  · account plan: PAID
     │  · spot quota 4 vCPU covers g6.xlarge (4)
+    │  ✓ ssh key ~/.ssh/gamevps.pem matches the key pair
 
     🎉 preflight passed - nothing was created.
+
+`./cg check --fix` installs anything the laptop is missing first, and asks for any `.env` setting
+that is absent.
 
 **What its failures mean:**
 

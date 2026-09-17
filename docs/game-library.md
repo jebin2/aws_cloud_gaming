@@ -99,7 +99,7 @@ own, and it cost:
   every future instance launched, and `InsufficientInstanceCapacity` in that zone failed the
   launch outright
 
-The same library in S3 Standard is **~INR 310/month** and pins nothing, which materially
+The same library in S3 Standard is **~INR 350/month** and pins nothing, which materially
 improves the odds on a spot launch. The cost is the ~10 minute restore, which is why it was
 worth the work to hide it inside the build.
 

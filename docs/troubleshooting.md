@@ -245,6 +245,10 @@ Set the `x-www-browser` alternative, `helpers.rc`, and the xdg defaults.
 
 ### Arming an idle alarm stops the box instantly
 
+> **Since removed.** The CloudWatch alarm is gone; the cloud watchdog Lambda replaced it and
+> counts inbound as well as outbound traffic. See [cost-guards.md](cost-guards.md). What follows is
+> why the alarm could never be armed during setup.
+
 A new CloudWatch alarm is evaluated against the **previous** 30 minutes immediately. During
 setup that window is the software install, which looks exactly like an idle one - so the alarm
 fired its stop action seconds after creation and killed the box mid-setup.
@@ -297,6 +301,10 @@ a relay at 43-71 ms instead of 16 ms, and never reports an error. Check with
 `tailscale ping <host>` - it must say *direct*, not *via DERP*.
 
 ### Persistent spot requests are safe with this design
+
+> **The design changed.** Boxes are launched as **one-time** spot requests now, which cannot be
+> stopped at all, so every guard terminates instead - see [cost.md](cost.md). What follows was
+> measured on the old persistent request, and its cancel-before-terminate rule still holds.
 
 `InstanceInterruptionBehavior=stop` preserves the disk on reclaim but requires a *persistent*
 request, which raises the question of whether AWS will relaunch a box the watchdog deliberately
@@ -1240,6 +1248,9 @@ that exercises the thing over the one that inspects its storage.**
 
 ### The alarm did kill it, and I said it did not
 
+> **Since removed.** This is what finally retired the CloudWatch alarm: the cloud watchdog Lambda
+> counts in + out and needs no arming. The lesson about reading an audit log is the part that lasts.
+
 Yesterday a 140 GB download was lost when the box went away mid-upload. The idle-stop alarm was
 in ALARM with `no datapoints were received for 6 periods ... treated as [Breaching]` and an
 `ec2:terminate` action. I reasoned that metrics stop when an instance terminates, so an alarm
@@ -1263,7 +1274,7 @@ Thirty minutes after a stream ended, a box busy downloading looked exactly like 
 It is disarmed now the moment the stream stops, via a trap so it also covers a session that dies
 early or is interrupted. During a session the inference "no outbound for 30 minutes means the
 stream is dead" is sound, which is the only window where this layer is meant to be watching.
-Outside one, layers 2 and 4 both count inbound and can tell the difference.
+Outside one, the on-host and cloud watchdogs both count inbound and can tell the difference.
 
 **And it explains the second failure.** The alarm terminates through the EC2 API, so the on-host
 watchdog never runs - the mirror-before-shutdown added for exactly this case was bypassed, and

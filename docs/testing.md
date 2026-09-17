@@ -8,6 +8,7 @@ Where things are, and how the test suites prove the risky paths without spending
     lib/setup, lib/game  what cg dispatches into
     lib/               provisioning and cloud-init internals
     host/              units deployed to the instance (watchdog, disk monitor, S3 mirror)
+    lambda/            the cloud watchdog, deployed as a zip to AWS Lambda
     tests/             offline tests for the fiddly host-side logic
     docs/              everything linked from the README
 
