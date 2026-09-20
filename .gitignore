@@ -23,3 +23,7 @@ clauderesumeid.txt
 # The ntfy URL, written beside the host scripts for a box. Never in the repo: on
 # ntfy.sh the topic is all it takes to read and post.
 host/notify.url
+
+# Python bytecode. A .pyc of lib/choose-games.py was committed once by accident.
+__pycache__/
+*.pyc

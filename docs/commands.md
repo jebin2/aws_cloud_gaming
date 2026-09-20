@@ -27,7 +27,7 @@ rather than reimplementing them.
 | `cg destroy --no-push` | Destroy and leave the archive exactly as it is - locks it first |
 | `cg destroy --all` | The box **and the whole account footprint** - archive, bucket, IAM, budget. Asks you to type `DESTROY-ALL` |
 | `cg check [--fix]` | Every preflight check, creates nothing. `--fix` first installs what the laptop is missing - AWS CLI v2, Tailscale, Moonlight, OpenSSH, curl, python3 - and signs in to Tailscale and AWS, after asking once. Any missing `.env` setting is asked for with its default shown and saved there |
-| `cg cost` | Month-to-date spend and what still bills |
+| `cg cost [--daily]` | Month-to-date spend and what still bills; `--daily` adds a day-by-day table, from the same single API call |
 | `cg log [what] [--watch]` | `build` \| `steam` \| `watchdog` \| `disk` \| `sunshine` |
 | `cg ssh [cmd]` | Shell on the box - resolves the suffixed tailnet name for you |
 | `cg watcher [--watch]` | Every guard, and whether each is genuinely armed - including what the cloud watchdog last decided, and when |
@@ -86,7 +86,7 @@ Everything is safe to run again. The ones worth knowing:
 | `cg stop` | On spot, offers destroy again; on demand, says "already stopped" |
 | `cg clean` | Frees less each time; needs the box running |
 | `cg destroy` | No-op. The first run keeps nothing and asks nothing |
-| `cg cost` | Each run makes one Cost Explorer call ($0.01) |
+| `cg cost` | Each run makes one Cost Explorer call ($0.01) - `--daily` included |
 
 **The two that cost money unprompted** are `cg init` and `cg open` - both start a stopped
 instance. Everything else is read-only or asks first.

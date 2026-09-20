@@ -70,6 +70,15 @@ misses the month's earlier sessions. `cg cost` also lists **every** volume and s
 the running instance's - orphaned volumes are the usual way people keep paying for a machine they
 believe they deleted.
 
+`cg cost --daily` breaks the month into one row per day, with a column for each kind of charge -
+compute, S3, disk, egress, API and everything else - plus the hours a box ran that day. Days with
+nothing billed are left out and counted at the end. It asks Cost Explorer for daily figures and
+renders the monthly summary from that same answer, so it costs the same $0.01 as `cg cost`:
+
+    DATE          HRS  COMPUTE       S3     DISK   EGRESS      API    OTHER    TOTAL     INR
+    2026-09-14    3.3     3.20     0.07        -        -     0.01        -     3.28     289
+    2026-09-16    2.0     0.42        -     0.05        -        -     0.01     0.48      42
+
 `cg status` shows traffic since the box booted, read straight off the interface counters - free,
 and immediate:
 
