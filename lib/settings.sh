@@ -16,6 +16,8 @@ settings_tty() { [[ -t 0 ]]; }
 # nothing typed.
 settings_masked() {
   local c v="" esc=0
+  # A driven run answers on stdin; there are no keystrokes to mask.
+  if cg_json; then IFS= read -r v || return 1; printf '%s' "$v"; return 0; fi
   printf '%s' "$1" >&2
   while :; do
     if ! IFS= read -rsn1 c; then
@@ -42,8 +44,10 @@ settings_masked() {
 # usable answer; an optional one returns an empty value when Enter is pressed on
 # its own.
 settings_secret() {
-  local prompt=$1 re=$2 what=$3 optional=${4:-} v try
+  local prompt=$1 re=$2 what=$3 optional=${4:-} v try id
+  id=${what,,}; id=${id// /-}
   for try in 1 2 3; do
+    cg_json && _cg_event ask id "$id" prompt "$prompt" default "" secret 1
     v=$(settings_masked "$prompt") || return 1     # end of input: no answer, not a skip
     v=${v//[[:space:]]/}
     if [[ -z $v ]]; then
@@ -66,9 +70,13 @@ settings_secret() {
 settings_number() {
   local key=$1 def=$2 min=$3 prompt=$4 v try
   for try in 1 2 3; do
-    # The prompt is printed here, not by read -p, which shows it only on a terminal.
-    printf '%s [%s]: ' "$prompt" "$def" >&2
-    IFS= read -r v || { echo >&2; return 1; }
+    if cg_json; then
+      _cg_event ask id "${key,,}" prompt "$prompt" default "$def"
+    else
+      # The prompt is printed here, not by read -p, which shows it only on a terminal.
+      printf '%s [%s]: ' "$prompt" "$def" >&2
+    fi
+    IFS= read -r v || { cg_json || echo >&2; return 1; }
     v=${v//[[:space:]]/}; v=${v:-$def}
     if [[ $v =~ ^[0-9]+$ ]] && (( 10#$v >= min )); then
       v=$((10#$v))
@@ -105,7 +113,7 @@ settings_prompts() {
     env_set TAILSCALE_AUTH_KEY "$GAME_TS_AUTHKEY"
   fi
   if [[ -z $GAME_ALERT_EMAIL ]]; then
-    read -rp "  email for billing alerts (comma-separated for several): " GAME_ALERT_EMAIL || true
+    GAME_ALERT_EMAIL=$(cg_ask alert-email "  email for billing alerts (comma-separated for several): ")
     [[ -n $GAME_ALERT_EMAIL ]] || die "no email given"
     env_set EMAIL_ALERTS "$GAME_ALERT_EMAIL"
   fi

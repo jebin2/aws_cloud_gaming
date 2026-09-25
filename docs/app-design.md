@@ -48,6 +48,7 @@ rather than asking again.
 | Archived games: appid, name, size, archived date | `cg library list` | yes | the real archive today holds **one** game (Diablo IV, 160.2 GB) |
 | "160 GB selected of 209 GB available" | `cg library list` footer (229 GB disk, 209 GB selectable) | yes | the arithmetic that refuses an over-large selection lives in `lib/choose-games.py` and must stay there |
 | Build progress steps | the `cg init` event stream: `step`, `step_end` | - | the six steps in the mockup are the real ones: provision, tailnet, driver, restore, desktop, pair |
+| Confirmations (destroy, image, clean) | `ask` events, answered on stdin | - | render the prompt, send back one line. Typed words (`DESTROY-ALL`) must be typed by the person |
 | Live restore line ("28 of 160 GB, ~10 min left") | `line` events with `source: box` | - | already emitted during the build |
 | Raw log panel | `raw` lines (anything that is not an event) | - | |
 | "Build (10-20 min)" | runs `cg init` | **spends money** | the app must pass the chosen games, so the picker prompt never appears - see gaps below |
@@ -95,9 +96,10 @@ tool invented AWS detail.
 
 ## What `cg` still owes the app
 
-1. **Flags or `ask` events for the 41 prompts.** An app has no terminal. Destructive ones need
-   flags (`--yes`); the rest need an `ask` event answered on stdin, so the decision logic - the
-   capacity arithmetic, the typed `DESTROY-ALL` - stays in `cg`.
+1. ~~Flags or `ask` events for the prompts.~~ **Done.** Every question is a `cg_ask` call, so under
+   `CG_JSON=1` it arrives as an `ask` event and the answer is one line on stdin. `CG_YES=1` takes
+   each yes/no default; typed confirmations still require the word; the game picker reads
+   `GAME_APPS`. See [commands.md](commands.md#machine-readable-output).
 2. **`--json` for the reports** (`status`, `cost`, `library`, `games`, `watcher`), so the app gets
    fields rather than a rendered table inside a `report` event.
 3. **`cg --version`**, so the app can refuse a repo older than the events it expects.

@@ -31,10 +31,16 @@ _CG_PAD="         "   # detail lines start with "HH:MM:SS "; headers line up wit
 # or another program can drive cg without scraping text meant for people. It
 # forces plain mode, so no escape code can ever reach the stream.
 #
-# Events: step / line / step_end / report / block / error. A line that does not
-# parse as JSON is raw output from a command cg ran - show it or ignore it, but
-# do not parse it. Prompts still go to the terminal; a run driven this way should
-# pass the flags that avoid them.
+# Events go to STDERR, so stdout stays the command's own data - `cg ping --json`,
+# a report piped somewhere, the value a helper returns. Questions are `ask`
+# events; the answer is one line on STDIN.
+#
+#   stderr  NDJSON events: step, line, step_end, ask, report, block, error
+#   stdout  command data, and raw output from what cg ran (aws, ssh, tables)
+#   stdin   answers to ask events
+#
+# A line on stderr that does not parse as JSON is a child process complaining;
+# show it or ignore it, but do not parse it.
 _CG_JSON=0
 if [[ ${CG_JSON:-0} == 1 ]]; then _CG_JSON=1; CG_COLOR=never; export CG_COLOR; fi
 cg_json() { (( _CG_JSON )); }
@@ -59,11 +65,11 @@ _cg_event() {
   while (( $# >= 2 )); do
     k=$1; v=$2; shift 2
     case $k in
-      rc|secs) out+=",\"$k\":${v:-0}" ;;
+      rc|secs|secret) out+=",\"$k\":${v:-0}" ;;
       *)       out+=",\"$k\":\"$(_cg_jesc "$v")\"" ;;
     esac
   done
-  printf '%s}\n' "$out"
+  printf '%s}\n' "$out" >&2
 }
 
 _cg_dur() { local s=${1:-0}; (( s < 60 )) && { printf '%ds' "$s"; return; }; printf '%dm %02ds' $((s/60)) $((s%60)); }
@@ -175,6 +181,52 @@ _cg_on_int() { _CG_INT=1; printf '\n' >&2; exit 130; }
 trap _cg_on_int INT
 if _cg_styled || cg_json; then trap _cg_on_exit EXIT; fi   # JSON needs the closing step_end too
 
+# --- questions -----------------------------------------------------------------
+# Every prompt goes through here, so a program driving cg can answer one. For a
+# person it is the same `read -rp` it has always been; under CG_JSON=1 the
+# question is an `ask` event and the answer is one line on stdin. At end of
+# input - a pipe that said nothing - the default stands.
+#
+# CG_YES=1 takes the default for every yes/no question, for a script that must
+# not block. It does NOT answer a typed confirmation (DESTROY-ALL, FORGET):
+# typing the word is the confirmation, so there is nothing to assume.
+cg_ask() { # cg_ask <id> <prompt> [default] [choices] -> the answer on stdout
+  local id=$1 prompt=$2 def=${3-} choices=${4-} a
+  if cg_json; then
+    _cg_event ask id "$id" prompt "$prompt" default "$def" choices "$choices"
+    IFS= read -r a || true
+    printf '%s' "${a:-$def}"
+    return 0
+  fi
+  # A reply typed without a newline still counts; only no reply at all is none.
+  if ! IFS= read -rp "$prompt" a; then [[ -n ${a:-} ]] || a=$def; fi
+  printf '%s' "${a:-$def}"
+}
+
+cg_ask_secret() { # cg_ask_secret <id> <prompt> - hidden from the screen, never echoed
+  local a
+  if cg_json; then
+    _cg_event ask id "$1" prompt "$2" default "" secret 1
+    IFS= read -r a || true
+    printf '%s' "$a"
+    return 0
+  fi
+  IFS= read -rsp "$2" a || true
+  echo >&2
+  printf '%s' "$a"
+}
+
+cg_confirm() { # cg_confirm <id> <prompt> <Y|N default> - 0 when the answer is yes
+  local def=$3 a
+  if [[ ${CG_YES:-0} == 1 ]]; then [[ ${def,,} == y* ]]; return; fi
+  a=$(cg_ask "$1" "$2" "$def")
+  [[ ${a,,} == y* ]]
+}
+
+cg_ask_typed() { # cg_ask_typed <id> <prompt> <word> - 0 when that word was typed
+  [[ $(cg_ask "$1" "$2" "") == "$3" ]]
+}
+
 # Progress and action output. Reports (status, cost) deliberately do not go
 # through these - a timestamp on every row of a table is noise, not context.
 say() {
@@ -208,7 +260,7 @@ log() {
   _cg_line "" "$*"
 }
 die() {
-  if cg_json; then _cg_event error text "$1" >&2; exit 1; fi
+  if cg_json; then _cg_event error text "$1"; exit 1; fi
   if ! _cg_styled 2; then printf '%s  error: %s\n' "$(ts)" "$1" >&2; exit 1; fi
   local first=${1%%$'\n'*} rest line
   _cg_line fail "${_CG_B}error:${_CG_R}${_CG_RED} ${first}" >&2

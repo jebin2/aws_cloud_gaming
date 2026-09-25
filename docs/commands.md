@@ -78,7 +78,15 @@ leaves those billing - the usual way to believe you deleted something and keep p
 ## Machine-readable output
 
 For a GUI, a script or anything else driving `cg`, `CG_JSON=1` turns every progress helper into
-**one NDJSON event per line**, so nothing has to scrape text written for people:
+**one NDJSON event per line**, so nothing has to scrape text written for people. The three streams
+each have one job:
+
+| Stream | Carries |
+|---|---|
+| **stderr** | the events |
+| **stdout** | the command's own data - `cg ping --json`, a report you piped somewhere - and raw output from what `cg` ran (`aws`, `ssh`, tables) |
+| **stdin** | answers to `ask` events, one line each |
+
 
     $ CG_JSON=1 cg init
     {"t":"step","at":"2026-09-25T22:26:22+05:30","text":"provisioning instance"}
@@ -92,7 +100,8 @@ For a GUI, a script or anything else driving `cg`, `CG_JSON=1` turns every progr
 | `line` | a detail line | `kind` (`ok`, `fail`, `warn`, `wait`, `kept`, `skip`, `info`, `cont`), `text`, `source` (`box` when it came from the instance) |
 | `step_end` | the step closes, including on exit or Ctrl+C | `rc`, `secs` |
 | `report` / `block` | a whole report or notice | `title`, `text` (newline-escaped) |
-| `error` | `die` - the command then exits 1 | `text` on **stderr** |
+| `ask` | a question. Answer with one line on stdin | `id`, `prompt`, `default`, `choices`, `secret` |
+| `error` | `die` - the command then exits 1 | `text` |
 
 Rules worth knowing:
 
@@ -100,8 +109,19 @@ Rules worth knowing:
   it or ignore it, but do not parse it.
 - **`CG_JSON=1` wins over `CG_COLOR=always`**, and whole escape sequences are stripped from event
   text, so no styling can ever reach the stream.
-- **Prompts still go to the terminal.** A run driven this way should pass the flags that avoid
-  them - `cg destroy --force`, `GAME_APPS` in `.env`, and so on.
+- **Every question is an `ask` event.** Reply with one line on stdin:
+
+      → {"t":"ask","id":"terminate-box","prompt":"terminate? [y/N] ","default":"N","choices":""}
+      ← y
+
+  No reply, or end of input, leaves the default standing. A `secret` question - a key being
+  pasted - is marked `"secret":1`, and its answer is never echoed back.
+- **`CG_YES=1` answers every yes/no question with its default**, for a script that must not block.
+  It does **not** answer a typed confirmation (`DESTROY-ALL`, `FORGET`, `CLEAN`, `DELETE`): typing
+  the word is the confirmation, so there is nothing to assume. `cg destroy --all --force` remains
+  the way to skip that one deliberately.
+- **The game picker is not asked** in a driven run: set `GAME_APPS` in `.env` (a csv of appids,
+  `all`, or `none`) and `cg init` uses it without prompting.
 - The human formats are unchanged: this is a third mode beside styled and plain.
 
 ## Running a command twice

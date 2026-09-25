@@ -178,19 +178,16 @@ end_session() {
     echo "and nothing else."
     echo
     } | cg_block "💡" "Nothing to stop on a spot box"
-    if _cg_styled 2; then
-      read -rp "${_CG_B}${_CG_YEL}?${_CG_R} ${_CG_B}[d]${_CG_R} destroy ${_CG_GREY}(recommended)${_CG_R}   ${_CG_B}[n]${_CG_R} leave it running: " a
-    else
-      read -rp "[d] destroy (recommended)  [n] leave it running: " a
-    fi
+    local q="[d] destroy (recommended)  [n] leave it running: "
+    _cg_styled 2 && q="${_CG_B}${_CG_YEL}?${_CG_R} ${_CG_B}[d]${_CG_R} destroy ${_CG_GREY}(recommended)${_CG_R}   ${_CG_B}[n]${_CG_R} leave it running: "
+    a=$(cg_ask session-end "$q" d "d,n")
     case "${a:-d}" in
       d|D|"") _cg_section_end 0; exec ./cg destroy ;;
       *)      cg_echo "left running - it is STILL BILLING by the hour" ;;
     esac
     return
   fi
-  read -rp "stop instance now? [Y/n] " a
-  [[ ${a:-Y} =~ ^[Nn]$ ]] || down
+  cg_confirm stop-box "stop instance now? [Y/n] " Y && down
 }
 
 # The mirror is written HERE, in the one function every stop path goes through:
@@ -238,8 +235,7 @@ destroy() {
   vol_gb=$(ec2 describe-volumes --volume-ids "$vol_gb" --query 'Volumes[0].Size' --output text 2>/dev/null || echo "?")
 
   echo "This deletes $INSTANCE_ID and its ${vol_gb} GB disk. Everything on it goes."
-  read -rp "terminate? [y/N] " a
-  [[ ${a:-N} =~ ^[Yy]$ ]] || { echo "cancelled"; return; }
+  cg_confirm terminate-box "terminate? [y/N] " N || { echo "cancelled"; return; }
 
   # Worth saving when the box holds a working setup you would rather not rebuild;
   # not worth it for a scratch box or a build you intend to redo from scratch.
@@ -247,8 +243,7 @@ destroy() {
   echo
   echo "An image keeps the installed desktop so `cg init` can restore it in minutes"
   echo "instead of rebuilding (10-20 min). It costs ~10% of the volume's monthly price."
-  read -rp "save an image first? [Y/n] " snap
-  if [[ ! ${snap:-Y} =~ ^[Nn]$ ]]; then
+  if cg_confirm save-image "save an image first? [Y/n] " Y; then
     # A stopped instance gives a consistent image without --no-reboot games.
     [[ $s == running ]] && down
     local name ami
@@ -290,8 +285,7 @@ clean() {
   [[ $(state) == running ]] || { echo "box is not running; start it first"; return 1; }
   echo "This clears temp files and browser downloads on /scratch."
   echo "Installed games are in /scratch/steam and are NOT touched."
-  read -rp "continue? [y/N] " a
-  [[ ${a:-N} =~ ^[Yy]$ ]] || { echo "cancelled"; return; }
+  cg_confirm clean-box "continue? [y/N] " N || { echo "cancelled"; return; }
   # NAMED directories only. This used to wipe everything directly under
   # /scratch, which was safe when the games lived on a separate volume and is
   # now the fastest way to delete a 140 GB library - the mirror would then

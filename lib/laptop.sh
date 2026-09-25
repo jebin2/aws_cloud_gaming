@@ -138,9 +138,8 @@ laptop_tailscale_up() {
 laptop_aws_keys() {
   local region=$1 key_id secret
   log "AWS credentials: paste an access key (IAM > Users > Security credentials > Create access key)"
-  read -rp "    access key id: " key_id || true
-  read -rsp "    secret access key: " secret || true
-  echo >&2
+  key_id=$(cg_ask aws-access-key-id "    access key id: ")
+  secret=$(cg_ask_secret aws-secret-access-key "    secret access key: ")
   if [[ -z ${key_id:-} || -z ${secret:-} ]]; then
     log "no key given - nothing saved"
     return 1
@@ -234,9 +233,7 @@ laptop_fix() {
   log "--fix will:"
   for t in $missing; do log "  install $(laptop_label "$t") - $(laptop_plan "$pm" "$t")"; done
   log "  sign this laptop in to Tailscale if it is not, with sudo tailscale up (prints a login link)"
-  # A reply with no newline still counts; only no reply at all (end of input) is a no.
-  read -rp "    go ahead? [Y/n] " a || [[ -n ${a:-} ]] || a=n
-  if [[ ${a:-Y} =~ ^[Nn] ]]; then
+  if ! cg_confirm fix-go-ahead "    go ahead? [Y/n] " Y; then
     log "nothing changed"
     return 1
   fi

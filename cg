@@ -376,8 +376,8 @@ library_clean() {
   awk -v b="$total" 'BEGIN{ g=b/1073741824;
     printf "\n  %.1f GB, costing $%.2f/month (INR %.0f) for files no game can use\n", g, g*0.025, g*0.025*88 }'
   echo "  They are not restorable: with no manifest, Steam cannot see them."
-  local a; read -r -p "type CLEAN to delete them: " a
-  [[ $a == CLEAN ]] || { echo "aborted - nothing was deleted"; return 1; }
+  cg_ask_typed clean-orphans "type CLEAN to delete them: " CLEAN \
+    || { echo "aborted - nothing was deleted"; return 1; }
   while IFS=$'\t' read -r bytes prefix; do
     [[ -n ${prefix:-} ]] || continue
     aws s3 rm "s3://$GAME_S3_BUCKET/steam/steamapps/$prefix" --recursive >/dev/null 2>&1 \
@@ -405,8 +405,8 @@ for a in apps:
   echo "This permanently deletes $name ($id, ${gb} GB) from the archive."
   echo "No undo, no versioning. Playing it again means downloading it from Steam."
   echo "At Steam speeds that is roughly $(awk -v b="$bytes" 'BEGIN{printf "%.1f", b/12582912/3600}') hours."
-  local a; read -r -p "type FORGET to confirm: " a
-  [[ $a == FORGET ]] || { echo "aborted - nothing was deleted"; return 1; }
+  cg_ask_typed forget-game "type FORGET to confirm: " FORGET \
+    || { echo "aborted - nothing was deleted"; return 1; }
   local pair
   for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
     # The trailing slash is the boundary: without it "common/Diablo IV" is a
@@ -630,8 +630,8 @@ destroy_everything() {
   echo "derived from your account, so it comes back identical."
   echo
   if (( ! force )); then
-    read -r -p "type DESTROY-ALL to confirm: " a
-    [[ $a == DESTROY-ALL ]] || { echo "aborted - nothing was deleted"; return 1; }
+    cg_ask_typed destroy-all "type DESTROY-ALL to confirm: " DESTROY-ALL \
+      || { echo "aborted - nothing was deleted"; return 1; }
   fi
 
   CG_DESTROY_ALL=1 lib/setup destroy
@@ -889,8 +889,7 @@ games_volume() {
       [[ $state == available ]] || die "volume is $state - stop or destroy the instance first"
       echo "Nothing uses this volume any more; the games are in S3 (cg library)."
       echo "This permanently deletes $vol and every game on it."
-      read -r -p "type DELETE to confirm: " a
-      [[ $a == DELETE ]] || { echo "aborted"; return 1; }
+      cg_ask_typed delete-volume "type DELETE to confirm: " DELETE || { echo "aborted"; return 1; }
       ec2 delete-volume --volume-id "$vol" >/dev/null && log "deleted $vol"
       log "storage charges stop now" ;;
     *) die "usage: cg games [show|--delete]" ;;

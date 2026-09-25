@@ -399,8 +399,7 @@ rebuild() {
   echo "a clean 50 GB baseline."
   echo
   echo "Note: the unattended build has not yet completed end-to-end in one run."
-  read -rp "rebuild from scratch? [y/N] " a
-  [[ ${a:-N} =~ ^[Yy]$ ]] || { echo "cancelled"; exit 0; }
+  cg_confirm rebuild "rebuild from scratch? [y/N] " N || { echo "cancelled"; exit 0; }
 
   say "destroying the current box"
   printf 'y\nn\n' | lib/game destroy || die "destroy failed; nothing rebuilt"
@@ -735,8 +734,7 @@ if ! aws sts get-caller-identity >/dev/null 2>&1; then
 
   if [[ -n $CSV && -f $CSV ]]; then
     log "AWS credentials are not configured, but found: $CSV"
-    read -rp "    import it? [Y/n] " a
-    if [[ ! ${a:-Y} =~ ^[Nn]$ ]]; then
+    if cg_confirm import-key-csv "    import it? [Y/n] " Y; then
       mapfile -t creds < <(import_key_csv "$CSV") \
         || die "could not read $CSV - check it is the .csv AWS gave you"
       [[ ${#creds[@]} -eq 2 ]] || die "unexpected format in $CSV"
