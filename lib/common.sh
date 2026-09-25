@@ -26,6 +26,46 @@ _CG_GREY=$'\e[38;5;245m' _CG_ORANGE=$'\e[38;5;214m' _CG_PINK=$'\e[38;5;211m'
 _CG_SEC=0 _CG_SEC_T0=0 _CG_SEC_COL=""
 _CG_PAD="         "   # detail lines start with "HH:MM:SS "; headers line up with them
 
+# --- machine-readable output ---------------------------------------------------
+# CG_JSON=1 turns every progress helper into one NDJSON event per line, so a GUI
+# or another program can drive cg without scraping text meant for people. It
+# forces plain mode, so no escape code can ever reach the stream.
+#
+# Events: step / line / step_end / report / block / error. A line that does not
+# parse as JSON is raw output from a command cg ran - show it or ignore it, but
+# do not parse it. Prompts still go to the terminal; a run driven this way should
+# pass the flags that avoid them.
+_CG_JSON=0
+if [[ ${CG_JSON:-0} == 1 ]]; then _CG_JSON=1; CG_COLOR=never; export CG_COLOR; fi
+cg_json() { (( _CG_JSON )); }
+
+# Escaping without a subprocess: this runs once per output line, and a build
+# prints hundreds. Escape codes are dropped rather than encoded - they are
+# presentation, and this stream is data.
+_cg_jesc() {
+  local s=$1 seq
+  # Whole escape sequences, not just the escape character: dropping ESC alone
+  # left "[31m" sitting in the text as if it were content.
+  while [[ $s =~ $'\e'\[[0-9\;]*[A-Za-z] ]]; do seq=${BASH_REMATCH[0]}; s=${s//"$seq"/}; done
+  s=${s//$'\e'/}
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  s=${s//$'\r'/}; s=${s//$'\t'/\\t}; s=${s//$'\n'/\\n}
+  printf '%s' "$s"
+}
+# _cg_event <type> [key value]... - `rc` and `secs` are numbers, the rest strings.
+_cg_event() {
+  local out="{\"t\":\"$1\",\"at\":\"$(ts)\"" k v; shift
+  while (( $# >= 2 )); do
+    k=$1; v=$2; shift 2
+    case $k in
+      rc|secs) out+=",\"$k\":${v:-0}" ;;
+      *)       out+=",\"$k\":\"$(_cg_jesc "$v")\"" ;;
+    esac
+  done
+  printf '%s}\n' "$out"
+}
+
 _cg_dur() { local s=${1:-0}; (( s < 60 )) && { printf '%ds' "$s"; return; }; printf '%dm %02ds' $((s/60)) $((s%60)); }
 _cg_cols() { local c=${COLUMNS:-}; [[ $c =~ ^[0-9]+$ ]] || c=$(tput cols 2>/dev/null); [[ $c =~ ^[0-9]+$ ]] || c=80; (( c > 100 )) && c=100; printf '%s' "$c"; }
 
@@ -97,6 +137,7 @@ _cg_line() { # _cg_line <ok|fail|warn|wait|kept|skip|step|cont|info|""> <text>
 # A line rewritten in place while something is waited on - one line that counts
 # up, instead of a heartbeat line every few seconds.
 _cg_live() {
+  cg_json && return 0      # a redrawn progress line is not an event
   local gutter=" "; (( _CG_SEC )) && gutter="${_CG_SEC_COL}│${_CG_R}"
   printf '\r\e[K%s%s%s %s  %s◌%s %s' "$_CG_D" "$(date +%H:%M:%S)" "$_CG_R" "$gutter" "$_CG_YEL" "$_CG_R" "$1"
 }
@@ -107,6 +148,7 @@ _cg_live_clear() { printf '\r\e[K'; }
 _cg_section_end() { # _cg_section_end [exit-code]
   (( _CG_SEC )) || return 0
   _CG_SEC=0
+  if cg_json; then _cg_event step_end rc "${1:-0}" secs "$(( SECONDS - _CG_SEC_T0 ))"; return 0; fi
   local d; d=$(_cg_dur $(( SECONDS - _CG_SEC_T0 )))
   if (( ${1:-0} == 0 )); then
     printf '%s%s╰─%s %s✓ done in %s%s\n' "$_CG_PAD" "$_CG_SEC_COL" "$_CG_R" "$_CG_GREEN" "$d" "$_CG_R"
@@ -131,11 +173,17 @@ cg_on_exit() { _CG_ON_EXIT+=("$1"); trap _cg_on_exit EXIT; }
 # and the script carried on to the next install; bash runs this once they return.
 _cg_on_int() { _CG_INT=1; printf '\n' >&2; exit 130; }
 trap _cg_on_int INT
-_cg_styled && trap _cg_on_exit EXIT
+if _cg_styled || cg_json; then trap _cg_on_exit EXIT; fi   # JSON needs the closing step_end too
 
 # Progress and action output. Reports (status, cost) deliberately do not go
 # through these - a timestamp on every row of a table is noise, not context.
 say() {
+  if cg_json; then
+    _cg_section_end 0
+    _cg_event step text "$1"
+    _CG_SEC=1 _CG_SEC_T0=$SECONDS
+    return
+  fi
   if ! _cg_styled; then printf '\n%s  ==> %s\n' "$(ts)" "$1"; return; fi
   _cg_section_end 0
   local ic col icw=2 t fill
@@ -155,10 +203,12 @@ say() {
   _CG_SEC=1 _CG_SEC_T0=$SECONDS _CG_SEC_COL=$col
 }
 log() {
+  if cg_json; then _cg_event line kind "$(_cg_kind "$*")" text "$*"; return; fi
   if ! _cg_styled; then printf '%s      %s\n' "$(ts)" "$*"; return; fi
   _cg_line "" "$*"
 }
 die() {
+  if cg_json; then _cg_event error text "$1" >&2; exit 1; fi
   if ! _cg_styled 2; then printf '%s  error: %s\n' "$(ts)" "$1" >&2; exit 1; fi
   local first=${1%%$'\n'*} rest line
   _cg_line fail "${_CG_B}error:${_CG_R}${_CG_RED} ${first}" >&2
@@ -173,6 +223,7 @@ die() {
 # words. For report-like rows where the words mislead: a row saying something is
 # NOT enabled still contains "enabled", and read as a success. Plain: log.
 log_as() { # log_as <ok|fail|warn|wait|kept|skip|info|cont> <text>
+  if cg_json; then _cg_event line kind "$1" text "$2"; return; fi
   if ! _cg_styled; then log "$2"; return; fi
   _cg_line "$1" "$2"
 }
@@ -180,12 +231,14 @@ log_as() { # log_as <ok|fail|warn|wait|kept|skip|info|cont> <text>
 # A blank line. Plain: an empty line, as `echo` printed. Styled: the gutter
 # alone, so a gap inside a step does not break the box it sits in.
 cg_gap() {
+  if cg_json; then return; fi
   if ! _cg_styled; then echo; return; fi
   if (( _CG_SEC )); then printf '%s%s│%s\n' "$_CG_PAD" "$_CG_SEC_COL" "$_CG_R"; else echo; fi
 }
 
 # echo that is plain off a terminal and a styled detail line on one.
 cg_echo() {
+  if cg_json; then _cg_event line kind "$(_cg_kind "$*")" text "$*"; return; fi
   if ! _cg_styled; then echo "$*"; return; fi
   local t="$*"; _cg_line "" "${t#"${t%%[![:space:]]*}"}"
 }
@@ -195,6 +248,13 @@ cg_echo() {
 # is dropped (this line already has a time) and each line gets its symbol.
 cg_relay() { # cg_relay [indent]
   local indent=${1-      } line timers=0
+  if cg_json; then
+    while IFS= read -r line; do
+      [[ -z ${line//[[:space:]]/} ]] && continue
+      _cg_event line kind cont source box text "$line"
+    done
+    return
+  fi
   if ! _cg_styled; then sed "s/^/$indent/"; return; fi
   while IFS= read -r line; do
     [[ $line =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^\ ]+\ [a-z-]+:\ (.*)$ ]] && line=${BASH_REMATCH[1]}
@@ -247,6 +307,7 @@ cg_relay() { # cg_relay [indent]
 # [ok]/[--] become a same-width tick/cross; that is the only substitution.
 # The optional arguments title a box for a report with no heading of its own.
 cg_report() { # cg_report [emoji title]
+  if cg_json; then _cg_event report title "${2:-report}" text "$(cat)"; return; fi
   if ! _cg_styled; then cat; return; fi
   # The program is an argument, not stdin: stdin is the report. (Piping the
   # program in is what broke the restore prompt once - input() read the code.)
@@ -389,6 +450,7 @@ PY
 # A caller showing a block between steps closes the step itself first:
 #     _cg_section_end 0; { ...; } | cg_block "🧾" "Plan"
 cg_block() { # cg_block <emoji> <title>   - text on stdin
+  if cg_json; then _cg_event block title "${2:-}" text "$(cat)"; return; fi
   if ! _cg_styled; then cat; return; fi
   local line col=$_CG_MAG hl
   printf '\n%s%s╭─ %s %s%s%s\n' "$_CG_PAD" "$col" "$1" "$_CG_B" "$2" "$_CG_R"

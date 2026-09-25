@@ -75,6 +75,35 @@ from each row of real reports and checks the original comes back character for c
 Deleting an image deregisters it **and** deletes its backing snapshots. Deregistering alone
 leaves those billing - the usual way to believe you deleted something and keep paying for it.
 
+## Machine-readable output: `CG_JSON=1`
+
+For a GUI, a script or anything else driving `cg`, `CG_JSON=1` turns every progress helper into
+**one NDJSON event per line**, so nothing has to scrape text written for people:
+
+    $ CG_JSON=1 cg init
+    {"t":"step","at":"2026-09-25T22:26:22+05:30","text":"provisioning instance"}
+    {"t":"line","at":"...","kind":"ok","text":"i-0abc launched"}
+    {"t":"line","at":"...","kind":"cont","source":"box","text":"nvidia driver packages installed"}
+    {"t":"step_end","at":"...","rc":0,"secs":19}
+
+| Event | When | Fields |
+|---|---|---|
+| `step` | a step begins | `text` |
+| `line` | a detail line | `kind` (`ok`, `fail`, `warn`, `wait`, `kept`, `skip`, `info`, `cont`), `text`, `source` (`box` when it came from the instance) |
+| `step_end` | the step closes, including on exit or Ctrl+C | `rc`, `secs` |
+| `report` / `block` | a whole report or notice | `title`, `text` (newline-escaped) |
+| `error` | `die` - the command then exits 1 | `text` on **stderr** |
+
+Rules worth knowing:
+
+- **A line that does not parse is raw output** from a command `cg` ran (`aws`, `ssh`, a table). Show
+  it or ignore it, but do not parse it.
+- **`CG_JSON=1` wins over `CG_COLOR=always`**, and whole escape sequences are stripped from event
+  text, so no styling can ever reach the stream.
+- **Prompts still go to the terminal.** A run driven this way should pass the flags that avoid
+  them - `cg destroy --force`, `GAME_APPS` in `.env`, and so on.
+- The human formats are unchanged: this is a third mode beside styled and plain.
+
 ## Running a command twice
 
 Everything is safe to run again. The ones worth knowing:

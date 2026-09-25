@@ -840,7 +840,12 @@ source lib/settings.sh
 settings_prompts "$FIX"
 
 if (( CHECK_ONLY )); then
-  if _cg_styled; then
+  if cg_json; then
+    # Events, not bare echo: a program driving cg should not have to read the
+    # two lines saying the check passed out of raw output.
+    log_as ok "preflight passed - nothing was created."
+    log_as info "Run $C_INIT to actually build the box."
+  elif _cg_styled; then
     # Close the preflight box first. These lines printed INSIDE it, and the box
     # then closed beneath them.
     say "preflight passed - nothing was created."
