@@ -263,6 +263,9 @@ cost() {
       "$gv" "$gsz" "$gaz" "$(awk -v s="$gsz" 'BEGIN{printf "%.2f", s*0.0912}')"
   else
     archive_line
+    # The countdown belongs here too: this is the command people run while
+    # thinking about money, and the archive is the one thing still billing.
+    printf '  game archive    %s\n' "$(cw_archive_line)"
     iam_lines
     stranded_spot_note "$REGION" "${INSTANCE_ID:-}"
   fi

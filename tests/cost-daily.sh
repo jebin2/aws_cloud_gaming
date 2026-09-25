@@ -70,5 +70,7 @@ check "cg passes the flag through"     "$(grep -c 'lib/setup cost "$@"' cg)" "1"
 check "setup asks Cost Explorer once, day by day" "$(grep -c 'granularity DAILY' lib/setup)" "1"
 check "  and renders the summary from it"         "$(grep -c 'cost-daily.py --aggregate' lib/setup)" "1"
 check "cg help mentions it"            "$(grep -c 'cg cost \[--daily\]' cg)" "1"
+# The archive is the only thing still billing with no box, so cg cost says when it goes.
+check "cost shows the archive countdown"  "$(sed -n '/^cost() {/,/^}/p' lib/setup | grep -c 'game archive    %s')" "1"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

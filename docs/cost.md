@@ -70,6 +70,10 @@ misses the month's earlier sessions. `cg cost` also lists **every** volume and s
 the running instance's - orphaned volumes are the usual way people keep paying for a machine they
 believe they deleted.
 
+`cg cost`'s resources block also shows what the game archive costs a month and when the cloud
+watchdog will delete it, from the watchdog's last decision - so the deadline is in front of you
+while you are looking at the money.
+
 `cg cost --daily` breaks the month into one row per day, with a column for each kind of charge -
 compute, S3, disk, egress, API and everything else - plus the hours a box ran that day. Days with
 nothing billed are left out and counted at the end. It asks Cost Explorer for daily figures and
