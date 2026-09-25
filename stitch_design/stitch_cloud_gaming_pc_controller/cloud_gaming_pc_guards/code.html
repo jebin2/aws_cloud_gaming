@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_dashboard" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{colors:{"tertiary-fixed":"#ffddb8","inverse-primary":"#006c49","on-surface-variant":"#bbcabf","surface-container":"#1c2026","secondary-fixed":"#c4e7ff","on-primary-fixed":"#002113","secondary":"#7bd0ff","surface-variant":"#31353c","outline-variant":"#3c4a42","on-primary-fixed-variant":"#005236","inverse-surface":"#dfe2eb","primary-container":"#10b981","surface":"#10141a","tertiary-fixed-dim":"#ffb95f","surface-container-high":"#262a31","on-background":"#dfe2eb","surface-container-low":"#181c22","primary":"#4edea3","surface-dim":"#10141a","on-secondary-fixed-variant":"#004c69","surface-container-highest":"#31353c","primary-fixed-dim":"#4edea3","on-error":"#690005","tertiary-container":"#e29100","on-tertiary-fixed":"#2a1700","on-primary":"#003824","background":"#10141a","error":"#ffb4ab","outline":"#86948a","on-secondary-container":"#00374d","secondary-fixed-dim":"#7bd0ff","on-tertiary-fixed-variant":"#653e00","inverse-on-surface":"#2d3137","on-primary-container":"#00422b","surface-bright":"#353940","on-secondary":"#00354a","on-surface":"#dfe2eb","error-container":"#93000a","on-secondary-fixed":"#001e2c","on-tertiary-container":"#523200","secondary-container":"#00a6e0","on-error-container":"#ffdad6","surface-container-lowest":"#0a0e14","surface-tint":"#4edea3","on-tertiary":"#472a00","primary-fixed":"#6ffbbe","tertiary":"#ffb95f"},borderRadius:{DEFAULT:"0.125rem",lg:"0.25rem",xl:"0.5rem",full:"0.75rem"},spacing:{"gutter-desktop":"1.5rem","space-xl":"2rem","margin":"1.5rem","space-xs":"0.25rem","space-md":"1rem","space-lg":"1.5rem","margin-desktop":"2rem","space-sm":"0.5rem","gutter":"1rem"},fontFamily:{"code-sm":["JetBrains Mono"],"headline-md":["Geist"],"body-sm":["Geist"],"headline-lg":["Geist"],"body-lg":["Geist"],"headline-xl":["Geist"],"label-caps":["JetBrains Mono"],"code-md":["JetBrains Mono"],"body-md":["Geist"],"code-lg":["JetBrains Mono"]},fontSize:{"code-sm":["11px",{lineHeight:"16px",fontWeight:"400"}],"headline-md":["18px",{lineHeight:"26px",letterSpacing:"-0.01em",fontWeight:"500"}],"body-sm":["12px",{lineHeight:"18px",fontWeight:"400"}],"headline-lg":["24px",{lineHeight:"32px",letterSpacing:"-0.015em",fontWeight:"600"}],"body-lg":["16px",{lineHeight:"24px",fontWeight:"400"}],"headline-xl":["32px",{lineHeight:"40px",letterSpacing:"-0.02em",fontWeight:"600"}],"label-caps":["11px",{lineHeight:"14px",letterSpacing:"0.06em",fontWeight:"600"}],"code-md":["13px",{lineHeight:"18px",fontWeight:"400"}],"body-md":["14px",{lineHeight:"20px",fontWeight:"400"}],"code-lg":["15px",{lineHeight:"22px",letterSpacing:"-0.01em",fontWeight:"500"}]}}}};</script></head><body class="bg-surface font-body-md text-body-md text-on-surface min-h-screen selection:bg-primary-container selection:text-on-primary-container"><header class="fixed top-0 left-0 right-0 h-12 z-50 bg-surface-container-lowest flex items-center justify-between px-margin select-none border-b border-surface-variant"><div class="flex items-center gap-space-md"><div class="flex items-center gap-space-xs"><div class="w-3 h-3 rounded-full bg-error/80 hover:bg-error transition-colors cursor-pointer"></div><div class="w-3 h-3 rounded-full bg-tertiary/80 hover:bg-tertiary transition-colors cursor-pointer"></div><div class="w-3 h-3 rounded-full bg-primary/80 hover:bg-primary transition-colors cursor-pointer"></div></div><div class="flex items-center gap-space-sm pl-space-sm"><span class="material-symbols-outlined text-primary text-[18px]">sports_esports</span><span class="font-code-md text-code-md font-medium text-on-surface tracking-tight">CloudRig</span><span class="text-outline-variant font-code-sm text-code-sm">/</span><span class="font-body-sm text-body-sm text-on-surface-variant">Personal AWS Gaming PC</span></div></div><div class="flex items-center gap-space-sm"><div class="flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container border border-surface-variant"><span class="material-symbols-outlined text-secondary text-[14px]">public</span><span class="font-code-sm text-code-sm text-on-surface-variant">ap-south-2 (Hyderabad)</span></div><div class="flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container border border-surface-variant"><div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div><span class="font-code-sm text-code-sm text-primary font-medium uppercase tracking-wider">AWS Connected</span></div><div class="h-4 w-[1px] bg-surface-variant mx-space-xs"></div><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></header><aside class="fixed left-0 top-12 bottom-0 w-60 bg-surface-container-low z-40 flex flex-col justify-between border-r border-surface-variant"><div class="flex flex-col"><div class="px-space-md py-space-sm flex items-center justify-between text-outline-variant"><span class="font-label-caps text-label-caps uppercase tracking-wider text-on-surface-variant">Navigation</span><span class="font-code-sm text-code-sm text-outline">v2.4.0</span></div><nav class="flex flex-col gap-0.5 px-space-xs" data-active-classes="bg-surface-container-high text-primary font-medium border-l-2 border-primary"><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-r text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-sm text-body-sm" data-path="dashboard" href="#"><span class="material-symbols-outlined text-[18px]">dashboard</span><span>Dashboard</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-r text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-sm text-body-sm" data-path="build" href="#"><span class="material-symbols-outlined text-[18px]">build_circle</span><span>Build</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-r text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-sm text-body-sm" data-path="library" href="#"><span class="material-symbols-outlined text-[18px]">stadia_controller</span><span>Library</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-r text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-sm text-body-sm" data-path="cost" href="#"><span class="material-symbols-outlined text-[18px]">attach_money</span><span>Cost</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-r text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-sm text-body-sm" data-path="guards" href="#"><span class="material-symbols-outlined text-[18px]">shield</span><span>Guards</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-r text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-sm text-body-sm" data-path="logs" href="#"><span class="material-symbols-outlined text-[18px]">terminal</span><span>Logs</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-r text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-sm text-body-sm" data-path="settings" href="#"><span class="material-symbols-outlined text-[18px]">settings</span><span>Settings</span></a></nav></div><div class="p-space-md border-t border-surface-variant bg-surface-container-lowest"><div class="flex items-center justify-between mb-space-xs"><span class="font-label-caps text-label-caps uppercase text-on-surface-variant">AWS Identity</span><span class="font-code-sm text-code-sm text-primary">IAM Active</span></div><div class="flex items-center gap-space-sm"><div class="w-7 h-7 rounded bg-surface-container-high border border-surface-variant flex items-center justify-center"><span class="material-symbols-outlined text-secondary text-[16px]">cloud</span></div><div class="flex flex-col min-w-0 flex-1"><span class="font-code-sm text-code-sm text-on-surface font-medium truncate">kestrel-gaming-master</span><span class="font-code-sm text-code-sm text-outline truncate">acct: 9283-4910-3829</span></div></div></div></aside><div class="pl-60"><main class="pt-12 min-h-screen bg-surface px-margin-desktop py-space-lg w-full"><div class="flex flex-col w-full">
+<!-- Top Navigation & Header Breadcrumbs -->
+<div class="flex flex-col gap-space-xs mb-space-lg">
+<div class="flex items-center gap-space-xs font-code-sm text-code-sm text-outline">
+<span class="hover:text-on-surface transition-colors cursor-pointer">CloudRig</span>
+<span>/</span>
+<span class="hover:text-on-surface transition-colors cursor-pointer">Personal AWS Gaming PC</span>
+<span>/</span>
+<span class="text-primary font-medium">Guards &amp; Safety Nets</span>
+</div>
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-space-md pt-space-xs">
+<div class="flex flex-col">
+<div class="flex items-center gap-space-md">
+<h1 class="font-headline-xl text-headline-xl text-on-surface tracking-tight font-semibold">Automated Cost Guards</h1>
+<div class="flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container-high">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+<span class="font-label-caps text-label-caps text-primary uppercase">3 of 3 Active Watchdogs Armed</span>
+<span class="text-outline-variant font-code-sm text-code-sm">•</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">Lambda Orchestrator v1.4.2</span>
+</div>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">Multi-tier circuit breakers preventing orphaned EC2 G4dn/G5 compute billing, frozen OS runtime, and idle session leakage.</p>
+</div>
+<!-- Action Bar -->
+<div class="flex items-center gap-space-sm self-start md:self-auto shrink-0">
+<button class="flex items-center gap-space-xs px-space-md py-1.5 rounded bg-surface-container hover:bg-surface-variant text-on-surface transition-colors font-code-md text-code-md active:bg-surface-container-highest cursor-pointer" id="btn-dry-run" onclick="triggerDryRun()">
+<span class="material-symbols-outlined text-[16px] text-secondary">play_circle</span>
+<span>Dry-run evaluation</span>
+</button>
+<button class="flex items-center gap-space-xs px-space-md py-1.5 rounded bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors font-code-md text-code-md cursor-pointer">
+<span class="material-symbols-outlined text-[16px] text-outline">history</span>
+<span>Audit logs</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Notification Toast Simulation (Dry Run feedback) -->
+<div class="hidden transition-all duration-200 mb-space-md p-space-sm rounded bg-surface-container-high flex items-center justify-between" id="toast-banner">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary text-[18px]">verified</span>
+<span class="font-code-sm text-code-sm text-on-surface">DRY-RUN SIMULATION COMPLETE: All 3 watchdogs executed against current IAM role and zero active EC2 compute nodes found. No kill triggers sent.</span>
+</div>
+<button class="text-outline hover:text-on-surface text-code-sm font-code-sm" onclick="document.getElementById('toast-banner').classList.add('hidden')">DISMISS</button>
+</div>
+<!-- SECTION 1: Layered Shutdown Guards -->
+<div class="flex flex-col gap-space-sm mb-space-xl">
+<div class="flex items-center justify-between pb-space-xs">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary text-[18px]">security</span>
+<span class="font-label-caps text-label-caps text-primary tracking-widest uppercase">Layered Shutdown Guards</span>
+<span class="font-code-sm text-code-sm text-outline">(Sequential Out-of-Band &amp; In-Guest Failover)</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface-variant">Policy: Fail-Safe Auto-Stop</span>
+</div>
+<!-- Tier Stack -->
+<div class="flex flex-col gap-space-md">
+<!-- Card 1: Session Run Guard -->
+<div class="rounded-xl bg-surface-container-low p-space-md flex flex-col gap-space-md transition-colors hover:bg-surface-container">
+<div class="flex flex-col md:flex-row md:items-start justify-between gap-space-sm">
+<div class="flex items-start gap-space-md">
+<div class="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-primary text-[18px]">timer</span>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center gap-space-sm">
+<span class="font-headline-md text-headline-md font-medium text-on-surface">Session Run Guard</span>
+<span class="px-space-xs py-0.5 rounded bg-surface-container-highest font-code-sm text-code-sm text-secondary">Tier 1 • Hard Limit</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Runaway session safeguard against streaming forgotten overnight. Enforces absolute stop independent of game state.</p>
+</div>
+</div>
+<div class="flex items-center gap-space-md self-end md:self-auto shrink-0">
+<div class="flex items-center gap-space-xs px-space-sm py-1 rounded bg-surface-container">
+<span class="font-label-caps text-label-caps text-outline uppercase">Boundary</span>
+<span class="font-code-md text-code-md text-on-surface font-semibold">4h 00m</span>
+</div>
+<!-- Armed Toggle Switch -->
+<button class="flex items-center gap-space-xs px-2.5 py-1 rounded bg-primary-container text-on-primary-container font-code-sm text-code-sm font-medium transition-opacity hover:opacity-90">
+<span class="w-2 h-2 rounded-full bg-on-primary-container"></span>
+<span>ARMED</span>
+</button>
+</div>
+</div>
+<!-- Telemetry & Parameters Grid -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-space-sm pt-space-xs font-code-sm text-code-sm">
+<div class="bg-surface-container-lowest p-space-sm rounded flex flex-col justify-between">
+<span class="text-outline uppercase font-label-caps text-label-caps">Catch Condition</span>
+<span class="text-on-surface mt-1">Uptime elapsed ≥ 240 mins</span>
+<span class="text-on-surface-variant text-[10px]">Overrules any active process</span>
+</div>
+<div class="bg-surface-container-lowest p-space-sm rounded flex flex-col justify-between">
+<span class="text-outline uppercase font-label-caps text-label-caps">Execution Mechanism</span>
+<span class="text-on-surface mt-1">AWS EventBridge &amp; Local Ring-0 Daemon</span>
+<span class="text-on-surface-variant text-[10px]">Dual heartbeat handshake</span>
+</div>
+<div class="bg-surface-container-lowest p-space-sm rounded flex flex-col justify-between">
+<span class="text-outline uppercase font-label-caps text-label-caps">Grace Notice</span>
+<span class="text-on-surface mt-1">10 min countdown banner</span>
+<span class="text-on-surface-variant text-[10px]">Broadcast via Moonlight HUD</span>
+</div>
+</div>
+<!-- Audit Strip & Quick Config -->
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm pt-space-xs bg-surface-container-lowest/60 px-space-sm py-1.5 rounded">
+<div class="flex items-center gap-space-xs text-outline font-code-sm text-code-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-outline"></span>
+<span class="text-on-surface-variant">Last Audit:</span>
+<span class="text-on-surface">no running box - nothing to do (4 min ago)</span>
+<span class="text-outline-variant">•</span>
+<span class="text-outline">2024-10-25 18:42:10 UTC</span>
+</div>
+<div class="flex items-center gap-space-sm">
+<span class="font-code-sm text-code-sm text-outline">Max duration: 4.0h</span>
+<button class="text-secondary hover:text-on-surface font-code-sm text-code-sm underline cursor-pointer">Configure</button>
+</div>
+</div>
+</div>
+<!-- Card 2: On-Host Watchdog -->
+<div class="rounded-xl bg-surface-container-low p-space-md flex flex-col gap-space-md transition-colors hover:bg-surface-container">
+<div class="flex flex-col md:flex-row md:items-start justify-between gap-space-sm">
+<div class="flex items-start gap-space-md">
+<div class="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-primary text-[18px]">sports_esports</span>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center gap-space-sm">
+<span class="font-headline-md text-headline-md font-medium text-on-surface">On-Host Watchdog</span>
+<span class="px-space-xs py-0.5 rounded bg-surface-container-highest font-code-sm text-code-sm text-secondary">Tier 2 • In-Guest Telemetry</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Interrogates low-level human input and encoder activity. Catches paused games, AFK menus, and closed stream windows.</p>
+</div>
+</div>
+<div class="flex items-center gap-space-md self-end md:self-auto shrink-0">
+<div class="flex items-center gap-space-xs px-space-sm py-1 rounded bg-surface-container">
+<span class="font-label-caps text-label-caps text-outline uppercase">Idle Trigger</span>
+<span class="font-code-md text-code-md text-on-surface font-semibold">15 min idle</span>
+</div>
+<!-- Armed Toggle Switch -->
+<button class="flex items-center gap-space-xs px-2.5 py-1 rounded bg-primary-container text-on-primary-container font-code-sm text-code-sm font-medium transition-opacity hover:opacity-90">
+<span class="w-2 h-2 rounded-full bg-on-primary-container"></span>
+<span>ARMED</span>
+</button>
+</div>
+</div>
+<!-- Telemetry & Parameters Grid -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-space-sm pt-space-xs font-code-sm text-code-sm">
+<div class="bg-surface-container-lowest p-space-sm rounded flex flex-col justify-between">
+<span class="text-outline uppercase font-label-caps text-label-caps">Monitored Vectors</span>
+<span class="text-on-surface mt-1">Win32 GetLastInputInfo &amp; HID</span>
+<span class="text-on-surface-variant text-[10px]">Gamepad, keyboard, virtual mouse</span>
+</div>
+<div class="bg-surface-container-lowest p-space-sm rounded flex flex-col justify-between">
+<span class="text-outline uppercase font-label-caps text-label-caps">Agent Runtime</span>
+<span class="text-on-surface mt-1">cloudrig-agent.exe (Windows SVC)</span>
+<span class="text-on-surface-variant text-[10px]">Direct Sunshine/Moonlight pipe</span>
+</div>
+<div class="bg-surface-container-lowest p-space-sm rounded flex flex-col justify-between">
+<span class="text-outline uppercase font-label-caps text-label-caps">Frame Stagnation Limit</span>
+<span class="text-on-surface mt-1">Freeze threshold: 120s</span>
+<span class="text-on-surface-variant text-[10px]">Auto-snapshot enabled on shutdown</span>
+</div>
+</div>
+<!-- Audit Strip & Quick Config -->
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm pt-space-xs bg-surface-container-lowest/60 px-space-sm py-1.5 rounded">
+<div class="flex items-center gap-space-xs text-outline font-code-sm text-code-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-outline"></span>
+<span class="text-on-surface-variant">Last Audit:</span>
+<span class="text-on-surface">standby: agent telemetry quiescent (12 min ago)</span>
+<span class="text-outline-variant">•</span>
+<span class="text-outline">Host offline</span>
+</div>
+<div class="flex items-center gap-space-sm">
+<span class="font-code-sm text-code-sm text-outline">Idle: 15m • Freeze: 120s</span>
+<button class="text-secondary hover:text-on-surface font-code-sm text-code-sm underline cursor-pointer">Configure</button>
+</div>
+</div>
+</div>
+<!-- Card 3: Cloud Watchdog -->
+<div class="rounded-xl bg-surface-container-low p-space-md flex flex-col gap-space-md transition-colors hover:bg-surface-container">
+<div class="flex flex-col md:flex-row md:items-start justify-between gap-space-sm">
+<div class="flex items-start gap-space-md">
+<div class="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-primary text-[18px]">cloud_sync</span>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center gap-space-sm">
+<span class="font-headline-md text-headline-md font-medium text-on-surface">Cloud Watchdog</span>
+<span class="px-space-xs py-0.5 rounded bg-surface-container-highest font-code-sm text-code-sm text-secondary">Tier 3 • Out-of-Band Sentinel</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">External serverless supervisor querying CloudWatch hypervisor metrics. Kills machine if guest OS freezes or network drops.</p>
+</div>
+</div>
+<div class="flex items-center gap-space-md self-end md:self-auto shrink-0">
+<div class="flex items-center gap-space-xs px-space-sm py-1 rounded bg-surface-container">
+<span class="font-label-caps text-label-caps text-outline uppercase">Egress Window</span>
+<span class="font-code-md text-code-md text-on-surface font-semibold">30 min idle</span>
+</div>
+<!-- Armed Toggle Switch -->
+<button class="flex items-center gap-space-xs px-2.5 py-1 rounded bg-primary-container text-on-primary-container font-code-sm text-code-sm font-medium transition-opacity hover:opacity-90">
+<span class="w-2 h-2 rounded-full bg-on-primary-container"></span>
+<span>ARMED</span>
+</button>
+</div>
+</div>
+<!-- Telemetry & Parameters Grid -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-space-sm pt-space-xs font-code-sm text-code-sm">
+<div class="bg-surface-container-lowest p-space-sm rounded flex flex-col justify-between">
+<span class="text-outline uppercase font-label-caps text-label-caps">Network Threshold</span>
+<span class="text-on-surface mt-1">&lt; 150 KB/s average egress</span>
+<span class="text-on-surface-variant text-[10px]">Moonlight idle heartbeat floor</span>
+</div>
+<div class="bg-surface-container-lowest p-space-sm rounded flex flex-col justify-between">
+<span class="text-outline uppercase font-label-caps text-label-caps">AWS Lambda Schedule</span>
+<span class="text-on-surface mt-1">rate(5 minutes)</span>
+<span class="text-on-surface-variant text-[10px]">CloudWatch metric query pipeline</span>
+</div>
+<div class="bg-surface-container-lowest p-space-sm rounded flex flex-col justify-between">
+<span class="text-outline uppercase font-label-caps text-label-caps">Failover Authority</span>
+<span class="text-on-surface mt-1">ec2:StopInstances hard RPC</span>
+<span class="text-on-surface-variant text-[10px]">Autonomous Lambda IAM role</span>
+</div>
+</div>
+<!-- Audit Strip & Quick Config -->
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm pt-space-xs bg-surface-container-lowest/60 px-space-sm py-1.5 rounded">
+<div class="flex items-center gap-space-xs text-outline font-code-sm text-code-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+<span class="text-on-surface-variant">Last Audit:</span>
+<span class="text-on-surface">metric check: 0 B/s egress (standby mode)</span>
+<span class="text-outline-variant">•</span>
+<span class="text-primary font-medium">next run in 1m 20s</span>
+</div>
+<div class="flex items-center gap-space-sm">
+<span class="font-code-sm text-code-sm text-outline">Schedule: 5m cron • Floor: 150KB/s</span>
+<button class="text-secondary hover:text-on-surface font-code-sm text-code-sm underline cursor-pointer">Configure</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- SECTION 2: Spend Circuit Breaker & Safeguard Parameters -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-space-lg mb-space-xl">
+<!-- Left Column (5 Cols): Monthly Budget Cap -->
+<div class="lg:col-span-5 flex flex-col">
+<div class="flex items-center gap-space-sm pb-space-xs mb-space-xs">
+<span class="material-symbols-outlined text-tertiary text-[18px]">account_balance_wallet</span>
+<span class="font-label-caps text-label-caps text-tertiary tracking-widest uppercase">Budget Circuit Breaker</span>
+</div>
+<div class="rounded-xl bg-surface-container-low p-space-md flex flex-col justify-between flex-1 gap-space-md">
+<div>
+<div class="flex items-start justify-between">
+<div class="flex flex-col">
+<span class="font-headline-md text-headline-md font-medium text-on-surface">Monthly Spend Cap</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Automated hard breaker triggered by AWS Cost Explorer API.</span>
+</div>
+<button class="flex items-center gap-space-xs px-2.5 py-1 rounded bg-primary-container text-on-primary-container font-code-sm text-code-sm font-medium">
+<span class="w-2 h-2 rounded-full bg-on-primary-container"></span>
+<span>ARMED</span>
+</button>
+</div>
+<!-- Big Spend Metric & Progress -->
+<div class="mt-space-lg bg-surface-container-lowest p-space-md rounded">
+<div class="flex items-baseline justify-between mb-space-xs">
+<span class="font-headline-xl text-headline-xl font-code-lg text-on-surface tracking-tight font-semibold">₹1,755.20</span>
+<span class="font-code-md text-code-md text-outline">/ ₹5,000.00 CAP</span>
+</div>
+<!-- Custom Segmented Metric Bar -->
+<div class="w-full bg-surface-container-high h-2.5 rounded relative overflow-hidden flex items-center">
+<div class="bg-primary h-full rounded-l transition-all duration-500" style="width: 35.1%;"></div>
+<!-- 80% soft warning tick marker -->
+<div class="absolute left-[80%] top-0 bottom-0 w-0.5 bg-tertiary z-10" title="80% Soft Warning Threshold"></div>
+</div>
+<div class="flex items-center justify-between mt-space-xs font-code-sm text-code-sm">
+<span class="text-primary font-medium">35.1% consumed</span>
+<span class="text-outline">Remaining: ₹3,244.80</span>
+</div>
+</div>
+<!-- Cap Behavior Specs -->
+<div class="flex flex-col gap-space-xs mt-space-md font-body-sm text-body-sm text-on-surface-variant">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[14px] text-tertiary">warning</span>
+<span>Soft warning triggered at <span class="font-code-sm text-on-surface">80% (₹4,000.00)</span> via SMS &amp; email.</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[14px] text-error">block</span>
+<span>Hard lock: blocks fresh EC2 launches at <span class="font-code-sm text-on-surface">100% (₹5,000.00)</span>.</span>
+</div>
+</div>
+</div>
+<!-- Recipient & Alert Testing -->
+<div class="pt-space-md bg-surface-container-lowest p-space-sm rounded flex flex-col gap-space-xs">
+<div class="flex items-center justify-between">
+<span class="font-label-caps text-label-caps text-outline uppercase">Verified Alert Recipient</span>
+<span class="px-space-xs py-0.5 rounded bg-surface-container text-primary font-code-sm text-[10px] flex items-center gap-0.5">
+<span class="material-symbols-outlined text-[12px]">check_circle</span>
+<span>VERIFIED</span>
+</span>
+</div>
+<div class="flex items-center justify-between gap-space-sm pt-0.5">
+<span class="font-code-sm text-code-sm text-on-surface truncate">kestrel.gaming.aws@proton.me</span>
+<button class="shrink-0 font-code-sm text-code-sm px-space-sm py-1 rounded bg-surface-container-high hover:bg-surface-variant text-secondary transition-colors cursor-pointer" id="btn-test-alert" onclick="sendTestAlert()">
+              Send test alert
+            </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column (7 Cols): Instance & App Safeguard Parameters -->
+<div class="lg:col-span-7 flex flex-col">
+<div class="flex items-center justify-between pb-space-xs mb-space-xs">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-secondary text-[18px]">tune</span>
+<span class="font-label-caps text-label-caps text-secondary tracking-widest uppercase">Instance &amp; Storage Safeguards</span>
+</div>
+<span class="font-code-sm text-code-sm text-outline">Config sync: AWS SSM</span>
+</div>
+<div class="rounded-xl bg-surface-container-low flex flex-col overflow-hidden">
+<!-- Row 1: Root Disk Size -->
+<div class="p-space-md flex items-center justify-between hover:bg-surface-container/60 transition-colors">
+<div class="flex flex-col min-w-0 pr-space-md">
+<div class="flex items-center gap-space-sm">
+<span class="font-headline-md text-headline-md font-medium text-on-surface">Root Disk Size</span>
+<span class="px-space-xs py-0.5 rounded bg-surface-container-high text-outline font-code-sm text-[10px]">gp3 NVMe</span>
+</div>
+<span class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Fixed root volume allocation. System files and Sunshine stream binaries.</span>
+</div>
+<div class="flex items-center gap-space-md shrink-0">
+<div class="text-right">
+<span class="font-code-lg text-code-lg text-on-surface font-semibold">50 GB</span>
+<div class="font-code-sm text-code-sm text-outline">~₹290/mo storage</div>
+</div>
+<button class="px-space-sm py-1 rounded bg-surface-container-high hover:bg-surface-variant text-on-surface font-code-sm text-code-sm transition-colors cursor-pointer">
+              Edit
+            </button>
+</div>
+</div>
+<div class="h-[1px] bg-surface-container-high mx-space-md"></div>
+<!-- Row 2: Cold Archive Expiry -->
+<div class="p-space-md flex items-center justify-between hover:bg-surface-container/60 transition-colors">
+<div class="flex flex-col min-w-0 pr-space-md">
+<div class="flex items-center gap-space-sm">
+<span class="font-headline-md text-headline-md font-medium text-on-surface">Archive Snapshot Expiry</span>
+<span class="px-space-xs py-0.5 rounded bg-surface-container-high text-outline font-code-sm text-[10px]">EBS Lifecycler</span>
+</div>
+<span class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Auto-prunes unattached cold EBS delta snapshots (set 0 to preserve indefinitely).</span>
+</div>
+<div class="flex items-center gap-space-md shrink-0">
+<div class="text-right">
+<span class="font-code-lg text-code-lg text-on-surface font-semibold">14 days</span>
+<div class="font-code-sm text-code-sm text-primary">Prunes cold deltas</div>
+</div>
+<button class="px-space-sm py-1 rounded bg-surface-container-high hover:bg-surface-variant text-on-surface font-code-sm text-code-sm transition-colors cursor-pointer">
+              Edit
+            </button>
+</div>
+</div>
+<div class="h-[1px] bg-surface-container-high mx-space-md"></div>
+<!-- Row 3: Emergency SMS / Push Safeguard -->
+<div class="p-space-md flex items-center justify-between hover:bg-surface-container/60 transition-colors">
+<div class="flex flex-col min-w-0 pr-space-md">
+<div class="flex items-center gap-space-sm">
+<span class="font-headline-md text-headline-md font-medium text-on-surface">Phone Notifications</span>
+<span class="px-space-xs py-0.5 rounded bg-primary-container text-on-primary-container font-code-sm text-[10px]">Active</span>
+</div>
+<span class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Dispatches low-latency SMS via AWS SNS for hard shutdown triggers and budget trips.</span>
+</div>
+<div class="flex items-center gap-space-md shrink-0">
+<div class="text-right">
+<span class="font-code-md text-code-md text-on-surface font-medium">+91 ••••• •••84</span>
+<div class="font-code-sm text-code-sm text-outline">Masked / E.164 verified</div>
+</div>
+<button class="px-space-sm py-1 rounded bg-surface-container-high hover:bg-surface-variant text-on-surface font-code-sm text-code-sm transition-colors cursor-pointer">
+              Edit
+            </button>
+</div>
+</div>
+<div class="h-[1px] bg-surface-container-high mx-space-md"></div>
+<!-- Row 4: Private-Network Tunnel Token -->
+<div class="p-space-md flex items-center justify-between hover:bg-surface-container/60 transition-colors">
+<div class="flex flex-col min-w-0 pr-space-md">
+<div class="flex items-center gap-space-sm">
+<span class="font-headline-md text-headline-md font-medium text-on-surface">Private Tunnel Auth Token</span>
+<span class="px-space-xs py-0.5 rounded bg-surface-container-highest text-secondary font-code-sm text-[10px]">Tailscale / WG</span>
+</div>
+<span class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Encrypted in AWS SSM Parameter Store with KMS customer-managed key.</span>
+</div>
+<div class="flex items-center gap-space-md shrink-0">
+<div class="text-right flex flex-col items-end">
+<span class="font-code-sm text-code-sm text-outline tracking-wider">••••••••••••••••••••••••••••••••</span>
+<span class="font-code-sm text-code-sm text-secondary">SHA-256: 7f8a...3b21</span>
+</div>
+<button class="px-space-sm py-1 rounded bg-surface-container-high hover:bg-surface-variant text-on-surface font-code-sm text-code-sm transition-colors cursor-pointer">
+              Rotate / Edit
+            </button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom Diagnostic Terminal Box -->
+<div class="rounded-xl bg-surface-container-lowest p-space-md flex flex-col gap-space-xs">
+<div class="flex items-center justify-between pb-space-xs">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-[16px] text-outline">terminal</span>
+<span class="font-label-caps text-label-caps text-outline uppercase tracking-wider">Guard Engine Diagnostic Stream (Realtime)</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+<span class="font-code-sm text-code-sm text-outline">AWS us-west-2 / EventBridge pipe idle</span>
+</div>
+</div>
+<div class="font-code-sm text-code-sm space-y-1 text-on-surface-variant bg-surface-container-low/40 p-space-sm rounded">
+<div class="flex items-center gap-space-sm">
+<span class="text-outline">2024-10-25 18:40:00.104</span>
+<span class="text-secondary">[INFO]</span>
+<span>Lambda watchdog invocation completed (req-991f8a). Status: 200 OK. Metric delta: 0 active compute nodes.</span>
+</div>
+<div class="flex items-center gap-space-sm">
+<span class="text-outline">2024-10-25 18:41:00.002</span>
+<span class="text-secondary">[INFO]</span>
+<span>Monthly Cost Explorer cache renewed: Total month-to-date = ₹1,755.20. Breaker distance: 64.9% margin.</span>
+</div>
+<div class="flex items-center gap-space-sm">
+<span class="text-outline">2024-10-25 18:42:10.891</span>
+<span class="text-secondary">[INFO]</span>
+<span>CloudWatch idle metric rule verified. Grace window initialized: 10m banner threshold armed on port 47989.</span>
+</div>
+</div>
+</div>
+<!-- Inline Micro-Interactions Script -->
+<script>
+    function triggerDryRun() {
+      const banner = document.getElementById('toast-banner');
+      const btn = document.getElementById('btn-dry-run');
+      
+      btn.innerHTML = `<span class="material-symbols-outlined text-[16px] text-secondary animate-spin">refresh</span><span>Evaluating...</span>`;
+      btn.disabled = true;
+
+      setTimeout(() => {
+        banner.classList.remove('hidden');
+        btn.innerHTML = `<span class="material-symbols-outlined text-[16px] text-secondary">play_circle</span><span>Dry-run evaluation</span>`;
+        btn.disabled = false;
+      }, 700);
+    }
+
+    function sendTestAlert() {
+      const btn = document.getElementById('btn-test-alert');
+      const originalText = btn.innerText;
+      btn.innerText = 'Dispatching SNS...';
+      btn.classList.add('text-primary');
+
+      setTimeout(() => {
+        btn.innerText = 'Sent (SNS: OK)';
+        setTimeout(() => {
+          btn.innerText = originalText;
+          btn.classList.remove('text-primary');
+        }, 2500);
+      }, 900);
+    }
+  </script>
+</div></main></div></body></html>

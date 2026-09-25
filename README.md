@@ -74,6 +74,7 @@ Every command, and what is safe to run twice: [docs/commands.md](docs/commands.m
 | [Game library](docs/game-library.md) | How games and the Steam login persist in S3 |
 | [Streaming](docs/streaming.md) | Moonlight and Steam settings, GPU performance, anti-cheat |
 | [Architecture](docs/architecture.md) | How Tailscale, Sunshine, Moonlight and the storage fit together |
+| [Desktop app design](docs/app-design.md) | What a GUI would show, and the command behind every field |
 | [Testing](docs/testing.md) | Repository layout and the test suites |
 | [Troubleshooting](docs/troubleshooting.md) | Every failure hit while building this, and why each fix works |
 

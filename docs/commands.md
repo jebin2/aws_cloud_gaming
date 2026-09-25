@@ -75,7 +75,7 @@ from each row of real reports and checks the original comes back character for c
 Deleting an image deregisters it **and** deletes its backing snapshots. Deregistering alone
 leaves those billing - the usual way to believe you deleted something and keep paying for it.
 
-## Machine-readable output: `CG_JSON=1`
+## Machine-readable output
 
 For a GUI, a script or anything else driving `cg`, `CG_JSON=1` turns every progress helper into
 **one NDJSON event per line**, so nothing has to scrape text written for people:

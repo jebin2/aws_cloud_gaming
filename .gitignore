@@ -27,3 +27,6 @@ host/notify.url
 # Python bytecode. A .pyc of lib/choose-games.py was committed once by accident.
 __pycache__/
 *.pyc
+
+# The Stitch design export: the screens are kept, the zip they came in is not.
+stitch_design/design.zip
