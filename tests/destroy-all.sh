@@ -23,7 +23,8 @@ contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 
 mkdir -p "$T/bin" "$T/home/.ssh" "$T/lib"
 cp "$REPO/cg" "$T/cg"
-cp "$REPO/lib/common.sh" "$REPO/lib/cloud-watchdog.sh" "$T/lib/"
+# cg sources these three; a sandbox missing one fails as a bash error, not a test.
+cp "$REPO/lib/common.sh" "$REPO/lib/cloud-watchdog.sh" "$REPO/lib/config.sh" "$REPO/lib/session.sh" "$REPO/lib/rates.sh" "$T/lib/"
 seed_env() {
   cat > "$T/.env" <<EOF
 GAME_INSTANCE_ID=i-test

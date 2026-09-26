@@ -911,10 +911,10 @@ stranded_spot_note() {  # stranded_spot_note <region> <instance-id>; prints noth
   gb=$(aws ec2 describe-volumes --region "$region" --volume-ids "$gb" \
         --query 'Volumes[0].Size' --output text 2>/dev/null)
   [[ $gb =~ ^[0-9]+$ ]] || gb=0
-  awk -v g="$gb" -v s="$srs" 'BEGIN{
-    u=g*0.0912;
+  awk -v g="$gb" -v s="$srs" -v ebs="${CG_EBS_USD_GB_MONTH:-0.0912}" -v inr="${CG_INR_PER_USD:-88}" 'BEGIN{
+    u=g*ebs;
     printf "  STRANDED       this stopped spot box can never start again (request: %s)\n", s;
-    printf "                 its %d GB root volume still bills $%.2f/mo (INR %.0f)\n", g, u, u*88;
+    printf "                 its %d GB root volume still bills $%.2f/mo (INR %.0f)\n", g, u, u*inr;
     printf "                 reclaim it: cg destroy\n";
   }'
 }

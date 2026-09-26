@@ -18,6 +18,11 @@ while [[ ${1:-} == -* ]]; do
     --region)  export GAME_REGION="$2"; shift 2 ;;
     --host)    export GAME_TS_HOST="$2"; shift 2 ;;
     -h|--help) set -- help; break ;;
+    # An app driving cg needs to know what it is driving: the commit it runs,
+    # and the event contract that goes with it.
+    --version) printf 'cg %s\nevents %s\n' \
+                 "$(git -C "$(dirname "$0")" describe --always --dirty 2>/dev/null || echo unknown)" \
+                 "1"; exit 0 ;;
     *) die "unknown flag '$1' (see: cg help)" ;;
   esac
 done
@@ -49,6 +54,16 @@ KEY="$HOME/.ssh/${TS_HOST}.pem"
 ec2() { aws ec2 "$@" --region "$REGION"; }
 # Layer 3, the cloud watchdog: needs REGION and TS_HOST, so sourced after them.
 source lib/cloud-watchdog.sh
+# The .env settings: one registry, shared by `cg config` and the app.
+# shellcheck source=lib/config.sh
+source lib/config.sh
+# The prices, in one place - see lib/rates.sh.
+# shellcheck source=lib/rates.sh
+source lib/rates.sh
+# The local stream lock: `cg open` holds it, `cg status` reports it, and
+# `cg destroy` closes it before taking the box away.
+# shellcheck source=lib/session.sh
+source lib/session.sh
 
 # lib/setup and lib/game are dispatch targets, not commands - see docs/commands.md
 # is not needed, their headers say so.
@@ -275,9 +290,98 @@ choose_games() {
 # list and forget are pure S3, so they work with no box running - which is when
 # you most want to know what the archive is costing, and the only time it is
 # safe to assume nothing is writing to it.
+# Why an S3 read failed, in words, from what the CLI printed. The distinction
+# that matters is the last one: a missing index on a bucket we CAN read is an
+# empty archive; anything else is an archive we cannot see.
+library_reason() { # library_reason <stderr text> -> a reason, or "missing"
+  local e=$1
+  case $e in
+    *InvalidAccessKeyId*|*InvalidClientTokenId*|*SignatureDoesNotMatch*|*ExpiredToken*|*"security token"*)
+      echo "the AWS credentials are not valid - check: aws sts get-caller-identity" ;;
+    *NoSuchBucket*)
+      echo "the bucket s3://${GAME_S3_BUCKET:-?} does not exist" ;;
+    *AccessDenied*|*"Access Denied"*)
+      echo "these AWS credentials may not read s3://${GAME_S3_BUCKET:-?}" ;;
+    # HeadObject answers 403 both for a key that is denied and for credentials
+    # that no longer exist, so the message must cover both rather than guess.
+    *403*|*Forbidden*)
+      echo "S3 refused the read (403) - the credentials are invalid, or may not read s3://${GAME_S3_BUCKET:-?}. Check: aws sts get-caller-identity" ;;
+    *EndpointConnectionError*|*"Could not connect"*|*"Connect timeout"*|*"Unable to locate credentials"*)
+      echo "cannot reach S3 - no network, or no credentials configured" ;;
+    *404*|*"Not Found"*|*"does not exist"*|*NoSuchKey*)
+      echo "missing" ;;
+    "") echo "the S3 read failed and said nothing" ;;
+    *)  head -1 <<<"$e" ;;
+  esac
+}
+
+# The archive index, or a reason it could not be read - never silence.
+#
+# This used to end in `|| echo '{"apps":[]}'`, so expired credentials, a denied
+# bucket or a dead network all came out as an EMPTY ARCHIVE. `cg library list`
+# then said "the archive is empty" about 160 GB of games that were sitting
+# safely in S3. That is the most alarming lie this tool can tell, and it told it
+# for free, so failures now come back as failures.
+# The reason goes to STDERR, not to a variable: every caller reads the index
+# through $( ), which is a subshell, so an assignment made inside would be
+# thrown away the moment the function returned.
 library_index() {
-  [[ -n ${GAME_S3_BUCKET:-} ]] || { echo "no bucket yet - run cg init"; return 1; }
-  aws s3 cp "s3://$GAME_S3_BUCKET/steam/index.json" - 2>/dev/null || echo '{"apps":[]}'
+  [[ -n ${GAME_S3_BUCKET:-} ]] || { echo "no bucket yet - run cg init" >&2; return 1; }
+  local out err rc reason
+  err=$(mktemp)
+  out=$(aws s3 cp "s3://$GAME_S3_BUCKET/steam/index.json" - 2>"$err") && rc=0 || rc=$?
+  if (( rc == 0 )); then rm -f "$err"; printf '%s' "$out"; return 0; fi
+  reason=$(library_reason "$(cat "$err")"); rm -f "$err"
+  # A bucket we can read that holds no index really is an empty archive.
+  [[ $reason == missing ]] && { echo '{"apps":[]}'; return 0; }
+  printf '%s\n' "$reason" >&2
+  return 1
+}
+
+# `cg library list --json`: the same index and orphan scan, as data.
+library_json() {
+  local idx orph err
+  err=$(mktemp)
+  if ! idx=$(library_index 2>"$err"); then
+    LIBRARY_ERR=$(cat "$err"); rm -f "$err"
+    # Data, still - a program reading this must be able to tell the difference
+    # between "no games" and "I could not look".
+    ERR="$LIBRARY_ERR" BUCKET="${GAME_S3_BUCKET:-}" python3 -c '
+import json, os
+print(json.dumps({"bucket": os.environ.get("BUCKET") or None,
+                  "error": os.environ["ERR"], "games": None,
+                  "total_bytes": None, "usd_month": None}, indent=2))'
+    return 1
+  fi
+  rm -f "$err"
+  orph=$(library_orphans)
+  printf '%s' "$idx" | ORPHANS="$orph" BUCKET="${GAME_S3_BUCKET:-}" python3 -c '
+import json, os, sys
+try:    apps = json.load(sys.stdin).get("apps", [])
+except Exception: apps = []
+GB = 1073741824.0
+S3 = float(os.environ["CG_S3_USD_GB_MONTH"])
+# Per game, not just the total: a screen that lists them must be able to say
+# what each one costs without knowing the price of S3.
+games = [{"appid": a.get("appid"), "name": a.get("name"), "installdir": a.get("installdir"),
+          "bytes": a.get("bytes", 0), "pushed": a.get("pushed"),
+          "usd_month": round(a.get("bytes", 0) / GB * S3, 2)} for a in apps]
+total = sum(g["bytes"] for g in games)
+orphan_bytes = 0
+for line in (os.environ.get("ORPHANS") or "").splitlines():
+    part = line.split("\t")
+    if part and part[0].strip().isdigit(): orphan_bytes += int(part[0])
+print(json.dumps({
+  "bucket": os.environ.get("BUCKET") or None,
+  "games": sorted(games, key=lambda g: -g["bytes"]),
+  "total_bytes": total,
+  "usd_month": round(total / GB * S3, 2),
+  "orphan_bytes": orphan_bytes or None,
+  "orphan_usd_month": round(orphan_bytes / GB * S3, 2) if orphan_bytes else None,
+  # What the box can hold at once, and what cg init offers after its reserve.
+  "disk_gb": 229, "selectable_gb": 209,
+  "usd_per_gb_month": S3,
+}, indent=2))'
 }
 
 library_list() {
@@ -289,6 +393,20 @@ library_list() {
   # `set -o pipefail` that made the assignment fail and `set -e` kill the whole
   # command - so `cg library list` printed nothing at all the moment the archive
   # became empty, which is exactly when someone runs it to check.
+  # Before anything is said about what is IN the archive, establish that it can
+  # be read at all. Expired credentials used to come out as "the archive is
+  # empty" - the same words as a real empty archive, about 160 GB of games.
+  local idx err
+  err=$(mktemp)
+  if ! idx=$(library_index 2>"$err"); then
+    log_as fail "cannot read the archive: $(cat "$err")"
+    rm -f "$err"
+    echo "  s3://${GAME_S3_BUCKET:-?} was not readable, so nothing here is known -"
+    echo "  this is NOT the same as the archive being empty."
+    return 1
+  fi
+  rm -f "$err"
+
   local objs
   objs=$(aws s3 ls "s3://$GAME_S3_BUCKET/steam/" --recursive --summarize 2>/dev/null \
          | awk '/Total Objects:/{print $3}') || true
@@ -304,8 +422,8 @@ library_list() {
       | sed 's/^ *PRE /  - /' | sed 's|/$||'
     return 0
   fi
-  library_index | python3 -c '
-import json,sys
+  printf '%s' "$idx" | python3 -c '
+import json,os,sys
 try:    apps=json.load(sys.stdin).get("apps",[])
 except Exception: apps=[]
 if not apps: print("  the archive is empty"); sys.exit()
@@ -317,7 +435,8 @@ for a in apps:
     print("  %-10s %-32s %6.1f GB  %s" % (a["appid"], a.get("name","?")[:32],
           a.get("bytes",0)/GB, a.get("pushed","?")[:16].replace("T"," ")))
 g=tot/GB
-print("  %-10s %-32s %6.1f GB   $%.2f/month (INR %.0f)" % ("","total",g,g*0.025,g*0.025*88))
+S3=float(os.environ["CG_S3_USD_GB_MONTH"]); INR=float(os.environ["CG_INR_PER_USD"])
+print("  %-10s %-32s %6.1f GB   $%.2f/month (INR %.0f)" % ("","total",g,g*S3,g*S3*INR))
 print("")
 print("  229 GB fits on the box at once (209 GB selectable after reserve)")
 if g > 209: print("  the archive is larger than the disk - cg init asks which to restore")'
@@ -333,7 +452,7 @@ if g > 209: print("  the archive is larger than the disk - cg init asks which to
 # Cleaning it up meant hand-written `aws s3 rm` commands.
 library_orphans() {   # -> "<bytes>\t<prefix>" per orphan
   local b="${GAME_S3_BUCKET:-}"; [[ -n $b ]] || return 0
-  local idx; idx=$(library_index)
+  local idx; idx=$(library_index 2>/dev/null) || return 0   # unreadable: the caller says so
   # Same empty-prefix exit-1 trap as library_list; an empty archive has no
   # orphans and must not abort the caller.
   aws s3 ls "s3://$b/steam/steamapps/" --recursive 2>/dev/null \
@@ -390,8 +509,12 @@ library_forget() {
   local id="${1:-}"
   [[ -n $id ]] || die "which game? see: cg library list"
   [[ -n ${GAME_S3_BUCKET:-} ]] || die "no bucket configured"
-  local row
-  row=$(library_index | python3 -c '
+  local row idx err
+  err=$(mktemp)
+  idx=$(library_index 2>"$err") || { local why; why=$(cat "$err"); rm -f "$err"
+    die "cannot read the archive: $why"; }
+  rm -f "$err"
+  row=$(printf '%s' "$idx" | python3 -c '
 import json,sys
 appid=sys.argv[1]
 try:    apps=json.load(sys.stdin).get("apps",[])
@@ -417,7 +540,7 @@ for a in apps:
   aws s3 rm "s3://$GAME_S3_BUCKET/steam/meta/symlinks-$id.tsv" >/dev/null 2>&1 || true
   # Drop it from the index too, or cg init keeps offering a game that is gone.
   local tmp; tmp=$(mktemp)
-  library_index | python3 -c '
+  printf '%s' "$idx" | python3 -c '
 import json,sys
 appid=sys.argv[1]
 try:    d=json.load(sys.stdin)
@@ -472,13 +595,14 @@ cmd_library() {
       need_node
       box '/usr/local/bin/cg-library check' ;;
     list)
+      if (( JSON )); then library_json; return; fi
       # Say it here too: this is the view people check, and an unindexed pile
       # is invisible everywhere else.
-      local orph; orph=$(library_orphans)
+      local orph; orph=$(library_orphans 2>/dev/null)
       {
       library_list
       if [[ -n ${orph//[[:space:]]/} ]]; then
-        awk -F'\t' '{t+=$1} END{ if (t>0) printf "\n  plus %.1f GB of ORPHANED objects from an unfinished push\n  costing $%.2f/month and unusable - remove them: cg library clean\n", t/1073741824, t/1073741824*0.025 }' <<<"$orph"
+        awk -F'\t' '{t+=$1} END{ if (t>0) printf "\n  plus %.1f GB of ORPHANED objects from an unfinished push\n  costing $%.2f/month and unusable - remove them: cg library clean\n", t/1073741824, t/1073741824*ENVIRON["CG_S3_USD_GB_MONTH"] }' <<<"$orph"
       fi
       } | cg_report "📦" "Game archive" ;;
     account|login)
@@ -516,6 +640,11 @@ cmd_destroy() {
       *) die "unknown option '$a' for destroy (--all, --force, --no-push)" ;;
     esac
   done
+  # A stream from this laptop is watching the box that is about to be deleted.
+  # Left alone, Moonlight goes black in the middle of the push and the `cg open`
+  # behind it then offers to end a box that is already gone. Close it first.
+  session_end_first
+
   # --all means the games go too, so mirroring them to S3 first and then
   # deleting the archive would be absurd. That path skips the push entirely.
   if (( all )); then
@@ -875,12 +1004,13 @@ games_volume() {
   fi
   case "${1:-show}" in
     show|"")
-      awk -v v="$vol" -v a="$az" -v s="$size" -v st="$state" 'BEGIN{
-        m=s*0.0912;
+      awk -v v="$vol" -v a="$az" -v s="$size" -v st="$state" \
+          -v ebs="$CG_EBS_USD_GB_MONTH" -v inr="$CG_INR_PER_USD" 'BEGIN{
+        m=s*ebs;
         printf "  volume   %s  (%s)\n", v, st;
         printf "  zone     %s\n", a;
         printf "  size     %s GB\n", s;
-        printf "  cost     $%.2f/month (INR %.0f) - billed whether or not the box exists\n", m, m*88;
+        printf "  cost     $%.2f/month (INR %.0f) - billed whether or not the box exists\n", m, m*inr;
       }'
       echo "  status   LEGACY - nothing mounts or attaches this any more."
       echo "           the library is in S3: cg library"
@@ -1005,8 +1135,82 @@ cmd_ping() {
   fi
 }
 
+# `cg watcher --json`: every guard as data - what it catches, whether it is
+# armed, and what it last decided. Same queries as the report.
+watcher_json() {
+  local st ohw sb want rule last ms msg lifecycle
+  st=$(ec2 describe-instances --instance-ids "${INSTANCE_ID:-x}" \
+       --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo none)
+  ohw="" sb="" want=""
+  if [[ $st == running ]] && box true 2>/dev/null; then
+    ohw=$(box 'systemctl is-active idle-watchdog.timer 2>/dev/null' 2>/dev/null) || true
+    ohw=${ohw//[$'\r\n']/}
+    sb=$(ec2 describe-instance-attribute --instance-id "$INSTANCE_ID" \
+         --attribute instanceInitiatedShutdownBehavior \
+         --query 'InstanceInitiatedShutdownBehavior.Value' --output text 2>/dev/null)
+    lifecycle=$(ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+                --query 'Reservations[0].Instances[0].InstanceLifecycle' --output text 2>/dev/null)
+    [[ $lifecycle == spot ]] && want=terminate || want=stop
+  fi
+  rule=$(cw_aws events describe-rule --name "$CW_NAME" --query State --output text 2>/dev/null) || rule=""
+  last=$(cw_aws logs filter-log-events --log-group-name "$CW_LOGS" \
+           --start-time "$(( ($(date +%s) - 3600) * 1000 ))" --filter-pattern '"cg-watchdog:"' \
+           --query 'events[-1].[timestamp,message]' --output text 2>/dev/null) || last=""
+  IFS=$'\t' read -r ms msg <<<"$last"
+
+  local acct budget alerts
+  acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
+  budget=$(aws budgets describe-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" \
+    --query 'Budget.BudgetLimit.Amount' --output text 2>/dev/null || echo "")
+  alerts=$(aws budgets describe-notifications-for-budget --account-id "$acct" \
+    --budget-name "${TS_HOST}-monthly" --query 'length(Notifications)' --output text 2>/dev/null || echo 0)
+
+  W_STATE="$st" W_OHW="$ohw" W_SHUTDOWN="$sb" W_WANT="$want" W_RULE="$rule" \
+  W_LAST_MS="${ms:-}" W_LAST_MSG="${msg:-}" W_BUDGET="$budget" W_ALERTS="$alerts" \
+  W_ARCHIVE="$(cw_archive_line)" W_HOST="$TS_HOST" python3 -c '
+import json, os, time
+g = os.environ.get
+ms = g("W_LAST_MS")
+age = int(time.time() - int(ms) / 1000) if ms.isdigit() else None
+msg = g("W_LAST_MSG").replace("cg-watchdog: ", "") or None
+budget = g("W_BUDGET")
+print(json.dumps({
+  "host": g("W_HOST"),
+  "instance_state": g("W_STATE"),
+  "guards": [
+    {"layer": 1, "name": "session", "dies_with": "your laptop",
+     "catches": "normal use", "reaction": "on Moonlight exit",
+     "armed": None, "state": "always on",
+     "note": "cg open ends the session when Moonlight quits"},
+    # It lives ON the box: with no box there is nothing to arm, which is not the
+    # same as a guard that should be running and is not.
+    {"layer": 2, "name": "on-host watchdog", "dies_with": "the box it protects",
+     "catches": "a forgotten disconnect, a crashed client", "reaction": "15 min idle",
+     "armed": (g("W_OHW") == "active") if g("W_OHW") else None,
+     "state": "armed" if g("W_OHW") == "active" else (
+              "not armed" if g("W_OHW") else
+              ("no box" if g("W_STATE") in ("none", "terminated", "") else "box not reachable")),
+     "note": g("W_OHW") or ("installed during the build, armed while the box runs"
+                            if g("W_STATE") in ("none", "terminated", "") else "box not reachable")},
+    {"layer": 3, "name": "cloud watchdog", "dies_with": "a deleted schedule",
+     "catches": "a wedged box, one left running, one stuck going down",
+     "reaction": "30 min idle; forced after 1 h stuck",
+     "armed": g("W_RULE") == "ENABLED",
+     "state": "armed" if g("W_RULE") == "ENABLED" else (g("W_RULE").lower() or "not installed"),
+     "note": g("W_RULE") or "not installed",
+     "last_decision": msg, "last_decision_age_s": age},
+  ],
+  "shutdown_action": {"value": g("W_SHUTDOWN") or None, "expected": g("W_WANT") or None,
+                      "ok": bool(g("W_SHUTDOWN")) and g("W_SHUTDOWN") == g("W_WANT")},
+  "budget": {"usd": float(budget) if budget not in ("", "None") else None,
+             "alerts": int(g("W_ALERTS") or 0)},
+  "archive": g("W_ARCHIVE") or None,
+}, indent=2))'
+}
+
 cmd_watcher() {
   if (( WATCH )); then box 'journalctl -t idle-watchdog -f'; return; fi
+  if (( JSON )); then watcher_json; return; fi
   say "guards"
   local s
   s=$(ec2 describe-instances --instance-ids "${INSTANCE_ID:-x}" \
@@ -1091,6 +1295,7 @@ info (read-only)
   cg watcher [--watch]       every guard, and whether each is armed
   cg watchdog [status|check|logs|install|remove]
                              layer 3: the cloud watchdog (Lambda); check is a dry run
+  cg config [set|get <k>]    what .env decides; set validates and writes, get reveals one
   cg notify                  send a test notification to GAME_NTFY_URL
   cg ping [--watch]          latency, and direct vs DERP relay
 
@@ -1105,7 +1310,9 @@ case "$CMD" in
   check)     exec lib/setup check "$@" ;;
   # Reports go through cg_report: on a terminal it boxes and colours them, and
   # anywhere else it is `cat`, so a redirected report is byte-for-byte as before.
-  status)    { lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true
+  # --json is the app's view: one object from lib/setup, no box round-trips.
+  status)    if (( JSON )); then exec lib/setup status --json; fi
+             { lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true
                # `tailscale ip` succeeds for a node that is registered but OFFLINE, so it
                # does not mean the box answers - and the heading used to print with
                # nothing under it. Ask the box first; say so when it did not answer.
@@ -1116,7 +1323,9 @@ case "$CMD" in
                  else echo "  box not reachable - the archive is listed by: cg library list"; fi
                fi
                stream_usage; } | cg_report ;;
-  cost)      lib/setup cost "$@" | cg_report ;;
+  # --json is the app's view of the same single Cost Explorer call.
+  cost)      if (( JSON )); then exec lib/setup cost --json; fi
+             lib/setup cost "$@" | cg_report ;;
   clean)     exec lib/setup clean ;;
   destroy)   cmd_destroy "$@" ;;
   open|up)   ensure_moonlight_syskeys; exec lib/game up ;;
@@ -1127,6 +1336,17 @@ case "$CMD" in
   pair)      cmd_pair ;;
   library|lib) cmd_library "$@" ;;
   watchdog)  cmd_watchdog "$@" ;;
+  # No leading `shift`: with no subcommand there is nothing to shift, and under
+  # `set -e` that ends the run with no output at all.
+  config)    case "${1:-show}" in
+               show|"")  if (( JSON )); then config_json; else config_show | cg_report "⚙️" "Settings"; fi ;;
+               --json)   config_json ;;
+               set)      shift; [[ $# -ge 1 ]] || die "usage: cg config set <key> [value]"
+                         config_set "$1" "${2-}" ;;
+               get)      shift; [[ $# -ge 1 ]] || die "usage: cg config get <key>"
+                         config_get "$1" ;;
+               *)        die "usage: cg config [show|--json|get <key>|set <key> [value]]" ;;
+             esac ;;
   notify)    cmd_notify ;;
   log|logs)  cmd_log "$@" ;;
   ssh)       if [[ $# -gt 0 ]]; then box "$@"; else need_node; exec ssh -i "$KEY" \

@@ -45,6 +45,26 @@ chmod +x "$T/bin"/*
 cg() { ( cd "$T" && HOME="$T/home" PATH="$T/bin:$PATH" COLUMNS=90 bash ./cg "$@" 2>&1 ); }
 norm() { sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}[+-][0-9]{2}:[0-9]{2}/TS/'; }
 
+echo "0. watcher --json: the same guards, as data for the app"
+j=$(CG_COLOR=never cg watcher --json)
+jq_() { python3 -c 'import json,sys
+d=json.load(sys.stdin)
+for k in sys.argv[1].split("."):
+    d = d[int(k)] if isinstance(d, list) else d.get(k)
+print(json.dumps(d))' "$1" <<<"$j"; }
+check    "valid JSON"                   "$(python3 -c 'import json,sys;json.load(sys.stdin);print("yes")' <<<"$j")" "yes"
+check    "three layers, in order"       "$(jq_ guards | python3 -c 'import json,sys;print([g["layer"] for g in json.load(sys.stdin)])')" "[1, 2, 3]"
+check    "the cloud watchdog is armed"  "$(jq_ guards.2.armed)" "true"
+check    "  with its last decision"     "$(jq_ guards.2.last_decision)" '"no running instance tagged gamevps - nothing to do"'
+check    "  aged in seconds, not words" "$(jq_ guards.2.last_decision_age_s | python3 -c 'import sys;print(int(float(sys.stdin.read()))<300)')" "True"
+check    "with no box, layer 2 is neither armed nor failing" "$(jq_ guards.1.armed)" "null"
+check    "  it says there is no box"    "$(jq_ guards.1.state)" '"no box"'
+check    "  and where it comes from"    "$(jq_ guards.1.note)" '"installed during the build, armed while the box runs"'
+check    "layer 1 is always on"         "$(jq_ guards.0.armed)" "null"
+check    "each layer says what it catches" "$(jq_ guards.1.catches)" '"a forgotten disconnect, a crashed client"'
+j=$(RULE=DISABLED CG_COLOR=never cg watcher --json)
+check    "a disabled schedule is not armed" "$(jq_ guards.2.armed)" "false"
+
 echo "1. plain watcher output is exactly what it was before the styling"
 check "byte-identical, timestamps normalised" "$(CG_COLOR=never cg watcher | norm)" "$(cat <<'BASE'
 

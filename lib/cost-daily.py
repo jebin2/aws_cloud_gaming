@@ -95,12 +95,56 @@ def table(days):
         print("  USD, and INR at %d." % INR)
 
 
+def as_json(days):
+    """Everything the CE answer holds, as data: per day, per usage type, and the
+    two summaries the report draws (hours by purchase model, egress allowance)."""
+    rows, usage = [], {}
+    hours = {"on_demand": 0.0, "spot": 0.0}
+    cost = {"on_demand": 0.0, "spot": 0.0}
+    out_gb = 0.0
+    for day in days:
+        cols = dict.fromkeys(COLS, 0.0)
+        day_hours = 0.0
+        for g in day.get("g") or []:
+            c, q = float(g["c"]), float(g["q"])
+            u = g["u"].split("-", 1)[-1]
+            cols[bucket(g["u"])] += c
+            t = usage.setdefault(u, {"type": u, "qty": 0.0, "usd": 0.0})
+            t["qty"] += q; t["usd"] += c
+            if u.startswith("SpotUsage"):       hours["spot"] += q; cost["spot"] += c; day_hours += q
+            elif u.startswith("BoxUsage"):      hours["on_demand"] += q; cost["on_demand"] += c; day_hours += q
+            elif u.startswith("DataTransfer-Out-Bytes"): out_gb += q
+        total = sum(cols.values())
+        if total <= 0.0005 and day_hours <= 0:
+            continue
+        rows.append({"date": day["d"], "hours": round(day_hours, 2),
+                     **{k: round(v, 4) for k, v in cols.items()},
+                     "total": round(total, 4)})
+    month = round(sum(r["total"] for r in rows), 4)
+    rates = {k: round(cost[k] / hours[k], 4) if hours[k] else None for k in hours}
+    return {
+        "days": rows,
+        "usage": sorted(({"type": u["type"], "qty": round(u["qty"], 4), "usd": round(u["usd"], 4)}
+                         for u in usage.values()), key=lambda x: -x["usd"]),
+        "total_usd": month, "total_inr": round(month * INR),
+        "hours": {k: round(v, 2) for k, v in hours.items()},
+        "usd_per_hour": rates,
+        "egress": {"gb_used": round(out_gb, 2), "gb_free": 100.0,
+                   "gb_left": round(max(0.0, 100.0 - out_gb), 2)},
+        "inr_per_usd": INR,
+    }
+
+
 def main():
     days = load()
     if days is None:
-        print("  (Cost Explorer unavailable)" if "--aggregate" not in sys.argv else "[]")
+        if "--json" in sys.argv:    print("{}")
+        elif "--aggregate" in sys.argv: print("[]")
+        else: print("  (Cost Explorer unavailable)")
         return
-    if "--aggregate" in sys.argv:
+    if "--json" in sys.argv:
+        print(json.dumps(as_json(days), indent=2))
+    elif "--aggregate" in sys.argv:
         aggregate(days)
     else:
         print("billed day by day (lags a day, like the totals below):")

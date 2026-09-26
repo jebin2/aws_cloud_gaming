@@ -40,7 +40,16 @@ cat > "$T/bin/aws" <<'FAKE'
 args="$*"
 echo "aws $args" >> "$LOG"
 case "$args" in
-  *"s3 cp"*index.json*) [[ ${NO_INDEX:-0} == 1 ]] && exit 1; cat "$IDX" ;;
+  *"s3 cp"*index.json*)
+    if [[ ${NO_INDEX:-0} == 1 ]]; then
+      echo "fatal error: An error occurred (404) when calling the HeadObject operation: Not Found" >&2
+      exit 1
+    fi
+    if [[ ${BAD_CREDS:-0} == 1 ]]; then
+      echo "fatal error: An error occurred (InvalidAccessKeyId) when calling the HeadObject operation" >&2
+      exit 1
+    fi
+    cat "$IDX" ;;
   *"s3 ls"*--recursive*) cat "$LISTING"; [[ $args == *summarize* ]] && printf '\nTotal Objects: 6\n   Total Size: 81419400077\n' ;;
   *"s3 rm"*) exit 0 ;;
   *"s3 ls"*index.json*) [[ ${NO_INDEX:-0} == 1 ]] && exit 1; echo "index.json" ;;
@@ -53,7 +62,7 @@ run() { # run <answer> <args...>
   rm -f "$T/log"
   local ans="$1"; shift
   ( cd "$T" && printf '%s\n' "$ans" | HOME="$T/home" LOG="$T/log" IDX="$T/index.json" \
-      LISTING="$T/listing.txt" NO_INDEX="${NO_INDEX:-0}" PATH="$T/bin:$PATH" \
+      LISTING="$T/listing.txt" NO_INDEX="${NO_INDEX:-0}" BAD_CREDS="${BAD_CREDS:-0}" PATH="$T/bin:$PATH" \
       timeout 30 bash ./cg library "$@" 2>&1 )
 }
 
@@ -63,6 +72,23 @@ contains "lists the indexed game" "$out" "Black Myth: Wukong"
 contains "flags the orphans"      "$out" "ORPHANED"
 contains "gives their size"       "$out" "71.2 GB"
 contains "says how to remove"     "$out" "cg library clean"
+
+echo "1b. list --json: the same archive as data, for the app"
+j=$(run "" list --json)
+jq_() { python3 -c 'import json,sys
+d=json.load(sys.stdin)
+for k in sys.argv[1].split("."):
+    d = d[int(k)] if isinstance(d, list) else d.get(k)
+print(json.dumps(d))' "$1" <<<"$j"; }
+check    "valid JSON"                  "$(python3 -c 'import json,sys;json.load(sys.stdin);print("yes")' <<<"$j")" "yes"
+check    "the indexed game"            "$(jq_ games.0.name)" '"Black Myth: Wukong"'
+check    "  with its size in bytes"    "$(jq_ games.0.bytes)" "137438953472"
+check    "  and when it was archived"  "$(jq_ games.0.pushed)" '"2026-09-13T09:14:00Z"'
+check    "the monthly cost"            "$(jq_ usd_month)" "3.2"
+check    "orphans counted separately"  "$(jq_ orphan_bytes)" "76419394933"
+check    "  with their own cost"       "$(jq_ orphan_usd_month)" "1.78"
+check    "what the disk can hold"      "$(jq_ selectable_gb)" "209"
+check    "  and no rendered table in it" "$(grep -c APPID <<<"$j")" "0"
 
 echo "2. clean shows what it would delete, and refuses without the word"
 out=$(run "no" clean)
@@ -78,6 +104,12 @@ check "deleted the orphans"       "$(grep -c 's3 rm.*Diablo IV' "$T/log" || true
 check "and the orphan shadercache" "$(grep -c 's3 rm.*shadercache/2344520' "$T/log" || true)" "1"
 check "left Wukong alone"         "$(grep -c 's3 rm.*BlackMythWukong' "$T/log" || true)" "0"
 check "left its compatdata alone" "$(grep -c 's3 rm.*2358720' "$T/log" || true)" "0"
+
+echo "3b. an index it cannot READ deletes nothing at all"
+# The dangerous direction: an unreadable index looks like an empty one, and
+# every archived game then looks like an orphan. Nothing may be deleted.
+out=$(BAD_CREDS=1 run "CLEAN" clean)
+check "deleted nothing"           "$(cnt 's3 rm')" "0"
 
 echo "4. with NO index at all, everything is an orphan"
 # The state after a first push dies: files present, index never written.

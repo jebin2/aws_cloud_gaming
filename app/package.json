@@ -1,0 +1,16 @@
+{
+  "name": "cg-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop viewer for cg - the scripts stay the engine",
+  "main": "main/index.js",
+  "scripts": {
+    "start": "npm run build:css && electron .",
+    "test": "node --test test/*.test.mjs",
+    "build:css": "tailwindcss -i renderer/src.css -o renderer/tailwind.css --minify"
+  },
+  "devDependencies": {
+    "electron": "^39.2.4",
+    "tailwindcss": "^3.4.19"
+  }
+}

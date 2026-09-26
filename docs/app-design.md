@@ -39,12 +39,14 @@ rather than asking again.
 | Archive size, object count, monthly cost | `cg status` / `cg cost` game-library line, or `cg library list` | yes (`library list`) | prefer `cg library list`: free, and it lists games |
 | Archive countdown ("deleted in 4d 1h") | `cg watchdog status` / `cg status` game-archive line | yes | comes from the watchdog's last hourly decision, with its age |
 | Guard pills (4) | `cg watcher` | yes | session guard, on-host watchdog, cloud watchdog, budget |
+| Play / Streaming | `cg status` → `session` | yes | a `cg open` running on this laptop holds a lock; the app asks cg rather than looking for Moonlight, so a stream it never started still disables Play |
 | Recent activity | `cg watchdog logs`, and the app's own job history | yes | |
 
 ## Build
 
 | Field | Source | Free | Notes |
 |---|---|---|---|
+| Machine strip: vCPU, RAM, GPU, VRAM | `cg status --json` → `spec` | yes | one `describe-instance-types` call, shared with the quota check - nothing about the type is written into the app |
 | Archived games: appid, name, size, archived date | `cg library list` | yes | the real archive today holds **one** game (Diablo IV, 160.2 GB) |
 | "160 GB selected of 209 GB available" | `cg library list` footer (229 GB disk, 209 GB selectable) | yes | the arithmetic that refuses an over-large selection lives in `lib/choose-games.py` and must stay there |
 | Build progress steps | the `cg init` event stream: `step`, `step_end` | - | the six steps in the mockup are the real ones: provision, tailnet, driver, restore, desktop, pair |
@@ -100,11 +102,27 @@ tool invented AWS detail.
    `CG_JSON=1` it arrives as an `ask` event and the answer is one line on stdin. `CG_YES=1` takes
    each yes/no default; typed confirmations still require the word; the game picker reads
    `GAME_APPS`. See [commands.md](commands.md#machine-readable-output).
-2. **`--json` for the reports** (`status`, `cost`, `library`, `games`, `watcher`), so the app gets
-   fields rather than a rendered table inside a `report` event.
-3. **`cg --version`**, so the app can refuse a repo older than the events it expects.
+2. ~~`--json` for the reports.~~ **Done** for `status`, `cost`, `library list` and `watcher` - each
+   renders from the same facts as its report, so the two cannot drift. `games` still prints text
+   only; the app does not use it yet.
+3. ~~`cg --version`.~~ **Done**: it prints the commit and the event-contract version.
 
-Until (1) and (2) exist, an app can only show read-only screens built from `report` events.
+## Where it is now
+
+`app/` is an Electron app with seven screens, built on the Stitch design: its Tailwind config,
+fonts and icons are vendored, so nothing is fetched at runtime.
+
+| Screen | Reads | Does |
+|---|---|---|
+| Dashboard | `cg status --json` | Build (to the Build screen), Play, Destroy - each confirms first |
+| Build | `cg library list --json` | picks games against the disk's capacity, runs `cg init` with `GAME_APPS`, shows the steps live |
+| Library | `cg library list --json` | lists the archive per game, with orphans and what fits |
+| Guards | `cg watcher --json` | a card per layer: what it catches, its reaction, its last decision |
+| Cost | `cg cost --json` | tiles, the daily table, what still bills, the egress allowance - one $0.01 call, only on click |
+| Settings | `cg status --json` | shows what `.env` decides; secrets as set / not set, never values |
+| Logs | any run | the live event stream |
+
+`tests/app.sh` enforces the rules below, and `app/test/` tests the runner against a fake `cg`.
 
 ## Safety rules for the app
 

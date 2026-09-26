@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* The few repeated shapes from the Stitch screens, written once. Everything
+   else stays inline utility classes, exactly as the export had them. */
+@layer components {
+  .nav-item {
+    @apply flex items-center gap-space-sm px-space-md py-space-sm rounded-r transition-colors
+           text-on-surface-variant hover:bg-surface-container hover:text-on-surface
+           font-body-sm text-body-sm;
+  }
+  .nav-item.on {
+    @apply bg-surface-container-high text-primary font-medium border-l-2 border-primary;
+  }
+  .btn {
+    @apply inline-flex items-center gap-space-xs px-space-md py-space-xs rounded
+           bg-surface-container-high border border-surface-variant text-on-surface
+           font-code-sm text-code-sm transition-colors hover:border-primary
+           disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-surface-variant;
+  }
+  .btn-primary { @apply bg-primary text-on-primary border-primary font-medium hover:border-primary; }
+  .btn-danger  { @apply text-error border-error/50 bg-transparent; }
+  .pill {
+    @apply inline-flex items-center gap-space-xs px-space-sm py-0.5 rounded-full
+           border border-surface-variant text-outline font-code-sm text-code-sm;
+  }
+  .pill-ok   { @apply text-primary border-primary/40; }
+  .pill-warn { @apply text-tertiary border-tertiary/40; }
+  .pill-bad  { @apply text-error border-error/40; }
+  .row { @apply flex items-center justify-between gap-space-sm py-space-xs; }
+}
+
+/* `hidden` must win. A class that sets display - .btn is inline-flex - is an
+   author style, and beats the browser's own [hidden] rule, so every hidden
+   button stayed on screen. */
+[hidden] { display: none !important; }
+
+/* Material Symbols, vendored: the class the export's markup uses. */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal; font-style: normal; line-height: 1;
+  letter-spacing: normal; text-transform: none; display: inline-block;
+  white-space: nowrap; direction: ltr;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #31353c; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #454a52; }
+::-webkit-scrollbar-track { background: transparent; }

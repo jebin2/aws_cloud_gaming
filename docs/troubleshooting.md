@@ -4,6 +4,39 @@ Real failures from building this, with the reasoning behind each fix. They are r
 the fix is rarely obvious from the code alone, and because most of them cost real money or
 hours to diagnose.
 
+
+## "the archive is empty" when it is not
+
+`cg library list` reads `s3://<bucket>/steam/index.json`. That read used to fall back to an empty
+index on **any** failure, so expired credentials, a denied bucket or no network all printed:
+
+```
+  the archive is empty
+```
+
+about an archive that was perfectly intact. It now says which it is:
+
+```
+  cannot read the archive: the AWS credentials are not valid - check: aws sts get-caller-identity
+  s3://cg-library-… was not readable, so nothing here is known -
+  this is NOT the same as the archive being empty.
+```
+
+`cg library list --json` carries the same distinction: `"error"` is set and `"games"` is `null`,
+never `[]`. `cg status` prints `UNREADABLE` rather than `EMPTY`, and if AWS rejects the credentials
+outright it says so once, at the top, and prints nothing about resources it could not read.
+
+If you see it, check the credentials first:
+
+```
+aws sts get-caller-identity      # InvalidClientTokenId means the key is gone
+./cg check --fix                 # asks for a key id and secret
+```
+
+Nothing in S3 is touched by any of this - `cg library clean` deletes nothing while the index
+cannot be read, because every game would otherwise look like an orphan.
+
+
 ## The ones that cost the most time
 
 Nearly all of them share a shape: **something reported success while broken.** That is why each

@@ -25,6 +25,8 @@ ec2() { aws ec2 "$@" --region "$REGION"; }
 
 # shellcheck source=lib/common.sh
 source lib/common.sh
+# shellcheck source=lib/session.sh
+source lib/session.sh
 
 state() {
   ec2 describe-instances --instance-ids "$INSTANCE_ID" \
@@ -83,6 +85,34 @@ instance_lifecycle() {
 }
 
 up() {
+  # A stream from this laptop is already running: a second Moonlight window
+  # would fight the first for the box's GPU and spend egress twice, and both
+  # `cg open` runs would try to end the session afterwards. Refuse, and say
+  # where the first one is.
+  local held pid since
+  if held=$(session_running); then
+    read -r pid since <<<"$held"
+    local age=""
+    [[ ${since:-} =~ ^[0-9]+$ ]] && age=" (started $(_cg_dur $(( $(date +%s) - since ))) ago)"
+    _cg_section_end 0
+    {
+    echo
+    echo "A stream from this laptop is already running$age."
+    echo
+    echo "  Moonlight is happy to open a second window; the box is not. Two"
+    echo "  streams share one GPU, both spend egress, and whichever ends first"
+    echo "  ends the session for the other."
+    echo
+    echo "  Look for the Moonlight window that is already open. To stop it from"
+    echo "  here instead:"
+    echo
+    echo "      kill $pid"
+    echo
+    } | cg_block "🎮" "Already streaming"
+    die "a session is already running (pid $pid)"
+  fi
+  session_claim
+
   if [[ $(state) == running ]]; then
     cg_echo "instance already running"
   else

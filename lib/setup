@@ -8,6 +8,11 @@ cd "$(dirname "$0")/.."   # repo root: every path below is relative to it
 # say/die/log and the live-progress waits live here.
 # shellcheck source=lib/common.sh
 source lib/common.sh
+# The prices, in one place - see lib/rates.sh.
+# shellcheck source=lib/rates.sh
+source lib/rates.sh
+# shellcheck source=lib/session.sh
+source lib/session.sh
 # shellcheck source=lib/pair.sh
 source lib/pair.sh
 
@@ -60,7 +65,7 @@ archive_line() {
   else
     printf '  game library    s3://%s  %s objects, %s  ($%.2f/mo)\n' "$b" "$n" \
       "$(numfmt --to=iec --suffix=B "$sz" 2>/dev/null || echo "${sz}B")" \
-      "$(awk -v x="$sz" 'BEGIN{printf "%.2f", x/1073741824*0.025}')"
+      "$(awk -v x="$sz" -v r="$CG_S3_USD_GB_MONTH" 'BEGIN{printf "%.2f", x/1073741824*r}')"
   fi
 }
 
@@ -83,52 +88,55 @@ iam_lines() {
   return 0
 }
 
-status() {
-  local id state itype ip launched plan credits q_od q_spot vcpus
+# The facts behind `cg status`, gathered once as KEY<TAB>VALUE lines. The report
+# and `cg status --json` both render from these, so the two can never disagree -
+# and an app reading the JSON is reading exactly what the report shows.
+status_facts() {
+  local id state itype ip launched plan credits q_od q_spot vcpus kp sgid acct budget spent nsubs
+  local gv gsz gaz b out n sz node tsn
   ec2() { aws ec2 "$@" --region "$REGION"; }
-  mark() { [[ $1 == ok ]] && printf '  [ok]   ' || printf '  [--]   '; }
+  f() { printf '%s\t%s\n' "$1" "${2-}"; }
 
-  echo "ACCOUNT"
-  printf '  id              %s\n' "$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo 'NO CREDENTIALS')"
+  acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo 'NO CREDENTIALS')
   plan=$(aws freetier get-account-plan-state --region us-east-1 --query accountPlanType --output text 2>/dev/null || echo '?')
   credits=$(aws freetier get-account-plan-state --region us-east-1 --query accountPlanRemainingCredits.amount --output text 2>/dev/null || echo '?')
-  printf '  plan            %s%s\n' "$plan" \
-    "$([[ $plan == FREE ]] && echo '   <- cannot launch GPU instances at all' || true)"
-  printf '  credits         $%s\n' "$credits"
+  f account.id "$acct"; f account.plan "$plan"; f account.credits "$credits"
+  [[ $acct == "NO CREDENTIALS" ]] && f error.credentials \
+    "AWS rejected these credentials - everything below is UNKNOWN, not empty. Check: aws sts get-caller-identity"
 
-  echo
-  echo "QUOTAS in $REGION"
-  vcpus=$(ec2 describe-instance-types --instance-types "$TYPE" \
-    --query 'InstanceTypes[0].VCpuInfo.DefaultVCpus' --output text 2>/dev/null || echo '?')
+  # One call answers the quota question and describes the machine the Build
+  # screen shows - vCPU, memory, GPU - so nothing about the type is hardcoded.
+  local spec mem gpu gpu_mem
+  spec=$(ec2 describe-instance-types --instance-types "$TYPE" \
+    --query 'InstanceTypes[0].[VCpuInfo.DefaultVCpus,MemoryInfo.SizeInMiB,GpuInfo.Gpus[0].Name,GpuInfo.Gpus[0].MemoryInfo.SizeInMiB,GpuInfo.Gpus[0].Count]' \
+    --output text 2>/dev/null) || spec=""
+  read -r vcpus mem gpu gpu_mem _ <<<"${spec:-? ? ? ?}"
+  [[ -z ${vcpus:-} || $vcpus == None ]] && vcpus='?'
+  f spec.vcpus "$vcpus"
+  f spec.memory_mib "${mem:-}"
+  f spec.gpu "${gpu:-}"
+  f spec.gpu_memory_mib "${gpu_mem:-}"
   q_od=$(aws service-quotas get-service-quota --region "$REGION" --service-code ec2 \
     --quota-code L-DB2E81BA --query Quota.Value --output text 2>/dev/null || echo 0)
   q_spot=$(aws service-quotas get-service-quota --region "$REGION" --service-code ec2 \
     --quota-code L-3819A6DF --query Quota.Value --output text 2>/dev/null || echo 0)
-  printf '  %s needs %s vCPU\n' "$TYPE" "$vcpus"
-  awk -v q="$q_od" -v v="$vcpus" 'BEGIN{s=(q>=v?"":"  <- too low to launch"); printf "  on-demand G/VT  %.0f vCPU%s\n", q, s}'
-  awk -v q="$q_spot" -v v="$vcpus" 'BEGIN{s=(q>=v?"":"  <- GAME_SPOT=1 will fail"); printf "  spot G/VT       %.0f vCPU%s\n", q, s}'
+  f quota.vcpus "$vcpus"; f quota.on_demand "$q_od"; f quota.spot "$q_spot"
 
-  echo
-  echo "RESOURCES in $REGION"
   id=$(ec2 describe-instances --filters "Name=tag:Name,Values=$TS_HOST" \
         "Name=instance-state-name,Values=pending,running,stopping,stopped" \
-        --query 'Reservations[0].Instances[0].InstanceId' --output text 2>/dev/null)
+        --query 'Reservations[0].Instances[0].InstanceId' --output text 2>/dev/null) || id=""
   [[ $id == None ]] && id=""
+  f box.id "$id"
   if [[ -n $id ]]; then
     read -r state itype ip launched < <(ec2 describe-instances --instance-ids "$id" \
       --query 'Reservations[0].Instances[0].[State.Name,InstanceType,PublicIpAddress,LaunchTime]' --output text)
-    printf '  instance        %s  %s  %s\n' "$id" "$itype" "$state"
-    printf '  public ip       %s\n' "$ip"
-    printf '  launched        %s\n' "$launched"
-  else
-    printf '  instance        none\n'
+    f box.state "$state"; f box.type "$itype"; f box.public_ip "$ip"; f box.launched "$launched"
   fi
-  printf '  volumes         %s GB total\n' "$(ec2 describe-volumes --query 'sum(Volumes[].Size)' --output text 2>/dev/null)"
-  printf '  snapshots       %s\n' "$(ec2 describe-snapshots --owner-ids self --query 'length(Snapshots)' --output text 2>/dev/null)"
-  printf '  saved images    %s\n' "$(ec2 describe-images --owners self --query 'length(Images)' --output text 2>/dev/null)"
-  printf '  elastic ips     %s%s\n' "$(ec2 describe-addresses --query 'length(Addresses)' --output text 2>/dev/null)" \
-    "$([[ $(ec2 describe-addresses --query 'length(Addresses)' --output text 2>/dev/null) != 0 ]] && echo '   <- these bill while idle' || true)"
-  local kp sgid
+
+  f res.volumes_gb "$(ec2 describe-volumes --query 'sum(Volumes[].Size)' --output text 2>/dev/null)"
+  f res.snapshots "$(ec2 describe-snapshots --owner-ids self --query 'length(Snapshots)' --output text 2>/dev/null)"
+  f res.images "$(ec2 describe-images --owners self --query 'length(Images)' --output text 2>/dev/null)"
+  f res.elastic_ips "$(ec2 describe-addresses --query 'length(Addresses)' --output text 2>/dev/null)"
   kp=$(ec2 describe-key-pairs --key-names "$TS_HOST" --query 'KeyPairs[0].KeyName' --output text 2>/dev/null || echo "")
   sgid=$(ec2 describe-security-groups --filters "Name=group-name,Values=${TS_HOST}-sg" \
     --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
@@ -136,92 +144,335 @@ status() {
   # the report does not read as if something is broken.
   [[ $kp   == None || -z $kp   ]] && kp=none
   [[ $sgid == None || -z $sgid ]] && sgid=none
-  printf '  key pair        %s\n' "$kp"
-  printf '  security group  %s\n' "$sgid"
-  # The game library is in S3 now; the EBS volume is legacy and the only thing
-  # worth saying about it is that it still bills.
-  local gv gsz gaz
+  f res.key_pair "$kp"; f res.security_group "$sgid"
+
+  # The old EBS game volume, if one survives: legacy, and the only thing worth
+  # saying about it is that it still bills.
   read -r gv gsz gaz < <(ec2 describe-volumes --filters "Name=tag:Name,Values=${TS_HOST}-games" \
     --query 'Volumes[0].[VolumeId,Size,AvailabilityZone]' --output text 2>/dev/null)
   if [[ -n ${gv:-} && $gv != None ]]; then
-    printf '  old EBS volume  %s  %s GB in %s  (~$%.2f/mo, LEGACY - cg games --delete)\n' \
-      "$gv" "$gsz" "$gaz" "$(awk -v s="$gsz" 'BEGIN{printf "%.2f", s*0.0912}')"
-  else
-    archive_line
-    iam_lines
-    stranded_spot_note "$REGION" "${INSTANCE_ID:-}"
+    f old_volume.id "$gv"; f old_volume.gb "$gsz"; f old_volume.az "$gaz"
   fi
-  if [[ $sgid != none ]]; then
-    local ingress
-    ingress=$(ec2 describe-security-groups --group-ids "$sgid" \
+
+  b="${GAME_S3_BUCKET:-}"
+  f archive.bucket "$b"
+  if [[ -n $b ]]; then
+    # A failed listing is not an empty archive. Reporting 0 objects because the
+    # credentials expired is the same lie `cg library list` used to tell, and
+    # this is the screen people check when they are worried.
+    local s3err; s3err=$(mktemp)
+    out=$(aws s3 ls "s3://$b/steam/" --recursive --summarize 2>"$s3err" | tail -2) && s3rc=0 || s3rc=$?
+    n=$(awk '/Total Objects:/{print $3}' <<<"$out"); sz=$(awk '/Total Size:/{print $3}' <<<"$out")
+    if [[ -z ${n:-} && $s3rc -ne 0 ]]; then
+      f archive.error "$(head -1 "$s3err" | sed 's/^[[:space:]]*//')"
+      f archive.objects ""; f archive.bytes ""; f archive.usd_month ""
+    else
+      f archive.objects "${n:-0}"; f archive.bytes "${sz:-0}"
+      f archive.usd_month "$(awk -v x="${sz:-0}" -v r="$CG_S3_USD_GB_MONTH" 'BEGIN{printf "%.2f", x/1073741824*r}')"
+    fi
+    rm -f "$s3err"
+  fi
+  f archive.expiry_days "$(cw_expiry_days)"
+
+  # What .env decides, as facts - never the values of the secrets themselves.
+  f config.disk_gb "${GAME_DISK_GB:-50}"
+  f config.spot "${GAME_SPOT:-auto}"
+  f config.instance_type "$TYPE"
+  f config.notifications "$([[ -n ${GAME_NTFY_URL:-} ]] && echo yes || echo no)"
+  f config.tailscale_api_key "$([[ -n ${TAILSCALE_API_KEY:-} ]] && echo yes || echo no)"
+  f config.alert_email "$([[ -n ${EMAIL_ALERTS:-${GAME_ALERT_EMAIL:-}} ]] && echo yes || echo no)"
+  f archive.decision "$(cw_archive_line)"
+
+  budget=$(aws budgets describe-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" \
+    --query 'Budget.BudgetLimit.Amount' --output text 2>/dev/null || echo "")
+  if [[ -n $budget && $budget != None ]]; then
+    spent=$(aws budgets describe-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" \
+      --query 'Budget.CalculatedSpend.ActualSpend.Amount' --output text 2>/dev/null || echo 0)
+    f budget.limit "$budget"; f budget.spent "${spent:-0}"
+  fi
+  nsubs=$(aws budgets describe-notifications-for-budget --account-id "$acct" \
+    --budget-name "${TS_HOST}-monthly" --query 'length(Notifications)' --output text 2>/dev/null || echo 0)
+  f budget.alerts "${nsubs:-0}"
+
+  # A stream running from this laptop. Local, free to ask, and the only way an
+  # app can know that `cg open` is already up - it holds the lock for as long as
+  # Moonlight is on screen, even if whatever started it has gone.
+  local held spid ssince
+  if held=$(session_running); then
+    read -r spid ssince <<<"$held"
+    f session.pid "$spid"
+    f session.started "${ssince:-}"
+    [[ ${ssince:-} =~ ^[0-9]+$ ]] && f session.age_s "$(( $(date +%s) - ssince ))"
+  else
+    f session.pid ""
+  fi
+
+  command -v tailscale >/dev/null && tailscale status >/dev/null 2>&1 && f local.tailscale up || f local.tailscale down
+  command -v moonlight >/dev/null && f local.moonlight yes || f local.moonlight no
+  [[ -f "$HOME/.ssh/${TS_HOST}.pem" ]] && f local.ssh_key yes || f local.ssh_key no
+  [[ -n ${TAILSCALE_AUTH_KEY:-${GAME_TS_AUTHKEY:-}} ]] && f local.auth_key yes || f local.auth_key no
+  tsn="${GAME_TS_NODE:-$TS_HOST}"
+  node=$(tailscale status 2>/dev/null | grep "[[:space:]]${tsn}[[:space:]]" | head -1)
+  if [[ -n $node ]]; then
+    # Column 1 is the address, column 2 the machine name. The report used to
+    # print the address, which reads as if the node had no name.
+    f tailnet.node "$(awk '{print $2}' <<<"$node")"
+    f tailnet.ip "$(awk '{print $1}' <<<"$node")"
+    [[ $node == *offline* ]] && f tailnet.online no || f tailnet.online yes
+  else
+    f tailnet.node ""; f tailnet.online no
+  fi
+}
+
+status() { # status [--json]
+  local -A F=(); local k v
+  while IFS=$'\t' read -r k v; do F[$k]=${v-}; done < <(status_facts)
+  [[ ${1:-} == --json ]] && { status_json; return; }
+
+  local mark_ok='  [ok]   ' mark_no='  [--]   '
+  ec2() { aws ec2 "$@" --region "$REGION"; }
+
+  echo "ACCOUNT"
+  printf '  id              %s\n' "${F[account.id]:-}"
+  printf '  plan            %s%s\n' "${F[account.plan]:-}" \
+    "$([[ ${F[account.plan]:-} == FREE ]] && echo '   <- cannot launch GPU instances at all' || true)"
+  printf '  credits         $%s\n' "${F[account.credits]:-}"
+
+  echo
+  echo "QUOTAS in $REGION"
+  printf '  %s needs %s vCPU\n' "$TYPE" "${F[quota.vcpus]:-}"
+  awk -v q="${F[quota.on_demand]:-}" -v v="${F[quota.vcpus]:-}" 'BEGIN{s=(q>=v?"":"  <- too low to launch"); printf "  on-demand G/VT  %.0f vCPU%s\n", q, s}'
+  awk -v q="${F[quota.spot]:-}" -v v="${F[quota.vcpus]:-}" 'BEGIN{s=(q>=v?"":"  <- GAME_SPOT=1 will fail"); printf "  spot G/VT       %.0f vCPU%s\n", q, s}'
+
+  if [[ -n ${F[error.credentials]:-} ]]; then
+    echo
+    echo "CREDENTIALS"
+    printf '  %s\n' "${F[error.credentials]}"
+    printf '  Your games are in S3 and nothing here can see them right now.\n'
+    printf '  Fix the credentials (cg check --fix asks for a key), then run this again.\n'
+  fi
+  echo
+  echo "RESOURCES in $REGION"
+  if [[ -n ${F[error.credentials]:-} ]]; then
+    # Printing "none", "0" and "not set up yet" here would describe an account
+    # nobody looked at. Say that instead.
+    printf '  unknown - the credentials above were rejected, so nothing was read\n'
+  else
+    if [[ -n ${F[box.id]:-} ]]; then
+      printf '  instance        %s  %s  %s\n' "${F[box.id]:-}" "${F[box.type]:-}" "${F[box.state]:-}"
+      printf '  public ip       %s\n' "${F[box.public_ip]:-}"
+      printf '  launched        %s\n' "${F[box.launched]:-}"
+    else
+      printf '  instance        none\n'
+    fi
+    # A stream held open from this laptop, which is why a second `cg open` refuses.
+    if [[ -n ${F[session.pid]:-} ]]; then
+      printf '  streaming       yes - cg open is running here (pid %s%s)\n' "${F[session.pid]:-}" \
+        "$([[ -n ${F[session.age_s]:-} ]] && printf ', %s' "$(_cg_dur "${F[session.age_s]:-}")" || true)"
+    fi
+    printf '  volumes         %s GB total\n' "${F[res.volumes_gb]:-}"
+    printf '  snapshots       %s\n' "${F[res.snapshots]:-}"
+    printf '  saved images    %s\n' "${F[res.images]:-}"
+    printf '  elastic ips     %s%s\n' "${F[res.elastic_ips]:-}" \
+      "$([[ ${F[res.elastic_ips]:-} != 0 ]] && echo '   <- these bill while idle' || true)"
+    printf '  key pair        %s\n' "${F[res.key_pair]:-}"
+    printf '  security group  %s\n' "${F[res.security_group]:-}"
+    if [[ -n ${F[old_volume.id]:-} ]]; then
+      printf '  old EBS volume  %s  %s GB in %s  (~$%.2f/mo, LEGACY - cg games --delete)\n' \
+        "${F[old_volume.id]:-}" "${F[old_volume.gb]:-}" "${F[old_volume.az]:-}" \
+        "$(awk -v s="${F[old_volume.gb]:-}" -v r="$CG_EBS_USD_GB_MONTH" 'BEGIN{printf "%.2f", s*r}')"
+    else
+      if [[ -z ${F[archive.bucket]:-} ]]; then
+        printf '  game library    not set up yet - cg init creates it\n'
+      elif [[ -n ${F[archive.error]:-} ]]; then
+        # Unknown, not empty. The difference is 160 GB of games.
+        printf '  game library    s3://%s  UNREADABLE - %s\n' "${F[archive.bucket]:-}" "${F[archive.error]:-}"
+        printf '                  this says nothing about what is in it\n'
+      elif [[ ${F[archive.objects]:-0} -eq 0 ]]; then
+        printf '  game library    s3://%s  EMPTY - no games archived\n' "${F[archive.bucket]:-}"
+      else
+        printf '  game library    s3://%s  %s objects, %s  ($%s/mo)\n' "${F[archive.bucket]:-}" \
+          "${F[archive.objects]:-}" \
+          "$(numfmt --to=iec --suffix=B "${F[archive.bytes]:-}" 2>/dev/null || echo "${F[archive.bytes]:-}B")" \
+          "${F[archive.usd_month]:-}"
+      fi
+      iam_lines
+      stranded_spot_note "$REGION" "${INSTANCE_ID:-}"
+    fi
+  fi
+  if [[ ${F[res.security_group]:-} != none ]]; then
+    local ingress p fp c
+    ingress=$(ec2 describe-security-groups --group-ids "${F[res.security_group]:-}" \
       --query 'SecurityGroups[0].IpPermissions[].[IpProtocol,FromPort,IpRanges[0].CidrIp]' --output text 2>/dev/null)
-    while read -r p f c; do
-      [[ -n ${p:-} && $p != None ]] && printf '    inbound       %s/%s from %s\n' "$p" "$f" "$c"
+    while read -r p fp c; do
+      [[ -n ${p:-} && $p != None ]] && printf '    inbound       %s/%s from %s\n' "$p" "$fp" "$c"
     done <<< "$ingress"
   fi
 
   echo
   echo "COST GUARDS"
-  local acct budget limit
-  acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
-  budget=$(aws budgets describe-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" \
-    --query 'Budget.BudgetLimit.Amount' --output text 2>/dev/null || echo "")
-  if [[ -n $budget && $budget != None ]]; then
-    limit=$(aws budgets describe-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" \
-      --query 'Budget.CalculatedSpend.ActualSpend.Amount' --output text 2>/dev/null || echo 0)
+  if [[ -n ${F[budget.limit]:-} ]]; then
     # AWS Budgets populates CalculatedSpend up to 24h AFTER a budget is created,
     # and `cg init` recreates this budget on every build - so it reads $0.00
     # almost always. Printed bare, that says "nothing has been spent" beside a
     # real month of $12.17, which is the opposite of what a cost guard should
     # communicate.
-    if awk -v x="${limit:-0}" 'BEGIN{exit !(x+0==0)}'; then
-      printf '  budget          $%.0f limit, AWS reports $0.00 spent - not calculated yet\n' "$budget"
+    if awk -v x="${F[budget.spent]:-0}" 'BEGIN{exit !(x+0==0)}'; then
+      printf '  budget          $%.0f limit, AWS reports $0.00 spent - not calculated yet\n' "${F[budget.limit]:-}"
       printf '                  (Budgets lags up to 24h after creation; real spend: cg cost)\n'
     else
-      printf '  budget          $%.0f limit, $%.2f spent so far\n' "$budget" "$limit"
+      printf '  budget          $%.0f limit, $%.2f spent so far\n' "${F[budget.limit]:-}" "${F[budget.spent]:-}"
     fi
   else
     printf '  budget          missing\n'
   fi
-  local acct2 nsubs
-  acct2=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
-  nsubs=$(aws budgets describe-notifications-for-budget --account-id "$acct2" \
-    --budget-name "${TS_HOST}-monthly" --query 'length(Notifications)' --output text 2>/dev/null || echo 0)
-  # Budget notifications go straight to the address - there is no confirmation
-  # step to get stuck on, which is the whole reason for using them.
-  printf '  budget alerts   %s configured\n' "${nsubs:-0}"
-  # What the cloud watchdog will do to the game archive, in its own words.
-  printf '  game archive    %s\n' "$(cw_archive_line)"
+  printf '  budget alerts   %s configured\n' "${F[budget.alerts]:-}"
+  printf '  game archive    %s\n' "${F[archive.decision]:-}"
 
   echo
   echo "LOCAL"
-  command -v tailscale >/dev/null && tailscale status >/dev/null 2>&1 \
-    && { mark ok; echo "tailscale up"; } || { mark no; echo "tailscale not running"; }
-  command -v moonlight >/dev/null && { mark ok; echo "moonlight installed"; } \
-    || { mark no; echo "moonlight missing (pacman -S moonlight-qt)"; }
-  [[ -f "$HOME/.ssh/${TS_HOST}.pem" ]] && { mark ok; echo "ssh key ~/.ssh/${TS_HOST}.pem"; } \
-    || { mark no; echo "no ssh key ~/.ssh/${TS_HOST}.pem"; }
-  [[ -n ${TAILSCALE_AUTH_KEY:-${GAME_TS_AUTHKEY:-}} ]] && { mark ok; echo "tailscale auth key in .env"; } \
-    || { mark no; echo "no tailscale auth key (setup will prompt)"; }
-  local node tsn="${GAME_TS_NODE:-$TS_HOST}"
-  node=$(tailscale status 2>/dev/null | grep "[[:space:]]${tsn}[[:space:]]" | head -1)
-  if [[ -n $node ]]; then
+  [[ ${F[local.tailscale]:-} == up ]]  && { printf '%s' "$mark_ok"; echo "tailscale up"; } \
+                                     || { printf '%s' "$mark_no"; echo "tailscale not running"; }
+  [[ ${F[local.moonlight]:-} == yes ]] && { printf '%s' "$mark_ok"; echo "moonlight installed"; } \
+                                     || { printf '%s' "$mark_no"; echo "moonlight missing (pacman -S moonlight-qt)"; }
+  [[ ${F[local.ssh_key]:-} == yes ]]   && { printf '%s' "$mark_ok"; echo "ssh key ~/.ssh/${TS_HOST}.pem"; } \
+                                     || { printf '%s' "$mark_no"; echo "no ssh key ~/.ssh/${TS_HOST}.pem"; }
+  [[ ${F[local.auth_key]:-} == yes ]]  && { printf '%s' "$mark_ok"; echo "tailscale auth key in .env"; } \
+                                     || { printf '%s' "$mark_no"; echo "no tailscale auth key (setup will prompt)"; }
+  if [[ -n ${F[tailnet.node]:-} ]]; then
     # A node registered but offline is the normal state while the box is
     # stopped; it is only a problem if it lingers after a destroy, because the
     # name then collides and a rebuild joins as <host>-1.
-    if [[ $node == *offline* ]]; then
-      mark no; echo "tailnet node $(awk '{print $1}' <<<"$node") registered but offline"
-    else
-      mark ok; echo "tailnet node $(awk '{print $1}' <<<"$node") online"
-    fi
+    [[ ${F[tailnet.online]:-} == yes ]] && { printf '%s' "$mark_ok"; echo "tailnet node ${F[tailnet.node]:-} online"; } \
+                                      || { printf '%s' "$mark_no"; echo "tailnet node ${F[tailnet.node]:-} registered but offline"; }
   else
-    mark no; echo "no '${tsn}' node on the tailnet"
+    printf '%s' "$mark_no"; echo "no '${GAME_TS_NODE:-$TS_HOST}' node on the tailnet"
   fi
 }
 
+# The same facts as JSON, for a program - see docs/app-design.md. Rendered by
+# python so quoting and escaping are its problem, not a shell script's.
+status_json() {
+  local k
+  for k in "${!F[@]}"; do printf '%s\t%s\n' "$k" "${F[$k]}"; done | python3 -c '
+import json, sys
+out = {"host": sys.argv[1], "region": sys.argv[2], "instance_type": sys.argv[3]}
+NUM = {"config.disk_gb","quota.vcpus","quota.on_demand","quota.spot","res.volumes_gb","res.snapshots",
+       "spec.vcpus","spec.memory_mib","spec.gpu_memory_mib",
+       "session.pid","session.started","session.age_s",
+       "res.images","res.elastic_ips","archive.objects","archive.bytes","archive.usd_month",
+       "archive.expiry_days","budget.limit","budget.spent","budget.alerts","old_volume.gb"}
+BOOL = {"local.tailscale": "up", "local.moonlight": "yes", "local.ssh_key": "yes",
+        "local.auth_key": "yes", "tailnet.online": "yes", "config.notifications": "yes",
+        "config.tailscale_api_key": "yes", "config.alert_email": "yes"}
+for line in sys.stdin:
+    k, _, v = line.rstrip("\n").partition("\t")
+    if not k: continue
+    if k in BOOL:      val = (v == BOOL[k])
+    elif k in NUM:
+        try: val = float(v) if "." in v else int(v)
+        except ValueError: val = None
+    else:              val = v or None
+    section, _, field = k.partition(".")
+    out.setdefault(section, {})[field] = val
+# A box that does not exist is null, not an object of empty strings. The same
+# for a session: no pid means nothing is streaming from this laptop.
+if not out.get("box", {}).get("id"): out["box"] = None
+if not out.get("session", {}).get("pid"): out["session"] = None
+print(json.dumps(out, indent=2, sort_keys=True))
+' "$TS_HOST" "$REGION" "$TYPE"
+}
+
+# `cg cost --json`: the resources that still bill, plus everything the one Cost
+# Explorer call knows. Same call, same price - see docs/app-design.md.
+cost_json() {
+  local ce b out n sz credits
+  ce=$(mktemp)
+  aws ce get-cost-and-usage --region us-east-1 \
+    --time-period "Start=$(date -u +%Y-%m-01),End=$(date -u -d tomorrow +%Y-%m-%d)" \
+    --granularity DAILY --metrics UnblendedCost UsageQuantity \
+    --filter '{"Dimensions":{"Key":"RECORD_TYPE","Values":["Usage"]}}' \
+    --group-by Type=DIMENSION,Key=USAGE_TYPE \
+    --query 'ResultsByTime[].{d:TimePeriod.Start,g:Groups[].{u:Keys[0],c:Metrics.UnblendedCost.Amount,q:Metrics.UsageQuantity.Amount}}' \
+    --output json > "$ce" 2>/dev/null
+  credits=$(aws freetier get-account-plan-state --region us-east-1 \
+    --query accountPlanRemainingCredits.amount --output text 2>/dev/null || echo "")
+  b="${GAME_S3_BUCKET:-}"
+  if [[ -n $b ]]; then
+    out=$(aws s3 ls "s3://$b/steam/" --recursive --summarize 2>/dev/null | tail -2) || true
+    n=$(awk '/Total Objects:/{print $3}' <<<"$out"); sz=$(awk '/Total Size:/{print $3}' <<<"$out")
+  fi
+  # The env prefix belongs on the process that READS it: in `A | B`, an
+  # assignment written before A is A's alone, which left every field null.
+  python3 lib/cost-daily.py --json < "$ce" \
+    | CJ_HOST="$TS_HOST" CJ_REGION="$REGION" CJ_ID="${id:-}" CJ_STATE="${state:-}" \
+      CJ_DISK="${disk_gb:-0}" CJ_SNAP="${snap_gb:-0}" CJ_IMAGES="${imgs:-0}" \
+      CJ_KEY="$([[ ${key:-0} != 0 ]] && echo 1 || echo 0)" \
+      CJ_SG="$([[ ${sg:-0} != 0 ]] && echo 1 || echo 0)" CJ_BUDGET="${budget:-}" \
+      CJ_CREDITS="$credits" CJ_BUCKET="$b" CJ_OBJECTS="${n:-0}" CJ_BYTES="${sz:-0}" \
+      CJ_DECISION="$(cw_archive_line)" \
+      python3 -c '
+import json, sys, os
+ce = json.load(sys.stdin)
+g = os.environ.get
+def num(v):
+    try: return float(v)
+    except (TypeError, ValueError): return None
+inst = g("CJ_ID") or None
+bytes_ = num(g("CJ_BYTES")) or 0
+out = {
+  "host": g("CJ_HOST"), "region": g("CJ_REGION"), "month": ce,
+  "credits_usd": num(g("CJ_CREDITS")),
+  "resources": {
+    "instance": {"id": inst, "state": g("CJ_STATE")} if inst else None,
+    "volumes_gb": num(g("CJ_DISK")), "snapshots_gb": num(g("CJ_SNAP")),
+    "images": num(g("CJ_IMAGES")), "key_pair": g("CJ_KEY") == "1",
+    "security_group": g("CJ_SG") == "1", "budget_usd": num(g("CJ_BUDGET")),
+  },
+  "archive": {
+    "bucket": g("CJ_BUCKET") or None,
+    "objects": num(g("CJ_OBJECTS")), "bytes": bytes_ or None,
+    "usd_month": round(bytes_ / 1073741824 * float(g("CG_S3_USD_GB_MONTH") or 0), 2) if bytes_ else None,
+    "decision": g("CJ_DECISION") or None,
+  },
+  # The prices themselves, from lib/rates.sh. A screen that must print a rate
+  # reads it here rather than keeping its own copy - the app holds no prices.
+  "rates": {
+    "s3_gb_month":       float(g("CG_S3_USD_GB_MONTH") or 0),
+    "ebs_gb_month":      float(g("CG_EBS_USD_GB_MONTH") or 0),
+    "snapshot_gb_month": float(g("CG_SNAPSHOT_USD_GB_MONTH") or 0),
+    "egress_gb":         float(g("CG_EGRESS_USD_GB") or 0),
+    "egress_free_gb":    float(g("CG_EGRESS_FREE_GB") or 0),
+    "ce_call_usd":       float(g("CG_CE_CALL_USD") or 0),
+    "inr_per_usd":       float(g("CG_INR_PER_USD") or 0),
+  },
+}
+# What still bills with no box at all: the archive, plus any volume or snapshot
+# left behind. One number, worked out once, here.
+archive_usd = out["archive"]["usd_month"] or 0.0
+vol = num(g("CJ_DISK")) or 0.0
+snap = num(g("CJ_SNAP")) or 0.0
+standby = (archive_usd
+           + vol * float(g("CG_EBS_USD_GB_MONTH") or 0)
+           + snap * float(g("CG_SNAPSHOT_USD_GB_MONTH") or 0))
+out["standby"] = {
+  "usd_month": round(standby, 2),
+  "usd_day": round(standby / 30.0, 4),
+  "archive_usd_month": round(archive_usd, 2),
+  "volumes_usd_month": round(vol * float(g("CG_EBS_USD_GB_MONTH") or 0), 2),
+  "snapshots_usd_month": round(snap * float(g("CG_SNAPSHOT_USD_GB_MONTH") or 0), 2),
+}
+print(json.dumps(out, indent=2, sort_keys=True))
+' || echo "{}"
+  rm -f "$ce"
+}
+
 cost() {
-  local id state rate hours disk_gb snap_gb imgs budget key sg DAILY=0
-  if [[ ${1:-} == --daily ]]; then DAILY=1; fi   # not `&&`: set -e would end the run
+  local id state rate hours disk_gb snap_gb imgs budget key sg DAILY=0 JSON=0
+  case ${1:-} in
+    --daily) DAILY=1 ;;
+    --json)  DAILY=1; JSON=1 ;;   # the JSON view is always day by day
+  esac
   ec2() { aws ec2 "$@" --region "$REGION"; }
 
   # Find the instance by tag rather than trusting .env: after a destroy the
@@ -246,6 +497,8 @@ cost() {
     --account-id "$(aws sts get-caller-identity --query Account --output text 2>/dev/null)" \
     --budget-name "${TS_HOST}-monthly" --query 'Budget.BudgetLimit.Amount' --output text 2>/dev/null || echo "")
 
+  if (( JSON )); then cost_json; return; fi
+
   echo "resources in $REGION:"
   printf '  instance        %s\n' "${id:-none}${id:+  ($state)}"
   printf '  volumes         %s GB %s\n' "${disk_gb:-0}" "$([[ ${disk_gb:-0} != 0 && -z $id ]] && echo '  <- ORPHANED, still billing')"
@@ -260,7 +513,7 @@ cost() {
     --query 'Volumes[0].[VolumeId,Size,AvailabilityZone]' --output text 2>/dev/null)
   if [[ -n ${gv:-} && $gv != None ]]; then
     printf '  old EBS volume  %s  %s GB in %s  (~$%.2f/mo, LEGACY - cg games --delete)\n' \
-      "$gv" "$gsz" "$gaz" "$(awk -v s="$gsz" 'BEGIN{printf "%.2f", s*0.0912}')"
+      "$gv" "$gsz" "$gaz" "$(awk -v s="$gsz" -v r="$CG_EBS_USD_GB_MONTH" 'BEGIN{printf "%.2f", s*r}')"
   else
     archive_line
     # The countdown belongs here too: this is the command people run while
@@ -306,13 +559,14 @@ cost() {
   # of 15. Storage genuinely is month-so-far. The month's compute is in the
   # "billed so far" section below, from Cost Explorer.
   echo "not yet billed (Cost Explorer lags about a day):"
-  awk -v h="${hours:-0}" -v r="$rate" -v g="${disk_gb:-0}" -v sg="${snap_gb:-0}" -v day="$(date -u +%d)" 'BEGIN{
-    c=h*r; s=g*0.0912*(day/30.0); n=sg*0.0125*(day/30.0);
-    printf "  compute   %6.1f hrs  $%6.2f  (INR %5.0f)  THIS instance only\n", h, c, c*88;
-    printf "  storage   %6d GB   $%6.2f  (INR %5.0f)  month so far, accrues while stopped\n", g, s, s*88;
-    if (sg>0) printf "  snapshots %6d GB   $%6.2f  (INR %5.0f)\n", sg, n, n*88;
+  awk -v h="${hours:-0}" -v r="$rate" -v g="${disk_gb:-0}" -v sg="${snap_gb:-0}" -v day="$(date -u +%d)" \
+      -v ebs="$CG_EBS_USD_GB_MONTH" -v snap="$CG_SNAPSHOT_USD_GB_MONTH" -v inr="$CG_INR_PER_USD" 'BEGIN{
+    c=h*r; s=g*ebs*(day/30.0); n=sg*snap*(day/30.0);
+    printf "  compute   %6.1f hrs  $%6.2f  (INR %5.0f)  THIS instance only\n", h, c, c*inr;
+    printf "  storage   %6d GB   $%6.2f  (INR %5.0f)  month so far, accrues while stopped\n", g, s, s*inr;
+    if (sg>0) printf "  snapshots %6d GB   $%6.2f  (INR %5.0f)\n", sg, n, n*inr;
     printf "  ---------------------------------------\n";
-    printf "  estimate              $%6.2f  (INR %5.0f)\n", c+s+n, (c+s+n)*88;
+    printf "  estimate              $%6.2f  (INR %5.0f)\n", c+s+n, (c+s+n)*inr;
   }'
   echo "  (egress is counted under 'billed so far' below, not in this estimate)"
   if [[ -z $id ]]; then
@@ -672,7 +926,7 @@ case "${1:-}" in
              --fix) FIX=1 ;;
              *) echo "usage: setup [check [--fix]|status|cost [--daily]|clean|rebuild|destroy]" >&2; exit 1 ;;
            esac ;;
-  status)  status; exit 0 ;;
+  status)  shift; status "$@"; exit 0 ;;
   cost)    shift; cost "$@"; exit 0 ;;
   clean)   clean; exit 0 ;;
   rebuild) rebuild ;;

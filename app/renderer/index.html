@@ -1,0 +1,505 @@
+<!doctype html>
+<html class="dark" lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Everything is local: the Stitch export loaded Tailwind and the fonts from
+     CDNs, which this policy forbids, so both are vendored (npm run build:css). -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:;">
+<title>cg</title>
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="tailwind.css">
+</head>
+<body class="bg-surface font-body-md text-body-md text-on-surface min-h-screen">
+
+<header class="fixed top-0 left-0 right-0 h-12 z-50 bg-surface-container-lowest flex items-center justify-between px-margin select-none border-b border-surface-variant">
+  <div class="flex items-center gap-space-sm">
+    <span class="material-symbols-outlined text-primary text-[18px]" data-icon="sports_esports">&#xea28;</span>
+    <span class="font-code-md text-code-md font-medium tracking-tight">cg</span>
+    <span class="text-outline-variant font-code-sm text-code-sm">/</span>
+    <span class="font-body-sm text-body-sm text-on-surface-variant">personal cloud gaming</span>
+  </div>
+  <div class="flex items-center gap-space-sm">
+    <div class="flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container border border-surface-variant">
+      <span class="material-symbols-outlined text-secondary text-[14px]" data-icon="public">&#xe80b;</span>
+      <span class="font-code-sm text-code-sm text-on-surface-variant" id="chip-region">—</span>
+    </div>
+    <div class="flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container border border-surface-variant">
+      <div class="w-2 h-2 rounded-full bg-outline" id="dot-conn"></div>
+      <span class="font-code-sm text-code-sm text-on-surface-variant uppercase tracking-wider" id="chip-conn">idle</span>
+    </div>
+  </div>
+</header>
+
+<aside class="fixed left-0 top-12 bottom-0 w-60 bg-surface-container-low z-40 flex flex-col justify-between border-r border-surface-variant">
+  <div class="flex flex-col">
+    <nav class="flex flex-col gap-0.5 px-space-xs pt-space-md" id="nav">
+      <a class="nav-item on" data-view="dashboard" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="dashboard">&#xe871;</span><span>Dashboard</span></a>
+      <a class="nav-item" data-view="build" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="build_circle">&#xef48;</span><span>Build</span></a>
+      <a class="nav-item" data-view="library" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="stadia_controller">&#xf135;</span><span>Library</span></a>
+      <a class="nav-item" data-view="guards" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="shield">&#xe9e0;</span><span>Guards</span></a>
+      <a class="nav-item" data-view="cost" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="attach_money">&#xe227;</span><span>Cost</span></a>
+      <a class="nav-item" data-view="settings" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="settings">&#xe8b8;</span><span>Settings</span></a>
+      <a class="nav-item" data-view="logs" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="terminal">&#xeb8e;</span><span>Logs</span></a>
+    </nav>
+  </div>
+  <div class="p-space-md border-t border-surface-variant bg-surface-container-lowest">
+    <span class="font-label-caps text-label-caps uppercase text-on-surface-variant">The engine</span>
+    <p class="font-code-sm text-code-sm text-outline mt-space-xs leading-relaxed">
+      This window only runs <span class="text-secondary">cg</span>.<br>The scripts decide everything.
+    </p>
+  </div>
+</aside>
+
+<div class="pl-60">
+<main class="pt-12 min-h-screen bg-surface px-margin-desktop py-space-lg w-full">
+
+  <!-- Something cg could not read at all. Not a screen's problem: every screen's. -->
+  <div class="mb-space-lg p-space-md rounded-lg border border-error/50 bg-error/5" id="banner" hidden>
+    <p class="font-code-md text-code-md text-error" id="banner-title">—</p>
+    <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="banner-body"></p>
+  </div>
+
+  <div class="flex items-center justify-between gap-space-md pb-space-lg">
+    <div class="flex flex-col gap-space-xs">
+      <div class="flex items-center gap-space-sm">
+        <span class="font-headline-lg text-headline-lg" id="view-title">Dashboard</span>
+        <span class="text-outline-variant font-code-sm text-code-sm">/</span>
+        <span class="font-code-sm text-code-sm text-on-surface-variant" id="job-line">idle</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-space-sm">
+      <button id="refresh" class="btn"><span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span>Refresh<em id="refresh-cost" class="not-italic text-tertiary" hidden>$0.01</em></button>
+      <button id="goto" class="btn" hidden><span class="material-symbols-outlined text-[16px]" data-icon="bolt">&#xea0b;</span><span id="goto-label">running</span></button>
+      <button id="cancel" class="btn btn-danger" hidden><span class="material-symbols-outlined text-[16px]" data-icon="error">&#xf8b6;</span><span id="cancel-label">Stop</span></button>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <section data-view="dashboard">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter-desktop mb-space-xl">
+
+      <div class="flex flex-col justify-between p-space-lg rounded-lg bg-surface-container-low min-h-[320px]">
+        <div>
+          <div class="flex items-center justify-between pb-space-md">
+            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Instance stage</span>
+            <span class="material-symbols-outlined text-[18px] text-outline" data-icon="bolt">&#xea0b;</span>
+          </div>
+          <p class="font-headline-xl text-headline-xl mb-space-lg" id="box-state">—</p>
+          <dl class="grid grid-cols-2 gap-space-md">
+            <div><dt class="font-label-caps text-label-caps uppercase text-outline">instance type</dt>
+                 <dd class="font-code-md text-code-md mt-0.5" id="box-type">—</dd></div>
+            <div><dt class="font-label-caps text-label-caps uppercase text-outline">purchase</dt>
+                 <dd class="font-code-md text-code-md mt-0.5" id="box-region">—</dd></div>
+            <div><dt class="font-label-caps text-label-caps uppercase text-outline">uptime</dt>
+                 <dd class="font-code-md text-code-md mt-0.5" id="box-uptime">—</dd></div>
+            <div><dt class="font-label-caps text-label-caps uppercase text-outline">tailnet</dt>
+                 <dd class="font-code-md text-code-md mt-0.5 truncate" id="box-node">—</dd></div>
+          </dl>
+        </div>
+        <div>
+          <div class="flex gap-space-sm mt-space-lg">
+            <button class="btn btn-primary flex-1 justify-center" id="d-open" hidden>
+              <span class="material-symbols-outlined text-[18px]" data-icon="sports_esports">&#xea28;</span>Play
+            </button>
+            <button class="btn btn-primary flex-1 justify-center" id="d-build">
+              <span class="material-symbols-outlined text-[18px]" data-icon="rocket_launch">&#xeb9b;</span>Build box
+            </button>
+            <button class="btn btn-danger" id="d-destroy" hidden>
+              <span class="material-symbols-outlined text-[18px]" data-icon="delete">&#xe92e;</span>Destroy
+            </button>
+          </div>
+          <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="d-note">A build takes 10-20 minutes and starts billing.</p>
+        </div>
+      </div>
+
+      <div class="flex flex-col justify-between p-space-lg rounded-lg bg-surface-container-low min-h-[320px]">
+        <div>
+          <div class="flex items-center justify-between pb-space-md">
+            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Game archive</span>
+            <span class="material-symbols-outlined text-[18px] text-outline" data-icon="storage">&#xe1db;</span>
+          </div>
+          <p class="font-headline-xl text-headline-xl" id="arch-size">—</p>
+          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs">
+            <span id="arch-objects">—</span> objects · <span id="arch-cost">—</span> a month
+          </p>
+        </div>
+        <div class="flex items-start gap-space-xs p-space-sm rounded bg-surface-container mt-space-lg" id="arch-chip" hidden>
+          <span class="material-symbols-outlined text-[16px] text-tertiary mt-0.5" data-icon="schedule">&#xefd6;</span>
+          <span class="font-code-sm text-code-sm text-tertiary" id="arch-expiry"></span>
+        </div>
+      </div>
+
+      <div class="flex flex-col p-space-lg rounded-lg bg-surface-container-low min-h-[320px]">
+        <div class="flex items-center justify-between pb-space-md">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Cost guards</span>
+          <span class="material-symbols-outlined text-[18px] text-outline" data-icon="shield">&#xe9e0;</span>
+        </div>
+        <div class="flex flex-col gap-space-sm" id="pills"></div>
+      </div>
+    </div>
+
+    <div class="p-space-lg rounded-lg bg-surface-container-low">
+      <div class="flex items-center justify-between pb-space-md">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">This laptop</span>
+        <span class="font-code-sm text-code-sm text-outline" id="age-status"></span>
+      </div>
+      <div class="flex flex-wrap gap-space-sm" id="local-pills"></div>
+    </div>
+  </section>
+
+  <!-- Build -->
+  <section data-view="build" hidden>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop">
+
+      <!-- left: what to restore, and what fits -->
+      <div class="flex flex-col gap-gutter-desktop">
+        <div class="p-space-lg rounded-lg bg-surface-container-low">
+          <div class="flex items-start justify-between pb-space-md">
+            <div>
+              <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Archive to restore</span>
+              <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-hint">
+                Pulled from S3 while the box builds. Nothing is selected by default.
+              </p>
+            </div>
+            <span class="font-code-sm text-code-sm text-outline whitespace-nowrap" id="b-bucket">—</span>
+          </div>
+
+          <table class="w-full font-code-sm text-code-sm">
+            <thead class="text-outline">
+              <tr class="text-left border-b border-surface-variant">
+                <th class="py-space-xs pr-space-sm font-normal w-6"></th>
+                <th class="py-space-xs pr-space-md font-normal">GAME</th>
+                <th class="py-space-xs px-space-md font-normal text-right">SIZE</th>
+                <th class="py-space-xs pl-space-md font-normal text-right">ARCHIVED</th>
+              </tr>
+            </thead>
+            <tbody id="b-games"></tbody>
+          </table>
+
+          <div class="mt-space-lg p-space-md rounded bg-surface-container" id="b-alloc">
+            <div class="flex items-center justify-between font-code-sm text-code-sm">
+              <span class="text-outline uppercase tracking-wider">NVMe allocation</span>
+              <span id="b-fit-pct" class="text-primary">0%</span>
+            </div>
+            <div class="h-1.5 rounded-full bg-surface-container-lowest mt-space-sm overflow-hidden">
+              <div class="h-full bg-primary" id="b-bar" style="width:0%"></div>
+            </div>
+            <div class="flex items-center justify-between mt-space-sm font-code-sm text-code-sm">
+              <span id="b-fit" class="text-on-surface-variant">nothing selected</span>
+              <span id="b-buffer" class="text-outline"></span>
+            </div>
+          </div>
+
+          <p class="font-code-sm text-code-sm text-tertiary mt-space-md" id="b-session" hidden></p>
+          <div class="flex items-center justify-between gap-space-md mt-space-lg">
+            <div class="font-code-sm text-code-sm text-on-surface-variant" id="b-chip">—</div>
+            <div class="flex items-center gap-space-sm">
+              <button class="btn btn-primary" id="b-build">
+                <span class="material-symbols-outlined text-[18px]" data-icon="rocket_launch">&#xeb9b;</span>Build (10-20 min)
+              </button>
+              <button class="btn btn-primary" id="b-open" hidden>
+                <span class="material-symbols-outlined text-[18px]" data-icon="sports_esports">&#xea28;</span>Play
+              </button>
+              <button class="btn btn-danger" id="b-destroy" hidden>
+                <span class="material-symbols-outlined text-[18px]" data-icon="delete">&#xe92e;</span>Destroy
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-space-lg rounded-lg bg-surface-container-low">
+          <div class="flex items-center justify-between pb-space-md">
+            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">The machine</span>
+            <span class="font-code-sm text-code-sm text-outline" id="b-ready">from your quota</span>
+          </div>
+          <div class="grid grid-cols-4 gap-space-sm" id="b-spec"></div>
+        </div>
+      </div>
+
+      <!-- right: the build itself -->
+      <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col h-full min-h-[560px]">
+        <div class="flex items-center justify-between pb-space-md">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline" id="b-panel">Provisioning</span>
+          <span class="font-code-sm text-code-sm" id="b-status">not running</span>
+        </div>
+
+        <ol class="flex flex-col gap-space-xs max-h-[28vh] overflow-y-auto pr-space-xs" id="b-steps">
+          <li class="font-code-sm text-code-sm text-outline">Steps appear here as cg reports them.</li>
+        </ol>
+
+        <div class="mt-space-lg rounded bg-surface-container-lowest overflow-hidden flex-1 flex flex-col min-h-0">
+          <div class="flex items-center justify-between px-space-md py-space-xs border-b border-surface-variant">
+            <span class="font-code-sm text-code-sm text-outline" id="b-log-title">build log</span>
+            <label class="font-code-sm text-code-sm text-outline flex items-center gap-space-xs">
+              <input type="checkbox" id="b-follow" class="accent-primary" checked>auto-scroll
+            </label>
+          </div>
+          <div class="font-code-sm text-code-sm flex-1 min-h-[180px] max-h-[38vh] overflow-y-auto px-space-md py-space-sm" id="b-log"></div>
+        </div>
+
+        <div class="flex items-center justify-between mt-space-md pt-space-md border-t border-surface-variant">
+          <span class="font-code-sm text-code-sm text-outline" id="b-burn">the box bills from the moment it launches</span>
+          <span class="font-code-sm text-code-sm text-outline" id="b-elapsed"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Library -->
+  <section data-view="library" hidden>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter-desktop mb-space-xl">
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Archived</span>
+        <p class="font-headline-xl text-headline-xl mt-space-sm" id="lib-total">—</p>
+        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="lib-count">press Refresh</p>
+      </div>
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Costs you</span>
+        <p class="font-headline-xl text-headline-xl mt-space-sm text-tertiary" id="lib-cost">—</p>
+        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="lib-rate">S3 standard</p>
+      </div>
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
+        <div class="flex items-center justify-between">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Fits on the box</span>
+          <span class="pill" id="lib-fit-chip" hidden>—</span>
+        </div>
+        <p class="font-headline-xl text-headline-xl mt-space-sm" id="lib-fit-num">—</p>
+        <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden">
+          <div class="h-full bg-secondary" id="lib-bar" style="width:0%"></div>
+        </div>
+        <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="lib-fit">—</p>
+      </div>
+    </div>
+
+    <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop">
+      <p class="font-code-sm text-code-sm text-error pb-space-sm" id="lib-error" hidden></p>
+      <div class="flex items-start justify-between pb-space-md">
+        <div>
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Archived games</span>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5" id="lib-note">
+            Written by the push that runs before every destroy.
+          </p>
+        </div>
+        <span class="font-code-sm text-code-sm text-outline whitespace-nowrap" id="lib-bucket">—</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full font-code-sm text-code-sm">
+          <thead class="text-outline">
+            <tr class="text-left border-b border-surface-variant">
+              <th class="py-space-xs pr-space-md font-normal">GAME</th>
+              <th class="py-space-xs px-space-md font-normal text-right">SIZE</th>
+              <th class="py-space-xs px-space-md font-normal">SHARE</th>
+              <th class="py-space-xs px-space-md font-normal text-right">COSTS</th>
+              <th class="py-space-xs pl-space-md font-normal text-right">ARCHIVED</th>
+            </tr>
+          </thead>
+          <tbody id="lib-rows"><tr><td class="py-space-sm text-outline" colspan="5">Press Refresh.</td></tr></tbody>
+          <tfoot id="lib-foot" class="border-t border-surface-variant"></tfoot>
+        </table>
+      </div>
+      <p class="font-code-sm text-code-sm text-tertiary mt-space-md" id="lib-orphans" hidden></p>
+    </div>
+  </section>
+
+  <!-- Guards -->
+  <section data-view="guards" hidden>
+    <div class="flex items-center justify-between pb-space-md">
+      <div>
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Layered shutdown guards</span>
+        <p class="font-code-sm text-code-sm text-outline mt-0.5">What stops a GPU box billing when you forget it. Numbered by independence.</p>
+      </div>
+      <span class="font-code-sm text-code-sm text-outline" id="age-watcher"></span>
+    </div>
+    <div class="flex flex-col gap-gutter-desktop" id="guard-cards"></div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mt-space-xl">
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Budget</span>
+        <p class="font-headline-md text-headline-md mt-space-sm" id="g-budget">—</p>
+        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="g-budget-note">
+          It emails you. It does not stop anything.
+        </p>
+      </div>
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Shutdown action</span>
+        <p class="font-headline-md text-headline-md mt-space-sm" id="g-shutdown">—</p>
+        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="g-shutdown-note">
+          decided at launch; a spot box must terminate
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Cost -->
+  <section data-view="cost" hidden>
+    <div class="flex flex-wrap items-center gap-space-sm mb-space-lg font-code-sm text-code-sm">
+      <span class="pill" id="c-cycle">billing cycle —</span>
+      <span class="text-outline" id="c-age">nothing fetched yet</span>
+      <span class="text-outline ml-auto" id="c-rate">—</span>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter-desktop mb-space-xl">
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
+        <div class="flex items-center justify-between">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">This month</span>
+          <span class="pill" id="c-cap-chip" hidden>—</span>
+        </div>
+        <p class="font-headline-xl text-headline-xl mt-space-sm" id="c-month">—</p>
+        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="c-month-usd">press Fetch</p>
+        <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden" id="c-cap-wrap" hidden>
+          <div class="h-full bg-primary" id="c-cap-bar" style="width:0%"></div>
+        </div>
+        <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="c-cap-note"></p>
+      </div>
+
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Credits left</span>
+        <p class="font-headline-xl text-headline-xl mt-space-sm text-secondary" id="c-credits">—</p>
+        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs">AWS credits, spent before your card</p>
+        <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="c-credits-note"></p>
+      </div>
+
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
+        <div class="flex items-center justify-between">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Latest day</span>
+          <span class="pill" id="c-today-chip" hidden>—</span>
+        </div>
+        <p class="font-headline-xl text-headline-xl mt-space-sm" id="c-today">—</p>
+        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="c-today-note">—</p>
+        <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="c-today-base"></p>
+      </div>
+    </div>
+
+    <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop">
+      <div class="pb-space-md">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Daily usage</span>
+        <p class="font-code-sm text-code-sm text-outline mt-0.5">
+          Days with nothing billed are left out. Cost Explorer lags about a day, and each Refresh
+          here is one call - $0.01 - so this screen never fetches on its own.
+        </p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full font-code-sm text-code-sm" id="c-table">
+          <thead class="text-outline">
+            <tr class="text-left border-b border-surface-variant">
+              <th class="py-space-xs pr-space-md font-normal">DATE</th>
+              <th class="py-space-xs px-space-md font-normal text-right">HOURS</th>
+              <th class="py-space-xs px-space-md font-normal text-right">COMPUTE</th>
+              <th class="py-space-xs px-space-md font-normal text-right">S3</th>
+              <th class="py-space-xs px-space-md font-normal text-right">DISK</th>
+              <th class="py-space-xs px-space-md font-normal text-right">EGRESS</th>
+              <th class="py-space-xs px-space-md font-normal text-right">API</th>
+              <th class="py-space-xs px-space-md font-normal text-right">OTHER</th>
+              <th class="py-space-xs px-space-md font-normal text-right">TOTAL ($)</th>
+              <th class="py-space-xs pl-space-md font-normal text-right">TOTAL (₹)</th>
+            </tr>
+          </thead>
+          <tbody id="c-rows"><tr><td class="py-space-sm text-outline" colspan="10">Nothing fetched yet - this is the only command here that bills.</td></tr></tbody>
+          <tfoot id="c-foot" class="border-t border-surface-variant"></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop">
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
+        <div class="flex items-center justify-between pb-space-md">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">What still bills with no box</span>
+          <span class="pill" id="c-standby" hidden>—</span>
+        </div>
+        <div class="p-space-md rounded bg-surface-container" id="c-arch-card" hidden>
+          <div class="flex items-start justify-between gap-space-md">
+            <div>
+              <span class="font-code text-code">Game archive</span>
+              <span class="pill ml-space-xs" id="c-arch-size">—</span>
+              <p class="font-code-sm text-code-sm text-outline mt-space-xs" id="c-arch-note">—</p>
+            </div>
+            <span class="font-code-sm text-code-sm text-tertiary whitespace-nowrap" id="c-arch-rate">—</span>
+          </div>
+          <p class="font-code-sm text-code-sm text-tertiary mt-space-sm" id="c-arch-decision"></p>
+        </div>
+        <div class="mt-space-md flex flex-col gap-space-xs" id="c-bills"></div>
+        <p class="font-code-sm text-code-sm text-outline mt-space-md pt-space-md border-t border-surface-variant" id="c-standby-note">—</p>
+      </div>
+
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
+        <div class="flex items-center justify-between">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Streaming allowance</span>
+          <span class="pill" id="c-egress-pct" hidden>—</span>
+        </div>
+        <p class="font-headline-xl text-headline-xl mt-space-sm" id="c-egress">—</p>
+        <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden">
+          <div class="h-full bg-primary" id="c-egress-bar" style="width:0%"></div>
+        </div>
+        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm" id="c-egress-note">
+          the first 100 GB a month is free
+        </p>
+        <div class="mt-space-md pt-space-md border-t border-surface-variant flex flex-col gap-space-xs">
+          <div class="row"><span class="font-code-sm text-code-sm text-outline">after the free 100 GB</span>
+            <span class="font-code-sm text-code-sm" id="c-egress-rate">—</span></div>
+          <div class="row"><span class="font-code-sm text-code-sm text-outline">your bitrate spends</span>
+            <span class="font-code-sm text-code-sm" id="c-egress-burn">—</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section data-view="settings" hidden>
+    <div class="p-space-lg rounded-lg bg-surface-container-low">
+      <div class="pb-space-md">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Settings</span>
+        <p class="font-code-sm text-code-sm text-outline mt-0.5">
+          They live in <span class="text-secondary">.env</span>, where cg owns them. Secrets are never shown here -
+          only whether they are set. Change them with <span class="text-secondary">cg check --fix</span> or by editing the file.
+        </p>
+      </div>
+      <div class="flex flex-col" id="s-rows"></div>
+      <div class="flex items-center justify-between mt-space-lg pt-space-md border-t border-surface-variant">
+        <p class="font-code-sm text-code-sm text-outline">
+          Checks every prerequisite - account, quota, key pair, tools - and creates nothing.
+        </p>
+        <button id="check" class="btn"><span class="material-symbols-outlined text-[16px]" data-icon="check_circle">&#xf0be;</span>Run check</button>
+      </div>
+      <pre class="font-code-sm text-code-sm whitespace-pre-wrap mt-space-md text-on-surface-variant" id="s-check" hidden></pre>
+    </div>
+  </section>
+
+  <!-- Logs -->
+  <section data-view="logs" hidden>
+    <div class="p-space-lg rounded-lg bg-surface-container-low">
+      <div class="flex items-center justify-between pb-space-md">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Event stream</span>
+      </div>
+      <div class="font-code-sm text-code-sm max-h-[65vh] overflow-auto" id="log"></div>
+    </div>
+  </section>
+
+</main>
+</div>
+
+<dialog id="confirm" class="rounded-lg bg-surface-container-low text-on-surface border border-surface-variant p-space-lg min-w-[460px] max-w-[560px]">
+  <form method="dialog">
+    <p class="font-headline-md text-headline-md" id="confirm-title"></p>
+    <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm whitespace-pre-line" id="confirm-body"></p>
+    <menu class="flex justify-end gap-space-sm mt-space-lg p-0">
+      <button value="no" class="btn">Cancel</button>
+      <button value="yes" class="btn btn-primary" id="confirm-yes">Continue</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="ask" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[420px]">
+  <form method="dialog">
+    <p class="font-code-md text-code-md mb-space-md" id="ask-prompt"></p>
+    <input id="ask-input" autocomplete="off" spellcheck="false"
+           class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
+    <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+      <button value="send" class="btn btn-primary">Answer</button>
+    </menu>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

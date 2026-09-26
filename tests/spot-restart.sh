@@ -22,9 +22,9 @@ contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 check()    { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: got '$2' want '$3'"; fail=$((fail+1)); fi; }
 
-mkdir -p "$T/bin" "$T/home/.ssh" "$T/lib"
+mkdir -p "$T/bin" "$T/home/.ssh" "$T/lib" "$T/run"
 cp "$REPO/lib/game" "$T/lib/game"
-cp "$REPO/lib/common.sh" "$T/lib/common.sh"
+cp "$REPO/lib/common.sh" "$REPO/lib/session.sh" "$T/lib/"
 cat > "$T/.env" <<EOF
 GAME_INSTANCE_ID=i-test
 GAME_REGION=ap-south-2
@@ -52,8 +52,8 @@ for c in tailscale moonlight ssh scp; do
 done
 
 run() {
-  rm -f "$T/log"
-  ( cd "$T" && HOME="$T/home" LOG="$T/log" PATH="$T/bin:$PATH" \
+  rm -f "$T/log" "$T/run/cg-session-$(id -u).pid"
+  ( cd "$T" && HOME="$T/home" LOG="$T/log" PATH="$T/bin:$PATH" XDG_RUNTIME_DIR="$T/run" \
       LIFECYCLE="${LIFECYCLE:-none}" SPOT_STATE="${SPOT_STATE:-active}" \
       STATE="${STATE:-stopped}" timeout 25 bash ./lib/game up 2>&1 )
 }

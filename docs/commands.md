@@ -12,7 +12,9 @@ rather than reimplementing them.
 | `cg open` | Start, stream, and on exit offer to end the box. **Costs money** |
 | `cg stop` | Mirror the games to S3, then end the box - destroy on spot (a spot box cannot be stopped), stop on demand |
 | `cg status` | Instance, disks, guards, tailnet, game library, local tools |
+| `cg status --json` | The same facts as data, for a program - see [app-design.md](app-design.md) |
 | `cg library` | What is on the box vs in S3, and what the archive costs |
+| `cg library list --json` | The archive per game, its orphans and what fits on the box, as data |
 | `cg library push` | Mirror the games to S3 now (`--verify` for a full comparison) |
 | `cg library pull` | Restore the games from S3 now |
 | `cg games` | What Steam has: installed, downloading (with progress), running, archived |
@@ -28,9 +30,12 @@ rather than reimplementing them.
 | `cg destroy --all` | The box **and the whole account footprint** - archive, bucket, IAM, budget. Asks you to type `DESTROY-ALL` |
 | `cg check [--fix]` | Every preflight check, creates nothing. `--fix` first installs what the laptop is missing - AWS CLI v2, Tailscale, Moonlight, OpenSSH, curl, python3 - and signs in to Tailscale and AWS, after asking once. Any missing `.env` setting is asked for with its default shown and saved there |
 | `cg cost [--daily]` | Month-to-date spend and what still bills; `--daily` adds a day-by-day table, from the same single API call |
+| `cg cost --json` | The same call as data: per day, per usage type, hours, egress, what still bills |
+| `cg --version` | The commit, and the version of the event contract a program can rely on |
 | `cg log [what] [--watch]` | `build` \| `steam` \| `watchdog` \| `disk` \| `sunshine` |
 | `cg ssh [cmd]` | Shell on the box - resolves the suffixed tailnet name for you |
 | `cg watcher [--watch]` | Every guard, and whether each is genuinely armed - including what the cloud watchdog last decided, and when |
+| `cg watcher --json` | The same guards as data: armed, what each catches, its last decision |
 | `cg watchdog [status\|check\|logs\|install\|remove]` | The cloud watchdog: schedule and recent decisions; `check` runs it now as a dry run |
 | `cg notify` | Send a test push notification to `GAME_NTFY_URL` |
 | `cg ping [--watch]` | Latency, and **direct vs DERP relay** - the usual cause of a bad session |
@@ -131,7 +136,7 @@ Everything is safe to run again. The ones worth knowing:
 | Command | Second run |
 |---|---|
 | `cg init` | Reuses the instance and skips what is done - **but it starts a stopped box, so it costs money** |
-| `cg open` | Connects again if already running |
+| `cg open` | Refuses while a stream from this laptop is still open, and names the pid. Two Moonlight windows on one box share its GPU and spend egress twice |
 | `cg stop` | On spot, offers destroy again; on demand, says "already stopped" |
 | `cg clean` | Frees less each time; needs the box running |
 | `cg destroy` | No-op. The first run keeps nothing and asks nothing |
