@@ -77,23 +77,34 @@
 
   <!-- Dashboard -->
   <section data-view="dashboard">
+    <div class="flex flex-wrap items-center gap-space-sm mb-space-lg font-code-sm text-code-sm">
+      <span class="pill" id="d-session">session idle</span>
+      <span class="pill ml-auto" id="d-machine">—</span>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter-desktop mb-space-xl">
 
-      <div class="flex flex-col justify-between p-space-lg rounded-lg bg-surface-container-low min-h-[320px]">
+      <!-- the box -->
+      <div class="flex flex-col justify-between p-space-lg rounded-lg bg-surface-container-low min-h-[340px]">
         <div>
           <div class="flex items-center justify-between pb-space-md">
             <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Instance stage</span>
-            <span class="material-symbols-outlined text-[18px] text-outline" data-icon="bolt">&#xea0b;</span>
+            <div class="flex items-center gap-space-xs font-code-sm text-code-sm" id="d-stages"></div>
           </div>
-          <p class="font-headline-xl text-headline-xl mb-space-lg" id="box-state">—</p>
+          <div class="flex items-center gap-space-sm mb-space-lg">
+            <p class="font-headline-xl text-headline-xl" id="box-state">—</p>
+            <span class="pill" id="box-chip" hidden>—</span>
+          </div>
           <dl class="grid grid-cols-2 gap-space-md">
             <div><dt class="font-label-caps text-label-caps uppercase text-outline">instance type</dt>
                  <dd class="font-code-md text-code-md mt-0.5" id="box-type">—</dd></div>
             <div><dt class="font-label-caps text-label-caps uppercase text-outline">purchase</dt>
+                 <dd class="font-code-md text-code-md mt-0.5" id="box-buy">—</dd></div>
+            <div><dt class="font-label-caps text-label-caps uppercase text-outline">region</dt>
                  <dd class="font-code-md text-code-md mt-0.5" id="box-region">—</dd></div>
             <div><dt class="font-label-caps text-label-caps uppercase text-outline">uptime</dt>
                  <dd class="font-code-md text-code-md mt-0.5" id="box-uptime">—</dd></div>
-            <div><dt class="font-label-caps text-label-caps uppercase text-outline">tailnet</dt>
+            <div class="col-span-2"><dt class="font-label-caps text-label-caps uppercase text-outline">tailnet</dt>
                  <dd class="font-code-md text-code-md mt-0.5 truncate" id="box-node">—</dd></div>
           </dl>
         </div>
@@ -113,29 +124,77 @@
         </div>
       </div>
 
-      <div class="flex flex-col justify-between p-space-lg rounded-lg bg-surface-container-low min-h-[320px]">
+      <!-- what it is spending -->
+      <div class="flex flex-col justify-between p-space-lg rounded-lg bg-surface-container-low min-h-[340px]">
         <div>
           <div class="flex items-center justify-between pb-space-md">
-            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Game archive</span>
-            <span class="material-symbols-outlined text-[18px] text-outline" data-icon="storage">&#xe1db;</span>
+            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Spend control</span>
+            <span class="font-code-sm text-code-sm text-outline">month to date</span>
           </div>
-          <p class="font-headline-xl text-headline-xl" id="arch-size">—</p>
-          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs">
-            <span id="arch-objects">—</span> objects · <span id="arch-cost">—</span> a month
-          </p>
+          <p class="font-headline-xl text-headline-xl" id="d-spend">—</p>
+          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="d-spend-sub">not fetched yet</p>
+          <div class="flex items-start gap-space-xs p-space-sm rounded bg-surface-container mt-space-md">
+            <span class="material-symbols-outlined text-[16px] mt-0.5" data-icon="check_circle" id="d-burn-icon">&#xe86c;</span>
+            <span class="font-code-sm text-code-sm" id="d-burn">no box - nothing is billing by the hour</span>
+          </div>
+          <div class="flex items-end gap-0.5 h-16 mt-space-md" id="d-spark"></div>
         </div>
-        <div class="flex items-start gap-space-xs p-space-sm rounded bg-surface-container mt-space-lg" id="arch-chip" hidden>
-          <span class="material-symbols-outlined text-[16px] text-tertiary mt-0.5" data-icon="schedule">&#xefd6;</span>
-          <span class="font-code-sm text-code-sm text-tertiary" id="arch-expiry"></span>
+        <div class="flex items-center justify-between mt-space-md">
+          <span class="font-code-sm text-code-sm text-outline" id="d-projected">projected —</span>
+          <button class="btn" id="d-cost">
+            <span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span>Fetch<em class="not-italic text-tertiary" id="d-cost-price">$0.01</em>
+          </button>
         </div>
       </div>
 
-      <div class="flex flex-col p-space-lg rounded-lg bg-surface-container-low min-h-[320px]">
-        <div class="flex items-center justify-between pb-space-md">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Cost guards</span>
-          <span class="material-symbols-outlined text-[18px] text-outline" data-icon="shield">&#xe9e0;</span>
+      <!-- what is in S3 -->
+      <div class="flex flex-col justify-between p-space-lg rounded-lg bg-surface-container-low min-h-[340px]">
+        <div>
+          <div class="flex items-center justify-between pb-space-md">
+            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Game archive</span>
+            <span class="font-code-sm text-code-sm text-outline" id="arch-bucket">—</span>
+          </div>
+          <div class="flex items-baseline gap-space-sm">
+            <p class="font-headline-xl text-headline-xl" id="arch-size">—</p>
+            <span class="font-code-sm text-code-sm text-outline" id="arch-cost-line">—</span>
+          </div>
+          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs">
+            <span id="arch-objects">—</span> objects · <span id="arch-cost">—</span> a month
+          </p>
+          <div class="flex flex-col gap-space-xs mt-space-md" id="arch-games"></div>
         </div>
-        <div class="flex flex-col gap-space-sm" id="pills"></div>
+        <div>
+          <div class="flex items-start gap-space-xs p-space-sm rounded bg-surface-container mt-space-md" id="arch-chip" hidden>
+            <span class="material-symbols-outlined text-[16px] text-tertiary mt-0.5" data-icon="schedule">&#xefd6;</span>
+            <span class="font-code-sm text-code-sm text-tertiary" id="arch-expiry"></span>
+          </div>
+          <button class="btn w-full justify-center mt-space-sm" id="d-library">
+            <span class="material-symbols-outlined text-[16px]" data-icon="storage">&#xe1db;</span>Manage the archive
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop">
+      <div class="flex items-center justify-between pb-space-md">
+        <div class="flex items-center gap-space-sm">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Cost guards</span>
+          <span class="pill" id="d-armed" hidden>—</span>
+        </div>
+        <button class="btn" id="d-guards">
+          <span class="material-symbols-outlined text-[16px]" data-icon="shield">&#xe9e0;</span>In detail
+        </button>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-space-sm" id="pills"></div>
+    </div>
+
+    <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop">
+      <div class="flex items-center justify-between pb-space-md">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Recent activity</span>
+        <span class="font-code-sm text-code-sm text-outline">what cg has done in this window, and the watchdog's last word</span>
+      </div>
+      <div class="flex flex-col gap-space-xs font-code-sm text-code-sm" id="d-activity">
+        <span class="text-outline">nothing yet</span>
       </div>
     </div>
 
@@ -304,29 +363,61 @@
 
   <!-- Guards -->
   <section data-view="guards" hidden>
+    <div class="flex flex-wrap items-center gap-space-sm mb-space-lg font-code-sm text-code-sm">
+      <span class="pill" id="g-armed">—</span>
+      <span class="text-outline" id="g-policy">a box that nobody stops bills until someone does</span>
+      <span class="text-outline ml-auto" id="age-watcher"></span>
+    </div>
+
     <div class="flex items-center justify-between pb-space-md">
       <div>
         <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Layered shutdown guards</span>
-        <p class="font-code-sm text-code-sm text-outline mt-0.5">What stops a GPU box billing when you forget it. Numbered by independence.</p>
+        <p class="font-code-sm text-code-sm text-outline mt-0.5">
+          Numbered by independence: each one catches what the one before it cannot.
+        </p>
       </div>
-      <span class="font-code-sm text-code-sm text-outline" id="age-watcher"></span>
     </div>
     <div class="flex flex-col gap-gutter-desktop" id="guard-cards"></div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mt-space-xl">
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Budget</span>
-        <p class="font-headline-md text-headline-md mt-space-sm" id="g-budget">—</p>
+      <!-- the money limit, which is not a guard: it only writes to you -->
+      <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
+        <div class="flex items-center justify-between pb-space-md">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Budget</span>
+          <span class="pill" id="g-budget-chip" hidden>—</span>
+        </div>
+        <p class="font-headline-md text-headline-md" id="g-budget">—</p>
         <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="g-budget-note">
           It emails you. It does not stop anything.
         </p>
+        <div class="mt-space-md pt-space-md border-t border-surface-variant">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Shutdown action</span>
+          <p class="font-code-md text-code-md mt-space-xs" id="g-shutdown">—</p>
+          <p class="font-code-sm text-code-sm text-on-surface-variant mt-0.5" id="g-shutdown-note">
+            decided at launch; a spot box must terminate
+          </p>
+        </div>
       </div>
+
+      <!-- the settings that decide what the guards do, edited through cg -->
       <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Shutdown action</span>
-        <p class="font-headline-md text-headline-md mt-space-sm" id="g-shutdown">—</p>
-        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="g-shutdown-note">
-          decided at launch; a spot box must terminate
-        </p>
+        <div class="flex items-center justify-between pb-space-md">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">What the guards are set to</span>
+          <button class="btn" id="g-settings">
+            <span class="material-symbols-outlined text-[16px]" data-icon="settings">&#xe8b8;</span>Settings
+          </button>
+        </div>
+        <div class="flex flex-col" id="g-knobs"></div>
+      </div>
+    </div>
+
+    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop">
+      <div class="flex items-center justify-between pb-space-md">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">The watchdog's own words</span>
+        <span class="font-code-sm text-code-sm text-outline">from its log, hourly</span>
+      </div>
+      <div class="flex flex-col gap-space-xs font-code-sm text-code-sm" id="g-log">
+        <span class="text-outline">nothing recorded yet</span>
       </div>
     </div>
   </section>

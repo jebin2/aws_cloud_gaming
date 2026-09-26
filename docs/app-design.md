@@ -40,7 +40,9 @@ rather than asking again.
 | Archive countdown ("deleted in 4d 1h") | `cg watchdog status` / `cg status` game-archive line | yes | comes from the watchdog's last hourly decision, with its age |
 | Guard pills (4) | `cg watcher` | yes | session guard, on-host watchdog, cloud watchdog, budget |
 | Play / Streaming | `cg status` → `session` | yes | a `cg open` running on this laptop holds a lock; the app asks cg rather than looking for Moonlight, so a stream it never started still disables Play |
-| Recent activity | `cg watchdog logs`, and the app's own job history | yes | |
+| Recent activity | the app's own job history, plus the watchdog's last decision from `cg watcher` | yes | the durable record is the watchdog's log, shown on Guards |
+| Instance stage (No box / Building / Ready) | `cg status` state, plus whether a `cg init` is running in this window | yes | never "Ready" while a build is in flight |
+| Spend control card | `cg cost --json` | **$0.01** | only from its Fetch button, which carries the price; the sparkline is the same `days` array the Cost table uses |
 
 ## Build
 
@@ -70,7 +72,9 @@ rather than asking again.
 
 | Field | Source | Free | Notes |
 |---|---|---|---|
-| Three guard cards, armed state, last decision | `cg watcher`, `cg watchdog status` | yes | reaction times are 15 min (on-host) and 30 min (cloud), boot grace 20 min |
+| Three guard cards, armed state, last decision | `cg watcher --json` → `guards[]` | yes | one card per layer cg reports, never a layer the app knows about - reaction times come from the field, not the markup |
+| "N of M armed" | the same array | yes | layer 1 has `armed: null` (it either runs or it does not), so it is not counted; counting it read as a missing guard |
+| The knobs behind the guards | `cg config --json`, edited with `cg config set` | yes | idle and stuck minutes, archive expiry, budget, ntfy, alert email - the same rows as Settings |
 | Dry-run evaluation | `cg watchdog check` | yes | runs the Lambda once, changing nothing |
 | Budget, spend against cap, alert address | `cg status` COST GUARDS, `.env` `EMAIL_ALERTS` | yes | the budget **emails**; it does not block launches |
 | Root disk, archive expiry, notifications, API token | `.env` | yes | the app shows set / not set, never the value |

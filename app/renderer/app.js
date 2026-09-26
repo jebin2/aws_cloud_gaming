@@ -27,6 +27,7 @@ const jobsHere = () => [...jobs.values()].filter(j => j.view === view);
 const WRITES = new Set(['init', 'destroy', 'open']);
 const writing = () => [...jobs.values()].some(j => WRITES.has(j.cmd[0]));
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
+const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
 
 function updateHeader() {
   const mine = jobsHere();
@@ -63,6 +64,36 @@ function updateHeader() {
 
   $('job-line').textContent = jobs.size
     ? `running: ${names.map(n => 'cg ' + n).join(', ')}` : 'idle';
+}
+
+// The dashboard's activity list: what cg did in this window. The app keeps no
+// history beyond it - the durable record is the watchdog's own log, shown on
+// the Guards screen.
+function note(text, tone) {
+  activity.unshift({ at: new Date(), text, tone });
+  activity.length = Math.min(activity.length, 8);
+  const wrap = $('d-activity');
+  if (!wrap) return;
+  wrap.textContent = '';
+  if (!activity.length) {
+    const el = document.createElement('span');
+    el.className = 'text-outline';
+    el.textContent = 'nothing yet';
+    wrap.append(el);
+    return;
+  }
+  for (const a of activity) {
+    const row = document.createElement('div');
+    row.className = 'flex gap-space-sm';
+    const t = document.createElement('span');
+    t.className = 'text-outline shrink-0';
+    t.textContent = a.at.toLocaleTimeString();
+    const b = document.createElement('span');
+    b.className = a.tone || 'text-on-surface-variant';
+    b.textContent = a.text;
+    row.append(t, b);
+    wrap.append(row);
+  }
 }
 
 function logLine(event) {
@@ -146,6 +177,32 @@ function paintStatus(s) {
     $('arch-chip').className = 'pill pill-bad';
   }
   $('chip-region').textContent = `${s.region} · ${s.host}`;
+
+  // The mockup's three stages. cg reports one state; the stage is which of the
+  // three that state falls into, and nothing is ever shown as "Ready" while a
+  // build is still running.
+  const st = s.box ? s.box.state : null;
+  const stage = !st ? 'No box'
+    : (st === 'pending' || jobsFor('init')) ? 'Building'
+    : st === 'running' ? 'Ready' : st;
+  const stages = $('d-stages');
+  stages.textContent = '';
+  for (const name of ['No box', 'Building', 'Ready']) {
+    const el = document.createElement('span');
+    el.className = 'px-space-sm py-0.5 rounded ' + (name === stage
+      ? 'bg-primary/15 text-primary' : 'text-outline');
+    el.textContent = name;
+    stages.append(el);
+  }
+
+  // The machine, and whether anything is streaming: the two things the mockup
+  // puts beside the title.
+  const spec = s.spec || {};
+  $('d-machine').textContent = spec.gpu
+    ? `${spec.gpu} · ${Math.round((spec.gpu_memory_mib || 0) / 1024)} GB VRAM · ${spec.vcpus} vCPU · `
+      + `${Math.round((spec.memory_mib || 0) / 1024)} GB RAM`
+    : s.instance_type;
+
   $('box-state').textContent = s.box ? s.box.state : 'No box';
   $('box-state').className = 'font-headline-xl text-headline-xl mb-space-lg '
     + (s.box ? 'text-primary' : 'text-outline');
@@ -153,6 +210,13 @@ function paintStatus(s) {
   $('chip-conn').textContent = s.box ? 'box running' : 'no box';
   $('box-type').textContent = s.box ? s.box.type : s.instance_type;
   $('box-region').textContent = s.region;
+  const spot = s.config && s.config.spot;
+  $('box-buy').textContent = spot === '0' ? 'on demand' : spot === '1' ? 'spot' : 'spot when it can';
+  $('box-chip').hidden = !s.box;
+  if (s.box) {
+    $('box-chip').textContent = s.box.state === 'running' ? 'billing' : s.box.state;
+    $('box-chip').className = 'pill ' + (s.box.state === 'running' ? 'pill-bad' : '');
+  }
   $('box-uptime').textContent = s.box ? uptime(s.box.launched) : 'not running';
   $('box-node').textContent = s.tailnet.node
     ? `${s.tailnet.node} · ${s.tailnet.online ? 'online' : 'offline'}` : 'no node';
@@ -167,6 +231,7 @@ function paintStatus(s) {
     $('arch-chip').textContent = 'cannot read S3 - this is not "empty"';
     $('arch-chip').className = 'pill pill-bad';
   } else if (s.archive && s.archive.bucket) {
+    $('arch-bucket').textContent = `s3://${s.archive.bucket}`;
     $('arch-size').textContent = s.archive.bytes ? GB(s.archive.bytes) : 'empty';
     $('arch-objects').textContent = s.archive.objects ?? '—';
     $('arch-cost').textContent = s.archive.usd_month != null ? `$${s.archive.usd_month}` : '—';
@@ -177,18 +242,8 @@ function paintStatus(s) {
       + (s.archive.expiry_days === 0 ? 'text-primary' : 'text-tertiary');
   }
 
-  const pills = $('pills');
-  pills.textContent = '';
-  if (s.budget && s.budget.limit != null) {
-    pill(pills, `budget $${s.budget.limit} a month`, 'ok', 'shield');
-    pill(pills, `${s.budget.alerts} alert address${s.budget.alerts === 1 ? '' : 'es'}`,
-         s.budget.alerts ? 'ok' : 'bad', 'info');
-  } else pill(pills, 'no budget - nothing will warn you', 'bad', 'warning');
-  pill(pills, s.archive && s.archive.expiry_days
-        ? `archive deleted after ${s.archive.expiry_days} days with no box`
-        : 'archive kept forever',
-       s.archive && s.archive.expiry_days ? 'warn' : 'ok', 'schedule');
-  pill(pills, 'watchdogs in detail: Guards', null, 'terminal');
+  statusBudget = s.budget || null;
+  paintGuardStrip();
 
   const local = $('local-pills');
   local.textContent = '';
@@ -229,6 +284,11 @@ function paintSession() {
       ? `a stream is already running from this laptop (pid ${sessionNow.pid})`
       : 'opens Moonlight and streams the box';
   }
+  const chip = $('d-session');
+  if (chip) {
+    chip.textContent = live ? `streaming (pid ${sessionNow.pid})` : 'session idle';
+    chip.className = 'pill ' + (live ? 'pill-ok' : '');
+  }
   const note = $('b-session');
   if (note) {
     note.hidden = !live;
@@ -257,7 +317,48 @@ function setting(key, fallback) {
   return (r && (r.effective ?? r.value)) || fallback;
 }
 
+function paintSpend(d) {
+  // The dashboard shows the last paid fetch and says how old it is. It never
+  // fetches on its own: Cost Explorer bills a cent a call.
+  costNow = d;
+  const m = d.month || {};
+  const rate = d.rates || {};
+  const inr = rate.inr_per_usd || m.inr_per_usd || 0;
+  const days = m.days || [];
+  $('d-spend').textContent = m.total_inr != null ? INR(m.total_inr) : '—';
+  $('d-spend-sub').textContent = m.total_usd != null
+    ? `${money(m.total_usd)} · fetched ${new Date().toLocaleTimeString()}` : 'not fetched yet';
+  if (rate.ce_call_usd) $('d-cost-price').textContent = money(rate.ce_call_usd);
+
+  const box = d.resources && d.resources.instance;
+  $('d-burn').textContent = box
+    ? `${box.id} is ${box.state} - billing by the hour`
+    : 'no box - nothing is billing by the hour';
+  $('d-burn').className = 'font-code-sm text-code-sm ' + (box ? 'text-tertiary' : 'text-primary');
+  $('d-burn-icon').textContent = box ? ICON.error : ICON.check_circle;
+  $('d-burn-icon').className = 'material-symbols-outlined text-[16px] mt-0.5 '
+    + (box ? 'text-tertiary' : 'text-primary');
+
+  // A bar per billed day, at the same scale, so a heavy day is obvious.
+  const spark = $('d-spark');
+  spark.textContent = '';
+  const max = days.reduce((n, x) => Math.max(n, x.total), 0) || 1;
+  for (const day of days.slice(-14)) {
+    const bar = document.createElement('div');
+    bar.className = 'flex-1 bg-primary/60 rounded-t min-w-[3px]';
+    bar.style.height = Math.max(2, (day.total / max) * 100) + '%';
+    bar.title = `${day.date}: ${INR(day.total * inr)}`;
+    spark.append(bar);
+  }
+  const now = new Date();
+  const inMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  $('d-projected').textContent = m.total_usd != null
+    ? `projected ${INR((m.total_usd / now.getDate()) * inMonth * inr)} this month`
+    : 'projected —';
+}
+
 function paintCost(d) {
+  paintSpend(d);
   const m = d.month || {};
   // Every rate on this screen comes from cg. The app knows no prices: if a
   // number is missing here, the fix is a field in `cg cost --json`.
@@ -403,6 +504,7 @@ function paintCost(d) {
 }
 function paintLibrary(d) {
   paintPicker(d);
+  paintArchiveCard(d);
   // cg says which it is; the app must never turn "I could not look" into
   // "there is nothing there".
   $('lib-error').hidden = !d.error;
@@ -500,7 +602,96 @@ function paintLibrary(d) {
 const ago = s => s == null ? '' : s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`;
 
 // Rendered from `cg watcher --json`: one card per layer, in the order they fire.
+// The guard strip on the dashboard: one card per layer, in the order they fire,
+// said the way cg says it. Nothing here is invented - a layer the app does not
+// hear about is a layer it does not draw.
+// The dashboard's archive card lists what is actually in there, biggest first.
+function paintArchiveCard(d) {
+  const wrap = $('arch-games');
+  if (!wrap) return;
+  wrap.textContent = '';
+  $('arch-cost-line').textContent = d.error ? '' : (d.usd_month ? `${money(d.usd_month)}/mo` : '');
+  for (const g of (d.games || []).slice(0, 3)) {
+    const row = document.createElement('div');
+    row.className = 'row font-code-sm text-code-sm';
+    const n = document.createElement('span');
+    n.className = 'truncate';
+    n.textContent = g.name || g.appid;
+    const sz = document.createElement('span');
+    sz.className = 'text-outline shrink-0';
+    sz.textContent = GB(g.bytes);
+    row.append(n, sz);
+    wrap.append(row);
+  }
+  const more = (d.games || []).length - 3;
+  if (more > 0) {
+    const el = document.createElement('span');
+    el.className = 'font-code-sm text-code-sm text-outline';
+    el.textContent = `and ${more} more`;
+    wrap.append(el);
+  }
+}
+
+// Layer 1 is not armed or unarmed - `cg open` either runs or it does not - so
+// it is not counted. Counting it as unarmed read as a missing guard.
+const guardCount = guards => [
+  guards.filter(g => g.armed === true).length,
+  guards.filter(g => g.armed !== null && g.armed !== undefined).length,
+];
+
+function paintGuardStrip() {
+  const pills = $('pills');
+  pills.textContent = '';
+  const guards = (watcher && watcher.guards) || [];
+  for (const g of guards) {
+    const card = document.createElement('div');
+    card.className = 'p-space-md rounded bg-surface-container';
+    const top = document.createElement('div');
+    top.className = 'flex items-center justify-between gap-space-sm';
+    const name = document.createElement('span');
+    name.className = 'font-code-md text-code-md';
+    name.textContent = g.name;
+    const tone = g.armed === true ? 'pill-ok' : g.armed === false ? 'pill-bad' : '';
+    const chip = document.createElement('span');
+    chip.className = 'pill ' + tone;
+    chip.textContent = g.state || (g.armed ? 'armed' : 'unknown');
+    top.append(name, chip);
+    const sub = document.createElement('p');
+    sub.className = 'font-code-sm text-code-sm text-outline mt-0.5';
+    sub.textContent = g.reaction || '';
+    card.append(top, sub);
+    pills.append(card);
+  }
+  // The budget belongs beside them even though it stops nothing.
+  const b = statusBudget || {};
+  const card = document.createElement('div');
+  card.className = 'p-space-md rounded bg-surface-container';
+  const top = document.createElement('div');
+  top.className = 'flex items-center justify-between gap-space-sm';
+  const name = document.createElement('span');
+  name.className = 'font-code-md text-code-md';
+  name.textContent = 'monthly budget';
+  const chip = document.createElement('span');
+  chip.className = 'pill ' + (b.limit != null ? 'pill-ok' : 'pill-bad');
+  chip.textContent = b.limit != null ? `$${b.limit}` : 'none';
+  top.append(name, chip);
+  const sub = document.createElement('p');
+  sub.className = 'font-code-sm text-code-sm text-outline mt-0.5';
+  sub.textContent = b.limit != null
+    ? `${b.alerts || 0} alert address${b.alerts === 1 ? '' : 'es'} - it emails, it stops nothing`
+    : 'nothing will warn you';
+  card.append(top, sub);
+  pills.append(card);
+
+  const [armed, armable] = guardCount(guards);
+  $('d-armed').hidden = !guards.length;
+  $('d-armed').textContent = `${armed} of ${armable} armed`;
+  $('d-armed').className = 'pill ' + (armed === armable ? 'pill-ok' : 'pill-bad');
+}
+
 function paintGuards(d) {
+  watcher = d;
+  paintGuardStrip();
   const wrap = $('guard-cards');
   wrap.textContent = '';
   for (const g of d.guards || []) {
@@ -515,32 +706,50 @@ function paintGuards(d) {
           <div class="flex items-center gap-space-sm">
             <span class="material-symbols-outlined text-[18px] text-outline" data-icon="shield">&#xe9e0;</span>
             <span class="font-headline-md text-headline-md"></span>
-            <span class="font-code-sm text-code-sm text-outline">layer ${g.layer}</span>
+            <span class="pill">tier ${g.layer}</span>
           </div>
           <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs"></p>
         </div>
-        <span class="pill ${tone}">${state}</span>
+        <div class="flex items-center gap-space-sm shrink-0">
+          <span class="font-code-sm text-code-sm text-outline reaction-top"></span>
+          <span class="pill ${tone}">${state}</span>
+        </div>
       </div>
-      <dl class="grid grid-cols-3 gap-space-md mt-space-md">
-        <div><dt class="font-label-caps text-label-caps uppercase text-outline">catches</dt>
-             <dd class="font-code-sm text-code-sm mt-0.5 catches"></dd></div>
-        <div><dt class="font-label-caps text-label-caps uppercase text-outline">reaction</dt>
-             <dd class="font-code-sm text-code-sm mt-0.5 reaction"></dd></div>
-        <div><dt class="font-label-caps text-label-caps uppercase text-outline">dies with</dt>
-             <dd class="font-code-sm text-code-sm mt-0.5 dies"></dd></div>
+      <dl class="grid grid-cols-1 md:grid-cols-3 gap-space-sm mt-space-md">
+        <div class="p-space-md rounded bg-surface-container">
+          <dt class="font-label-caps text-label-caps uppercase tracking-wider text-outline">catches</dt>
+          <dd class="font-code-sm text-code-sm mt-0.5 catches"></dd></div>
+        <div class="p-space-md rounded bg-surface-container">
+          <dt class="font-label-caps text-label-caps uppercase tracking-wider text-outline">reacts</dt>
+          <dd class="font-code-sm text-code-sm mt-0.5 reaction"></dd></div>
+        <div class="p-space-md rounded bg-surface-container">
+          <dt class="font-label-caps text-label-caps uppercase tracking-wider text-outline">dies with</dt>
+          <dd class="font-code-sm text-code-sm mt-0.5 dies"></dd></div>
       </dl>
       <p class="font-code-sm text-code-sm text-outline mt-space-md last"></p>`;
     card.querySelector('.font-headline-md').textContent = g.name;
     card.querySelector('p.font-code-sm').textContent = g.note || '';
     card.querySelector('.catches').textContent = g.catches;
     card.querySelector('.reaction').textContent = g.reaction;
+    card.querySelector('.reaction-top').textContent = g.reaction || '';
     card.querySelector('.dies').textContent = g.dies_with;
     card.querySelector('.last').textContent = g.last_decision
-      ? `last decision ${ago(g.last_decision_age_s)}: ${g.last_decision}` : '';
+      ? `last audit ${ago(g.last_decision_age_s)}: ${g.last_decision}` : '';
     wrap.append(card);
   }
+
+  const [armed, armable] = guardCount(d.guards || []);
+  $('g-armed').textContent = `${armed} of ${armable} armed`;
+  $('g-armed').className = 'pill ' + (armed === armable ? 'pill-ok' : 'pill-bad');
+  $('g-policy').textContent = d.instance_state === 'running'
+    ? 'a box is running - these are what end it'
+    : 'no box is running - there is nothing for them to stop';
+
   const b = d.budget || {};
   $('g-budget').textContent = b.usd != null ? `$${b.usd} a month` : 'missing';
+  $('g-budget-chip').hidden = false;
+  $('g-budget-chip').textContent = b.usd != null ? 'set' : 'none';
+  $('g-budget-chip').className = 'pill ' + (b.usd != null ? 'pill-ok' : 'pill-bad');
   $('g-budget-note').textContent = b.usd == null
     ? 'no budget exists - nothing will warn you'
     : `${b.alerts} alert address${b.alerts === 1 ? '' : 'es'}. It emails you; it does not stop anything.`;
@@ -549,6 +758,67 @@ function paintGuards(d) {
   $('g-shutdown-note').textContent = sd.expected
     ? (sd.ok ? `correct for this box (${sd.expected})` : `WRONG - must be ${sd.expected}`)
     : 'decided at launch; a spot box must terminate';
+
+  // The knobs behind the guards, read from the settings registry and edited
+  // through cg like every other setting.
+  const knobs = $('g-knobs');
+  knobs.textContent = '';
+  const WANT = ['GAME_WATCHDOG_IDLE_MIN', 'GAME_WATCHDOG_STUCK_MIN', 'GAME_ARCHIVE_EXPIRY_DAYS',
+                'GAME_BUDGET_INR', 'GAME_NTFY_URL', 'EMAIL_ALERTS'];
+  for (const key of WANT) {
+    const r = config.find(x => x.key === key);
+    if (!r) continue;
+    const row = document.createElement('div');
+    row.className = 'row border-b border-surface-variant/40 items-start';
+    const left = document.createElement('div');
+    const n = document.createElement('p');
+    n.className = 'font-code-md text-code-md';
+    n.textContent = LABEL[r.key] || r.key;
+    const note = document.createElement('p');
+    note.className = 'font-code-sm text-code-sm text-outline mt-0.5';
+    note.textContent = r.note;
+    left.append(n, note);
+    const right = document.createElement('div');
+    right.className = 'flex items-center gap-space-sm shrink-0';
+    const val = document.createElement('span');
+    val.className = 'font-code-md text-code-md text-on-surface-variant';
+    val.textContent = settingValue(r);
+    const edit = document.createElement('button');
+    edit.className = 'btn';
+    edit.textContent = r.secret && r.is_set ? 'Replace' : 'Edit';
+    edit.onclick = () => editSetting(r, row);
+    right.append(val, edit);
+    row.append(left, right);
+    knobs.append(row);
+  }
+
+  // Its last decision, in its own words, with the archive line beside it.
+  const log = $('g-log');
+  log.textContent = '';
+  const lines = [];
+  for (const g of d.guards || []) {
+    if (g.last_decision) lines.push([`${g.name} · ${ago(g.last_decision_age_s)}`, g.last_decision]);
+  }
+  if (d.archive) lines.push(['archive', d.archive]);
+  if (!lines.length) {
+    const el = document.createElement('span');
+    el.className = 'text-outline';
+    el.textContent = 'nothing recorded yet - the cloud watchdog writes a line every hour';
+    log.append(el);
+  }
+  for (const [who, what] of lines) {
+    const row = document.createElement('div');
+    row.className = 'flex gap-space-sm';
+    const a = document.createElement('span');
+    a.className = 'text-outline shrink-0';
+    a.textContent = who;
+    const b2 = document.createElement('span');
+    b2.className = 'text-on-surface-variant';
+    b2.textContent = what;
+    row.append(a, b2);
+    log.append(row);
+  }
+
   if (d.archive) $('age-watcher').textContent = new Date().toLocaleTimeString();
 }
 
@@ -689,6 +959,10 @@ let archive = { games: [], selectable_gb: 209 };
 let boxNow = null;   // the box `cg status` last reported, or null
 let sessionNow = null; // a `cg open` streaming from this laptop, per cg status
 let config = [];     // the settings registry, as `cg config --json` last gave it
+let watcher = null;  // `cg watcher --json`, for the guard strip and the Guards screen
+let statusBudget = null;
+let costNow = null;  // the last paid cost fetch, if one was made in this window
+const activity = [];  // what cg has done in this window, newest first
 const picked = new Set();
 
 function daysAgo(iso) {
@@ -919,7 +1193,11 @@ window.cg.onEvent(({ id, event }) => {
     updateHeader();
     // A build, a destroy or a session changes what every free screen shows -
     // the box, the archive, the guards - so read them again once it is over.
-    if (WRITES.has(job.cmd[0])) refreshAll();
+    if (WRITES.has(job.cmd[0])) {
+      note(`cg ${job.cmd.join(' ')} ${event.rc === 0 ? 'finished' : `failed (exit ${event.rc})`}`,
+           event.rc === 0 ? 'text-primary' : 'text-error');
+      refreshAll();
+    }
     if (job.resolve) job.resolve(job.capture ? job.out.join('\n') : undefined);
   }
 });
@@ -932,6 +1210,7 @@ function runCg(args, { panel, age, json, env, collect, capture } = {}) {
       return resolve();
     }
     jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, out: [], resolve });
+    if (WRITES.has(args[0])) note(`cg ${args.join(' ')} started`, 'text-primary');
     updateHeader();
     if (panel) $(panel).textContent = 'running…';
   });
@@ -1006,6 +1285,11 @@ $('cancel').onclick = async () => {
   for (const [id, j] of jobs) if (j.view === view) window.cg.cancel(id);
 };
 $('d-build').onclick = () => goView('build');
+$('d-library').onclick = () => goView('library');
+$('d-guards').onclick = () => goView('guards');
+$('g-settings').onclick = () => goView('settings');
+// The only button on the dashboard that spends money, and it says so.
+$('d-cost').onclick = () => runCg(['cost', '--json'], { json: 'cost' });
 // A build, a destroy and a session all report the same way - steps, lines, an
 // exit - so they all run in the Build screen's panel, and starting one goes
 // there. Watching a destroy in a panel that says nothing was the complaint.

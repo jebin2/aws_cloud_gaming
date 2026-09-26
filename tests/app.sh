@@ -94,8 +94,10 @@ contains "quitting mid-run asks first"   "$main" "before-quit"
 contains "the cost refresh carries its price" "$(tr -s ' ' < app/renderer/index.html)" 'id="refresh-cost"'
 contains "  shown only on the cost screen" "$js" "refresh-cost').hidden = view !== 'cost'"
 check    "nothing is on a timer"             "$(grep -c 'setInterval\|setTimeout' app/renderer/app.js)" "0"
-check    "  and cost runs only from its own Refresh" \
-         "$(grep -c "runCg(\['cost', '--json'\]" app/renderer/app.js)" "1"
+# Two buttons fetch cost - the Cost tab's Refresh and the dashboard's Fetch -
+# and both say the price. Nothing else may run it.
+check    "  and cost runs only from a button" \
+         "$(grep -c "runCg(\['cost', '--json'\]" app/renderer/app.js)" "2"
 contains "  never on opening the tab"    "$js" "Cost is not in NEEDS"
 contains "the dashboard reads fields, not tables" "$(cat app/renderer/app.js)" "dashboard: [[['status', '--json']"
 
@@ -201,7 +203,7 @@ contains "  and a footer about the money" "$js" "billing stops when the box is g
 contains "destroy runs through it"       "$js" "startRun(['destroy'])"
 contains "  and so does play"            "$js" "startRun(['open'])"
 contains "every long run paints the steps" "$js" "if (WRITES.has(job.cmd[0])) {"
-contains "  and the free reads follow it" "$js" "if (WRITES.has(job.cmd[0])) refreshAll()"
+contains "  and the free reads follow it" "$js" "refreshAll();"
 
 echo "5f. the app holds no prices"
 # This is the rule, checked rather than asserted: while the Cost and Library
@@ -209,7 +211,7 @@ echo "5f. the app holds no prices"
 # renderer. Every one of them now arrives from cg.
 check "no price literal in the renderer" \
       "$(grep -vE '^\s*(//|\*)' app/renderer/app.js | grep -cE '[^0-9.](0\.[0-9]{2,})')" "0"
-check "  nor in the markup, bar one"     "$(grep -cE '\$0\.[0-9]+' app/renderer/index.html)" "2"
+check "  nor in the markup, bar the buttons" "$(grep -cE '\$0\.[0-9]+' app/renderer/index.html)" "3"
 contains "  which is what Refresh costs" "$html" 'id="refresh-cost"'
 contains "  and cg overwrites it"        "$js" "money(rate.ce_call_usd)"
 contains "rates come from cg"            "$js" "const rate = d.rates || {}"
@@ -218,6 +220,28 @@ contains "  and each game's monthly cost" "$js" "money(g.usd_month)"
 check    "cg publishes the table"        "$(grep -c 'ce_call_usd' lib/setup)" "1"
 check    "  from one file"               "$(grep -c 'CG_EGRESS_USD_GB=' lib/rates.sh)" "1"
 lacks    "the build confirm quotes no rate" "$js" "an hour on spot"
+
+echo "5g. the dashboard and guards screens"
+# The dashboard answers "what is it doing and what is it spending" without
+# spending anything itself; only its Fetch button bills.
+contains "the stages from the mockup"    "$js" "for (const name of ['No box', 'Building', 'Ready'])"
+contains "  building means a build is running" "$js" "jobsFor('init')"
+contains "the machine strip"             "$js" "GB VRAM"
+contains "the archive lists its games"   "$js" "function paintArchiveCard(d)"
+contains "spend comes from a fetch"      "$js" "function paintSpend(d)"
+check    "  which is the only paid button" \
+         "$(grep -c "runCg(\['cost', '--json'\]" app/renderer/app.js)" "2"
+contains "  and it carries the price"    "$html" 'id="d-cost-price"'
+contains "activity is this window's own" "$js" "function note(text, tone)"
+contains "  recording what cg ran"       "$js" 'note(`cg ${args.join('"'"' '"'"')} started`'
+# Guards: one card per layer cg reports, never a layer the app invented.
+contains "guards come from the watcher"  "$js" "for (const g of d.guards || [])"
+contains "  tier badges"                 "$js" 'tier ${g.layer}'
+contains "  and the audit line"          "$js" 'last audit ${ago(g.last_decision_age_s)}'
+contains "always-on is not counted as unarmed" "$js" "const guardCount = guards =>"
+contains "the knobs are settings rows"   "$js" "const WANT = ['GAME_WATCHDOG_IDLE_MIN'"
+contains "  edited through cg"           "$js" "editSetting(r, row)"
+check    "no guard is hardcoded"         "$(grep -c 'on-host watchdog\|cloud watchdog' app/renderer/index.html)" "0"
 
 echo "6. the actions that spend money ask first"
 # window.confirm draws a native alert that belongs to no design.
