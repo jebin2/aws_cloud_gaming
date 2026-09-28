@@ -13,19 +13,25 @@ let view = 'dashboard';
 
 // What a run is called, so a button can say what it stops rather than "Stop".
 const RUN_NAME = {
-  init: 'build', destroy: 'destroy', open: 'session', check: 'check',
+  init: 'build', destroy: 'destroy', open: 'session', check: 'check', library: 'archive change',
   status: 'refresh', watcher: 'refresh', library: 'refresh', cost: 'cost fetch',
 };
 const runName = cmd => RUN_NAME[cmd[0]] || cmd[0];
 // Runs long enough to be worth going back to.
 const WATCHABLE = new Set(['init', 'destroy', 'open']);
+const watchable = cmd => WATCHABLE.has(cmd[0]) || (cmd[0] === 'library' && LIBRARY_WRITES.has(cmd[1]));
 const jobsHere = () => [...jobs.values()].filter(j => j.view === view);
 
 // A screen's button answers for that screen. The one real dependency is that a
 // build or a destroy runs alone - cg refuses anything else while one is in
 // flight - so those disable the rest. Reads never block each other.
 const WRITES = new Set(['init', 'destroy', 'open']);
-const writing = () => [...jobs.values()].some(j => WRITES.has(j.cmd[0]));
+// `library` is both: `list` is a free read that runs on every refresh, while
+// `clean` and `forget` delete from S3 for good. The main process draws the same
+// line in isReadOnly(); these two must not drift apart.
+const LIBRARY_WRITES = new Set(['push', 'pull', 'forget', 'clean', 'account']);
+const isWrite = cmd => WRITES.has(cmd[0]) || (cmd[0] === 'library' && LIBRARY_WRITES.has(cmd[1]));
+const writing = () => [...jobs.values()].some(j => isWrite(j.cmd));
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
 
@@ -44,7 +50,7 @@ function updateHeader() {
   // Point at a run only when it is worth watching: a build or a destroy takes
   // minutes and has its own screen. A refresh finishes in seconds and paints
   // itself, so sending you to another tab for it is noise.
-  const elsewhere = [...jobs.values()].find(j => WATCHABLE.has(j.cmd[0]) && j.view !== view);
+  const elsewhere = [...jobs.values()].find(j => watchable(j.cmd) && j.view !== view);
   $('goto').hidden = !elsewhere;
   if (elsewhere) {
     $('goto-label').textContent = `${runName(elsewhere.cmd)} running - show it`;
@@ -96,17 +102,48 @@ function note(text, tone) {
   }
 }
 
+// The event stream, filtered. Rows carry their kind so a filter can hide them
+// without the app keeping a second copy of the log.
+let logFilter = 'all';
+let logCount = 0;
+
+function logKind(event) {
+  if (event.t === 'raw') return 'raw';
+  if (event.t === 'error' || event.kind === 'fail') return 'problems';
+  if (event.t === 'step' || event.t === 'step_end') return 'steps';
+  return 'other';
+}
+
 function logLine(event) {
   const kind = event.kind || event.t;
   const row = document.createElement('div');
+  row.dataset.group = logKind(event);
+  row.className = 'log-row';
+  row.hidden = logFilter !== 'all' && row.dataset.group !== logFilter;
   row.innerHTML = '<time></time><span class="k"></span><span class="t"></span>';
-  row.querySelector('time').textContent = (event.at || '').slice(11, 19);
+  row.querySelector('time').textContent = (event.at || '').slice(11, 19)
+    || new Date().toLocaleTimeString();
   row.querySelector('.k').textContent = event.t === 'line' ? (event.kind || '') : event.t;
   row.querySelector('.k').className = 'k ' + kind;
   row.querySelector('.t').textContent =
     event.text || event.prompt || (event.t === 'exit' ? `exit ${event.rc}` : '');
-  $('log').append(row);
-  $('log').scrollTop = $('log').scrollHeight;
+  const log = $('log');
+  log.append(row);
+  // A long build is thousands of lines; the window keeps the last 2000.
+  while (log.children.length > 2000) log.firstChild.remove();
+  logCount += 1;
+  $('log-count').textContent = `${logCount} event${logCount === 1 ? '' : 's'}`;
+  if ($('log-follow').checked) log.scrollTop = log.scrollHeight;
+}
+
+function applyLogFilter(which) {
+  logFilter = which;
+  for (const row of $('log').children) {
+    row.hidden = which !== 'all' && row.dataset.group !== which;
+  }
+  for (const b of document.querySelectorAll('[data-filter]')) {
+    b.classList.toggle('btn-primary', b.dataset.filter === which);
+  }
 }
 
 // The app's own confirmation. window.confirm draws a native alert box that
@@ -563,7 +600,15 @@ function paintLibrary(d) {
     track.append(fill); share.append(track);
 
     cell(tr, `${money(g.usd_month)}/mo`, 'text-right px-space-md text-tertiary');
-    cell(tr, daysAgo(g.pushed), 'text-right pl-space-md text-outline');
+    const last = cell(tr, '', 'text-right pl-space-md');
+    const when = document.createElement('span');
+    when.className = 'text-outline';
+    when.textContent = daysAgo(g.pushed);
+    const forget = document.createElement('button');
+    forget.className = 'btn btn-danger ml-space-sm';
+    forget.textContent = 'Forget';
+    forget.onclick = () => forgetGame(g);
+    last.append(when, forget);
     rows.append(tr);
   }
   const foot = $('lib-foot');
@@ -578,11 +623,11 @@ function paintLibrary(d) {
     foot.append(tr);
   }
 
-  $('lib-orphans').hidden = !d.orphan_bytes;
+  $('lib-orphan-box').hidden = !d.orphan_bytes;
   if (d.orphan_bytes) {
     $('lib-orphans').textContent =
       `plus ${(d.orphan_bytes / 1073741824).toFixed(1)} GB orphaned by an unfinished push, `
-      + `costing $${d.orphan_usd_month}/month and unusable - remove with: cg library clean`;
+      + `costing ${money(d.orphan_usd_month)} a month and unusable. Nothing indexed is touched.`;
   }
 
   const over = gb > cap;
@@ -606,6 +651,20 @@ const ago = s => s == null ? '' : s < 90 ? `${s}s ago` : s < 5400 ? `${Math.roun
 // said the way cg says it. Nothing here is invented - a layer the app does not
 // hear about is a layer it does not draw.
 // The dashboard's archive card lists what is actually in there, biggest first.
+// One game, deleted from the archive for good. cg does the asking - it prints
+// what it costs to re-download and demands the word FORGET - so the app's own
+// dialog only has to be honest about which game is going.
+async function forgetGame(g) {
+  const ok = await askConfirm({
+    title: `Forget ${g.name || g.appid}?`,
+    body: `${GB(g.bytes)} is deleted from the archive permanently. No undo, no versioning.\n\n`
+        + 'Playing it again means downloading it from Steam onto a new box. '
+        + 'cg will ask you to type FORGET.',
+    yes: 'Forget', danger: true,
+  });
+  if (ok) await startRun(['library', 'forget', String(g.appid)]);
+}
+
 function paintArchiveCard(d) {
   const wrap = $('arch-games');
   if (!wrap) return;
@@ -849,63 +908,111 @@ function settingValue(r) {
   return 'not set';
 }
 
+// Settings, grouped the way the rig is actually thought about: what the box is,
+// what stops it costing money, how the stream looks, and who gets told. The
+// order and the groups are the app's; every row, rule and value is cg's.
+const SETTING_GROUPS = [
+  ['The box', 'Applies at the next build. A disk cannot be shrunk later.',
+   ['GAME_INSTANCE_TYPE', 'GAME_REGION', 'GAME_SPOT', 'GAME_DISK_GB']],
+  ['The guards', 'What the watchdogs wait for, and what the archive costs you to keep.',
+   ['GAME_WATCHDOG_IDLE_MIN', 'GAME_WATCHDOG_STUCK_MIN', 'GAME_ARCHIVE_EXPIRY_DAYS', 'GAME_BUDGET_INR']],
+  ['The stream', 'Passed to Moonlight as flags, so your saved settings stay untouched.',
+   ['GAME_RES', 'GAME_FPS', 'GAME_BITRATE_KBPS']],
+  ['Being told', 'Where it reaches you, and the token that keeps the tailnet tidy.',
+   ['GAME_NTFY_URL', 'EMAIL_ALERTS', 'TAILSCALE_API_KEY']],
+];
+
 function paintConfig(rows) {
   config = rows;
-  const wrap = $('s-rows');
+  const wrap = $('s-groups');
   wrap.textContent = '';
-  for (const r of rows) {
-    const row = document.createElement('div');
-    row.className = 'row border-b border-surface-variant/40 items-start';
+  const set = rows.filter(r => r.is_set).length;
+  $('s-count').textContent = `${set} of ${rows.length} set`;
+  $('s-age').textContent = new Date().toLocaleTimeString();
 
-    const left = document.createElement('div');
-    left.innerHTML = '<p class="font-code-md text-code-md"></p>'
-                   + '<p class="font-code-sm text-code-sm text-outline mt-0.5"></p>';
-    left.querySelector('p').textContent = LABEL[r.key] || r.key;
-    left.querySelectorAll('p')[1].textContent = r.note;
+  const seen = new Set();
+  const groups = SETTING_GROUPS.map(([title, note, keys]) => [title, note, keys]);
+  // Anything cg grows that this file has not heard of still appears, rather
+  // than vanishing because the app did not know where to put it.
+  const known = new Set(groups.flatMap(g => g[2]));
+  const rest = rows.filter(r => !known.has(r.key)).map(r => r.key);
+  if (rest.length) groups.push(['Everything else', 'New settings cg knows about.', rest]);
 
-    const right = document.createElement('div');
-    right.className = 'flex items-center gap-space-sm';
-    const val = document.createElement('span');
-    val.className = 'font-code-md text-code-md text-on-surface-variant';
-    val.textContent = settingValue(r);
-    const edit = document.createElement('button');
-    edit.className = 'btn';
-    edit.textContent = r.secret && r.is_set ? 'Replace' : 'Edit';
-    edit.onclick = () => editSetting(r, row);
-
-    if (r.secret && r.is_set) {
-      // Secrets are withheld everywhere else. Showing one is a deliberate act,
-      // so it takes a click, asks cg for it, and hides again.
-      const eye = document.createElement('button');
-      eye.className = 'btn';
-      eye.title = 'show the value';
-      const glyph = document.createElement('span');
-      glyph.className = 'material-symbols-outlined text-[16px]';
-      glyph.dataset.icon = 'visibility';
-      glyph.textContent = '\ue8f4';                    // visibility
-      eye.append(glyph);
-      let shown = false;
-      eye.onclick = async () => {
-        if (shown) {
-          val.textContent = 'set';
-          glyph.textContent = '\ue8f4';                // visibility
-          shown = false; eye.title = 'show the value';
-          return;
-        }
-        val.textContent = 'reading…';
-        const value = await runCg(['config', 'get', r.key], { capture: true });
-        val.textContent = (value || '').trim() || 'not set';
-        glyph.textContent = '\ue8f5';                  // visibility_off
-        shown = true; eye.title = 'hide it again';
-      };
-      right.append(val, eye, edit);
-    } else {
-      right.append(val, edit);
-    }
-
-    row.append(left, right);
-    wrap.append(row);
+  for (const [title, note, keys] of groups) {
+    const present = keys.map(k => rows.find(r => r.key === k)).filter(Boolean);
+    if (!present.length) continue;
+    const card = document.createElement('div');
+    card.className = 'p-space-lg rounded-lg bg-surface-container-low';
+    const head = document.createElement('div');
+    head.className = 'pb-space-md';
+    const h = document.createElement('span');
+    h.className = 'font-label-caps text-label-caps uppercase tracking-wider text-outline';
+    h.textContent = title;
+    const p = document.createElement('p');
+    p.className = 'font-code-sm text-code-sm text-outline mt-0.5';
+    p.textContent = note;
+    head.append(h, p);
+    card.append(head);
+    for (const r of present) { seen.add(r.key); card.append(settingRow(r)); }
+    wrap.append(card);
   }
+}
+
+// One row: what it is, what it is for, what it says now, and how to change it.
+function settingRow(r) {
+  const row = document.createElement('div');
+  row.className = 'row border-b border-surface-variant/40 items-start';
+
+  const left = document.createElement('div');
+  left.className = 'min-w-0';
+  const name = document.createElement('p');
+  name.className = 'font-code-md text-code-md';
+  name.textContent = LABEL[r.key] || r.key;
+  const note = document.createElement('p');
+  note.className = 'font-code-sm text-code-sm text-outline mt-0.5';
+  note.textContent = r.note;
+  left.append(name, note);
+
+  const right = document.createElement('div');
+  right.className = 'flex items-center gap-space-sm shrink-0';
+  const val = document.createElement('span');
+  val.className = 'font-code-md text-code-md '
+    + (r.is_set ? 'text-on-surface-variant' : 'text-outline');
+  val.textContent = settingValue(r);
+  const edit = document.createElement('button');
+  edit.className = 'btn';
+  edit.textContent = r.secret && r.is_set ? 'Replace' : 'Edit';
+  edit.onclick = () => editSetting(r, row);
+
+  if (r.secret && r.is_set) {
+    // Secrets are withheld everywhere else. Showing one is a deliberate act,
+    // so it takes a click, asks cg for it, and hides again.
+    const eye = document.createElement('button');
+    eye.className = 'btn';
+    eye.title = 'show the value';
+    const glyph = document.createElement('span');
+    glyph.className = 'material-symbols-outlined text-[16px]';
+    glyph.textContent = ICON.visibility;
+    eye.append(glyph);
+    let shown = false;
+    eye.onclick = async () => {
+      if (shown) {
+        val.textContent = settingValue(r);
+        glyph.textContent = ICON.visibility;
+        shown = false;
+        return;
+      }
+      const out = await runCg(['config', 'get', r.key], { capture: true });
+      val.textContent = (out || '').trim() || '(empty)';
+      glyph.textContent = ICON.visibility_off;   // click again to hide it
+      shown = true;
+    };
+    right.append(val, eye, edit);
+  } else {
+    right.append(val, edit);
+  }
+  row.append(left, right);
+  return row;
 }
 
 function editSetting(r, row) {
@@ -1164,7 +1271,7 @@ window.cg.onEvent(({ id, event }) => {
   const job = jobs.get(id);
   if (!job) return;
   logLine(event);
-  if (WRITES.has(job.cmd[0])) {
+  if (isWrite(job.cmd)) {
     if (event.t === 'step') buildStep(event.text);
     if (event.t === 'step_end') buildStepEnd(event);
     if (event.t === 'line' || (event.t === 'raw' && event.stream === 'stdout')) buildLine(event);
@@ -1193,7 +1300,7 @@ window.cg.onEvent(({ id, event }) => {
     updateHeader();
     // A build, a destroy or a session changes what every free screen shows -
     // the box, the archive, the guards - so read them again once it is over.
-    if (WRITES.has(job.cmd[0])) {
+    if (isWrite(job.cmd)) {
       note(`cg ${job.cmd.join(' ')} ${event.rc === 0 ? 'finished' : `failed (exit ${event.rc})`}`,
            event.rc === 0 ? 'text-primary' : 'text-error');
       refreshAll();
@@ -1210,7 +1317,7 @@ function runCg(args, { panel, age, json, env, collect, capture } = {}) {
       return resolve();
     }
     jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, out: [], resolve });
-    if (WRITES.has(args[0])) note(`cg ${args.join(' ')} started`, 'text-primary');
+    if (isWrite(args)) note(`cg ${args.join(' ')} started`, 'text-primary');
     updateHeader();
     if (panel) $(panel).textContent = 'running…';
   });
@@ -1286,6 +1393,42 @@ $('cancel').onclick = async () => {
 };
 $('d-build').onclick = () => goView('build');
 $('d-library').onclick = () => goView('library');
+for (const b of document.querySelectorAll('[data-filter]')) {
+  b.onclick = () => applyLogFilter(b.dataset.filter);
+}
+$('log-clear').onclick = () => {
+  $('log').textContent = '';
+  logCount = 0;
+  $('log-count').textContent = '0';
+};
+$('log-copy').onclick = async () => {
+  const text = [...$('log').children].filter(r => !r.hidden)
+    .map(r => [...r.children].map(c => c.textContent).join('  ')).join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    $('log-count').textContent = 'copied';
+  } catch { $('log-count').textContent = 'could not copy'; }
+};
+// Reading CloudWatch logs is free; it is manual only because it is rarely the
+// thing you want, not because it costs anything.
+$('log-cloud').onclick = async () => {
+  $('log-cloud-out').textContent = 'fetching…';
+  const out = await runCg(['watchdog', 'logs'], { capture: true });
+  $('log-cloud-out').textContent = (out || '').trim()
+    || 'nothing in the last three hours - it writes a line when it decides something';
+};
+// Both of these delete things in S3 for good. The app asks once, then cg asks
+// for the word typed out - CLEAN, FORGET - which the ask dialog renders.
+$('lib-clean').onclick = async () => {
+  const ok = await askConfirm({
+    title: 'Delete the orphaned objects?',
+    body: 'These belong to no archived game - a push that never finished. They cannot be '
+        + 'restored: with no manifest, Steam cannot see them.\n\n'
+        + 'Nothing that is indexed is touched. cg will ask you to type CLEAN.',
+    yes: 'Clean', danger: true,
+  });
+  if (ok) await startRun(['library', 'clean']);
+};
 $('d-guards').onclick = () => goView('guards');
 $('g-settings').onclick = () => goView('settings');
 // The only button on the dashboard that spends money, and it says so.
@@ -1293,12 +1436,14 @@ $('d-cost').onclick = () => runCg(['cost', '--json'], { json: 'cost' });
 // A build, a destroy and a session all report the same way - steps, lines, an
 // exit - so they all run in the Build screen's panel, and starting one goes
 // there. Watching a destroy in a panel that says nothing was the complaint.
-const RUN_TITLE = { init: 'Provisioning', destroy: 'Destroying', open: 'Session' };
+const RUN_TITLE = { init: 'Provisioning', destroy: 'Destroying', open: 'Session',
+                    library: 'Changing the archive' };
 // The footer says what the money is doing, which is not the same for all three.
 const RUN_FOOT = {
   init: ['the box bills from the moment it launches', 'of 10-20'],
   destroy: ['the games are pushed to S3 first; billing stops when the box is gone', ''],
   open: ['the box bills while this streams', ''],
+  library: ['deleting from S3 stops its storage charge', ''],
 };
 let runKind = 'init';
 function startRun(args) {

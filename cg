@@ -492,8 +492,8 @@ library_clean() {
     total=$(( total + bytes ))
     printf '  %10s  %s\n' "$(numfmt --to=iec --suffix=B "$bytes" 2>/dev/null)" "$prefix"
   done <<< "$rows"
-  awk -v b="$total" 'BEGIN{ g=b/1073741824;
-    printf "\n  %.1f GB, costing $%.2f/month (INR %.0f) for files no game can use\n", g, g*0.025, g*0.025*88 }'
+  awk -v b="$total" -v r="$CG_S3_USD_GB_MONTH" -v inr="$CG_INR_PER_USD" 'BEGIN{ g=b/1073741824;
+    printf "\n  %.1f GB, costing $%.2f/month (INR %.0f) for files no game can use\n", g, g*r, g*r*inr }'
   echo "  They are not restorable: with no manifest, Steam cannot see them."
   cg_ask_typed clean-orphans "type CLEAN to delete them: " CLEAN \
     || { echo "aborted - nothing was deleted"; return 1; }

@@ -29,6 +29,15 @@
   .pill-warn { @apply text-tertiary border-tertiary/40; }
   .pill-bad  { @apply text-error border-error/40; }
   .row { @apply flex items-center justify-between gap-space-sm py-space-xs; }
+  /* One event per row: the time, what kind it was, and what it said. Columns
+     rather than a blob, so a long build stays readable while it scrolls. */
+  .log-row { @apply flex gap-space-sm items-baseline py-0.5; }
+  .log-row time { @apply text-outline shrink-0 w-16; }
+  .log-row .k { @apply text-outline shrink-0 w-16 uppercase; }
+  .log-row .k.fail, .log-row .k.error { @apply text-error; }
+  .log-row .k.ok { @apply text-primary; }
+  .log-row .k.warn, .log-row .k.wait { @apply text-tertiary; }
+  .log-row .t { @apply text-on-surface-variant break-all; }
 }
 
 /* `hidden` must win. A class that sets display - .btn is inline-flex - is an

@@ -31,5 +31,16 @@ __pycache__/
 # The Stitch design export: the screens are kept, the zip they came in is not.
 stitch_design/design.zip
 
-# Electron app dependencies.
+# Electron app dependencies, and what electron-builder produces: a 200 MB
+# unpacked Chromium per build.
 app/node_modules/
+app/dist/
+
+# Identity and bank documents. Three of these were found sitting in the working
+# tree during the AWS account verification of September 2026 - a statement, an
+# unlocked copy of it, and a photo ID. `git add -A` would have published them to
+# a public repo, permanently. They belong outside the checkout; these rules are
+# the second line of defence, not the first.
+*.pdf
+Acct_Statement*
+/stitch_design/*.png

@@ -8,7 +8,22 @@ const path = require('node:path');
 const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
 const { run, answer, interrupt } = require('./runner');
 
-const REPO = path.resolve(__dirname, '..', '..');   // the repo that owns cg
+// The repo that owns cg. Running from source that is app/.. ; packaged, the app
+// lives somewhere else entirely and must be told - CG_REPO, or the default
+// checkout. The scripts are deliberately NOT bundled into the app: a copy
+// inside an .asar would be a second, stale source of truth.
+function findRepo() {
+  const candidates = [
+    process.env.CG_REPO,
+    path.resolve(__dirname, '..', '..'),
+    path.join(require('node:os').homedir(), 'cloud_gaming'),
+  ].filter(Boolean);
+  for (const dir of candidates) {
+    try { if (require('node:fs').existsSync(path.join(dir, 'cg'))) return dir; } catch {}
+  }
+  return candidates[1];
+}
+const REPO = findRepo();
 let win = null;
 let nextId = 1;
 

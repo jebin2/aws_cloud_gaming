@@ -202,7 +202,7 @@ contains "  with the command on the log" "$js" "'cg ' + args.join(' ')"
 contains "  and a footer about the money" "$js" "billing stops when the box is gone"
 contains "destroy runs through it"       "$js" "startRun(['destroy'])"
 contains "  and so does play"            "$js" "startRun(['open'])"
-contains "every long run paints the steps" "$js" "if (WRITES.has(job.cmd[0])) {"
+contains "every long run paints the steps" "$js" "if (isWrite(job.cmd)) {"
 contains "  and the free reads follow it" "$js" "refreshAll();"
 
 echo "5f. the app holds no prices"
@@ -241,7 +241,46 @@ contains "  and the audit line"          "$js" 'last audit ${ago(g.last_decision
 contains "always-on is not counted as unarmed" "$js" "const guardCount = guards =>"
 contains "the knobs are settings rows"   "$js" "const WANT = ['GAME_WATCHDOG_IDLE_MIN'"
 contains "  edited through cg"           "$js" "editSetting(r, row)"
-check    "no guard is hardcoded"         "$(grep -c 'on-host watchdog\|cloud watchdog' app/renderer/index.html)" "0"
+# The Logs screen names the cloud watchdog in a heading, which is a label, not
+# a guard definition; no guard's state, timing or existence is in the markup.
+# id="d-armed" and id="g-armed" are placeholders cg fills; what must not be in
+# the markup is a guard's name, its timing or its state.
+check    "no guard is hardcoded"         "$(grep -c '15 min\|30 min\|ARMED\|watchdog idle' app/renderer/index.html)" "0"
+
+echo "5h. the logs and settings screens"
+contains "the event stream can be filtered" "$js" "function applyLogFilter(which)"
+contains "  and copied"                  "$html" 'id="log-copy"'
+contains "  and cleared"                 "$html" 'id="log-clear"'
+check    "  it keeps a bounded number"   "$(grep -c "log.children.length > 2000" app/renderer/app.js)" "1"
+contains "the watchdog's own log is reachable" "$js" "runCg(['watchdog', 'logs']"
+contains "  and reading it is free"      "$html" "costs nothing to read"
+contains "settings are grouped"          "$js" "const SETTING_GROUPS = ["
+contains "  a new setting still appears" "$js" "New settings cg knows about"
+contains "  and the screen says how it saves" "$html" "cg config set"
+lacks    "  not by editing the file"     "$html" "or by editing the file"
+# The archive's destructive actions were unreachable: the orphan line said
+# "remove with: cg library clean" and there was no button.
+contains "orphans can be cleaned"        "$js" "startRun(['library', 'clean'])"
+contains "  a game can be forgotten"     "$js" "startRun(['library', 'forget'"
+contains "  both warn first"             "$js" "cg will ask you to type FORGET"
+contains "  and both count as writes"    "$js" "const LIBRARY_WRITES = new Set("
+check    "  the same line the main process draws" \
+         "$(grep -c "'push', 'pull', 'forget', 'clean', 'account'" app/main/index.js app/renderer/app.js | grep -vc ':0')" "2"
+
+echo "5i. packaging keeps the scripts outside the package"
+# A cg bundled into the .asar would be a second, stale engine. The app finds
+# the repo instead - and still works when it is somewhere else.
+check "the build config exists"          "$(node -e 'console.log(require("./app/package.json").build ? 1 : 0)')" "1"
+check "  and ships only the app"         "$(node -e 'console.log(require("./app/package.json").build.files.join(","))')" "main/**,renderer/**,package.json"
+contains "the repo is found, not bundled" "$main" "function findRepo()"
+contains "  CG_REPO can say where it is" "$main" "process.env.CG_REPO"
+check "an icon is committed"             "$([[ -s app/build/icon.png ]] && echo yes || echo no)" "yes"
+check "  the binary is called cg"        "$(node -e 'console.log(require("./app/package.json").build.executableName)')" "cg"
+check "  and the build output is ignored" "$(git check-ignore app/dist >/dev/null 2>&1 && echo yes || echo no)" "yes"
+contains "the README says Windows is untested" "$(cat app/README.md)" "Windows is written but untested"
+# Verified by running it: `npm run pack` produced dist/linux-unpacked/cg, whose
+# app.asar holds the app and nothing else - no cg, no lib/*.sh.
+contains "  and how it was proven"       "$(cat app/README.md)" "verified by packing it"
 
 echo "6. the actions that spend money ask first"
 # window.confirm draws a native alert that belongs to no design.
@@ -262,6 +301,6 @@ contains "  and confirming a clear"      "$js" "remembered as"
 # "1" means nothing to a person, and a secret is worth seeing once, on purpose.
 contains "a choice is shown in words"    "$js" "'1': 'spot', '0': 'on demand'"
 contains "a secret can be revealed"      "$js" "runCg(['config', 'get', r.key]"
-contains "  deliberately, then hidden"   "$js" "hide it again"
+contains "  deliberately, then hidden"   "$js" "click again to hide it"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

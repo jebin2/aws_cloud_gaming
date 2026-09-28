@@ -357,7 +357,12 @@
           <tfoot id="lib-foot" class="border-t border-surface-variant"></tfoot>
         </table>
       </div>
-      <p class="font-code-sm text-code-sm text-tertiary mt-space-md" id="lib-orphans" hidden></p>
+      <div class="flex items-start justify-between gap-space-md mt-space-md p-space-md rounded bg-surface-container" id="lib-orphan-box" hidden>
+        <p class="font-code-sm text-code-sm text-tertiary" id="lib-orphans"></p>
+        <button class="btn btn-danger shrink-0" id="lib-clean">
+          <span class="material-symbols-outlined text-[16px]" data-icon="delete">&#xe92e;</span>Clean
+        </button>
+      </div>
     </div>
   </section>
 
@@ -537,34 +542,85 @@
 
   <!-- Settings -->
   <section data-view="settings" hidden>
-    <div class="p-space-lg rounded-lg bg-surface-container-low">
-      <div class="pb-space-md">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Settings</span>
-        <p class="font-code-sm text-code-sm text-outline mt-0.5">
-          They live in <span class="text-secondary">.env</span>, where cg owns them. Secrets are never shown here -
-          only whether they are set. Change them with <span class="text-secondary">cg check --fix</span> or by editing the file.
-        </p>
+    <div class="flex flex-wrap items-center gap-space-sm mb-space-lg font-code-sm text-code-sm">
+      <span class="pill" id="s-count">—</span>
+      <span class="text-outline">
+        Editing one here runs <span class="text-secondary">cg config set</span>, which checks it and writes
+        <span class="text-secondary">.env</span>. The app never touches the file itself.
+      </span>
+      <span class="text-outline ml-auto" id="s-age"></span>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-gutter-desktop" id="s-groups"></div>
+
+    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop">
+      <div class="flex items-center justify-between gap-space-md">
+        <div>
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Preflight</span>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5">
+            Checks every prerequisite - account, quota, key pair, laptop tools - and creates nothing.
+          </p>
+        </div>
+        <button id="check" class="btn shrink-0">
+          <span class="material-symbols-outlined text-[16px]" data-icon="check_circle">&#xf0be;</span>Run check
+        </button>
       </div>
-      <div class="flex flex-col" id="s-rows"></div>
-      <div class="flex items-center justify-between mt-space-lg pt-space-md border-t border-surface-variant">
-        <p class="font-code-sm text-code-sm text-outline">
-          Checks every prerequisite - account, quota, key pair, tools - and creates nothing.
-        </p>
-        <button id="check" class="btn"><span class="material-symbols-outlined text-[16px]" data-icon="check_circle">&#xf0be;</span>Run check</button>
-      </div>
-      <pre class="font-code-sm text-code-sm whitespace-pre-wrap mt-space-md text-on-surface-variant" id="s-check" hidden></pre>
+      <pre class="font-code-sm text-code-sm whitespace-pre-wrap mt-space-md max-h-[40vh] overflow-auto text-on-surface-variant" id="s-check" hidden></pre>
     </div>
   </section>
 
   <!-- Logs -->
   <section data-view="logs" hidden>
-    <div class="p-space-lg rounded-lg bg-surface-container-low">
-      <div class="flex items-center justify-between pb-space-md">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Event stream</span>
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-gutter-desktop">
+
+      <!-- everything this window has heard from cg -->
+      <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
+        <div class="flex items-center justify-between pb-space-md gap-space-sm">
+          <div>
+            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Event stream</span>
+            <p class="font-code-sm text-code-sm text-outline mt-0.5">
+              Every event cg emitted in this window. It is not kept anywhere - closing the app forgets it.
+            </p>
+          </div>
+          <span class="font-code-sm text-code-sm text-outline whitespace-nowrap" id="log-count">0</span>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-space-xs pb-space-sm">
+          <button class="btn" data-filter="all">All</button>
+          <button class="btn" data-filter="steps">Steps</button>
+          <button class="btn" data-filter="problems">Problems</button>
+          <button class="btn" data-filter="raw">Raw</button>
+          <label class="font-code-sm text-code-sm text-outline flex items-center gap-space-xs ml-auto">
+            <input type="checkbox" id="log-follow" class="accent-primary" checked>auto-scroll
+          </label>
+          <button class="btn" id="log-copy">
+            <span class="material-symbols-outlined text-[16px]" data-icon="terminal">&#xeb8e;</span>Copy
+          </button>
+          <button class="btn" id="log-clear">Clear</button>
+        </div>
+
+        <div class="font-code-sm text-code-sm flex-1 min-h-[200px] max-h-[62vh] overflow-auto rounded bg-surface-container-lowest p-space-md" id="log"></div>
       </div>
-      <div class="font-code-sm text-code-sm max-h-[65vh] overflow-auto" id="log"></div>
+
+      <!-- the durable record: what the cloud watchdog decided, hourly -->
+      <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
+        <div class="flex items-center justify-between pb-space-md gap-space-sm">
+          <div>
+            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Cloud watchdog log</span>
+            <p class="font-code-sm text-code-sm text-outline mt-0.5">
+              The Lambda's own decisions, from CloudWatch - the last three hours. It survives this window,
+              and costs nothing to read.
+            </p>
+          </div>
+          <button class="btn shrink-0" id="log-cloud">
+            <span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span>Fetch
+          </button>
+        </div>
+        <pre class="font-code-sm text-code-sm whitespace-pre-wrap flex-1 min-h-[200px] max-h-[62vh] overflow-auto rounded bg-surface-container-lowest p-space-md" id="log-cloud-out">Not fetched. It runs every 5 minutes and writes a line when it decides something.</pre>
+      </div>
     </div>
   </section>
+
 
 </main>
 </div>

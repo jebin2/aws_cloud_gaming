@@ -61,6 +61,15 @@ and stops the bill. The next `cg init` brings everything back.
 
 Every command, and what is safe to run twice: [docs/commands.md](docs/commands.md).
 
+## A window, if you prefer one
+
+    cd app && npm install && npm start
+
+A desktop app over the same commands: the box and what it is spending, the archive, the guards and
+what they last decided, and a build you can watch step by step. It holds no AWS logic - it runs
+`cg` and renders what it says, so the scripts stay the only thing that decides anything.
+[app/README.md](app/README.md).
+
 ## Documentation
 
 | | |
@@ -68,6 +77,7 @@ Every command, and what is safe to run twice: [docs/commands.md](docs/commands.m
 | [AWS account setup](docs/aws-account-setup.md) | Step by step: paid plan, GPU quotas with example requests, how to verify - followable by a person or an AI |
 | [Getting started](docs/getting-started.md) | Credentials, configuration, the first build and pairing |
 | [Commands](docs/commands.md) | Every command, the terminal output, running things twice |
+| [The desktop app](docs/app-design.md) | What each screen shows and the command behind every field |
 | [Cost](docs/cost.md) | What every charge is, measured, and why spot is the default |
 | [Cost guards](docs/cost-guards.md) | The guards that stop a forgotten box, and the cloud watchdog's IAM role |
 | [Destroy](docs/destroy.md) | What `cg destroy` and `cg destroy --all` remove, and what they keep |
