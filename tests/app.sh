@@ -281,6 +281,15 @@ contains "the README says Windows is untested" "$(cat app/README.md)" "Windows i
 # Verified by running it: `npm run pack` produced dist/linux-unpacked/cg, whose
 # app.asar holds the app and nothing else - no cg, no lib/*.sh.
 contains "  and how it was proven"       "$(cat app/README.md)" "verified by packing it"
+# A tag builds the release. The workflow runs this very suite first, so a
+# release cannot ship an app that grew AWS logic or a price of its own.
+check    "a release workflow exists"     "$([[ -s .github/workflows/desktop-release.yml ]] && echo yes || echo no)" "yes"
+contains "  triggered by a v tag"        "$(cat .github/workflows/desktop-release.yml)" "- 'v*'"
+contains "  the tag decides the version" "$(cat .github/workflows/desktop-release.yml)" "npm version --no-git-tag-version"
+contains "  and it runs these checks first" "$(cat .github/workflows/desktop-release.yml)" "bash tests/app.sh"
+contains "  the release says the app needs the repo" "$(cat .github/workflows/desktop-release.yml)" "This app needs the repo"
+contains "  and which platforms are tested" "$(cat .github/workflows/desktop-release.yml)" "Treat it as untested"
+check    "the deb can be built"          "$(node -e 'const b=require("./app/package.json");console.log(b.homepage && b.build.linux.maintainer ? "yes" : "no")')" "yes"
 
 echo "6. the actions that spend money ask first"
 # window.confirm draws a native alert that belongs to no design.

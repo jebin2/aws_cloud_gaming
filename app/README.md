@@ -30,6 +30,14 @@ package would be a second, stale source of truth - which is the one thing this d
 have. So a packaged app still needs the checkout, and updating the rig means `git pull`, not a new
 build.
 
+Releases are built by tagging:
+
+    git tag v0.2.0 && git push origin v0.2.0
+
+`.github/workflows/desktop-release.yml` stamps the version from the tag, runs `tests/app.sh`,
+builds on Linux, Windows and macOS, and opens a **draft** release with the artifacts attached -
+look at it before publishing.
+
 Both scripts were run here: `npm run pack` produces `dist/linux-unpacked/cg`, and its `app.asar`
 holds `main/`, `renderer/` and `package.json` - no `cg`, no `lib/*.sh` (verified by packing it and
 listing the archive). The packed binary starts and opens its window.

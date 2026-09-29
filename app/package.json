@@ -30,10 +30,14 @@
     },
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb"
       ],
       "category": "Game",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "synopsis": "Desktop viewer for cg, the cloud gaming rig",
+      "description": "Runs the cg scripts from your checkout and renders what they say. It holds no AWS logic of its own.",
+      "maintainer": "jebin2 <noreply@users.noreply.github.com>"
     },
     "mac": {
       "target": [
@@ -50,5 +54,11 @@
     },
     "executableName": "cg"
   },
-  "author": "jebin2"
+  "author": "jebin2",
+  "homepage": "https://github.com/jebin2/aws_cloud_gaming",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jebin2/aws_cloud_gaming.git"
+  },
+  "license": "MIT"
 }

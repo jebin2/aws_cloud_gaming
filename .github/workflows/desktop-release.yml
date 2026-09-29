@@ -1,0 +1,162 @@
+# Tag a version, get the app built for all three platforms.
+#
+#     git tag v0.2.0 && git push origin v0.2.0
+#
+# The tag is the version: package.json is stamped from it, so an installed
+# build can say which one it is. The release is a DRAFT - look at it, write
+# what changed, then publish.
+#
+# Free: GitHub Actions costs nothing on a public repository.
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      # The app must never grow AWS logic, and it must never hold a price -
+      # both are checked by this suite. A release that fails it is a release
+      # that broke the one rule the design has.
+      - name: Check The App Still Only Runs cg
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          (cd app && npm ci)
+          bash tests/app.sh
+        shell: bash
+
+      # The tag is the source of truth for the version. Without this the
+      # version is whatever was committed, so every release reports the same
+      # number and nothing in an installed build says which one it is.
+      - name: Stamp Version From Tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: ./app
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+        shell: bash
+
+      - name: Install Dependencies
+        working-directory: ./app
+        run: npm ci
+
+      - name: Build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: ./app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist -- --linux --publish never
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: ./app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist -- --win --publish never
+
+      - name: Build (macOS)
+        if: matrix.os == 'macos-latest'
+        working-directory: ./app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No Apple Developer certificate, so do not go looking for one.
+          # The .dmg is unsigned: macOS will want right-click - Open.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run dist -- --mac --publish never
+
+      - name: Upload Linux Artifacts
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            app/dist/*.AppImage
+            app/dist/*.deb
+          if-no-files-found: error
+
+      - name: Upload Windows Artifacts
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: app/dist/*.exe
+          if-no-files-found: error
+
+      - name: Upload macOS Artifacts
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            app/dist/*.dmg
+            app/dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display Structure
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
+          # Said on every release, because a downloaded app on its own does
+          # nothing: it runs the scripts in the repo, which is the whole design.
+          body: |
+            ## This app needs the repo
+
+            It holds no AWS logic. It runs `cg` from a checkout of this repository and renders
+            what the scripts say, so the scripts stay the only thing that decides anything.
+
+                git clone https://github.com/jebin2/aws_cloud_gaming.git ~/cloud_gaming
+                cd ~/cloud_gaming && ./cg check --fix
+
+            Then start the app. It looks for the repo in `$CG_REPO`, then beside itself, then
+            `~/cloud_gaming`.
+
+            ## What is tested where
+
+            - **Linux** - this is where it runs. AppImage and .deb.
+            - **macOS** - builds, unsigned, never tried. Right-click - Open the first time.
+            - **Windows** - builds, and shells through WSL because the scripts are bash. Stop
+              cannot reach a job inside WSL yet, so a run started there must be stopped from a
+              terminal. Treat it as untested.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
