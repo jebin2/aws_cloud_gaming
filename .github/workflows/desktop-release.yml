@@ -1,10 +1,17 @@
-# Tag a version, get the app built for all three platforms.
+# Tag a version, get a Linux build.
 #
 #     git tag v0.2.0 && git push origin v0.2.0
 #
 # The tag is the version: package.json is stamped from it, so an installed
 # build can say which one it is. The release is a DRAFT - look at it, write
 # what changed, then publish.
+#
+# LINUX ONLY, deliberately. electron-builder will happily produce a .exe and a
+# .dmg, and both would be untested downloads: macOS has never been tried, and
+# on Windows the app shells through WSL while Stop kills a POSIX process group
+# that cannot reach inside it. Shipping them would be shipping a guess. The
+# matrix below is one line away from all three - add them back when someone has
+# actually run the thing on that machine.
 #
 # Free: GitHub Actions costs nothing on a public repository.
 name: Desktop Release
@@ -25,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest]   # windows-latest, macos-latest: untested, see the header
 
     steps:
       - name: Checkout Code
@@ -42,7 +49,6 @@ jobs:
       # both are checked by this suite. A release that fails it is a release
       # that broke the one rule the design has.
       - name: Check The App Still Only Runs cg
-        if: matrix.os == 'ubuntu-latest'
         run: |
           (cd app && npm ci)
           bash tests/app.sh
@@ -62,55 +68,18 @@ jobs:
         run: npm ci
 
       - name: Build (Linux)
-        if: matrix.os == 'ubuntu-latest'
         working-directory: ./app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run dist -- --linux --publish never
 
-      - name: Build (Windows)
-        if: matrix.os == 'windows-latest'
-        working-directory: ./app
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist -- --win --publish never
-
-      - name: Build (macOS)
-        if: matrix.os == 'macos-latest'
-        working-directory: ./app
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No Apple Developer certificate, so do not go looking for one.
-          # The .dmg is unsigned: macOS will want right-click - Open.
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: npm run dist -- --mac --publish never
-
       - name: Upload Linux Artifacts
-        if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
           name: linux-artifacts
           path: |
             app/dist/*.AppImage
             app/dist/*.deb
-          if-no-files-found: error
-
-      - name: Upload Windows Artifacts
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-artifacts
-          path: app/dist/*.exe
-          if-no-files-found: error
-
-      - name: Upload macOS Artifacts
-        if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-artifacts
-          path: |
-            app/dist/*.dmg
-            app/dist/*.zip
           if-no-files-found: error
 
   release:
@@ -134,9 +103,6 @@ jobs:
           files: |
             artifacts/**/*.AppImage
             artifacts/**/*.deb
-            artifacts/**/*.exe
-            artifacts/**/*.dmg
-            artifacts/**/*.zip
           # Said on every release, because a downloaded app on its own does
           # nothing: it runs the scripts in the repo, which is the whole design.
           body: |
@@ -151,12 +117,13 @@ jobs:
             Then start the app. It looks for the repo in `$CG_REPO`, then beside itself, then
             `~/cloud_gaming`.
 
-            ## What is tested where
+            ## Linux only
 
-            - **Linux** - this is where it runs. AppImage and .deb.
-            - **macOS** - builds, unsigned, never tried. Right-click - Open the first time.
-            - **Windows** - builds, and shells through WSL because the scripts are bash. Stop
-              cannot reach a job inside WSL yet, so a run started there must be stopped from a
-              terminal. Treat it as untested.
+            These are the only builds published, because Linux is the only place the app has
+            been run. It is Electron and the scripts are bash, so macOS and Windows (through
+            WSL) are within reach - but an untested download is worse than none, so they are
+            not built until someone has actually used one.
+
+            From source on any platform: `cd app && npm install && npm start`.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

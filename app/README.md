@@ -35,8 +35,9 @@ Releases are built by tagging:
     git tag v0.2.0 && git push origin v0.2.0
 
 `.github/workflows/desktop-release.yml` stamps the version from the tag, runs `tests/app.sh`,
-builds on Linux, Windows and macOS, and opens a **draft** release with the artifacts attached -
-look at it before publishing.
+builds the AppImage and the .deb, and opens a **draft** release - look at it before publishing.
+It builds **Linux only**: an untested .exe or .dmg is worse than none, and the matrix is one line
+away from all three the day someone has actually run it there.
 
 Both scripts were run here: `npm run pack` produces `dist/linux-unpacked/cg`, and its `app.asar`
 holds `main/`, `renderer/` and `package.json` - no `cg`, no `lib/*.sh` (verified by packing it and

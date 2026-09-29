@@ -288,7 +288,11 @@ contains "  triggered by a v tag"        "$(cat .github/workflows/desktop-releas
 contains "  the tag decides the version" "$(cat .github/workflows/desktop-release.yml)" "npm version --no-git-tag-version"
 contains "  and it runs these checks first" "$(cat .github/workflows/desktop-release.yml)" "bash tests/app.sh"
 contains "  the release says the app needs the repo" "$(cat .github/workflows/desktop-release.yml)" "This app needs the repo"
-contains "  and which platforms are tested" "$(cat .github/workflows/desktop-release.yml)" "Treat it as untested"
+# Only Linux is published, because only Linux has been run. The day someone
+# tries macOS or Windows, the matrix is one line.
+check    "  it publishes Linux only"     "$(grep -c 'windows-latest, macos-latest: untested' .github/workflows/desktop-release.yml)" "1"
+check    "  and builds no untested installer" "$(grep -cE '\*\.exe|\*\.dmg' .github/workflows/desktop-release.yml)" "0"
+contains "  the release says why"        "$(cat .github/workflows/desktop-release.yml)" "an untested download is worse than none"
 check    "the deb can be built"          "$(node -e 'const b=require("./app/package.json");console.log(b.homepage && b.build.linux.maintainer ? "yes" : "no")')" "yes"
 
 echo "6. the actions that spend money ask first"
