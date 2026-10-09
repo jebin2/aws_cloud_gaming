@@ -72,7 +72,17 @@
         "from": "../.env.example",
         "to": "cg/.env.example"
       }
-    ]
+    ],
+    "pacman": {
+      "depends": [
+        "gtk3",
+        "nss",
+        "alsa-lib",
+        "libcups",
+        "libdrm",
+        "mesa"
+      ]
+    }
   },
   "author": "jebin2",
   "homepage": "https://github.com/jebin2/aws_cloud_gaming",

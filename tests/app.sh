@@ -393,6 +393,18 @@ contains "  and the workflow ships them"  "$(cat .github/workflows/desktop-relea
 # and then died with exit 127. Arch has bsdtar, so only CI ever saw it.
 contains "  and installs what fpm needs for them" \
          "$(cat .github/workflows/desktop-release.yml)" "libarchive-tools"
+# electron-builder's default pacman dependencies are a Debian list with Debian
+# names: http-parser was dropped from Arch's repos and libappindicator-gtk3 is
+# AUR-only, so pacman refused the package outright - "cannot resolve
+# http-parser". These are the packages that own the libraries ldd actually
+# reports against the built binary.
+check "  the Arch package depends on Arch packages" \
+      "$(node -e 'console.log(require("./app/package.json").build.pacman.depends.join(" "))')" \
+      "gtk3 nss alsa-lib libcups libdrm mesa"
+lacks "  not a name Arch has never had" \
+      "$(node -e 'console.log(JSON.stringify(require("./app/package.json").build.pacman))')" "http-parser"
+lacks "  nor one that lives only in the AUR" \
+      "$(node -e 'console.log(JSON.stringify(require("./app/package.json").build.pacman))')" "libappindicator"
 contains "  including the one with no dependencies" "$(cat .github/workflows/desktop-release.yml)" "artifacts/**/*.tar.gz"
 contains "the release says which file to take" "$(cat .github/workflows/desktop-release.yml)" "Arch, CachyOS, Omarchy"
 contains "  and warns what the AppImage needs" "$(cat .github/workflows/desktop-release.yml)" "needs FUSE 2 on the machine"
