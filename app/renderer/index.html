@@ -218,10 +218,16 @@
         <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline" id="b-strip-title">Provisioning</span>
         <span class="font-code-sm text-code-sm text-outline shrink-0" id="b-strip-meta"></span>
       </div>
-      <div class="h-1.5 rounded-full bg-surface-container overflow-hidden">
+      <div class="h-1.5 rounded-full bg-surface-container overflow-hidden" id="b-bar-track">
         <div class="h-full bg-primary rounded-full" id="b-prog" style="width:0%"></div>
       </div>
       <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm truncate" id="b-prog-step"></p>
+
+      <!-- Why the run stopped, in place of the bar rather than below the fold:
+           a bar that has stopped moving says nothing, and the log holds 200
+           auto-scrolling lines, so the one line that explains the failure had
+           already gone by the time anyone looked. -->
+      <div class="hidden font-code-sm text-code-sm text-on-surface whitespace-pre-wrap" id="b-error"></div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop">
@@ -313,16 +319,6 @@
           <span class="font-code-sm text-code-sm" id="b-status">not running</span>
         </div>
 
-        <!-- Why the run stopped. Hidden until something fails: the log scrolls and
-             holds 200 lines, so the one line that explains the failure does not
-             stay on screen. -->
-        <div class="hidden mb-space-md rounded border border-error bg-surface-container-lowest px-space-md py-space-sm" id="b-error">
-          <div class="flex items-center gap-space-xs pb-space-xs">
-            <span class="material-symbols-outlined text-error text-[18px]" data-icon="error">&#xf8b6;</span>
-            <span class="font-label-caps text-label-caps uppercase tracking-wider text-error" id="b-error-title">stopped</span>
-          </div>
-          <div class="font-code-sm text-code-sm text-on-surface whitespace-pre-wrap" id="b-error-text"></div>
-        </div>
 
         <div class="rounded bg-surface-container-lowest overflow-hidden flex-1 flex flex-col min-h-0">
           <div class="flex items-center justify-between px-space-md py-space-xs border-b border-surface-variant">

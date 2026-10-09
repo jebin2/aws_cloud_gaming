@@ -1358,6 +1358,7 @@ function paintProgress() {
 }
 
 function buildProgressDone(rc) {
+  if (buildFailures.length) return;   // the strip is showing why it stopped
   const bar = $('b-prog');
   bar.classList.remove('animate-pulse');
   bar.style.width = '100%';
@@ -1397,16 +1398,31 @@ function buildFail(text) {
   // The title names the phase, not the failure: a fixed "launch failed" above
   // cg's own "launch failed: InsufficientInstanceCapacity" read as the same
   // thing said twice.
-  $('b-error-title').textContent = `${RUN_TITLE[runKind] || RUN_TITLE.init} stopped`;
-  $('b-error-text').textContent = buildFailures.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  // The strip's own heading carries the state, rather than a second heading
+  // under it: "Provisioning" above "Provisioning stopped" was the same words
+  // twice, and cg's first line says what failed anyway.
+  const title = $('b-strip-title');
+  title.textContent = `${RUN_TITLE[runKind] || RUN_TITLE.init} stopped`;
+  title.classList.add('text-error');
+  title.classList.remove('text-outline');
+  $('b-error').textContent = buildFailures.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   $('b-error').classList.remove('hidden');
+  // The failure takes the bar's place. A bar frozen at 35% beside the reason it
+  // froze is two things saying the same moment, and the useful one is smaller.
+  $('b-strip').hidden = false;
+  $('b-bar-track').hidden = true;
+  $('b-prog-step').hidden = true;
 }
 
 function buildFailClear() {
   buildFailures = [];
   buildFailing = false;
-  $('b-error-text').textContent = '';
+  $('b-error').textContent = '';
   $('b-error').classList.add('hidden');
+  $('b-bar-track').hidden = false;
+  $('b-prog-step').hidden = false;
+  $('b-strip-title').classList.remove('text-error');
+  $('b-strip-title').classList.add('text-outline');
 }
 
 function buildLine(event) {

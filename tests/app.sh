@@ -189,11 +189,20 @@ check    "  and it is still not a timer" "$(grep -c 'setInterval' app/renderer/a
 # log that had already moved past it. cg marks the headline as `fail`; the panel
 # keeps that and everything under it until the next step.
 contains "a failure gets its own panel"    "$html" 'id="b-error"'
-contains "  hidden until something fails"  "$html" 'class="hidden mb-space-md rounded border border-error'
+contains "  hidden until something fails"  "$html" 'class="hidden font-code-sm'
+# It lives in the strip, taking the BAR's place: a bar frozen at 35% says
+# nothing, and in the right-hand panel the reason sat under a 200-line
+# auto-scrolling log that had already moved past it.
+check    "  and sits in the strip, not the panel" \
+         "$(awk '/id="b-strip"/{s=NR} /id="b-error"/{e=NR} /id="b-log"/{l=NR} END{print (s && e && l && s < e && e < l) ? "yes" : "no"}' app/renderer/index.html)" "yes"
+contains "  the bar gives way to it"       "$js" "\$('b-bar-track').hidden = true"
+contains "  and comes back on the next run" "$js" "\$('b-bar-track').hidden = false"
+contains "  a failed run paints no full bar" "$js" "if (buildFailures.length) return;"
 # A fixed "launch failed" heading sat directly above cg's own "launch failed:
 # InsufficientInstanceCapacity", which read as the same sentence twice.
-contains "  its heading names the phase"   "$js" 'RUN_TITLE[runKind] || RUN_TITLE.init} stopped'
-lacks    "  not the failure itself"        "$html" 'id="b-error-title">launch failed'
+contains "  the strip's own heading names the phase" "$js" 'RUN_TITLE[runKind] || RUN_TITLE.init} stopped'
+check    "  with no second heading under it" \
+         "$(grep -c 'b-error-title' app/renderer/app.js app/renderer/index.html | awk -F: '{s+=$2} END{print s}')" "0"
 contains "  fed by the lines cg marked"    "$js" "if (event.kind === 'fail') { buildFailing = true;"
 contains "  and the report under them"     "$js" "else if (buildFailing && event.t === 'line')"
 contains "  an error event lands there too" "$js" "if (event.t === 'error') buildFail(event.text)"
