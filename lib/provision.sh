@@ -7,6 +7,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."   # lib/ -> repo root; .env and paths live there
 # shellcheck source=lib/ssh-key.sh
 source lib/ssh-key.sh
+# shellcheck source=lib/launch-error.sh
+source lib/launch-error.sh
 
 REGION="${GAME_REGION:-ap-south-2}"
 TS_HOST="${GAME_TS_HOST:-gamevps}"
@@ -251,31 +253,11 @@ sys.stdout.write(s)' > "$USERDATA" \
     break
   done
   if [[ -z $INSTANCE_ID ]]; then
-      cat "$ERRF" >&2
-      echo ""
-      echo "launch failed. The things this is usually:"
-      echo ""
-      echo "  MaxSpotInstanceCountExceeded, right after a destroy"
-      echo "    AWS releases the spot vCPU quota a minute or two AFTER the instance"
-      echo "    terminates, so an immediate rebuild hits your own old allocation."
-      echo "    Nothing is wrong - wait ~2 minutes and run it again."
-      echo "    Check with: aws ec2 describe-spot-instance-requests --region $REGION"
-      echo ""
-      echo "  MaxSpotInstanceCountExceeded, persistently"
-      echo "    Your spot quota (L-3819A6DF) is smaller than this instance needs,"
-      echo "    or an older request still holds it. On-demand instead:"
-      echo "      GAME_SPOT=0 cg init"
-      echo ""
-      echo "  InsufficientInstanceCapacity"
-      echo "    No spare $TYPE capacity right now. Nothing pins the AZ any more, so"
-      echo "    this is the whole region being short. On-demand usually fits:"
-      echo "      GAME_SPOT=0 cg init"
-      echo ""
-      echo "  AccessDenied on iam:PassRole"
-      echo "    Launching with an instance profile needs iam:PassRole for"
-      echo "    $INSTANCE_PROFILE. Without it the box cannot reach S3 and the"
-      echo "    game library will not survive a stop."
-      echo ""
+      # stdout, NOT stderr: lib/setup pipes provision.sh stderr into cg_relay only on
+      # a terminal, so a report on stderr is invisible to CG_JSON consumers - the
+      # app saw only the die() line and had to say "see the launch error above",
+      # with nothing above it.
+      launch_error_report "$ERRF"
       exit 1
   fi
   echo "    $INSTANCE_ID"

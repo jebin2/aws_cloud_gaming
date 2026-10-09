@@ -24,7 +24,10 @@ contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 mkdir -p "$T/bin" "$T/home/.ssh" "$T/lib"
 cp "$REPO/cg" "$T/cg"
 # cg sources these three; a sandbox missing one fails as a bash error, not a test.
-cp "$REPO/lib/common.sh" "$REPO/lib/cloud-watchdog.sh" "$REPO/lib/config.sh" "$REPO/lib/session.sh" "$REPO/lib/rates.sh" "$T/lib/"
+# Everything cg sources. A file added to that list and not to this one makes cg
+# die with a bash error before the first assertion, which reads as the feature
+# being broken rather than the sandbox being short a file.
+cp "$REPO/lib/common.sh" "$REPO/lib/cloud-watchdog.sh" "$REPO/lib/config.sh" "$REPO/lib/session.sh" "$REPO/lib/rates.sh" "$REPO/lib/machines.sh" "$T/lib/"
 seed_env() {
   cat > "$T/.env" <<EOF
 GAME_INSTANCE_ID=i-test

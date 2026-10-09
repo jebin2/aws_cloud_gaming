@@ -1158,7 +1158,21 @@ say "provisioning instance"
 # name - and a bare stderr line landed in the middle of the styled step with no
 # time and no gutter. Off a terminal it is left alone, so a redirected log gets
 # exactly what it got before.
-if _cg_styled; then lib/provision.sh 2>&1 | cg_relay ''; else lib/provision.sh | cg_relay ''; fi
+# The exit status, not just the output. Under `set -e` with pipefail a failing
+# provision.sh ended cg right here, which on a terminal is fine - the error is
+# the last thing on screen - but under CG_JSON=1 emitted no `error` event at
+# all, so the app saw a run stop and never learned why. die() emits one.
+set +e
+# Under CG_JSON=1 stderr must be relayed too, for the same reason it is on a
+# terminal: anything provision.sh or its children write there otherwise arrives
+# beside the NDJSON stream rather than in it, as stray non-JSON the app can only
+# show as raw text. Off a terminal and not in JSON mode it is still left alone,
+# so a redirected log gets exactly what it always got.
+if _cg_styled || cg_json; then lib/provision.sh 2>&1 | cg_relay ''
+else lib/provision.sh | cg_relay ''; fi
+prov_rc=$?
+set -e
+(( prov_rc == 0 )) || die "could not launch the instance - see the launch error above"
 # shellcheck disable=SC1091
 set -a; source .env; set +a
 

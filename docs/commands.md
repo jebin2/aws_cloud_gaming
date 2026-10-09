@@ -37,11 +37,36 @@ rather than reimplementing them.
 | `cg watcher [--watch]` | Every guard, and whether each is genuinely armed - including what the cloud watchdog last decided, and when |
 | `cg watcher --json` | The same guards as data: armed, what each catches, its last decision |
 | `cg watchdog [status\|check\|logs\|install\|remove]` | The cloud watchdog: schedule and recent decisions; `check` runs it now as a dry run |
+| `cg machines` | What GPU shapes this region rents, their specs, and what each costs on spot and on demand. Reads only; costs nothing |
+| `cg machines --all` | The same, including shapes no quota covers |
+| `cg machines --json` | The same table as data - the app's instance picker is fed from this |
 | `cg notify` | Send a test push notification to `GAME_NTFY_URL` |
 | `cg ping [--watch]` | Latency, and **direct vs DERP relay** - the usual cause of a bad session |
 
-`--region` and `--host` override `.env` without editing it; `--json` works on `ping` and
-`snapshot --list`.
+`--region` and `--host` override `.env` without editing it; `--json` works on `ping`,
+`machines` and `snapshot --list`.
+
+### Choosing the machine
+
+`cg machines` exists because the instance type used to be a constant, and a region running out
+of capacity for that one shape meant no box at all. The table names the alternatives a quota
+already covers, so the choice does not need a quota appeal first:
+
+```
+  TYPE           VCPU  GPU       VRAM     RAM     DISK     SPOT / ON DEMAND
+  *g6.xlarge     4     L4        22.4 GB  16 GB   250 GB   INR 13   / INR 85
+   g6e.xlarge    4     L40S      44.7 GB  32 GB   250 GB   INR 49   / INR 197
+```
+
+Two things the single hard-coded type used to hide. **A shape may not fit your quota at all** -
+larger `g6`s are cheaper per hour on spot than `g6e.xlarge`, and all of them need a quota
+increase, so they are listed separately rather than offered. And **the spot price is per zone**:
+nothing pins the AZ any more, so the table shows the cheapest zone and the JSON carries the
+dearest, which can be more than double.
+
+Change it with `cg config set GAME_INSTANCE_TYPE <type>`, or from the dropdown on the app's
+Build screen - which writes the same setting. It applies to the next `cg init`; a running box
+is untouched.
 
 ## Terminal output
 

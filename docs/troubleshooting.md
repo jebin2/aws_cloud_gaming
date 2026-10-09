@@ -95,6 +95,34 @@ not raise maximum concurrent capacity - it only changes the purchase model.
 The messages that worked, and the full sequence, are in
 [aws-account-setup.md](aws-account-setup.md#the-appeals-we-actually-sent).
 
+### Reading a launch failure
+
+`cg init` now prints the AWS error code and AWS's own sentence on the first line, then the one
+explanation that matches it:
+
+```
+!! launch failed: InsufficientInstanceCapacity
+    There is no Spot capacity available that matches your request.
+
+  No spare g6.xlarge spot capacity in ap-south-2 right now.
+  Nothing pins the AZ any more, so this is the whole region being short,
+  not one zone. On-demand usually fits:
+    GAME_SPOT=0 cg init
+```
+
+It used to print AWS's message and then every cause it knew, 25 lines of them. On a terminal
+the real error scrolled off the top; in the desktop app every one of those lines arrived as an
+ordinary continuation line, indistinguishable from build progress, so a failed build reported
+itself as the words "stopped (exit 1)" and nothing else. The classifier lives in
+[lib/launch-error.sh](../lib/launch-error.sh) and is tested in `tests/launch-error.sh`.
+
+The `!! ` prefix is a marker, not decoration: `cg_relay` turns it into a `fail` event, and the
+app shows that line and everything under it in a panel above the log. Any relayed script can
+use it.
+
+An error code the classifier has not been taught still prints its code and AWS's sentence, and
+falls back to the list - so a new failure is never silent.
+
 ### Region and instance type are not free choices
 
 `ap-south-2` offers no `g4dn` at all, only `g6`/`g6e`, and `g6.xlarge` is the only one that

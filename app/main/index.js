@@ -42,7 +42,7 @@ const ENV_ALLOWED = new Set(['GAME_APPS']);
 // `config set` only writes .env locally - it cannot collide with a build. Left
 // out, it counted as a write and was refused while the other reads ran, so the
 // Settings screen stayed empty until someone pressed Refresh.
-const READ_ONLY = new Set(['status', 'watcher', 'library', 'cost', 'check', 'ping', 'games', 'config']);
+const READ_ONLY = new Set(['status', 'watcher', 'library', 'cost', 'check', 'ping', 'games', 'config', 'machines']);
 const isReadOnly = args =>
   READ_ONLY.has(args[0]) && !['push', 'pull', 'forget', 'clean', 'account'].includes(args[1] || '');
 

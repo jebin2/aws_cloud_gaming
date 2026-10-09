@@ -64,6 +64,10 @@ source lib/rates.sh
 # `cg destroy` closes it before taking the box away.
 # shellcheck source=lib/session.sh
 source lib/session.sh
+# What this region will rent, read from AWS - see lib/machines.sh. The app's
+# instance picker is fed from here, so no list of types lives in the renderer.
+# shellcheck source=lib/machines.sh
+source lib/machines.sh
 
 # lib/setup and lib/game are dispatch targets, not commands - see docs/commands.md
 # is not needed, their headers say so.
@@ -1347,6 +1351,10 @@ case "$CMD" in
                          config_get "$1" ;;
                *)        die "usage: cg config [show|--json|get <key>|set <key> [value]]" ;;
              esac ;;
+  # Every call behind this is free, and none of them launch anything.
+  machines|types)
+             if (( JSON )); then machines_json "$REGION"; exit 0; fi
+             machines_show "$REGION" "${1:-}" | cg_report "🖥" "Machines" ;;
   notify)    cmd_notify ;;
   log|logs)  cmd_log "$@" ;;
   ssh)       if [[ $# -gt 0 ]]; then box "$@"; else need_node; exec ssh -i "$KEY" \

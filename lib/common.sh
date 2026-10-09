@@ -303,7 +303,11 @@ cg_relay() { # cg_relay [indent]
   if cg_json; then
     while IFS= read -r line; do
       [[ -z ${line//[[:space:]]/} ]] && continue
-      _cg_event line kind cont source box text "$line"
+      # A relayed script marks its own failure with "!! ". Without this every
+      # line it ever prints arrives as `cont`, and a GUI cannot tell the one
+      # line that says why the run stopped from the hundred above it.
+      if [[ $line == '!! '* ]]; then _cg_event line kind fail source box text "${line#'!! '}"
+      else _cg_event line kind cont source box text "$line"; fi
     done
     return
   fi
@@ -330,7 +334,8 @@ cg_relay() { # cg_relay [indent]
       fi
       timers=0
     fi
-    if   [[ $line =~ ^[[:space:]]*s5cmd: ]];    then _cg_line cont "  ${line#"${line%%[![:space:]]*}"}"
+    if   [[ $line =~ ^[[:space:]]*!!\ (.*)$ ]]; then _cg_line fail "${BASH_REMATCH[1]}"
+    elif [[ $line =~ ^[[:space:]]*s5cmd: ]];    then _cg_line cont "  ${line#"${line%%[![:space:]]*}"}"
     elif [[ $line =~ ^[[:space:]]*==\>\ (.*)$ ]]; then _cg_line step "${BASH_REMATCH[1]}"
     elif [[ $line =~ ^[[:space:]]{4,}(.*)$ ]];  then _cg_line cont "  ${BASH_REMATCH[1]}"
     else

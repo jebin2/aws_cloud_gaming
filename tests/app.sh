@@ -89,7 +89,10 @@ contains "  a write waits for everything" "$main" "[...jobs.values()][0]"
 contains "  and a read waits only for a write" "$main" "find(j => !j.readOnly)"
 # config was missing from that set, so the Settings screen was refused at startup
 # while the other reads ran, and stayed empty.
-contains "  config counts as a read"     "$main" "'games', 'config']"
+contains "  config counts as a read"     "$main" "'games', 'config'"
+# `machines` reads describe-* and the Pricing API: free, and it launches nothing,
+# so the picker must not be refused while the other reads are in flight.
+contains "  so does machines"             "$main" "'config', 'machines']"
 contains "quitting mid-run asks first"   "$main" "before-quit"
 contains "the cost refresh carries its price" "$(tr -s ' ' < app/renderer/index.html)" 'id="refresh-cost"'
 contains "  shown only on the cost screen" "$js" "refresh-cost').hidden = view !== 'cost'"
@@ -165,6 +168,53 @@ contains "  and so is the step list"      "$html" 'max-h-[28vh] overflow-y-auto'
 contains "  which keeps the newest step in view" "$js" "steps.scrollTop = steps.scrollHeight"
 contains "the log follows only if asked" "$js" '$('"'"'b-follow'"'"').checked' 
 check    "  and it is still not a timer" "$(grep -c 'setInterval' app/renderer/app.js)" "0"
+# A failed build used to report itself as the words "stopped (exit 1)" in a
+# small label, with the actual AWS error somewhere in a 200-line auto-scrolling
+# log that had already moved past it. cg marks the headline as `fail`; the panel
+# keeps that and everything under it until the next step.
+contains "a failure gets its own panel"    "$html" 'id="b-error"'
+contains "  hidden until something fails"  "$html" 'class="hidden mb-space-md rounded border border-error'
+# A fixed "launch failed" heading sat directly above cg's own "launch failed:
+# InsufficientInstanceCapacity", which read as the same sentence twice.
+contains "  its heading names the phase"   "$js" 'RUN_TITLE[runKind] || RUN_TITLE.init} stopped'
+lacks    "  not the failure itself"        "$html" 'id="b-error-title">launch failed'
+contains "  fed by the lines cg marked"    "$js" "if (event.kind === 'fail') { buildFailing = true;"
+contains "  and the report under them"     "$js" "else if (buildFailing && event.t === 'line')"
+contains "  an error event lands there too" "$js" "if (event.t === 'error') buildFail(event.text)"
+contains "  a nonzero exit is never silent" "$js" "exited ${event.rc} without saying why"
+contains "  and the next run clears it"    "$js" "buildFailClear();"
+
+# The machine picker. Its whole point is that the app knows nothing about any
+# machine: a list of types typed in here goes stale the first time the region
+# gains a shape, and this rig hit exactly that - a launch that failed for
+# capacity on the only type it had ever used.
+contains "an instance-type dropdown"      "$html" 'id="b-type"'
+# It first went in the machine panel further down the column, where a narrow
+# window - the grid collapses to one column under lg - put it below the fold
+# and it could not be found at all. It belongs beside the button that spends
+# the money.
+check    "  above the Build button, not below it" \
+         "$(awk '/id="b-type"/{a=NR} /id="b-build"/{b=NR} END{print (a && b && a < b) ? "yes" : "no"}' app/renderer/index.html)" "yes"
+contains "  fed by cg machines"           "$js" "[['machines', '--json'], 'machines']"
+contains "  and read at startup with the rest" "$js" "[['machines', '--json'], 'machines'],"
+contains "  only what a quota covers is offered" "$js" "if (spot ? !m.fits_spot : !m.fits_ondemand) continue"
+contains "  the GPU and price come from cg" "$js" "spot ? m.inr_hour_spot : m.inr_hour_ondemand"
+# The purchase model is the bigger lever - on demand is about six times spot,
+# and it is the only thing that launches when a region has no spare capacity -
+# so it is the same choice, not a separate setting to go and find.
+contains "  each row is a machine AND a purchase model" "$js" "for (const spot of [true, false])"
+contains "  priced cheapest first"        "$js" "options.sort((a, b) => a.price - b.price"
+contains "  'auto' counts as spot"        "$js" "d.spot !== '0'"
+contains "  a row with no market is not offered" "$js" "if (price == null) continue"
+contains "  choosing one writes the type" "$js" "'config', 'set', 'GAME_INSTANCE_TYPE'"
+contains "  and the purchase model"       "$js" "'config', 'set', 'GAME_SPOT'"
+contains "  after confirming the rate"    "$js" 'Build on ${type}, ${onSpot ? '"'"'spot'"'"' : '"'"'on demand'"'"'}?'
+contains "  saying what each model means" "$js" "launches even when spot has none left"
+contains "  a running box locks it"       "$js" "sel.disabled = !!boxNow"
+contains "  and says why"                 "$js" "destroy it before changing the machine"
+contains "  the unpinned zone is priced too" "$js" "usd_hour_spot_max"
+check    "  and still no machine is named here" \
+         "$(grep -cE 'g6\.|g6e\.|L40S|L4 ' app/renderer/app.js)" "0"
 
 echo "5c. the library and cost screens, in the same language"
 contains "the library leads with three numbers" "$html" 'id="lib-cost"'

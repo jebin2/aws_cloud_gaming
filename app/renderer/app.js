@@ -1160,6 +1160,64 @@ function paintFit() {
 
 // The machine strip: the type you asked for, and what AWS says that type is.
 // Every number here comes from `cg status --json`; nothing is hardcoded.
+// The instance-type picker. Everything shown - the types, their GPUs, their
+// prices - is `cg machines --json`; nothing about any machine is written down
+// in this file. Choosing one writes GAME_INSTANCE_TYPE through `cg config set`,
+// so .env stays the single source of truth and the next build agrees with the
+// picker without being told.
+let machinesNow = null;
+function paintMachines(d) {
+  machinesNow = d;
+  const sel = $('b-type');
+  const note = $('b-type-note');
+  sel.textContent = '';
+  if (d.error) {
+    sel.append(new Option(d.error, ''));
+    sel.disabled = true;
+    note.textContent = '';
+    return;
+  }
+  // One row per machine AND purchase model, because the model is the bigger
+  // lever: on demand costs about six times spot, and when a region runs out of
+  // spot capacity it is the only way to launch at all. Picking a row sets both
+  // settings, so the choice is one decision rather than two.
+  const options = [];
+  for (const m of d.machines) {
+    for (const spot of [true, false]) {
+      if (spot ? !m.fits_spot : !m.fits_ondemand) continue;   // no quota covers it
+      const price = spot ? m.inr_hour_spot : m.inr_hour_ondemand;
+      if (price == null) continue;                            // no market, or no published price
+      const bits = [m.type, spot ? 'spot' : 'on demand'];
+      if (m.gpu) bits.push(m.vram_gib ? `${m.gpu} ${m.vram_gib} GB` : m.gpu);
+      bits.push(`${m.ram_gib} GB RAM`, `INR ${price}/hr`);
+      options.push({ type: m.type, spot, price, m, label: bits.join(' · ') });
+    }
+  }
+  options.sort((a, b) => a.price - b.price || a.type.localeCompare(b.type));
+  // 'auto' means spot wherever the quota allows, so it selects the spot row.
+  const spotOn = d.spot !== '0';
+  for (const o of options) {
+    const opt = new Option(o.label, `${o.type}|${o.spot ? '1' : '0'}`);
+    opt.selected = o.type === d.configured && o.spot === spotOn;
+    sel.append(opt);
+  }
+  if (!options.length) sel.append(new Option('no machine here fits your quota', ''));
+  // A running box cannot change shape, and silently writing a machine that is
+  // not the one billing is worse than refusing.
+  sel.disabled = !!boxNow || !options.length;
+  const chosen = options.find(o => o.type === d.configured && o.spot === spotOn);
+  const parts = [];
+  if (boxNow) parts.push('a box is running - destroy it before changing the machine');
+  else if (chosen && chosen.spot && chosen.m.spot_az)
+    parts.push(`cheapest in ${chosen.m.spot_az}; the zone is not pinned, so it can cost up to INR `
+             + `${Math.round(chosen.m.usd_hour_spot_max * d.inr_per_usd)}/hr`);
+  else if (chosen && !chosen.spot)
+    parts.push('on demand: it launches when spot has no capacity, and costs the full rate');
+  const noQuota = d.machines.length - new Set(options.map(o => o.type)).size;
+  if (noQuota > 0) parts.push(`${noQuota} larger shapes need more quota`);
+  note.textContent = parts.join(' · ');
+}
+
 function paintSpec(s) {
   const spec = s.spec || {};
   boxNow = s.box || null;
@@ -1194,6 +1252,10 @@ function paintSpec(s) {
   $('b-chip').textContent = s.box
     ? `${s.box.id} · ${s.box.type} · ${s.region} · billing`
     : `${s.instance_type} · ${s.region} · ${pay}${disk}`;
+  // The two reads land in whatever order they finish, and the picker's enabled
+  // state depends on this one. Repaint it once a box is known, or a picker that
+  // arrived first would stay editable beside a running box.
+  if (machinesNow) paintMachines(machinesNow);
   paintFit();
 }
 
@@ -1253,6 +1315,37 @@ function paintElapsed() {
   $('b-elapsed').textContent = `${mins}m elapsed${scale ? ' ' + scale : ''}`;
 }
 
+// Every line cg marked as a failure, plus whatever `error` event ended the run.
+// Kept out of the log on purpose: the log holds 200 lines and auto-scrolls, so by
+// the time a run ends the line that said why is usually gone.
+let buildFailures = [];
+// cg marks only the HEADLINE of a failure report as `fail`; the AWS message and
+// the remedy underneath it are ordinary continuation lines. A relayed script
+// exits straight after printing one, so once a failure starts, everything until
+// the next step belongs to it - which is how the panel gets the whole report
+// rather than just its title.
+let buildFailing = false;
+function buildFail(text) {
+  if (!text) return;
+  const line = text.replace(/\s+$/, '');
+  if (!line && !buildFailures.length) return;
+  if (buildFailures[buildFailures.length - 1] === line) return;
+  buildFailures.push(line);
+  // The title names the phase, not the failure: a fixed "launch failed" above
+  // cg's own "launch failed: InsufficientInstanceCapacity" read as the same
+  // thing said twice.
+  $('b-error-title').textContent = `${RUN_TITLE[runKind] || RUN_TITLE.init} stopped`;
+  $('b-error-text').textContent = buildFailures.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  $('b-error').classList.remove('hidden');
+}
+
+function buildFailClear() {
+  buildFailures = [];
+  buildFailing = false;
+  $('b-error-text').textContent = '';
+  $('b-error').classList.add('hidden');
+}
+
 function buildLine(event) {
   const log = $('b-log');
   const row = document.createElement('div');
@@ -1275,8 +1368,18 @@ window.cg.onEvent(({ id, event }) => {
     if (event.t === 'step') buildStep(event.text);
     if (event.t === 'step_end') buildStepEnd(event);
     if (event.t === 'line' || (event.t === 'raw' && event.stream === 'stdout')) buildLine(event);
-    if (event.t === 'exit') buildStatus(event.rc === 0 ? 'done' : `stopped (exit ${event.rc})`,
-                                       event.rc === 0 ? 'text-primary' : 'text-error');
+    if (event.kind === 'fail') { buildFailing = true; buildFail(event.text); }
+    else if (buildFailing && event.t === 'line') buildFail(event.text);
+    if (event.t === 'step') buildFailing = false;
+    if (event.t === 'error') buildFail(event.text);
+    if (event.t === 'exit') {
+      buildStatus(event.rc === 0 ? 'done' : `stopped (exit ${event.rc})`,
+                  event.rc === 0 ? 'text-primary' : 'text-error');
+      // A nonzero exit with nothing marked is still a failure, and saying so
+      // beats a bare status label the eye slides over.
+      if (event.rc !== 0 && !buildFailures.length)
+        buildFail(`cg ${job.cmd.join(' ')} exited ${event.rc} without saying why - the log above is all there is.`);
+    }
   }
   if (event.t === 'ask') ask(id, event);
   // JSON comes back on stdout as the command's own data; reports arrive as events.
@@ -1292,7 +1395,7 @@ window.cg.onEvent(({ id, event }) => {
       try {
         const data = JSON.parse(job.out.join('\n'));
         ({ cost: paintCost, library: paintLibrary, guards: paintGuards,
-           config: paintConfig, status: paintStatus }[job.json])(data);
+           config: paintConfig, status: paintStatus, machines: paintMachines }[job.json])(data);
       } catch (err) { $('job-line').textContent = `could not read cg ${job.cmd[0]} --json`; }
     }
     if (job.age) $(job.age).textContent = new Date().toLocaleTimeString();
@@ -1330,7 +1433,8 @@ const NEEDS = {
   settings:  [[['config', '--json'], 'config']],
   // Build reads status too: if a box is already up there is nothing to build,
   // and its own Refresh must be able to find that out.
-  build:     [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status']],
+  build:     [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status'],
+              [['machines', '--json'], 'machines']],
   library:   [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status']],
   guards:    [[['watcher', '--json'], 'guards']],
 };
@@ -1353,6 +1457,7 @@ const ALL_READS = [
   [['config', '--json'], 'config'],
   [['watcher', '--json'], 'guards'],
   [['library', 'list', '--json'], 'library'],
+  [['machines', '--json'], 'machines'],
 ];
 function refreshAll() {
   for (const v of Object.keys(NEEDS)) loaded.add(v);
@@ -1429,6 +1534,36 @@ $('lib-clean').onclick = async () => {
   });
   if (ok) await startRun(['library', 'clean']);
 };
+// Changing the machine is a `config set` - .env is where cg keeps it, and the
+// next build reads it from there. Re-read afterwards rather than assuming the
+// write landed: the note and the chip both describe the new choice.
+$('b-type').onchange = async () => {
+  const [type, spot] = ($('b-type').value || '').split('|');
+  if (!type || !machinesNow) return;
+  const was = machinesNow.spot !== '0' ? '1' : '0';
+  if (type === machinesNow.configured && spot === was) return;
+  const m = machinesNow.machines.find(x => x.type === type);
+  const onSpot = spot === '1';
+  const price = m && (onSpot ? m.inr_hour_spot : m.inr_hour_ondemand);
+  const ok = await askConfirm({
+    title: `Build on ${type}, ${onSpot ? 'spot' : 'on demand'}?`,
+    body: (m && m.gpu ? `${m.gpu}${m.vram_gib ? `, ${m.vram_gib} GB VRAM` : ''}, ${m.ram_gib} GB RAM.\n\n` : '')
+        + (price != null ? `About INR ${price} an hour. ` : '')
+        + (onSpot
+            ? 'Spot is far cheaper, and a region with no spare capacity will refuse to launch it.'
+            : 'On demand costs the full rate and launches even when spot has none left.')
+        + '\n\nThis applies to the next build; a box that is already running is untouched.',
+    yes: 'Use it',
+  });
+  if (!ok) { paintMachines(machinesNow); return; }   // put the old choice back
+  // Two settings, one decision. The type first: a half-applied change that left
+  // the purchase model pointing at a machine nobody chose would be worse than
+  // either value alone.
+  await runCg(['config', 'set', 'GAME_INSTANCE_TYPE', type]);
+  await runCg(['config', 'set', 'GAME_SPOT', spot]);
+  await Promise.all([runCg(['machines', '--json'], { json: 'machines' }),
+                     runCg(['status', '--json'], { json: 'status' })]);
+};
 $('d-guards').onclick = () => goView('guards');
 $('g-settings').onclick = () => goView('settings');
 // The only button on the dashboard that spends money, and it says so.
@@ -1452,6 +1587,7 @@ function startRun(args) {
   $('b-steps').dataset.fresh = 'yes';
   $('b-steps').textContent = '';
   $('b-log').textContent = '';
+  buildFailClear();
   $('b-log-title').textContent = 'cg ' + args.join(' ');
   $('b-panel').textContent = RUN_TITLE[args[0]] || 'Running';
   $('b-burn').textContent = (RUN_FOOT[args[0]] || RUN_FOOT.init)[0];
@@ -1493,6 +1629,7 @@ $('b-build').onclick = async () => {
   $('b-steps').dataset.fresh = 'yes';
   $('b-steps').textContent = '';
   $('b-log').textContent = '';
+  buildFailClear();
   $('b-log-title').textContent = 'cg init';
   $('b-panel').textContent = RUN_TITLE.init;
   $('b-burn').textContent = RUN_FOOT.init[0];
