@@ -22,7 +22,13 @@ Screens:
 ## Building an app out of it
 
     npm run pack    # an unpacked build in dist/, to try
-    npm run dist    # AppImage (Linux), dmg (macOS), nsis (Windows)
+    npm run dist    # .pacman, .deb, .tar.gz and .AppImage
+
+Four Linux formats, because one was not enough. The AppImage looks like the simplest - a single
+file - but type-2 AppImages dlopen `libfuse.so.2`, and distributions have moved to fuse3; on Arch
+it dies with "error loading libfuse.so.2" until `pacman -S fuse2`, which is a poor first
+impression for something advertised as standalone. `.pacman` and `.deb` are native packages
+for the two families, and `.tar.gz` extracts and runs with no dependency at all.
 
 **The scripts travel with it.** `cg`, `lib/` and `lambda/` are copied into `resources/cg`, so a
 download runs without a checkout. The app still holds no AWS logic: it shells out to those

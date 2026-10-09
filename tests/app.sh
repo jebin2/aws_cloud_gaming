@@ -377,6 +377,20 @@ contains "the scripts are found, wherever they are" "$main" "function findRepo()
 contains "  CG_REPO can say where it is" "$main" "process.env.CG_REPO"
 check "an icon is committed"             "$([[ -s app/build/icon.png ]] && echo yes || echo no)" "yes"
 check "  the binary is called cg"        "$(node -e 'console.log(require("./app/package.json").build.executableName)')" "cg"
+# Four Linux formats, because one was not enough. A type-2 AppImage dlopens
+# libfuse.so.2 and distributions have moved to fuse3, so on Arch the "standalone"
+# download dies with "error loading libfuse.so.2" until a package is installed.
+# .tar.gz needs nothing; the two native packages are for the two families.
+check "  every Linux format is built" \
+      "$(node -e 'console.log(require("./app/package.json").build.linux.target.join(","))')" \
+      "AppImage,deb,pacman,tar.gz"
+# electron-builder writes "<name>-<version>.pacman", NOT a .pkg.tar.zst. The
+# file is a zstd package either way, but a glob for the wrong extension would
+# have shipped a release with the Arch package silently missing.
+contains "  and the workflow ships them"  "$(cat .github/workflows/desktop-release.yml)" "artifacts/**/*.pacman"
+contains "  including the one with no dependencies" "$(cat .github/workflows/desktop-release.yml)" "artifacts/**/*.tar.gz"
+contains "the release says which file to take" "$(cat .github/workflows/desktop-release.yml)" "Arch, CachyOS, Omarchy"
+contains "  and warns what the AppImage needs" "$(cat .github/workflows/desktop-release.yml)" "needs FUSE 2 on the machine"
 # A path INSIDE it, not the directory itself: the rule is `app/dist/`, which git
 # matches only against something it can see is a directory. On a fresh clone -
 # a release runner - app/dist does not exist yet, so asking about the directory

@@ -80,6 +80,8 @@ jobs:
           path: |
             app/dist/*.AppImage
             app/dist/*.deb
+            app/dist/*.pacman
+            app/dist/*.tar.gz
           if-no-files-found: error
 
   release:
@@ -103,6 +105,8 @@ jobs:
           files: |
             artifacts/**/*.AppImage
             artifacts/**/*.deb
+            artifacts/**/*.pacman
+            artifacts/**/*.tar.gz
           # Said on every release: what the download actually is, and what it
           # still needs from you before it can build anything on AWS.
           body: |
@@ -117,6 +121,20 @@ jobs:
             installed copy is read-only. A checkout keeps using its own `.env` as before, and
             a checkout beside the app wins over the bundled copy - so running from source
             shows your edits.
+
+            ## Which file
+
+            | | |
+            |---|---|
+            | `.pacman` | Arch, CachyOS, Omarchy - `sudo pacman -U <file>` |
+            | `.deb` | Debian, Ubuntu, Mint - `sudo dpkg -i <file>` |
+            | `.tar.gz` | anything else - extract it and run `cg` inside |
+            | `.AppImage` | one file, but it needs FUSE 2 on the machine |
+
+            The AppImage is listed last on purpose. AppImage type-2 needs `libfuse.so.2`, which
+            distributions have largely moved past - on Arch that means `pacman -S fuse2` first,
+            or running it as `./cg-*.AppImage --appimage-extract-and-run`. The `.tar.gz` needs
+            nothing at all.
 
             ## Before it can build a box
 

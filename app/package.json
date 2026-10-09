@@ -31,7 +31,9 @@
     "linux": {
       "target": [
         "AppImage",
-        "deb"
+        "deb",
+        "pacman",
+        "tar.gz"
       ],
       "category": "Game",
       "icon": "build/icon.png",
