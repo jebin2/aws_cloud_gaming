@@ -388,6 +388,11 @@ check "  every Linux format is built" \
 # file is a zstd package either way, but a glob for the wrong extension would
 # have shipped a release with the Arch package silently missing.
 contains "  and the workflow ships them"  "$(cat .github/workflows/desktop-release.yml)" "artifacts/**/*.pacman"
+# fpm shells out to bsdtar for the Arch package's .MTREE, and the Ubuntu runner
+# does not have it - the build spent four minutes on the other three formats
+# and then died with exit 127. Arch has bsdtar, so only CI ever saw it.
+contains "  and installs what fpm needs for them" \
+         "$(cat .github/workflows/desktop-release.yml)" "libarchive-tools"
 contains "  including the one with no dependencies" "$(cat .github/workflows/desktop-release.yml)" "artifacts/**/*.tar.gz"
 contains "the release says which file to take" "$(cat .github/workflows/desktop-release.yml)" "Arch, CachyOS, Omarchy"
 contains "  and warns what the AppImage needs" "$(cat .github/workflows/desktop-release.yml)" "needs FUSE 2 on the machine"

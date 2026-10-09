@@ -67,6 +67,14 @@ jobs:
         working-directory: ./app
         run: npm ci
 
+      # fpm builds the Arch package by shelling out to bsdtar for its .MTREE,
+      # and the Ubuntu runner has no bsdtar - the step died with exit code 127,
+      # "command not found", after four minutes of building everything else.
+      # It is present on Arch, which is why this only failed in CI.
+      - name: Install Packaging Tools
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
+        shell: bash
+
       - name: Build (Linux)
         working-directory: ./app
         env:
