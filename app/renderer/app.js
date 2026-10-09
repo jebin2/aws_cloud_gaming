@@ -1018,8 +1018,31 @@ function settingRow(r) {
 function editSetting(r, row) {
   const right = row.lastElementChild;
   right.textContent = '';
+  row.classList.add('editing');
   let input;
-  if (r.kind === 'choice') {
+  // The instance type is declared `text` in cg's registry, and has to be: the
+  // shapes a region rents are not knowable until AWS is asked, so there is no
+  // fixed list to declare. Settings asks the same way the Build screen does,
+  // and falls back to typing a name when that answer has not arrived.
+  const machineRow = r.key === 'GAME_INSTANCE_TYPE' && machinesNow && !machinesNow.error
+                  && machinesNow.machines.some(m => m.fits_spot || m.fits_ondemand);
+  if (machineRow) {
+    input = document.createElement('select');
+    for (const m of machinesNow.machines) {
+      if (!m.fits_spot && !m.fits_ondemand) continue;     // no quota covers it
+      const bits = [m.type];
+      if (m.gpu) bits.push(m.vram_gib ? `${m.gpu} ${m.vram_gib} GB` : m.gpu);
+      const spot = m.inr_hour_spot, od = m.inr_hour_ondemand;
+      if (spot != null || od != null) {
+        bits.push([spot != null ? `spot INR ${spot}` : null,
+                   od != null ? `on demand INR ${od}` : null].filter(Boolean).join(' / ') + '/hr');
+      }
+      const o = document.createElement('option');
+      o.value = m.type; o.textContent = bits.join(' · ');
+      input.append(o);
+    }
+    input.value = r.value || r.default || '';
+  } else if (r.kind === 'choice') {
     input = document.createElement('select');
     for (const opt of (r.rule || '').split(',')) {
       const o = document.createElement('option');
@@ -1037,7 +1060,12 @@ function editSetting(r, row) {
       : (r.default || '');
   }
   input.className = 'bg-surface border border-surface-variant rounded px-space-sm py-0.5 '
-                  + 'font-code-md text-code-md text-on-surface w-64';
+                  + 'font-code-md text-code-md text-on-surface min-w-0 '
+                  // A machine's label carries its GPU and both prices, which does
+                  // not fit a fixed 16rem - sharing the line with Save and Cancel
+                  // clipped it. The row wraps, so taking the full width puts the
+                  // buttons underneath rather than squeezing the text.
+                  + (machineRow ? 'w-full' : 'w-64');
   const save = document.createElement('button');
   save.className = 'btn btn-primary'; save.textContent = 'Save';
   const cancel = document.createElement('button');
@@ -1262,45 +1290,79 @@ function paintSpec(s) {
 // Numbered steps, the way cg reports them: the one running is marked, the ones
 // before it carry how long they took. No timer - each event repaints.
 let buildStarted = 0;
+// How long a run is expected to take, in minutes, so the bar means something.
+// Only `init` has a published estimate - the others finish when they finish, and
+// a bar invented for them would be a number nobody measured.
+const RUN_EXPECT = { init: 20 };
+let buildSteps = 0;
+
+// A step is a heading in the transcript, not a row in a second list. Keeping
+// both meant two boxes that each grew, which is what stretched the page; the
+// log scrolls on its own and loses nothing.
 function buildStep(text) {
-  const steps = $('b-steps');
-  if (steps.dataset.fresh !== 'no') { steps.textContent = ''; steps.dataset.fresh = 'no'; buildStarted = Date.now(); }
-  for (const li of steps.children) {
-    li.classList.remove('bg-surface-container');
-    const dot = li.querySelector('.dot');
-    if (dot) { dot.textContent = ICON.check_circle; dot.className = 'dot material-symbols-outlined text-[16px] text-primary'; }
-  }
-  const n = steps.children.length + 1;
-  const li = document.createElement('li');
-  li.className = 'flex items-start gap-space-sm px-space-sm py-space-xs rounded bg-surface-container font-code-sm text-code-sm';
-  li.innerHTML = '<span class="dot material-symbols-outlined text-[16px] text-primary animate-pulse"></span>'
-               + '<span class="text-outline w-5 shrink-0"></span>'
-               + '<span class="min-w-0"><span class="t text-on-surface block"></span>'
-               + '<span class="sub text-outline block truncate"></span></span>';
-  li.querySelector('.dot').textContent = ICON.bolt;
-  li.querySelector('span.text-outline').textContent = String(n).padStart(2, '0');
-  li.querySelector('.t').textContent = text;
-  steps.append(li);
-  steps.scrollTop = steps.scrollHeight;
-  paintElapsed();
+  const log = $('b-log');
+  if (log.dataset.fresh !== 'no') { log.textContent = ''; log.dataset.fresh = 'no'; buildStarted = Date.now(); }
+  buildSteps += 1;
+  const head = document.createElement('div');
+  head.className = 'step flex items-baseline gap-space-sm pt-space-sm first:pt-0';
+  const n = document.createElement('span');
+  n.className = 'text-outline shrink-0';
+  n.textContent = String(buildSteps).padStart(2, '0');
+  const label = document.createElement('span');
+  label.className = 'text-on-surface';
+  label.textContent = text;
+  const meta = document.createElement('span');
+  meta.className = 'meta ml-auto pl-space-sm text-outline shrink-0';
+  head.append(n, label, meta);
+  log.append(head);
+  $('b-prog-step').textContent = text;
+  paintProgress();
+  if ($('b-follow').checked) log.scrollTop = log.scrollHeight;
 }
 
 // cg times every step; the finished ones carry how long they took, which is the
 // only honest answer to "how much longer" on a box that varies.
 function buildStepEnd(event) {
-  const last = $('b-steps').lastElementChild;
+  const heads = $('b-log').querySelectorAll('.step');
+  const last = heads[heads.length - 1];
   if (!last) return;
-  const dot = last.querySelector('.dot');
+  const meta = last.querySelector('.meta');
   const ok = !event.rc;
-  dot.textContent = ok ? ICON.check_circle : ICON.error;
-  dot.className = 'dot material-symbols-outlined text-[16px] ' + (ok ? 'text-primary' : 'text-error');
-  last.classList.remove('bg-surface-container');
-  const sub = last.querySelector('.sub'); if (sub) sub.textContent = '';
-  const meta = document.createElement('span');
-  meta.className = 'ml-auto pl-space-sm text-outline shrink-0';
   meta.textContent = event.secs != null ? `${Math.round(event.secs)}s` : (ok ? 'ok' : `exit ${event.rc}`);
-  last.append(meta);
-  paintElapsed();
+  if (!ok) meta.classList.add('text-error');
+  paintProgress();
+}
+
+// The bar is TIME against the expected window, not steps completed: cg does not
+// announce how many steps a run has, and a fraction invented from the steps seen
+// so far would move backwards the moment another one arrived. It stops short of
+// full until the run actually ends, so it never claims to be finished.
+function paintProgress() {
+  const strip = $('b-strip');
+  strip.hidden = false;
+  const mins = buildStarted ? (Date.now() - buildStarted) / 60000 : 0;
+  const expect = RUN_EXPECT[runKind];
+  const bar = $('b-prog');
+  if (expect) {
+    bar.style.width = `${Math.min(95, (mins / expect) * 100).toFixed(1)}%`;
+    bar.classList.remove('animate-pulse');
+  } else {
+    // No estimate: show that something is happening rather than a made-up share.
+    bar.style.width = '100%';
+    bar.classList.add('animate-pulse');
+  }
+  const foot = (RUN_FOOT[runKind] || RUN_FOOT.init)[1];
+  $('b-strip-meta').textContent =
+    [buildSteps ? `step ${String(buildSteps).padStart(2, '0')}` : null,
+     buildStarted ? `${Math.floor(mins)}m${foot ? ' ' + foot : ''}` : null].filter(Boolean).join(' · ');
+}
+
+function buildProgressDone(rc) {
+  const bar = $('b-prog');
+  bar.classList.remove('animate-pulse');
+  bar.style.width = '100%';
+  bar.className = bar.className.replace('bg-primary', rc === 0 ? 'bg-primary' : 'bg-error');
+  $('b-prog-step').textContent = rc === 0 ? 'done' : 'stopped';
 }
 
 function buildStatus(text, tone) {
@@ -1313,6 +1375,7 @@ function paintElapsed() {
   const mins = Math.floor((Date.now() - buildStarted) / 60000);
   const scale = (RUN_FOOT[runKind] || RUN_FOOT.init)[1];
   $('b-elapsed').textContent = `${mins}m elapsed${scale ? ' ' + scale : ''}`;
+  paintProgress();
 }
 
 // Every line cg marked as a failure, plus whatever `error` event ended the run.
@@ -1353,8 +1416,9 @@ function buildLine(event) {
                 : event.kind === 'ok' ? 'text-primary' : 'text-on-surface-variant';
   row.textContent = event.text || '';
   log.append(row);
-  const running = $('b-steps').lastElementChild?.querySelector('.sub');
-  if (running && event.text) running.textContent = event.text;
+  // The strip carries the live line, so the one place to look while a step runs
+  // is the same place that says which step it is.
+  if (event.text && event.kind !== 'fail') $('b-prog-step').textContent = event.text;
   while (log.children.length > 200) log.firstChild.remove();
   if ($('b-follow').checked) log.scrollTop = log.scrollHeight;
   paintElapsed();
@@ -1375,6 +1439,7 @@ window.cg.onEvent(({ id, event }) => {
     if (event.t === 'exit') {
       buildStatus(event.rc === 0 ? 'done' : `stopped (exit ${event.rc})`,
                   event.rc === 0 ? 'text-primary' : 'text-error');
+      buildProgressDone(event.rc);
       // A nonzero exit with nothing marked is still a failure, and saying so
       // beats a bare status label the eye slides over.
       if (event.rc !== 0 && !buildFailures.length)
@@ -1430,7 +1495,9 @@ function runCg(args, { panel, age, json, env, collect, capture } = {}) {
 // they run together rather than one after another.
 const NEEDS = {
   dashboard: [[['status', '--json'], 'status'], [['watcher', '--json'], 'guards']],
-  settings:  [[['config', '--json'], 'config']],
+  // machines too: the instance-type row is a picker, and its options are
+  // whatever this region rents - see editSetting.
+  settings:  [[['config', '--json'], 'config'], [['machines', '--json'], 'machines']],
   // Build reads status too: if a box is already up there is nothing to build,
   // and its own Refresh must be able to find that out.
   build:     [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status'],
@@ -1584,12 +1651,17 @@ let runKind = 'init';
 function startRun(args) {
   runKind = args[0];
   goView('build');
-  $('b-steps').dataset.fresh = 'yes';
-  $('b-steps').textContent = '';
+  $('b-log').dataset.fresh = 'yes';
   $('b-log').textContent = '';
+  buildSteps = 0;
+  buildStarted = Date.now();
+  $('b-prog').className = 'h-full bg-primary rounded-full';
+  $('b-prog').style.width = '0%';
+  $('b-prog-step').textContent = 'starting…';
+  $('b-strip').hidden = false;
   buildFailClear();
   $('b-log-title').textContent = 'cg ' + args.join(' ');
-  $('b-panel').textContent = RUN_TITLE[args[0]] || 'Running';
+  $('b-strip-title').textContent = RUN_TITLE[args[0]] || 'Running';
   $('b-burn').textContent = (RUN_FOOT[args[0]] || RUN_FOOT.init)[0];
   buildStatus('running', 'text-primary');
   buildStarted = Date.now();
@@ -1626,12 +1698,17 @@ $('b-build').onclick = async () => {
   });
   if (!ok) return;
   goView('build');
-  $('b-steps').dataset.fresh = 'yes';
-  $('b-steps').textContent = '';
+  $('b-log').dataset.fresh = 'yes';
   $('b-log').textContent = '';
+  buildSteps = 0;
+  buildStarted = Date.now();
+  $('b-prog').className = 'h-full bg-primary rounded-full';
+  $('b-prog').style.width = '0%';
+  $('b-prog-step').textContent = 'starting…';
+  $('b-strip').hidden = false;
   buildFailClear();
   $('b-log-title').textContent = 'cg init';
-  $('b-panel').textContent = RUN_TITLE.init;
+  $('b-strip-title').textContent = RUN_TITLE.init;
   $('b-burn').textContent = RUN_FOOT.init[0];
   runKind = 'init';
   buildStatus('running', 'text-primary');

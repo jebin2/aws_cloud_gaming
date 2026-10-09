@@ -29,9 +29,19 @@
   .pill-warn { @apply text-tertiary border-tertiary/40; }
   .pill-bad  { @apply text-error border-error/40; }
   .row { @apply flex items-center justify-between gap-space-sm py-space-xs; }
+  /* While a setting is being edited the controls need more width than the value
+     they replace, and the label is the only thing that can give - it squeezed
+     and wrapped. Editing stacks instead: the label keeps its width, and the
+     controls get a line of their own. */
+  .row.editing { @apply flex-col items-stretch gap-space-xs; }
+  .row.editing > :last-child { @apply w-full justify-end flex-wrap; }
   /* One event per row: the time, what kind it was, and what it said. Columns
      rather than a blob, so a long build stays readable while it scrolls. */
   .log-row { @apply flex gap-space-sm items-baseline py-0.5; }
+  /* A step heading inside the build transcript. The steps used to be a second
+     list beside the log; both grew, and together they stretched the page. */
+  #b-log .step { @apply border-t border-surface-variant/40 mt-space-xs pt-space-xs; }
+  #b-log .step:first-child { @apply border-0 mt-0 pt-0; }
   .log-row time { @apply text-outline shrink-0 w-16; }
   .log-row .k { @apply text-outline shrink-0 w-16 uppercase; }
   .log-row .k.fail, .log-row .k.error { @apply text-error; }

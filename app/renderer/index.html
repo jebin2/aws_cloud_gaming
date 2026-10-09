@@ -209,6 +209,21 @@
 
   <!-- Build -->
   <section data-view="build" hidden>
+    <!-- Progress, across both columns. It used to live in the right panel,
+         where a growing step list plus a growing log stretched the grid row and
+         made the whole page taller than the window. Here it costs a fixed
+         strip, and the panel below it never changes height. -->
+    <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop" id="b-strip" hidden>
+      <div class="flex items-center justify-between pb-space-sm gap-space-md">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline" id="b-strip-title">Provisioning</span>
+        <span class="font-code-sm text-code-sm text-outline shrink-0" id="b-strip-meta"></span>
+      </div>
+      <div class="h-1.5 rounded-full bg-surface-container overflow-hidden">
+        <div class="h-full bg-primary rounded-full" id="b-prog" style="width:0%"></div>
+      </div>
+      <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm truncate" id="b-prog-step"></p>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop">
 
       <!-- left: what to restore, and what fits -->
@@ -294,7 +309,7 @@
       <!-- right: the build itself -->
       <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col h-full min-h-[560px]">
         <div class="flex items-center justify-between pb-space-md">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline" id="b-panel">Provisioning</span>
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline" id="b-panel">Output</span>
           <span class="font-code-sm text-code-sm" id="b-status">not running</span>
         </div>
 
@@ -309,18 +324,14 @@
           <div class="font-code-sm text-code-sm text-on-surface whitespace-pre-wrap" id="b-error-text"></div>
         </div>
 
-        <ol class="flex flex-col gap-space-xs max-h-[28vh] overflow-y-auto pr-space-xs" id="b-steps">
-          <li class="font-code-sm text-code-sm text-outline">Steps appear here as cg reports them.</li>
-        </ol>
-
-        <div class="mt-space-lg rounded bg-surface-container-lowest overflow-hidden flex-1 flex flex-col min-h-0">
+        <div class="rounded bg-surface-container-lowest overflow-hidden flex-1 flex flex-col min-h-0">
           <div class="flex items-center justify-between px-space-md py-space-xs border-b border-surface-variant">
             <span class="font-code-sm text-code-sm text-outline" id="b-log-title">build log</span>
             <label class="font-code-sm text-code-sm text-outline flex items-center gap-space-xs">
               <input type="checkbox" id="b-follow" class="accent-primary" checked>auto-scroll
             </label>
           </div>
-          <div class="font-code-sm text-code-sm flex-1 min-h-[180px] max-h-[38vh] overflow-y-auto px-space-md py-space-sm" id="b-log"></div>
+          <div class="font-code-sm text-code-sm flex-1 min-h-[180px] max-h-[46vh] overflow-y-auto px-space-md py-space-sm" id="b-log"></div>
         </div>
 
         <div class="flex items-center justify-between mt-space-md pt-space-md border-t border-surface-variant">

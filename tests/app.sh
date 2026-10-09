@@ -39,6 +39,8 @@ check "the renderer never spawns anything" "$(grep -rc 'child_process' app/rende
 
 echo "3. the window is locked down"
 main=$(cat app/main/index.js); js=$(cat app/renderer/app.js); html=$(cat app/renderer/index.html)
+# The hand-written stylesheet, not the Tailwind build: component rules live here.
+css=$(cat app/renderer/src.css)
 contains "context isolation"             "$main" "contextIsolation: true"
 contains "no node in the renderer"       "$main" "nodeIntegration: false"
 contains "sandboxed"                     "$main" "sandbox: true"
@@ -152,9 +154,9 @@ contains "  says what is left"           "$js" "buffer remaining"
 contains "the machine comes from cg"     "$js" "const spec = s.spec || {}"
 check    "  with no type hardcoded"      "$(grep -c 'g6\.xlarge\|L4\|16 GiB' app/renderer/app.js)" "0"
 contains "  and the chip names the purchase model" "$js" "on demand' : spot === '1'"
-contains "steps are numbered"            "$js" "String(n).padStart(2, '0')"
+contains "steps are numbered"            "$js" "String(buildSteps).padStart(2, '0')"
 contains "  and carry how long they took" "$js" "function buildStepEnd(event)"
-contains "  the running one shows the last line" "$js" "running.textContent = event.text"
+contains "  the live line shows in the strip" "$js" "\$('b-prog-step').textContent = event.text"
 # A box that is already up cannot be built again - cg would refuse, so the
 # screen offers what you can actually do with it instead.
 contains "a running box replaces the build button" "$js" '$('"'"'b-build'"'"').hidden = up'
@@ -162,10 +164,24 @@ contains "  with play and destroy"       "$js" '$('"'"'b-destroy'"'"').hidden = 
 contains "  and the picker goes read-only" "$js" "box.disabled = up"
 contains "  build re-reads the box state" "$js" "[['status', '--json'], 'status']],"
 # The panel sits in a content-sized grid row, so flex-1 had no height to divide
-# and the log grew forever instead of scrolling. Both lists are bounded.
-contains "the log is bounded and scrolls" "$html" 'max-h-[38vh] overflow-y-auto'
-contains "  and so is the step list"      "$html" 'max-h-[28vh] overflow-y-auto'
-contains "  which keeps the newest step in view" "$js" "steps.scrollTop = steps.scrollHeight"
+# and the log grew forever instead of scrolling. It is bounded.
+contains "the log is bounded and scrolls" "$html" 'max-h-[46vh] overflow-y-auto'
+# Progress used to live in the right panel: a step list that grew beside a log
+# that grew, which stretched the grid row and made the whole page taller than
+# the window on every build. One strip across the top, one bounded transcript.
+contains "progress is a strip above both columns" "$html" 'id="b-strip"'
+contains "  with a bar"                   "$html" 'id="b-prog"'
+contains "  the step number and elapsed"  "$js" "\$('b-strip-meta').textContent"
+contains "  and the line cg is on now"    "$html" 'id="b-prog-step"'
+contains "steps are headings in the transcript" "$js" "head.className = 'step flex items-baseline"
+check    "  so there is no second list to grow" \
+         "$(grep -c 'b-steps' app/renderer/app.js app/renderer/index.html | awk -F: '{s+=$2} END{print s}')" "0"
+# The bar is time against the estimate, not steps done: cg never says how many
+# steps a run has, so a fraction built from the ones seen so far would go
+# backwards the moment another arrived.
+contains "the bar measures time, not steps" "$js" "const RUN_EXPECT = { init: 20 }"
+contains "  and a run with no estimate does not pretend" "$js" "animate-pulse"
+contains "  nor does it reach full before the end" "$js" "Math.min(95"
 contains "the log follows only if asked" "$js" '$('"'"'b-follow'"'"').checked' 
 check    "  and it is still not a timer" "$(grep -c 'setInterval' app/renderer/app.js)" "0"
 # A failed build used to report itself as the words "stopped (exit 1)" in a
@@ -181,7 +197,7 @@ lacks    "  not the failure itself"        "$html" 'id="b-error-title">launch fa
 contains "  fed by the lines cg marked"    "$js" "if (event.kind === 'fail') { buildFailing = true;"
 contains "  and the report under them"     "$js" "else if (buildFailing && event.t === 'line')"
 contains "  an error event lands there too" "$js" "if (event.t === 'error') buildFail(event.text)"
-contains "  a nonzero exit is never silent" "$js" "exited ${event.rc} without saying why"
+contains "  a nonzero exit is never silent" "$js" 'exited ${event.rc} without saying why'
 contains "  and the next run clears it"    "$js" "buildFailClear();"
 
 # The machine picker. Its whole point is that the app knows nothing about any
@@ -297,7 +313,33 @@ contains "  edited through cg"           "$js" "editSetting(r, row)"
 # the markup is a guard's name, its timing or its state.
 check    "no guard is hardcoded"         "$(grep -c '15 min\|30 min\|ARMED\|watchdog idle' app/renderer/index.html)" "0"
 
+echo "5g2. the needles in this file are quoted so bash cannot eat them"
+# A needle holding ${...} or $(...) inside DOUBLE quotes is expanded by bash
+# before the comparison runs, so the assertion either dies with "unbound
+# variable" or silently passes against the wrong text. It has happened three
+# times; single quotes are the fix, and this is how we stop a fourth.
+# A backslash-escaped \$ is safe - bash leaves it alone - so it is removed before
+# the search, or every correctly written needle would be reported.
+bad=$(sed 's/\\\$//g' "$0" | grep -nE '^(contains|lacks|check) +"[^"]*" +"\$[a-z_]+" +"[^"]*(\$\{|\$\()' || true)
+if [[ -z $bad ]]; then echo "  ok   every needle with a \$ is single-quoted"; pass=$((pass+1))
+else echo "  FAIL double-quoted needles bash will expand:"; echo "$bad"; fail=$((fail+1)); fi
+
 echo "5h. the logs and settings screens"
+# The instance type is `text` in cg's registry - it has to be, because what a
+# region rents is not knowable until AWS is asked - so Settings rendered it as a
+# box to type a machine name into, beside a Build screen that offered a picker.
+contains "the instance type is a picker here too" "$js" "r.key === 'GAME_INSTANCE_TYPE' && machinesNow"
+contains "  offering only what a quota covers"    "$js" "if (!m.fits_spot && !m.fits_ondemand) continue"
+contains "  with both prices on the row"          "$js" 'on demand INR ${od}'
+contains "  and settings asks cg for them"        "$js" "[['config', '--json'], 'config'], [['machines', '--json'], 'machines']"
+contains "  falling back to typing a name"        "$js" "} else if (r.kind === 'choice') {"
+# The row is flex/justify-between with a shrink-0 right side, so the editor's
+# control and its two buttons took their width out of the only flexible thing
+# in the row - the label, which squeezed and wrapped on every Edit click.
+contains "editing stacks instead of squeezing" "$css" '.row.editing'
+contains "  the controls get their own line"   "$css" 'flex-col'
+contains "  and the editor marks the row"      "$js" "row.classList.add('editing')"
+contains "  a machine label is too long for a fixed width" "$js" "machineRow ? 'w-full' : 'w-64'"
 contains "the event stream can be filtered" "$js" "function applyLogFilter(which)"
 contains "  and copied"                  "$html" 'id="log-copy"'
 contains "  and cleared"                 "$html" 'id="log-clear"'
