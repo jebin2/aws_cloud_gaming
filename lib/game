@@ -5,13 +5,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."   # repo root: every path below is relative to it
 
 # .env is written by provision.sh. Anything already exported wins over it.
-if [[ -f .env ]]; then
-  # `|| [[ -n ... ]]`: `read` returns non-zero on a last line with no newline, so
-  # without it the final entry of .env - usually the one just added - was ignored.
-  while IFS='=' read -r k v || [[ -n $k ]]; do
-    [[ $k == GAME_* && -z ${!k:-} ]] && export "$k=$v"
-  done < .env
-fi
+# shellcheck source=lib/env-file.sh
+source "$(dirname "${BASH_SOURCE[0]}")/env-file.sh"
+cg_env_load GAME_
 
 INSTANCE_ID="${GAME_INSTANCE_ID:-i-CHANGEME}"
 REGION="${GAME_REGION:-ap-south-2}"

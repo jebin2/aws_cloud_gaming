@@ -24,11 +24,21 @@ Screens:
     npm run pack    # an unpacked build in dist/, to try
     npm run dist    # AppImage (Linux), dmg (macOS), nsis (Windows)
 
-**The scripts are not bundled.** The app runs the `cg` in the repo it sits beside, found in this
-order: `$CG_REPO`, the parent of `app/`, then `~/cloud_gaming`. A copy of the scripts inside the
-package would be a second, stale source of truth - which is the one thing this design will not
-have. So a packaged app still needs the checkout, and updating the rig means `git pull`, not a new
-build.
+**The scripts travel with it.** `cg`, `lib/` and `lambda/` are copied into `resources/cg`, so a
+download runs without a checkout. The app still holds no AWS logic: it shells out to those
+scripts, which remain the only thing that decides anything.
+
+It looks for them in this order: `$CG_REPO`, the parent of `app/`, the bundled copy in
+`resources/cg`, then `~/cloud_gaming`. **A checkout beside the app wins over the bundle** - anyone
+running from source is editing that one and must see their edits, not a stale copy. The same order
+means `git pull` still updates a rig that has a checkout; only a plain download relies on the
+bundle, and there a new build is the update.
+
+This used to say the scripts could not be bundled, because a second copy would be a stale source
+of truth. The copy is not a second source of truth - it is the same files, shipped - and the real
+blocker was elsewhere: `.env` was a relative path, so a read-only install could not save a
+setting. [lib/env-file.sh](../lib/env-file.sh) fixed that, and `tests/standalone.sh` holds it
+there.
 
 Releases are built by tagging:
 

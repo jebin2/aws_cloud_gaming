@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# shellcheck source=lib/env-file.sh
+source "$(dirname "${BASH_SOURCE[0]}")/env-file.sh"
 # Ensures the durable half of the game library: an S3 bucket to hold it, and an
 # EC2 instance profile that lets the box read and write that one bucket.
 #
@@ -134,13 +136,7 @@ fi
 
 # Remember the bucket so every later run resolves the same name without another
 # sts call, and so `cg library` can find it.
-touch .env
-tmp=$(mktemp)
-grep -vE '^GAME_S3_BUCKET=' .env > "$tmp" 2>/dev/null || true
-echo "GAME_S3_BUCKET=$BUCKET" >> "$tmp"
-cat "$tmp" > .env
-rm -f "$tmp"
-chmod 600 .env
+cg_env_set GAME_S3_BUCKET "$BUCKET"
 
 echo "$BUCKET"
 

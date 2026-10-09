@@ -24,7 +24,7 @@ check()    { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
 
 mkdir -p "$T/bin" "$T/home/.ssh" "$T/lib" "$T/run"
 cp "$REPO/lib/game" "$T/lib/game"
-cp "$REPO/lib/common.sh" "$REPO/lib/session.sh" "$T/lib/"
+cp "$REPO/lib/common.sh" "$REPO/lib/session.sh" "$REPO/lib/env-file.sh" "$T/lib/"
 cat > "$T/.env" <<EOF
 GAME_INSTANCE_ID=i-test
 GAME_REGION=ap-south-2

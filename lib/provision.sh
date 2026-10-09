@@ -5,6 +5,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."   # lib/ -> repo root; .env and paths live there
+# shellcheck source=lib/env-file.sh
+source lib/env-file.sh
 # shellcheck source=lib/ssh-key.sh
 source lib/ssh-key.sh
 # shellcheck source=lib/launch-error.sh
@@ -290,20 +292,12 @@ if [[ -n $old_vol && $old_vol != None ]]; then
   echo "    it is no longer used or attached - reclaim it with: cg games --delete"
 fi
 
-# Update our own keys in place. .env may hold values this script did not put
-# there (auth keys, for one), so it must never be truncated.
-touch .env
-tmp=$(mktemp)
-grep -vE '^(GAME_INSTANCE_ID|GAME_REGION|GAME_TS_HOST)=' .env > "$tmp" || true
-{
-  echo "GAME_INSTANCE_ID=$INSTANCE_ID"
-  echo "GAME_REGION=$REGION"
-  echo "GAME_TS_HOST=$TS_HOST"
-} >> "$tmp"
-cat "$tmp" > .env
-rm -f "$tmp"
-chmod 600 .env
-echo "updated .env"
+# Update our own keys in place. The file may hold values this script did not
+# put there (auth keys, for one), so it must never be truncated.
+cg_env_set GAME_INSTANCE_ID "$INSTANCE_ID"
+cg_env_set GAME_REGION      "$REGION"
+cg_env_set GAME_TS_HOST     "$TS_HOST"
+echo "updated $(cg_env_file)"
 
 # See the note at the end of cg: bash reads a script incrementally and returns
 # for more input after the last command, so a file edited while this runs can

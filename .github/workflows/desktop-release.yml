@@ -103,19 +103,27 @@ jobs:
           files: |
             artifacts/**/*.AppImage
             artifacts/**/*.deb
-          # Said on every release, because a downloaded app on its own does
-          # nothing: it runs the scripts in the repo, which is the whole design.
+          # Said on every release: what the download actually is, and what it
+          # still needs from you before it can build anything on AWS.
           body: |
-            ## This app needs the repo
+            ## Self-contained
 
-            It holds no AWS logic. It runs `cg` from a checkout of this repository and renders
-            what the scripts say, so the scripts stay the only thing that decides anything.
+            The scripts travel with the app - `cg`, `lib/` and the Lambda are inside the
+            download, so it runs without a checkout. It still holds no AWS logic of its own:
+            the app shells out to those scripts, and they remain the only thing that decides
+            anything.
 
-                git clone https://github.com/jebin2/aws_cloud_gaming.git ~/cloud_gaming
-                cd ~/cloud_gaming && ./cg check --fix
+            Settings are written to `~/.config/cg/.env`, not next to the app, because an
+            installed copy is read-only. A checkout keeps using its own `.env` as before, and
+            a checkout beside the app wins over the bundled copy - so running from source
+            shows your edits.
 
-            Then start the app. It looks for the repo in `$CG_REPO`, then beside itself, then
-            `~/cloud_gaming`.
+            ## Before it can build a box
+
+            It needs an AWS account, a Tailscale auth key and the local tools. The app's
+            Settings screen asks for each one, or:
+
+                ./cg check --fix
 
             ## Linux only
 

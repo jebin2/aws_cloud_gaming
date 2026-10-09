@@ -52,7 +52,25 @@
       ],
       "icon": "build/icon.png"
     },
-    "executableName": "cg"
+    "executableName": "cg",
+    "extraResources": [
+      {
+        "from": "../cg",
+        "to": "cg/cg"
+      },
+      {
+        "from": "../lib",
+        "to": "cg/lib"
+      },
+      {
+        "from": "../lambda",
+        "to": "cg/lambda"
+      },
+      {
+        "from": "../.env.example",
+        "to": "cg/.env.example"
+      }
+    ]
   },
   "author": "jebin2",
   "homepage": "https://github.com/jebin2/aws_cloud_gaming",

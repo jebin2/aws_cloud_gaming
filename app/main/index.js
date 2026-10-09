@@ -12,10 +12,16 @@ const { run, answer, interrupt } = require('./runner');
 // lives somewhere else entirely and must be told - CG_REPO, or the default
 // checkout. The scripts are deliberately NOT bundled into the app: a copy
 // inside an .asar would be a second, stale source of truth.
+// Where the scripts are. A packaged build carries its own copy in
+// resources/cg, so the app works from a cold download; a checkout beside the
+// app wins over it, because someone running from source is editing that one and
+// expects to see their edits. The bundled copy is read-only, which is exactly
+// why cg keeps settings outside its own directory - see lib/env-file.sh.
 function findRepo() {
   const candidates = [
     process.env.CG_REPO,
-    path.resolve(__dirname, '..', '..'),
+    path.resolve(__dirname, '..', '..'),              // a checkout: app/ -> repo
+    process.resourcesPath && path.join(process.resourcesPath, 'cg'),  // packaged
     path.join(require('node:os').homedir(), 'cloud_gaming'),
   ].filter(Boolean);
   for (const dir of candidates) {

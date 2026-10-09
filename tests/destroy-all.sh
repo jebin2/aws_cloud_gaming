@@ -27,7 +27,7 @@ cp "$REPO/cg" "$T/cg"
 # Everything cg sources. A file added to that list and not to this one makes cg
 # die with a bash error before the first assertion, which reads as the feature
 # being broken rather than the sandbox being short a file.
-cp "$REPO/lib/common.sh" "$REPO/lib/cloud-watchdog.sh" "$REPO/lib/config.sh" "$REPO/lib/session.sh" "$REPO/lib/rates.sh" "$REPO/lib/machines.sh" "$T/lib/"
+cp "$REPO/lib/common.sh" "$REPO/lib/cloud-watchdog.sh" "$REPO/lib/config.sh" "$REPO/lib/session.sh" "$REPO/lib/rates.sh" "$REPO/lib/machines.sh" "$REPO/lib/env-file.sh" "$T/lib/"
 seed_env() {
   cat > "$T/.env" <<EOF
 GAME_INSTANCE_ID=i-test

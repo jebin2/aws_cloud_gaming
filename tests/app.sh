@@ -373,7 +373,7 @@ echo "5i. packaging keeps the scripts outside the package"
 # the repo instead - and still works when it is somewhere else.
 check "the build config exists"          "$(node -e 'console.log(require("./app/package.json").build ? 1 : 0)')" "1"
 check "  and ships only the app"         "$(node -e 'console.log(require("./app/package.json").build.files.join(","))')" "main/**,renderer/**,package.json"
-contains "the repo is found, not bundled" "$main" "function findRepo()"
+contains "the scripts are found, wherever they are" "$main" "function findRepo()"
 contains "  CG_REPO can say where it is" "$main" "process.env.CG_REPO"
 check "an icon is committed"             "$([[ -s app/build/icon.png ]] && echo yes || echo no)" "yes"
 check "  the binary is called cg"        "$(node -e 'console.log(require("./app/package.json").build.executableName)')" "cg"
@@ -393,7 +393,15 @@ check    "a release workflow exists"     "$([[ -s .github/workflows/desktop-rele
 contains "  triggered by a v tag"        "$(cat .github/workflows/desktop-release.yml)" "- 'v*'"
 contains "  the tag decides the version" "$(cat .github/workflows/desktop-release.yml)" "npm version --no-git-tag-version"
 contains "  and it runs these checks first" "$(cat .github/workflows/desktop-release.yml)" "bash tests/app.sh"
-contains "  the release says the app needs the repo" "$(cat .github/workflows/desktop-release.yml)" "This app needs the repo"
+# The release notes used to say the download needed a checkout. It carries the
+# scripts now, so saying otherwise would send people to clone a repo they do
+# not need - and the notes are the only instructions a downloader ever sees.
+contains "  the release says the scripts are included" \
+         "$(cat .github/workflows/desktop-release.yml)" "The scripts travel with the app"
+contains "  and where settings go instead"  \
+         "$(cat .github/workflows/desktop-release.yml)" "~/.config/cg/.env"
+lacks    "  not that a checkout is required" \
+         "$(cat .github/workflows/desktop-release.yml)" "This app needs the repo"
 # Only Linux is published, because only Linux has been run. The day someone
 # tries macOS or Windows, the matrix is one line.
 check    "  it publishes Linux only"     "$(grep -c 'windows-latest, macos-latest: untested' .github/workflows/desktop-release.yml)" "1"

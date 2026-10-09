@@ -21,7 +21,7 @@ lacks()    { if [[ $2 != *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 
 mkdir -p "$T/bin" "$T/home/.ssh" "$T/lib" "$T/run"
 cp "$REPO/lib/game" "$T/lib/game"
-cp "$REPO/lib/common.sh" "$REPO/lib/session.sh" "$T/lib/"
+cp "$REPO/lib/common.sh" "$REPO/lib/session.sh" "$REPO/lib/env-file.sh" "$T/lib/"
 printf 'GAME_INSTANCE_ID=i-test\nGAME_REGION=ap-south-2\nGAME_TS_HOST=gamevps\n' > "$T/.env"
 
 cat > "$T/bin/aws" <<'FAKE'

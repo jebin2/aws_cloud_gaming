@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Shared helpers. Sourced by lib/setup and lib/game - not run directly.
 
+# Where the settings live, and the only loader that reads them. Sourced here so
+# env_set works wherever common.sh does; guarded because callers that resolve
+# the settings file before common.sh have already sourced it.
+if ! declare -F cg_env_set >/dev/null 2>&1; then
+  # shellcheck source=lib/env-file.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/env-file.sh"
+fi
+
 # ISO 8601 with offset, so a saved log is unambiguous about when things ran and
 # how long each step took. Local time rather than UTC: these are read by the
 # person who ran the command, usually while waiting.
@@ -935,17 +943,10 @@ cg_ntfy_url() {
   printf '%s' "$v"
 }
 
-# env_set <KEY> <value>: one line in .env, replacing any earlier one. The file is
-# made readable by you alone before anything is written to it.
-env_set() {
-  local tmp; tmp=$(mktemp) || return 1
-  grep -v "^$1=" .env 2>/dev/null > "$tmp" || true
-  printf '%s=%s\n' "$1" "$2" >> "$tmp"
-  touch .env && chmod 600 .env && cat "$tmp" > .env
-  local rc=$?
-  rm -f "$tmp"
-  return "$rc"
-}
+# env_set <KEY> <value>: one line in the settings file, replacing any earlier
+# one. The file is made readable by you alone before anything is written to it.
+# WHERE that file is lives in lib/env-file.sh - it is not always in the repo.
+env_set() { cg_env_set "$1" "$2"; }
 
 # Best effort, and never fatal: a notification that cannot be sent is logged and
 # the command carries on. The URL is never printed - on ntfy.sh, the topic is all

@@ -46,6 +46,22 @@ rather than reimplementing them.
 `--region` and `--host` override `.env` without editing it; `--json` works on `ping`,
 `machines` and `snapshot --list`.
 
+### Where the settings live
+
+`.env` is resolved once, by [lib/env-file.sh](../lib/env-file.sh), first hit winning:
+
+| | |
+|---|---|
+| `$CG_ENV_FILE` | said outright |
+| `$CG_HOME/.env` | a chosen state directory |
+| `<repo>/.env` | a checkout that already has one |
+| `<repo>/.env` | a checkout cg can write to - the normal case |
+| `~/.config/cg/.env` | otherwise: an installed, read-only copy |
+
+A clone keeps its settings in itself, exactly as it always has. The fallback exists because an
+installed app is read-only - an AppImage mounts squashfs - so there is nowhere in the install to
+write. `cg config get GAME_REGION` and `cg status` report whichever file is in force.
+
 ### Choosing the machine
 
 `cg machines` exists because the instance type used to be a constant, and a region running out

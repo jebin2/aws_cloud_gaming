@@ -29,15 +29,13 @@ TYPE="${GAME_INSTANCE_TYPE:-g6.xlarge}"
 C_INIT="cg init"; C_OPEN="cg open"; C_STOP="cg stop"
 C_STATUS="cg status"; C_COST="cg cost"
 
-if [[ -f .env ]]; then
-  # `|| [[ -n ... ]]`: `read` returns non-zero on a last line with no newline, so
-  # without it the final entry of .env - usually the one just added - was ignored.
-  while IFS= read -r line || [[ -n $line ]]; do
-    [[ $line =~ ^[[:space:]]*# ]] && continue
-    [[ $line =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
-    export "${line%%=*}=${line#*=}"
-  done < .env
-fi
+# shellcheck source=lib/env-file.sh
+source lib/env-file.sh
+# Exported values win now, where this loader used to overwrite them. REGION,
+# TS_HOST and TYPE above are already read from the exported ones, so nothing
+# here changes - except that `cg --region X` now survives in GAME_REGION too,
+# instead of being quietly replaced by the file it overrides.
+cg_env_load
 # For the game archive's expiry line in status. Needs REGION and TS_HOST.
 # shellcheck source=lib/cloud-watchdog.sh
 source lib/cloud-watchdog.sh
@@ -1256,10 +1254,7 @@ fi
 if [[ ! $TS_NODE =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]; then
   die "refusing to record a malformed tailnet node name: '$TS_NODE'"
 fi
-tmp=$(mktemp)
-grep -v '^GAME_TS_NODE=' .env 2>/dev/null > "$tmp" || true
-echo "GAME_TS_NODE=$TS_NODE" >> "$tmp"
-cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
+cg_env_set GAME_TS_NODE "$TS_NODE"
 
 # Key expiry used to be a manual step after every build (see STEP 2 at the end).
 # The API token that prunes stale nodes can turn it off, so it is done here, as
@@ -1384,11 +1379,9 @@ elif (( WELCOME )); then
   if curl -sk --max-time 15 -X POST -H 'Content-Type: application/json' \
        -d "{\"newUsername\":\"$SUNSHINE_USER\",\"newPassword\":\"$SUNSHINE_PASS\",\"confirmNewPassword\":\"$SUNSHINE_PASS\"}" \
        "https://$IP:47990/api/password" 2>/dev/null | grep -q '"status":true'; then
-    tmp=$(mktemp)
-    grep -vE '^SUNSHINE_(USER|PASS)=' .env 2>/dev/null > "$tmp" || true
-    { echo "SUNSHINE_USER=$SUNSHINE_USER"; echo "SUNSHINE_PASS=$SUNSHINE_PASS"; } >> "$tmp"
-    cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
-    log "created; credentials saved to .env"
+    cg_env_set SUNSHINE_USER "$SUNSHINE_USER"
+    cg_env_set SUNSHINE_PASS "$SUNSHINE_PASS"
+    log "created; credentials saved to $(cg_env_file)"
   else
     log "could not create it automatically - do it in the browser at step 1"
   fi

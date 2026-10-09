@@ -35,16 +35,10 @@ done
 
 # .env, parsed rather than sourced: a malformed line in a sourced file executes
 # as a command. Anything already exported wins, so --region/--host stick.
-if [[ -f .env ]]; then
-  # `|| [[ -n ... ]]`: `read` returns non-zero on a last line with no newline, so
-  # without it the final entry of .env - usually the one just added - was ignored.
-  while IFS= read -r line || [[ -n $line ]]; do
-    [[ $line =~ ^[[:space:]]*# ]] && continue
-    [[ $line =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
-    k="${line%%=*}"; [[ -n ${!k:-} ]] && continue
-    export "$k=${line#*=}"
-  done < .env
-fi
+# Settings, from wherever this installation keeps them - see lib/env-file.sh.
+# shellcheck source=lib/env-file.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/env-file.sh"
+cg_env_load
 
 REGION="${GAME_REGION:-ap-south-2}"
 TS_HOST="${GAME_TS_HOST:-gamevps}"
@@ -285,10 +279,7 @@ choose_games() {
   sel=$(GAME_S3_BUCKET="${GAME_S3_BUCKET:-}" bash lib/choose-games.sh) \
     || sel="${GAME_APPS:-none}"
   export GAME_APPS="${sel:-${GAME_APPS:-none}}"
-  local tmp; tmp=$(mktemp)
-  grep -vE '^GAME_APPS=' .env > "$tmp" 2>/dev/null || true
-  echo "GAME_APPS=$GAME_APPS" >> "$tmp"
-  cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
+  cg_env_set GAME_APPS "$GAME_APPS"
 }
 
 # list and forget are pure S3, so they work with no box running - which is when
@@ -783,10 +774,11 @@ destroy_everything() {
     fi
     # .env must not keep pointing at a bucket that no longer exists, or the next
     # status prints a name for something deleted.
-    if [[ -f .env ]]; then
+    local envf; envf=$(cg_env_file)
+    if [[ -f $envf ]]; then
       local tmp; tmp=$(mktemp)
-      grep -vE '^GAME_S3_BUCKET=' .env > "$tmp" 2>/dev/null || true
-      cat "$tmp" > .env; rm -f "$tmp"; chmod 600 .env
+      grep -vE '^GAME_S3_BUCKET=' "$envf" > "$tmp" 2>/dev/null || true
+      cat "$tmp" > "$envf"; rm -f "$tmp"; chmod 600 "$envf"
     fi
   fi
 
