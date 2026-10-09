@@ -377,7 +377,12 @@ contains "the repo is found, not bundled" "$main" "function findRepo()"
 contains "  CG_REPO can say where it is" "$main" "process.env.CG_REPO"
 check "an icon is committed"             "$([[ -s app/build/icon.png ]] && echo yes || echo no)" "yes"
 check "  the binary is called cg"        "$(node -e 'console.log(require("./app/package.json").build.executableName)')" "cg"
-check "  and the build output is ignored" "$(git check-ignore app/dist >/dev/null 2>&1 && echo yes || echo no)" "yes"
+# A path INSIDE it, not the directory itself: the rule is `app/dist/`, which git
+# matches only against something it can see is a directory. On a fresh clone -
+# a release runner - app/dist does not exist yet, so asking about the directory
+# said "not ignored" and failed the build that was about to create it.
+check "  and the build output is ignored" \
+      "$(git check-ignore app/dist/any-built-file >/dev/null 2>&1 && echo yes || echo no)" "yes"
 contains "the README says Windows is untested" "$(cat app/README.md)" "Windows is written but untested"
 # Verified by running it: `npm run pack` produced dist/linux-unpacked/cg, whose
 # app.asar holds the app and nothing else - no cg, no lib/*.sh.
