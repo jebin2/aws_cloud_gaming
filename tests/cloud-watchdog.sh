@@ -408,6 +408,72 @@ done
 r=$(arch_ '')
 check "deleting: only the listings are billed requests" "$(field 4 "$r")" "s3:list,list,list,list,list-uploads,list-uploads"
 
+echo "31a. removing one region's watchdog must not break another's"
+# cw_remove deletes the IAM ROLE, which is global, while the function, rules,
+# logs and marks are regional. After a region move there are two functions and
+# ONE role, so removing the one you left would have deleted the role out from
+# under the one you kept.
+rm_in() { # rm_in <other-region-has-function: yes|no>
+  local T2; T2=$(mktemp -d)
+  mkdir -p "$T2/bin"
+  cat > "$T2/bin/aws" <<FAKE
+#!/usr/bin/env bash
+case "\$*" in
+  *describe-regions*)  echo "ap-south-1 ap-south-2 eu-west-1" ;;
+  *get-function-configuration*)
+    # The function exists in ap-south-1 only.
+    case "\$*" in *"--region ap-south-1"*) [[ $1 == yes ]] && exit 0 || exit 254 ;; esac
+    exit 254 ;;
+  *delete-role-policy*) echo "DELETED-POLICY" ;;
+  *delete-role*)        echo "DELETED-ROLE" ;;
+  *) exit 0 ;;
+esac
+FAKE
+  chmod +x "$T2/bin/aws"
+  env PATH="$T2/bin:$PATH" TS_HOST=gamevps REGION=ap-south-2 GAME_S3_BUCKET=b \
+    bash -c 'source lib/common.sh >/dev/null 2>&1; source lib/s3-region.sh
+             source lib/cloud-watchdog.sh; cw_remove' 2>&1
+  rm -rf "$T2"
+}
+out=$(rm_in yes)
+contains "the role is kept when another region has one" "$out" "kept the role"
+lacks    "  and is not deleted"                         "$out" "DELETED-ROLE"
+out=$(rm_in no)
+lacks    "the role is dropped when it is the last"      "$out" "kept the role"
+
+echo "31b. the shared role's policy is not pinned to one region"
+# An IAM role is GLOBAL. This policy pinned the SSM parameter to $REGION, so the
+# moment a second region had a watchdog - which a region move guarantees - the
+# one installed last rewrote the shared policy and revoked the other. The
+# symptom was a function that had worked for weeks failing every five minutes
+# with "not authorized to perform ssm:GetParameter on arn:aws:ssm:ap-south-2".
+pol=$(TS_HOST=gamevps GAME_ARCHIVE_EXPIRY_DAYS=14 GAME_S3_BUCKET=cg-library-test REGION=ap-south-1 \
+      bash -c 'source lib/s3-region.sh; source lib/cloud-watchdog.sh; cw_policy 123456789012' 2>/dev/null)
+ssm_res=$(python3 -c '
+import json,sys
+for s in json.load(sys.stdin)["Statement"]:
+    if "ssm" in str(s.get("Action")): print(s["Resource"])' <<<"$pol")
+check "the region is a wildcard" "$ssm_res" "arn:aws:ssm:*:123456789012:parameter/cloud-gaming/gamevps/*"
+# Installing in another region must produce the SAME statement, or it revokes
+# the first one again.
+pol2=$(TS_HOST=gamevps GAME_ARCHIVE_EXPIRY_DAYS=14 GAME_S3_BUCKET=cg-library-test REGION=ap-south-2 \
+      bash -c 'source lib/s3-region.sh; source lib/cloud-watchdog.sh; cw_policy 123456789012' 2>/dev/null)
+ssm_res2=$(python3 -c '
+import json,sys
+for s in json.load(sys.stdin)["Statement"]:
+    if "ssm" in str(s.get("Action")): print(s["Resource"])' <<<"$pol2")
+check "  and the same in another region" "$ssm_res2" "$ssm_res"
+# Wildcarding the region must NOT loosen anything else: the account and the
+# parameter path are what scope this.
+contains "the account is still exact"  "$ssm_res" "123456789012"
+contains "the host path is still exact" "$ssm_res" "parameter/cloud-gaming/gamevps/"
+lacks    "and it is not a bare wildcard" "$ssm_res" '"*"'
+check    "no other statement went wildcard" \
+         "$(python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+print(sum(1 for s in d["Statement"] if s.get("Resource")=="*"))' <<<"$pol")" "2"
+
 echo "32. the watchdog names the archive bucket exactly as library-aws.sh creates it"
 # This WAS two copies of one formula, guarded by this check. The check earned
 # its keep the day the region went into the hash and only one copy changed: the
@@ -437,11 +503,15 @@ check "3 is 3, not raised"  "$(days 3)" "3"
 check "1 is 1"              "$(days 1)" "1"
 check "30 is 30"            "$(days 30)" "30"
 check "unset is 14"         "$(days '')" "14"
-pol() { TS_HOST=gamevps REGION=ap-south-2 GAME_S3_BUCKET=b GAME_ARCHIVE_EXPIRY_DAYS="$1" bash -c 'source lib/cloud-watchdog.sh; cw_policy 123456789012'; }
+pol() { TS_HOST=gamevps REGION=ap-south-2 GAME_S3_BUCKET=b GAME_ARCHIVE_EXPIRY_DAYS="$1" \
+          bash -c 'source lib/s3-region.sh; source lib/cloud-watchdog.sh; cw_policy 123456789012'; }
 check "off: the role cannot delete a thing" "$(pol 0 | grep -cE 'DeleteBucket|DeleteObject|cloudtrail' || true)" "0"
 check "on: delete is scoped to that bucket" "$(pol 14 | grep -c '"Resource":"arn:aws:s3:::b/\*"')" "1"
 check "on: no bucket tagging - the marks are SSM parameters" "$(pol 14 | grep -c 'BucketTagging' || true)" "0"
-check "on: SSM limited to this host's marks" "$(pol 14 | grep -c '"Resource":"arn:aws:ssm:ap-south-2:123456789012:parameter/cloud-gaming/gamevps/\*"')" "1"
+# The region is a wildcard on purpose - see 31b - so the scope that matters is
+# the account and the host's parameter path, and those must stay exact.
+check "on: SSM limited to this host's marks" "$(pol 14 | grep -c '"Resource":"arn:aws:ssm:\*:123456789012:parameter/cloud-gaming/gamevps/\*"')" "1"
+check "on: and not to another host's"        "$(pol 14 | grep -c 'parameter/cloud-gaming/someone-else' || true)" "0"
 pol 14 | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null \
   && { echo "  ok   on: the policy is valid JSON"; pass=$((pass+1)); } \
   || { echo "  FAIL on: the policy is not valid JSON"; fail=$((fail+1)); }

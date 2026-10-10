@@ -850,7 +850,14 @@ touches it, and GAME_ARCHIVE_EXPIRY_DAYS=0 keeps it forever."
   fi
   # Sunshine credentials and the tailnet node belong to the box being deleted;
   # leaving them behind makes the next build authenticate against nothing.
-  sed -i '/^GAME_INSTANCE_ID=/d;/^GAME_REGION=/d;/^GAME_TS_HOST=/d;/^GAME_TS_NODE=/d;/^SUNSHINE_USER=/d;/^SUNSHINE_PASS=/d' .env 2>/dev/null || true
+  #
+  # GAME_REGION is NOT in this list, and must never be: it is a setting the
+  # person chose, listed in `cg config`, not state this box created. Deleting it
+  # made the next `cg init` fall back to the registry default - so a destroy
+  # followed by a rebuild silently moved the rig to a different region, with a
+  # different archive bucket, and said nothing. Everything else here is written
+  # by provision and means nothing without the box it describes.
+  sed -i '/^GAME_INSTANCE_ID=/d;/^GAME_TS_HOST=/d;/^GAME_TS_NODE=/d;/^SUNSHINE_USER=/d;/^SUNSHINE_PASS=/d' .env 2>/dev/null || true
 
   if (( ! all )); then
     say "box deleted - security group, key pair and tailnet node kept for cg init"

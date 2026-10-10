@@ -77,6 +77,14 @@ cw_env() { # cw_env <account>
 # Archive expiry adds CloudTrail lookups, its own free SSM marks, and list/delete on
 # the ONE archive bucket - and only while expiry is on. With GAME_ARCHIVE_EXPIRY_DAYS=0 the role
 # cannot delete a single game.
+# The SSM resource's region is a WILDCARD, deliberately. An IAM role is GLOBAL
+# while this policy was pinned to $REGION, so the moment a second region had a
+# watchdog the one installed last rewrote the shared policy and revoked the
+# other: "not authorized to perform ssm:GetParameter on
+# arn:aws:ssm:ap-south-2:...", every five minutes, from a function that had been
+# working for weeks. A region move is exactly that situation. What actually
+# scopes this is the account and the parameter PATH - /cloud-gaming/<host>/* in
+# this account only - and both of those stay exact.
 cw_policy() { # cw_policy <account>
   local b extra=""
   b=$(cw_bucket "$1")
@@ -90,7 +98,7 @@ cw_policy() { # cw_policy <account>
  {"Sid":"ArchiveExpiryObjects","Effect":"Allow","Action":["s3:DeleteObject","s3:AbortMultipartUpload"],
   "Resource":"arn:aws:s3:::$b/*"},
  {"Sid":"ArchiveExpiryMarks","Effect":"Allow","Action":["ssm:GetParameter","ssm:PutParameter"],
-  "Resource":"arn:aws:ssm:$REGION:$1:parameter/cloud-gaming/$TS_HOST/*"}
+  "Resource":"arn:aws:ssm:*:$1:parameter/cloud-gaming/$TS_HOST/*"}
 JSON
 )
   fi
@@ -404,6 +412,18 @@ cw_exists() {
 # The schedule first, so nothing invokes a half-removed function. Every part is
 # attempted whatever happened to the one before, and the outcome is said on
 # every path - including "there was nothing".
+# Is any OTHER region still running this function? Only asked on removal, so a
+# scan of the enabled regions is cheap enough, and every call in it is free.
+cw_role_used_elsewhere() {
+  local r
+  for r in $(aws ec2 describe-regions --query 'Regions[].RegionName' --output text 2>/dev/null); do
+    [[ $r == "$REGION" ]] && continue
+    aws lambda get-function-configuration --region "$r" \
+      --function-name "$CW_NAME" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
 cw_remove() {
   local any=0
   cw_aws events remove-targets --rule "$CW_NAME" --ids watchdog >/dev/null 2>&1 && any=1
@@ -415,8 +435,17 @@ cw_remove() {
   # Its marks. Not counted as "something removed": deleting absent parameters succeeds.
   aws ssm delete-parameters --region "$REGION" --names "/cloud-gaming/$TS_HOST/archive-last-seen" \
     "/cloud-gaming/$TS_HOST/archive-warned" "/cloud-gaming/$TS_HOST/archive-deleted" >/dev/null 2>&1 || true
-  aws iam delete-role-policy --role-name "$CW_NAME" --policy-name "$CW_POLICY_NAME" >/dev/null 2>&1 && any=1
-  aws iam delete-role --role-name "$CW_NAME" >/dev/null 2>&1 && { any=1; log "deleted the role $CW_NAME"; }
+  # The role is GLOBAL; the function, the rules, the logs and the marks are
+  # regional. Deleting the role while ANOTHER region still has a function that
+  # assumes it would break that function instead of this one - and a region move
+  # leaves exactly that arrangement behind. So the role goes only when it is the
+  # last one using it.
+  if cw_role_used_elsewhere; then
+    log "kept the role $CW_NAME - a watchdog in another region still uses it"
+  else
+    aws iam delete-role-policy --role-name "$CW_NAME" --policy-name "$CW_POLICY_NAME" >/dev/null 2>&1 && any=1
+    aws iam delete-role --role-name "$CW_NAME" >/dev/null 2>&1 && { any=1; log "deleted the role $CW_NAME"; }
+  fi
   (( any )) || log "cloud watchdog: nothing to remove"
   return 0
 }

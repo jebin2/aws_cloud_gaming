@@ -57,6 +57,16 @@ case "$args" in
   *describe-volumes*)   echo "None	None" ;;
   # The cloud watchdog: its pieces exist only when CW_EXISTS=1, and deleting one
   # that does not exist fails, as it does in AWS.
+  # The role is global, so cw_remove asks whether ANOTHER region still has the
+  # function before deleting it. This sandbox is one region: the function exists
+  # here and nowhere else, which is what AWS would say.
+  *describe-regions*)   echo "ap-south-1 ap-south-2 eu-west-1" ;;
+  *get-function-configuration*--region\ *)
+                        case "$args" in
+                          *"--region ${CW_REGION:-ap-south-2}"*)
+                            [[ ${CW_EXISTS:-0} == 1 ]] || exit 254; echo "{}" ;;
+                          *) exit 254 ;;
+                        esac ;;
   *"get-role --role-name gamevps-cloud-watchdog"*|*get-function-configuration*|*"events delete-rule"*|\
   *"events remove-targets"*|*"lambda delete-function"*|*"logs delete-log-group"*|\
   *"delete-role-policy --role-name gamevps-cloud-watchdog"*|*"delete-role --role-name gamevps-cloud-watchdog"*)
@@ -207,5 +217,26 @@ out=$(run "" --everything)
 check "refused"               "$(grep -c "unknown option" <<<"$out")" "1"
 check "box NOT destroyed"     "$(did SETUP-DESTROY-CALLED)" "no"
 check "archive NOT deleted"   "$(did 's3 rm')" "no"
+
+echo "13. destroy clears what the BOX wrote, never what you chose"
+# GAME_REGION was in this list. Deleting it made the next `cg init` fall back to
+# the registry default, so destroy-then-rebuild silently moved the rig to a
+# different region with a different archive bucket - and the only clue was a
+# build that worked and billed in the wrong place.
+clean=$(grep -n "GAME_INSTANCE_ID=/d" "$REPO/lib/setup" | head -1)
+check "the instance id goes"       "$(grep -c 'GAME_INSTANCE_ID' <<<"$clean")" "1"
+check "  the tailnet node too"     "$(grep -c 'GAME_TS_NODE' <<<"$clean")" "1"
+check "  and the sunshine pair"    "$(grep -c 'SUNSHINE_PASS' <<<"$clean")" "1"
+check "but the region stays"       "$(grep -c 'GAME_REGION' <<<"$clean" || true)" "0"
+# The rule, not just this one key: nothing `cg config` owns may be deleted by a
+# destroy, or the next build silently disagrees with what you set.
+owned=$(cd "$REPO" && bash -c 'source lib/common.sh >/dev/null 2>&1; source lib/config.sh
+                               CONFIG_ROWS | cut -d"|" -f1' 2>/dev/null)
+bad=""
+for k in $owned; do
+  [[ $clean == *"/^$k="* ]] && bad+="$k "
+done
+if [[ -z $bad ]]; then echo "  ok   and no other setting cg config owns"; pass=$((pass+1))
+else echo "  FAIL destroy deletes settings cg config owns: $bad"; fail=$((fail+1)); fi
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]
