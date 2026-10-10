@@ -90,6 +90,19 @@ iam_lines() {
 # and `cg status --json` both render from these, so the two can never disagree -
 # and an app reading the JSON is reading exactly what the report shows.
 status_facts() {
+  # A fact collector must never abort. Every probe in here is EXPECTED to fail
+  # sometimes - no credentials, no volume, no node, no tailscale - and under
+  # `set -euo pipefail` the first one that did killed the whole function at that
+  # line. Everything before it had already been printed, so the result was a
+  # silently SHORT answer rather than an error: `cg status --json` came back
+  # missing local.*, tailnet.* and anything after, and the desktop app read
+  # s.local.tailscale and s.tailnet.node and threw, blanking a screen that
+  # should have said "no credentials".
+  #
+  # Safe to do here and nowhere else: this runs inside a process substitution,
+  # so the options are restored for the caller the moment it ends. Its job is to
+  # report what it could learn; a probe that fails is a fact, not a failure.
+  set +e +o pipefail
   local id state itype ip launched plan credits q_od q_spot vcpus kp sgid acct budget spent nsubs
   local gv gsz gaz b out n sz node tsn
   ec2() { aws ec2 "$@" --region "$REGION"; }

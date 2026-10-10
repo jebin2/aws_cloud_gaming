@@ -24,6 +24,8 @@ printf 'GAME_S3_BUCKET=cg-library-test\nGAME_REGION=ap-south-2\nGAME_TS_HOST=gam
 cat > "$T/bin/aws" <<'FAKE'
 #!/usr/bin/env bash
 args="$*"
+# AWS_DEAD: every call refuses, the way it does with no credentials at all.
+[[ -n ${AWS_DEAD:-} ]] && { echo "Unable to locate credentials" >&2; exit 255; }
 case "$args" in
   *"sts get-caller-identity"*)        echo 123456789012 ;;
   *accountPlanType*)                  echo PAID ;;
@@ -63,7 +65,7 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$T/bin/moonlight"
 chmod +x "$T/bin"/*
 
 run() { # run [--json]
-  ( cd "$T/repo" && env -i PATH="$T/bin:$PATH" HOME="$T/home" BOX="${BOX:-none}" TS_STATE="${TS_STATE-}" TS_NODE_GONE="${TS_NODE_GONE-}" \
+  ( cd "$T/repo" && env -i PATH="$T/bin:$PATH" HOME="$T/home" BOX="${BOX:-none}" TS_STATE="${TS_STATE-}" TS_NODE_GONE="${TS_NODE_GONE-}" AWS_DEAD="${AWS_DEAD-}" \
       CG_COLOR=never bash lib/setup status ${1:+--json} 2>&1 )
 }
 jq_() { python3 -c 'import json,sys;d=json.load(sys.stdin)
@@ -131,6 +133,21 @@ check "  and offline"                        "$(jq_ tailnet.online <<<"$json")" 
 # Everything BEFORE the grep survived even when it died, which is what made the
 # truncation so hard to see - so check a field that proves the whole function ran.
 check "  and the fields before it are intact" "$(jq_ local.moonlight <<<"$json")" "true"
+
+# The same shape, one probe earlier and far worse: with NO credentials the
+# describe-volumes probe failed, killed status_facts, and took local.* and
+# tailnet.* with it - so the app threw on s.local.tailscale and blanked a screen
+# whose whole job at that moment was to say "no credentials". A fact collector
+# must never abort; a probe that fails is a fact.
+json=$(AWS_DEAD=1 run --json)
+check "no credentials still reports the local side" "$(haskey local <<<"$json")" "True"
+check "  every local fact, not some of them"        "$(jq_ local.tailscale <<<"$json")" "true"
+check "  and the tailnet section"                   "$(haskey tailnet <<<"$json")" "True"
+check "  and says what is actually wrong"           "$(python3 -c 'import json,sys;print(bool((json.load(sys.stdin).get("error") or {}).get("credentials")))' <<<"$json")" "True"
+# The collector is only made lenient inside its own subshell, so the caller
+# still runs under set -e.
+contains "the leniency is scoped to the collector" "$(cat lib/setup)" "set +e +o pipefail"
+contains "  and explains why it is safe there"     "$(cat lib/setup)" "inside a process substitution"
 
 echo "4. the archive countdown, in the watchdog's own words"
 json=$(run --json)
