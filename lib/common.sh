@@ -578,10 +578,43 @@ wait_instance_state() {
 #
 # Reconnects on failure rather than giving up: the box reboots partway through
 # to load the NVIDIA driver, so ssh dropping is expected, not an error.
+# Did user-data abort, or is it still working?
+#
+# A `verify` that fails returns 1 and user-data runs under `set -e`, so the
+# build is OVER: nothing further runs, no desktop comes up, and the readiness
+# marker can never appear. The watcher used to print the FAILED line and then
+# keep polling for that marker until it timed out, so a build that died in 30
+# seconds looked like one that was still going 30 minutes later. That has now
+# happened twice.
+#
+# Deciding this needs all three parts, because the obvious shortcuts are wrong:
+#
+#   - A FAILED line is NOT enough. The library stage ends its verifies with
+#     `|| true` on purpose - a missing mirror is not worth refusing to build
+#     over - and those print FAILED and carry on.
+#   - cloud-init's verdict is NOT enough either, and this is the subtle one:
+#     99-finish.sh deliberately writes the marker on the NEXT boot, after
+#     graphical.target and the library restore, so there is a long, entirely
+#     healthy window where cloud-init says "done" and the marker is absent.
+#     Calling that an abort would condemn every good build.
+#
+# So: a FAILED was seen, cloud-init says error, and the log never reached
+# "bootstrap complete". Pure, so it can be tested without a box.
+build_aborted() {  # build_aborted <failed-seen> <"<cloud-init status>|<reached-finish>">
+  local seen=$1 ci=${2%%|*} finished=${2##*|}
+  (( seen )) || return 1
+  [[ -n $2 && $ci == error && $finished == no ]]
+}
+
+# The one ssh probe that answers build_aborted's second argument.
+_build_state_cmd='s=$(cloud-init status 2>/dev/null | head -1); s=${s#status: };
+grep -q "bootstrap complete" /var/log/cloud-gaming-bootstrap.log 2>/dev/null && f=yes || f=no;
+printf "%s|%s\n" "${s:-unknown}" "$f"'
+
 stream_build() {
   local target=$1 key=$2 timeout=${3:-2400}
   if _cg_styled; then _stream_build_styled "$target" "$key" "$timeout"; return; fi
-  local seen=0 waited=0 new count rebooted=0
+  local seen=0 waited=0 new count rebooted=0 failed_seen=0 last_fail="" state
   local ssh_opts=(-i "$key" -o StrictHostKeyChecking=accept-new
                   -o ConnectTimeout=8 -o BatchMode=yes)
 
@@ -599,7 +632,8 @@ stream_build() {
         # names like libgpg-error0 and floods the output with routine apt lines.
         while IFS= read -r line; do
           case $line in
-            ">>> FAILED: "*) log "FAILED: ${line#>>> FAILED: }" ;;
+            ">>> FAILED: "*) log "FAILED: ${line#>>> FAILED: }"
+                             failed_seen=1; last_fail=${line#>>> FAILED: } ;;
             ">>> ok: "*)     log "  ok  ${line#>>> ok: }" ;;
             ">>> "*)         log "${line#>>> }" ;;
             *)               log "! $line" ;;
@@ -611,6 +645,19 @@ stream_build() {
         log "build complete after $(( waited / 60 ))m"
         rm -f "$err"
         return 0
+      fi
+      # Asked only once a FAILED has been seen, so a healthy build pays nothing.
+      if (( failed_seen )); then
+        state=$(ssh "${ssh_opts[@]}" "$target" "$_build_state_cmd" 2>/dev/null) || state=""
+        if build_aborted "$failed_seen" "$state"; then
+          log "the build STOPPED here: $last_fail"
+          log "  user-data runs under 'set -e', so a failed check ends it."
+          log "  nothing after that step ran, and no desktop is coming up."
+          log "  ssh -i $key $target"
+          log "  sudo tail -50 /var/log/cloud-gaming-bootstrap.log"
+          rm -f "$err"
+          return 1
+        fi
       fi
     elif grep -q 'HOST IDENTIFICATION HAS CHANGED\|Host key verification failed' "$err" 2>/dev/null; then
       # Distinguish "cannot connect" from "refused to connect". Reporting a
@@ -680,6 +727,7 @@ _cg_build_status() { # <step> <elapsed-s> <have-bytes> <total-bytes> <rate-bytes
 _stream_build_styled() {
   local target=$1 key=$2 timeout=$3
   local seen=0 waited=0 new count rebooted=0 step="starting" out line err
+  local failed_seen=0 last_fail="" state
   local have=0 prev_have=0 prev_t=0 rate=0 inst
   local ssh_opts=(-i "$key" -o StrictHostKeyChecking=accept-new
                   -o ConnectTimeout=8 -o BatchMode=yes)
@@ -693,7 +741,8 @@ _stream_build_styled() {
           seen=$(( seen + count ))
           while IFS= read -r line; do
             case $line in
-              ">>> FAILED: "*) _cg_line fail "${line#>>> FAILED: }" ;;
+              ">>> FAILED: "*) _cg_line fail "${line#>>> FAILED: }"
+                               failed_seen=1; last_fail=${line#>>> FAILED: } ;;
               ">>> ok: "*)     _cg_line ok "${line#>>> ok: }" ;;
               ">>> "*)         step=${line#>>> }
                                if [[ $step == "finishing up" ]]; then
@@ -718,6 +767,19 @@ _stream_build_styled() {
           _cg_line ok "build complete after $(_cg_dur "$waited")"
           rm -f "$err"
           return 0
+        fi
+        # Asked only once a FAILED has been seen, so a healthy build pays nothing.
+        if (( failed_seen )); then
+          state=$(ssh "${ssh_opts[@]}" "$target" "$_build_state_cmd" 2>/dev/null) || state=""
+          if build_aborted "$failed_seen" "$state"; then
+            _cg_line fail "the build STOPPED here: $last_fail"
+            _cg_line cont "  user-data runs under 'set -e', so a failed check ends it."
+            _cg_line cont "  nothing after that step ran, and no desktop is coming up."
+            _cg_line cont "  ssh -i $key $target"
+            _cg_line cont "  sudo tail -50 /var/log/cloud-gaming-bootstrap.log"
+            rm -f "$err"
+            return 1
+          fi
         fi
         have=$(tail -1 <<<"$out"); [[ $have =~ ^[0-9]+$ ]] || have=$prev_have
         # A smoothed rate: one sample is noisy - s5cmd lands files in bursts.
