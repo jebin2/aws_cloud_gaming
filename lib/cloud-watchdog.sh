@@ -50,7 +50,11 @@ cw_expiry_days() {
 # The archive bucket, named exactly as lib/library-aws.sh names it.
 cw_bucket() { # cw_bucket <account>
   if [[ -n ${GAME_S3_BUCKET:-} ]]; then printf '%s' "$GAME_S3_BUCKET"
-  else printf 'cg-library-%s' "$(printf '%s' "$1-$TS_HOST" | sha256sum | cut -c1-12)"; fi
+  # cg_bucket_name is shared with lib/library-aws.sh. It used to be a second
+  # copy of the same formula, and the moment the region went into the hash the
+  # two disagreed - so expiry would have watched a bucket that does not exist
+  # and never deleted the real one.
+  else cg_bucket_name "$1" "$TS_HOST" "${GAME_REGION:-${REGION:-}}"; fi
 }
 
 # Floors, not just defaults. A stuck limit under the shutdown push's 30 minutes

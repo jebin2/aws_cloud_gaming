@@ -409,12 +409,24 @@ r=$(arch_ '')
 check "deleting: only the listings are billed requests" "$(field 4 "$r")" "s3:list,list,list,list,list-uploads,list-uploads"
 
 echo "32. the watchdog names the archive bucket exactly as library-aws.sh creates it"
-# Two copies of one formula. If they drift, expiry watches a bucket that does not
-# exist and never deletes the real one - or, worse, is granted another bucket.
-formula=$(grep -E '^  suffix=\$\(printf' lib/library-aws.sh)
-lib_name=$(ACCOUNT=123456789012 TS_HOST=gamevps bash -c "$formula; echo cg-library-\$suffix")
-cw_name=$(TS_HOST=gamevps GAME_S3_BUCKET= bash -c 'source lib/cloud-watchdog.sh; cw_bucket 123456789012')
+# This WAS two copies of one formula, guarded by this check. The check earned
+# its keep the day the region went into the hash and only one copy changed: the
+# watchdog would have watched a bucket that does not exist and never deleted the
+# real one. There is one copy now - cg_bucket_name - and this asserts both
+# callers reach it and agree.
+lib_name=$(ACCOUNT=123456789012 TS_HOST=gamevps REGION=ap-south-1 bash -c '
+  source lib/s3-region.sh; cg_bucket_name "$ACCOUNT" "$TS_HOST" "$REGION"')
+cw_name=$(TS_HOST=gamevps GAME_S3_BUCKET= GAME_REGION=ap-south-1 bash -c '
+  source lib/s3-region.sh; source lib/cloud-watchdog.sh; cw_bucket 123456789012')
 check "same name" "$cw_name" "$lib_name"
+# And exactly one place computes it, or they can drift again.
+check "only one copy of the formula exists" \
+      "$(grep -rlE 'cg-library-%s|cg-library-\$suffix' lib/*.sh | tr '\n' ' ')" "lib/s3-region.sh "
+# A region change must change the bucket, or the box reads another region's
+# archive across regions at $0.086/GB - which is what happened.
+other=$(TS_HOST=gamevps GAME_S3_BUCKET= GAME_REGION=ap-south-2 bash -c '
+  source lib/s3-region.sh; source lib/cloud-watchdog.sh; cw_bucket 123456789012')
+check "  and it follows the region" "$([[ $cw_name != "$other" ]] && echo yes)" "yes"
 check "GAME_S3_BUCKET wins, as it does there" \
   "$(TS_HOST=gamevps GAME_S3_BUCKET=my-bucket bash -c 'source lib/cloud-watchdog.sh; cw_bucket 123456789012')" "my-bucket"
 

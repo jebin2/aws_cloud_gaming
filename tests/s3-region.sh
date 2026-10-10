@@ -75,7 +75,36 @@ contains "  with the per-GB price"    "$prov" '0.086/GB'
 contains "  and what it costs a pull" "$prov" "INR 1,234"
 contains "  and how to start fresh"   "$prov" "set GAME_S3_BUCKET to a new name"
 
-echo "6. nothing in the helper costs anything or changes anything"
+echo "6. the bucket name follows the region, because a bucket is regional"
+# The name was sha256(account-host) with no region in it, so moving GAME_REGION
+# derived the OLD region's bucket, found it, and used it from the new region -
+# which is how the box ended up reading its library across regions and getting
+# a 400 for a URL signed in the wrong one.
+#
+# Needles single-quoted: these contain $ACCOUNT and $TS_HOST, and in double
+# quotes bash expands them - to nothing under set -u, or to an error.
+lib=$(cat lib/library-aws.sh)
+contains "the region is in the hash"        "$(cat lib/s3-region.sh)" '"$1-$2-$3" | sha256sum'
+contains "  and library-aws calls it"       "$lib" 'cg_bucket_name "$ACCOUNT" "$TS_HOST" "$REGION"'
+lacks    "and no local copy of the formula" "$lib" "sha256sum"
+contains "an explicit name still wins"      "$lib" 'if [[ -n ${GAME_S3_BUCKET:-} ]]; then'
+
+# Two regions must not collide, and one region must be stable across runs.
+name() { printf '%s' "$1-gamevps-$2" | sha256sum | cut -c1-12; }
+a=$(name 123456789012 ap-south-1)
+b=$(name 123456789012 ap-south-2)
+c=$(name 123456789012 ap-south-1)
+d=$(name 210987654321 ap-south-1)
+check "two regions derive different names" "$([[ $a != "$b" ]] && echo yes)" "yes"
+check "  the same region is stable"        "$([[ $a == "$c" ]] && echo yes)" "yes"
+check "  two accounts differ too"          "$([[ $a != "$d" ]] && echo yes)" "yes"
+# The name ends up in a URL and in logs, so the account number must not be in it.
+lacks "the account number is not in the name" "cg-library-$a" "123456789012"
+nm="cg-library-$a"
+check "  and it fits S3's limits"          "$([[ ${#nm} -ge 3 && ${#nm} -le 63 ]] && echo yes)" "yes"
+check "  lower case and dashes only"       "$([[ $nm =~ ^[a-z0-9-]+$ ]] && echo yes)" "yes"
+
+echo "7. nothing in the helper costs anything or changes anything"
 # Comments stripped: this file explains WHY `aws s3 cp` hid the bug, and a
 # search of the prose found that sentence rather than a call.
 body=$(sed 's/#.*//' lib/s3-region.sh)
@@ -83,6 +112,15 @@ for verb in create-bucket delete-bucket put-object cp sync rm mb rb; do
   lacks "the helper never runs $verb" "$body" "aws s3 $verb"
 done
 contains "it says the call is free" "$(cat lib/s3-region.sh)" "not charged"
+
+echo "8. this file's own needles are safe"
+# The same guard tests/app.sh carries, because it is scoped to that file and has
+# since caught me three times in files it does not look at. A needle containing
+# ${...} or $(...) inside DOUBLE quotes is expanded by bash before the search,
+# so it silently looks for the wrong thing - or dies under set -u.
+bad=$(sed 's/\\\$//g' "$0" | grep -nE '^(contains|lacks|check) +"[^"]*" +"[^"]*" +"[^"]*(\$\{|\$\()' || true)
+if [[ -z $bad ]]; then echo "  ok   every needle with a \$ is single-quoted"; pass=$((pass+1))
+else echo "  FAIL double-quoted needles bash will expand:"; echo "$bad"; fail=$((fail+1)); fi
 
 echo ""
 echo "s3-region: $pass passed, $fail failed"

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck source=lib/env-file.sh
 source "$(dirname "${BASH_SOURCE[0]}")/env-file.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/s3-region.sh"
 # Ensures the durable half of the game library: an S3 bucket to hold it, and an
 # EC2 instance profile that lets the box read and write that one bucket.
 #
@@ -36,14 +37,20 @@ note() { quiet || echo "    $*" >&2; }
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 
 # Bucket names are globally unique, so it cannot just be "cg-library". Derived
-# from the account and host so it is the SAME name every time this runs - and
-# hashed rather than embedding the account number, which does not belong in a
-# name that is effectively public.
+# from the account, host AND REGION so it is the SAME name every time this runs
+# in the same place - and hashed rather than embedding the account number, which
+# does not belong in a name that is effectively public.
+#
+# The region is in there because a bucket IS regional and the name was not.
+# Moving GAME_REGION to ap-south-1 therefore derived the ap-south-2 bucket's
+# name, found it, and used it - so the box pulled its library across regions at
+# $0.086/GB, and its presigned host bundle was signed for the wrong region and
+# came back 400. A name that cannot tell two regions apart is a name that
+# quietly points somewhere else.
 if [[ -n ${GAME_S3_BUCKET:-} ]]; then
   BUCKET="$GAME_S3_BUCKET"
 else
-  suffix=$(printf '%s' "$ACCOUNT-$TS_HOST" | sha256sum | cut -c1-12)
-  BUCKET="cg-library-$suffix"
+  BUCKET=$(cg_bucket_name "$ACCOUNT" "$TS_HOST" "$REGION")
 fi
 
 # --- bucket -------------------------------------------------------------------

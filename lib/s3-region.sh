@@ -25,3 +25,17 @@ s3_bucket_region() {
   [[ -z $r || $r == None || $r == null ]] && r=us-east-1
   printf '%s' "$r"
 }
+
+# cg_bucket_name <account> <host> <region> - the archive bucket's derived name.
+#
+# THE one copy. It lived in both lib/library-aws.sh and lib/cloud-watchdog.sh,
+# guarded by a test asserting the two agreed - and when the region went into the
+# hash, that test caught the drift immediately. A formula kept in two places
+# will drift again, so there is now one and both callers use it.
+#
+# The region is in the hash because a bucket IS regional. Hashed rather than
+# spelling out the account number, which ends up in URLs and logs. Names are
+# globally unique, so it cannot just be "cg-library".
+cg_bucket_name() {
+  printf 'cg-library-%s' "$(printf '%s' "$1-$2-$3" | sha256sum | cut -c1-12)"
+}

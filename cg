@@ -47,6 +47,7 @@ INSTANCE_ID="${GAME_INSTANCE_ID:-}"
 KEY="$HOME/.ssh/${TS_HOST}.pem"
 ec2() { aws ec2 "$@" --region "$REGION"; }
 # Layer 3, the cloud watchdog: needs REGION and TS_HOST, so sourced after them.
+source lib/s3-region.sh
 source lib/cloud-watchdog.sh
 # The .env settings: one registry, shared by `cg config` and the app.
 # shellcheck source=lib/config.sh
