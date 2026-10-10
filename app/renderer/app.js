@@ -41,6 +41,12 @@ const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
 const JOB_LINE_OK  = 'font-code-sm text-code-sm text-on-surface-variant';
 const JOB_LINE_ERR = 'font-code-sm text-code-sm text-error';
 
+// Why these are kept rather than painted where they happen: job-line is shared
+// with the running list, and updateHeader() rewrites it every time ANY job
+// starts or ends. A failure written directly was erased by the next read.
+// Keyed by the read, so a later success for the same read clears it.
+const readFailures = new Map();
+
 function updateHeader() {
   const mine = jobsHere();
   const busy = writing();
@@ -74,9 +80,16 @@ function updateHeader() {
     $(b).disabled = jobs.size > 0;
   for (const b of ['b-open', 'd-open']) if (sessionNow) $(b).disabled = true;
 
-  $('job-line').textContent = jobs.size
-    ? `running: ${names.map(n => 'cg ' + n).join(', ')}` : 'idle';
-  $('job-line').className = JOB_LINE_OK;
+  if (jobs.size) {
+    $('job-line').textContent = `running: ${names.map(n => 'cg ' + n).join(', ')}`;
+    $('job-line').className = JOB_LINE_OK;
+  } else if (readFailures.size) {
+    $('job-line').textContent = [...readFailures.values()].join(' · ');
+    $('job-line').className = JOB_LINE_ERR;
+  } else {
+    $('job-line').textContent = 'idle';
+    $('job-line').className = JOB_LINE_OK;
+  }
 }
 
 // The dashboard's activity list: what cg did in this window. The app keeps no
@@ -262,8 +275,13 @@ function paintStatus(s) {
     $('box-chip').className = 'pill ' + (s.box.state === 'running' ? 'pill-bad' : '');
   }
   $('box-uptime').textContent = s.box ? uptime(s.box.launched) : 'not running';
-  $('box-node').textContent = s.tailnet.node
-    ? `${s.tailnet.node} · ${s.tailnet.online ? 'online' : 'offline'}` : 'no node';
+  // Guarded, even though cg now always sends it: this line threw for every
+  // machine whose node was absent and took the whole status paint down with it
+  // - the box, the archive, the guards, all of it blank. One missing field
+  // should cost one field. The fix for the field itself is in lib/setup.
+  const tn = s.tailnet || {};
+  $('box-node').textContent = tn.node
+    ? `${tn.node} · ${tn.online ? 'online' : 'offline'}` : 'no node';
 
   if (credErr) {
     // already said above: unknown, and the banner explains why
@@ -1507,6 +1525,47 @@ let machinesNow = null;
 let machinesAnswered = false;
 function paintMachines(d) { machinesNow = d; machinesAnswered = true; paintChooser(); }
 
+function paintSpec(s) {
+  const spec = s.spec || {};
+  boxNow = s.box || null;
+  const cells = [
+    ['vCPU',  spec.vcpus ?? '—',                                       s.quota ? `quota ${s.quota.vcpus}` : ''],
+    ['RAM',   spec.memory_mib ? `${Math.round(spec.memory_mib / 1024)} GB` : '—', ''],
+    ['GPU',   spec.gpu || '—', spec.gpu_memory_mib ? `${Math.round(spec.gpu_memory_mib / 1024)} GB VRAM` : ''],
+    ['PROTOCOL', 'Sunshine', 'Moonlight client'],
+  ];
+  const wrap = $('b-spec');
+  wrap.textContent = '';
+  for (const [label, value, meta] of cells) {
+    const box = document.createElement('div');
+    box.className = 'p-space-md rounded bg-surface-container';
+    const l = document.createElement('div');
+    l.className = 'font-code-sm text-code-sm text-outline uppercase tracking-wider';
+    l.textContent = label;
+    const v = document.createElement('div');
+    v.className = 'font-code text-code text-on-surface mt-0.5';
+    v.textContent = value;
+    const m = document.createElement('div');
+    m.className = 'font-code-sm text-code-sm text-outline';
+    m.textContent = meta;
+    box.append(l, v, m);
+    wrap.append(box);
+  }
+  $('b-ready').textContent = s.box ? `${s.box.state} for ${uptime(s.box.launched)}` : 'ready to build';
+  // The chip beside the button: what will be launched, and how it is paid for.
+  const spot = s.config && s.config.spot;
+  const pay = spot === '0' ? 'on demand' : spot === '1' ? 'spot' : 'spot when the quota allows';
+  const disk = s.config && s.config.disk_gb ? ` · ${s.config.disk_gb} GB root` : '';
+  $('b-chip').textContent = s.box
+    ? `${s.box.id} · ${s.box.type} · ${s.region} · billing`
+    : `${s.instance_type} · ${s.region} · ${pay}${disk}`;
+  // The reads land in whatever order they finish, and whether a pick is allowed
+  // at all depends on this one - so repaint the chooser once a box is known, or
+  // a table that arrived first would stay selectable beside a running box.
+  paintChooser();
+  paintFit();
+}
+
 // Numbered steps, the way cg reports them: the one running is marked, the ones
 // before it carry how long they took. No timer - each event repaints.
 let buildStarted = 0;
@@ -1718,11 +1777,15 @@ window.cg.onEvent(({ id, event }) => {
     // and the header busy with nothing anywhere saying why - which is exactly
     // what a packaged app pointed at the wrong directory looked like. This runs
     // AFTER updateHeader because updateHeader rewrites the same line.
-    if (job.json && (event.rc !== 0 || failure)) {
-      $('job-line').textContent = failure ? failure
-        : job.err ? `cg ${job.cmd[0]} could not run: ${job.err}`
-        : `cg ${job.cmd[0]} failed (exit ${event.rc})`;
-      $('job-line').className = JOB_LINE_ERR;
+    if (job.json) {
+      if (event.rc !== 0 || failure) {
+        readFailures.set(job.json, failure ? failure
+          : job.err ? `cg ${job.cmd[0]} could not run: ${job.err}`
+          : `cg ${job.cmd[0]} failed (exit ${event.rc})`);
+      } else {
+        readFailures.delete(job.json);       // it worked this time
+      }
+      updateHeader();
     }
     // A build, a destroy or a session changes what every free screen shows -
     // the box, the archive, the guards - so read them again once it is over.

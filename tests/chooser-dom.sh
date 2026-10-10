@@ -89,10 +89,90 @@ const MACHINES = {
   { type: 'g4dn.xlarge', vcpu: 4, gpu: 'T4', vram_gib: 16, ram_gib: 16, store_gb: 125,
     inr_hour_spot: 18, inr_hour_ondemand: 51, fits_spot: false, fits_ondemand: true }],
 };
-const STATUS = { region: 'ap-south-1', instance_type: 'g4dn.xlarge', box: null, spot: '0' };
-const DATA = { sweep: SWEEP, config: CONFIG, machines: MACHINES, status: STATUS };
+// The real shape of `cg status --json`, with every identifier replaced. Built
+// from the live command rather than written by hand, because hand-written
+// fixtures only contain the fields whoever wrote them remembered - and the two
+// painter crashes that reached a user's machine were both a field this file did
+// not have: s.tailnet.node and s.local.tailscale.
+const STATUS = {
+    "account": {
+      "credits": "138.38",
+      "id": "000000000000",
+      "plan": "PAID"
+    },
+    "archive": {
+      "bucket": "cg-library-test",
+      "bytes": 174813455930,
+      "decision": "kept - a box exists (i-0123456789abcdef0)  (checked 2 min ago)",
+      "expiry_days": 14,
+      "objects": 6289,
+      "usd_month": 4.07
+    },
+    "box": null,
+    "budget": {
+      "alerts": 2,
+      "limit": 57.0,
+      "spent": 0.0
+    },
+    "config": {
+      "alert_email": "yes",
+      "disk_gb": 50,
+      "instance_type": "g4dn.xlarge",
+      "notifications": true,
+      "spot": "0",
+      "tailscale_api_key": "yes"
+    },
+    "host": "gamevps",
+    "instance_type": "g4dn.xlarge",
+    "local": {
+      "auth_key": true,
+      "moonlight": true,
+      "ssh_key": true,
+      "tailscale": true
+    },
+    "quota": {
+      "on_demand": 4.0,
+      "spot": 0.0,
+      "vcpus": 4
+    },
+    "region": "ap-south-1",
+    "res": {
+      "elastic_ips": 0,
+      "images": 0,
+      "key_pair": "gamevps",
+      "security_group": "sg-05822edde423b6956",
+      "snapshots": 0,
+      "volumes_gb": 50
+    },
+    "session": null,
+    "spec": {
+      "gpu": "T4",
+      "gpu_memory_mib": 16384,
+      "memory_mib": 16384,
+      "vcpus": 4
+    },
+    "tailnet": {
+      "node": "gamevps",
+      "online": false
+    }
+  };
+
+// All SIX reads the app makes at startup. Leaving two out meant two painters
+// never ran in here at all - and paintSpec, which paintStatus calls on its
+// first line, was deleted and shipped.
+const LIBRARY = {
+  bucket: 'cg-library-test', games: [], total_bytes: 0, usd_month: 0,
+  orphan_bytes: 0, orphan_usd_month: 0, disk_gb: 50, selectable_gb: 209,
+  usd_per_gb_month: 0.025,
+};
+const GUARDS = { guards: [
+  { name: 'idle watchdog', armed: true, state: 'armed', catches: 'a box left running' },
+] };
+const DATA = { sweep: SWEEP, config: CONFIG, machines: MACHINES, status: STATUS,
+               library: LIBRARY, guards: GUARDS };
 const MAP = [[['sweep'], 'sweep'], [['config'], 'config'],
-             [['machines'], 'machines'], [['status'], 'status']];
+             [['machines'], 'machines'], [['status'], 'status'],
+             [['library', 'list'], 'library'], [['watcher'], 'guards']];
 let nextId = 1; const handlers = [];
 window.cg = {
   run(args) {
@@ -151,6 +231,12 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('DIMROWS | ' + document.querySelectorAll('#s-chooser tr.dim').length);
   out.push('LEGEND | ' + document.getElementById('s-chooser-legend').innerText
                           .replace(/\s+/g, ' ').trim());
+  // One line per painter, naming a DOM effect only that painter produces.
+  out.push('PAINTED | status/spec | ' + document.getElementById('b-spec').children.length);
+  out.push('PAINTED | status/chip | ' + document.getElementById('b-chip').textContent.trim());
+  out.push('PAINTED | config | ' + document.getElementById('s-count').textContent.trim());
+  out.push('PAINTED | guards | ' + document.getElementById('guard-cards').children.length);
+  out.push('PAINTED | library | ' + document.getElementById('b-fit').textContent.trim());
   if (window.__errs.length) out.push('ERRORS: ' + window.__errs.join(' | '));
   out.push('BPICK | ' + document.getElementById('b-pick').textContent.trim());
   out.push('BNOTE | ' + document.getElementById('b-type-note').textContent.trim());
@@ -212,12 +298,20 @@ if [[ $OUT == "PROBE DID NOT RUN" || -z $OUT ]]; then
   echo ""; echo "chooser-dom: $pass passed, 1 failed"; exit 1
 fi
 
-echo "1. the page renders, and nothing throws"
+echo "1. the page renders, every painter runs, and nothing throws"
 lacks    "no uncaught error" "$OUT" "ERRORS:"
-# A painter that throws used to be invisible: the catch wrote job-line and
-# updateHeader overwrote it in the same tick, so the screen just stayed empty.
+# A painter that throws was invisible twice over: the catch wrote job-line, and
+# updateHeader overwrote it - first in the same tick, then when any OTHER read
+# finished. A read failure is sticky now, so idle really means all six worked.
 lacks    "no painter failed"  "$OUT" "could not show cg"
+lacks    "  nor could not run"  "$OUT" "could not run:"
 contains "and it settles to idle" "$OUT" "JOBLINE: idle"
+# Named effects, because "no error" is what passed while paintSpec was missing.
+contains "paintSpec filled the spec grid"  "$OUT" "PAINTED | status/spec | 4"
+contains "  and the build chip"            "$OUT" "PAINTED | status/chip | g4dn.xlarge · ap-south-1 · on demand"
+contains "paintConfig counted the settings" "$OUT" "PAINTED | config | 4 of 4 set"
+contains "paintGuards drew a card"          "$OUT" "PAINTED | guards | 1"
+contains "paintLibrary sized the disk"      "$OUT" "PAINTED | library | "
 
 echo "2. the table lives on Settings, and only there"
 contains "the Settings screen has it"  "$OUT" "TABLE s-chooser"

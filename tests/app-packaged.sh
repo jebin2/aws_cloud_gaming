@@ -137,15 +137,22 @@ contains "  and close is a backstop"           "$runner" "child.on('close', () =
 
 echo "8. a failed READ is no longer silent"
 js=$(cat app/renderer/app.js)
-contains "a non-zero read is reported"   "$js" "job.json && (event.rc !== 0 || failure)"
+contains "a non-zero read is reported"   "$js" "event.rc !== 0 || failure"
+# Kept in a map, not painted where it happens: job-line is shared with the
+# running list, and updateHeader() rewrites it whenever ANY job starts or ends.
+# A failure written directly was erased by the next of six parallel reads - so
+# a missing painter reached a user while the suite called the screen clean.
+contains "  and kept until that read succeeds" "$js" "readFailures.set(job.json"
+contains "  cleared when it does"              "$js" "readFailures.delete(job.json)"
+contains "  and shown while nothing is running" "$js" "[...readFailures.values()].join"
 contains "  naming why it could not run" "$js" "could not run:"
 contains "  and the reason is kept"      "$js" "if (event.t === 'error' && event.text) job.err"
 # The message goes on the same line the header rewrites, so it has to be set
 # after updateHeader - put before it, it was overwritten in the same tick.
 handler=$(awk '/if \(event.t === .exit.\)/,/if \(isWrite\(job.cmd\)\)/' app/renderer/app.js)
 order=$(grep -nE "updateHeader\(\);|event.rc !== 0 \|\| failure" <<<"$handler" \
-        | sed -E 's/.*(updateHeader|\|\| failure).*/\1/' | tr '\n' ' ')
-check "the failure is painted after updateHeader" "$order" "updateHeader || failure "
+        | sed -E 's/.*(updateHeader|\|\| failure).*/\1/' | head -2 | tr '\n' ' ')
+check "the failure is recorded after updateHeader" "$order" "updateHeader || failure "
 # A painter that THREW was silent for the same reason: the catch wrote job-line
 # and updateHeader overwrote it in the same tick. Found by rendering the page.
 contains "a throwing painter is reported too" "$js" "could not show cg"

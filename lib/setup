@@ -210,7 +210,15 @@ status_facts() {
   [[ -f "$HOME/.ssh/${TS_HOST}.pem" ]] && f local.ssh_key yes || f local.ssh_key no
   [[ -n ${TAILSCALE_AUTH_KEY:-${GAME_TS_AUTHKEY:-}} ]] && f local.auth_key yes || f local.auth_key no
   tsn="${GAME_TS_NODE:-$TS_HOST}"
-  node=$(tailscale status 2>/dev/null | grep "[[:space:]]${tsn}[[:space:]]" | head -1)
+  # `|| true` is load bearing. grep exits 1 when the node is not on the tailnet,
+  # and under `set -euo pipefail` that failure propagated out of the command
+  # substitution and killed status_facts HERE - so tailnet.node and
+  # tailnet.online were never emitted at all, and `cg status --json` came back
+  # with no tailnet key. The desktop app reads s.tailnet.node, so its whole
+  # status paint threw on any machine whose node was absent: a fresh install,
+  # or a laptop with no tailscale. Being on no tailnet is a normal state and
+  # must report as one.
+  node=$(tailscale status 2>/dev/null | grep "[[:space:]]${tsn}[[:space:]]" | head -1 || true)
   if [[ -n $node ]]; then
     # Column 1 is the address, column 2 the machine name. The report used to
     # print the address, which reads as if the node had no name.

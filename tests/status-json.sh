@@ -55,13 +55,15 @@ FAKE
 cat > "$T/bin/tailscale" <<'FAKE'
 #!/usr/bin/env bash
 [[ $1 == status ]] || exit 0
+# TS_NODE_GONE: a tailnet that answers, with no node of ours on it.
+[[ -n ${TS_NODE_GONE:-} ]] && { printf '100.64.0.1  someone-else  you@  linux  active\n'; exit 0; }
 printf '100.64.0.9  gamevps  you@  linux  %s\n' "${TS_STATE:-offline, last seen 2d ago}"
 FAKE
 printf '#!/usr/bin/env bash\nexit 0\n' > "$T/bin/moonlight"
 chmod +x "$T/bin"/*
 
 run() { # run [--json]
-  ( cd "$T/repo" && env -i PATH="$T/bin:$PATH" HOME="$T/home" BOX="${BOX:-none}" TS_STATE="${TS_STATE-}" \
+  ( cd "$T/repo" && env -i PATH="$T/bin:$PATH" HOME="$T/home" BOX="${BOX:-none}" TS_STATE="${TS_STATE-}" TS_NODE_GONE="${TS_NODE_GONE-}" \
       CG_COLOR=never bash lib/setup status ${1:+--json} 2>&1 )
 }
 jq_() { python3 -c 'import json,sys;d=json.load(sys.stdin)
@@ -113,6 +115,22 @@ check "the node is named, not addressed" "$(jq_ tailnet.node <<<"$json")" '"game
 check "  offline is false, not a string" "$(jq_ tailnet.online <<<"$json")" "false"
 json=$(TS_STATE="active; direct" run --json)
 check "  and online is true"            "$(jq_ tailnet.online <<<"$json")" "true"
+
+# Being on no tailnet is a NORMAL state and has to report as one. grep exits 1
+# when the node is absent, and under `set -euo pipefail` that failure came out
+# of the command substitution and killed status_facts at that line - so
+# tailnet.node and tailnet.online were never emitted and `status --json` had no
+# tailnet key at all. The desktop app reads s.tailnet.node, so its entire
+# status paint threw: no box, no archive, no guards, on any machine whose node
+# was not on the tailnet. A fresh install is exactly that machine.
+json=$(TS_NODE_GONE=1 run --json)
+haskey() { python3 -c 'import json,sys;print(sys.argv[1] in json.load(sys.stdin))' "$1"; }
+check "a missing node still reports tailnet" "$(haskey tailnet <<<"$json")" "True"
+check "  with no node"                       "$(jq_ tailnet.node <<<"$json")" "null"
+check "  and offline"                        "$(jq_ tailnet.online <<<"$json")" "false"
+# Everything BEFORE the grep survived even when it died, which is what made the
+# truncation so hard to see - so check a field that proves the whole function ran.
+check "  and the fields before it are intact" "$(jq_ local.moonlight <<<"$json")" "true"
 
 echo "4. the archive countdown, in the watchdog's own words"
 json=$(run --json)
