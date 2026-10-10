@@ -113,7 +113,33 @@ for verb in create-bucket delete-bucket put-object cp sync rm mb rb; do
 done
 contains "it says the call is free" "$(cat lib/s3-region.sh)" "not charged"
 
-echo "8. this file's own needles are safe"
+echo "8. the bucket is hardened on every run, not only when it is created"
+# Both PUTs sat inside the `else` of `if head-bucket`, so a bucket that already
+# existed - made by hand, made by an older version, or pre-created to seed a
+# region move - took the "exists" path and got NEITHER. The archive then sat
+# unencrypted with no public-access block, and nothing ever said so.
+lib=$(cat lib/library-aws.sh)
+contains "public access is blocked"  "$lib" "put-public-access-block"
+contains "  and encryption set"      "$lib" "put-bucket-encryption"
+# Line order is the whole assertion: after the branch closes, not inside it.
+ln_if=$(grep -n '^if aws s3api head-bucket' lib/library-aws.sh | cut -d: -f1)
+ln_fi=$(awk -v s="$ln_if" 'NR>s && /^fi$/ {print NR; exit}' lib/library-aws.sh)
+ln_pab=$(grep -n 'put-public-access-block' lib/library-aws.sh | head -1 | cut -d: -f1)
+ln_enc=$(grep -n 'put-bucket-encryption' lib/library-aws.sh | head -1 | cut -d: -f1)
+check "the block is applied after the create branch" \
+      "$([[ ${ln_pab:-0} -gt ${ln_fi:-0} ]] && echo yes)" "yes"
+check "  and so is encryption" \
+      "$([[ ${ln_enc:-0} -gt ${ln_fi:-0} ]] && echo yes)" "yes"
+# Neither may abort init: a bucket policy this account cannot set is a warning,
+# not a reason to refuse to build.
+contains "a refused block is not fatal"      "$lib" "could not set the public access block (not fatal)"
+contains "  nor refused encryption"          "$lib" "could not set default encryption (not fatal)"
+# The multipart rule was already applied every run; it must stay that way.
+ln_lc=$(grep -n 'put-bucket-lifecycle-configuration' lib/library-aws.sh | head -1 | cut -d: -f1)
+check "  and the multipart rule still is" \
+      "$([[ ${ln_lc:-0} -gt ${ln_fi:-0} ]] && echo yes)" "yes"
+
+echo "9. this file's own needles are safe"
 # The same guard tests/app.sh carries, because it is scoped to that file and has
 # since caught me three times in files it does not look at. A needle containing
 # ${...} or $(...) inside DOUBLE quotes is expanded by bash before the search,

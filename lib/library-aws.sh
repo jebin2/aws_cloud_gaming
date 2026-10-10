@@ -84,13 +84,21 @@ else
     note "S3 has not released the name yet (attempt $attempt) - waiting 15s"
     sleep 15
   done
-  aws s3api put-public-access-block --bucket "$BUCKET" \
-    --public-access-block-configuration \
-    'BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true' >/dev/null
-  aws s3api put-bucket-encryption --bucket "$BUCKET" \
-    --server-side-encryption-configuration \
-    '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}' >/dev/null
 fi
+
+# Applied every run, not only on the run that created the bucket. Both are
+# idempotent PUTs and both are things you want to be true of the bucket
+# whatever its history: a bucket that already existed - made by hand, made by
+# an older version, or restored - took the "exists" path and silently got
+# NEITHER, so the archive sat there unencrypted with no public-access block.
+aws s3api put-public-access-block --bucket "$BUCKET" \
+  --public-access-block-configuration \
+  'BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true' >/dev/null 2>&1 \
+  || note "could not set the public access block (not fatal)"
+aws s3api put-bucket-encryption --bucket "$BUCKET" \
+  --server-side-encryption-configuration \
+  '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}' >/dev/null 2>&1 \
+  || note "could not set default encryption (not fatal)"
 
 # Abandoned multipart uploads bill as storage forever and appear in no listing -
 # the classic S3 leak. A 140 GB push that dies halfway would otherwise cost real
