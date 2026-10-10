@@ -199,8 +199,8 @@ ensure_moonlight_syskeys() {
 # ssh is the usual reason for wanting --no-push at all. IAM works from here
 # regardless of the box's state.
 archive_lock() {   # archive_lock ro|rw
-  local mode="$1" b="${GAME_S3_BUCKET:-}" role="${TS_HOST}-box"
-  [[ -n $b ]] || return 0
+  local mode="$1" role="${TS_HOST}-box" b
+  b=$(cg_bucket) || return 0
   aws iam get-role --role-name "$role" >/dev/null 2>&1 || return 0
   local write=''
   [[ $mode == rw ]] && write=', "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"'
@@ -224,8 +224,8 @@ box_state() {
 # the only way to ask once the box is stopped or gone, and exactly when the
 # question matters most.
 archive_report() {
-  local b="${GAME_S3_BUCKET:-}"
-  [[ -n $b ]] || { log "no bucket in .env - cannot check the archive"; return 1; }
+  local b
+  b=$(cg_bucket) || { log "could not work out the archive bucket - AWS did not answer"; return 1; }
   local out
   out=$(aws s3 ls "s3://$b/steam/" --recursive --summarize 2>/dev/null | tail -2) || true
   local n sz
@@ -278,7 +278,7 @@ choose_games() {
   # reason this prompt exists is that it no longer is.
   # On failure keep whatever .env already said, and fall back to "none" rather
   # than "all" - a chooser that broke should not decide to move 158 GB.
-  sel=$(GAME_S3_BUCKET="${GAME_S3_BUCKET:-}" bash lib/choose-games.sh) \
+  sel=$(GAME_S3_BUCKET="$(cg_bucket || true)" bash lib/choose-games.sh) \
     || sel="${GAME_APPS:-none}"
   export GAME_APPS="${sel:-${GAME_APPS:-none}}"
   cg_env_set GAME_APPS "$GAME_APPS"
@@ -296,13 +296,13 @@ library_reason() { # library_reason <stderr text> -> a reason, or "missing"
     *InvalidAccessKeyId*|*InvalidClientTokenId*|*SignatureDoesNotMatch*|*ExpiredToken*|*"security token"*)
       echo "the AWS credentials are not valid - check: aws sts get-caller-identity" ;;
     *NoSuchBucket*)
-      echo "the bucket s3://${GAME_S3_BUCKET:-?} does not exist" ;;
+      echo "the bucket s3://$(cg_bucket || echo '?') does not exist" ;;
     *AccessDenied*|*"Access Denied"*)
-      echo "these AWS credentials may not read s3://${GAME_S3_BUCKET:-?}" ;;
+      echo "these AWS credentials may not read s3://$(cg_bucket || echo '?')" ;;
     # HeadObject answers 403 both for a key that is denied and for credentials
     # that no longer exist, so the message must cover both rather than guess.
     *403*|*Forbidden*)
-      echo "S3 refused the read (403) - the credentials are invalid, or may not read s3://${GAME_S3_BUCKET:-?}. Check: aws sts get-caller-identity" ;;
+      echo "S3 refused the read (403) - the credentials are invalid, or may not read s3://$(cg_bucket || echo '?'). Check: aws sts get-caller-identity" ;;
     *EndpointConnectionError*|*"Could not connect"*|*"Connect timeout"*|*"Unable to locate credentials"*)
       echo "cannot reach S3 - no network, or no credentials configured" ;;
     *404*|*"Not Found"*|*"does not exist"*|*NoSuchKey*)
@@ -322,11 +322,32 @@ library_reason() { # library_reason <stderr text> -> a reason, or "missing"
 # The reason goes to STDERR, not to a variable: every caller reads the index
 # through $( ), which is a subshell, so an assignment made inside would be
 # thrown away the moment the function returned.
+# The bucket, from .env when it is there and DERIVED when it is not. The name is
+# a function of the account, the host and the region - the same function
+# lib/library-aws.sh uses to create it - so requiring .env to carry it made
+# every library read fail until an init had written it. Clearing it to move
+# region did exactly that: `cg library` exited 1, and the app reported a failed
+# read for a bucket whose name was never in question.
+#
+# Resolved once per run and remembered: the account lookup is a free call, but
+# it is still a network round trip and this is on the path of an opening screen.
+_CG_BUCKET=""
+cg_bucket() {
+  if [[ -n ${GAME_S3_BUCKET:-} ]]; then printf '%s' "$GAME_S3_BUCKET"; return 0; fi
+  if [[ -n $_CG_BUCKET ]]; then printf '%s' "$_CG_BUCKET"; return 0; fi
+  local acct
+  acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || return 1
+  [[ -n $acct && $acct != None ]] || return 1
+  _CG_BUCKET=$(cg_bucket_name "$acct" "$TS_HOST" "$REGION")
+  printf '%s' "$_CG_BUCKET"
+}
+
 library_index() {
-  [[ -n ${GAME_S3_BUCKET:-} ]] || { echo "no bucket yet - run cg init" >&2; return 1; }
+  local bucket
+  bucket=$(cg_bucket) || { echo "could not work out the archive bucket - AWS did not answer" >&2; return 1; }
   local out err rc reason
   err=$(mktemp)
-  out=$(aws s3 cp "s3://$GAME_S3_BUCKET/steam/index.json" - 2>"$err") && rc=0 || rc=$?
+  out=$(aws s3 cp "s3://$bucket/steam/index.json" - 2>"$err") && rc=0 || rc=$?
   if (( rc == 0 )); then rm -f "$err"; printf '%s' "$out"; return 0; fi
   reason=$(library_reason "$(cat "$err")"); rm -f "$err"
   # A bucket we can read that holds no index really is an empty archive.
@@ -343,7 +364,7 @@ library_json() {
     LIBRARY_ERR=$(cat "$err"); rm -f "$err"
     # Data, still - a program reading this must be able to tell the difference
     # between "no games" and "I could not look".
-    ERR="$LIBRARY_ERR" BUCKET="${GAME_S3_BUCKET:-}" python3 -c '
+    ERR="$LIBRARY_ERR" BUCKET="$(cg_bucket || true)" python3 -c '
 import json, os
 print(json.dumps({"bucket": os.environ.get("BUCKET") or None,
                   "error": os.environ["ERR"], "games": None,
@@ -352,7 +373,7 @@ print(json.dumps({"bucket": os.environ.get("BUCKET") or None,
   fi
   rm -f "$err"
   orph=$(library_orphans)
-  printf '%s' "$idx" | ORPHANS="$orph" BUCKET="${GAME_S3_BUCKET:-}" python3 -c '
+  printf '%s' "$idx" | ORPHANS="$orph" BUCKET="$(cg_bucket || true)" python3 -c '
 import json, os, sys
 try:    apps = json.load(sys.stdin).get("apps", [])
 except Exception: apps = []
@@ -398,24 +419,29 @@ library_list() {
   if ! idx=$(library_index 2>"$err"); then
     log_as fail "cannot read the archive: $(cat "$err")"
     rm -f "$err"
-    echo "  s3://${GAME_S3_BUCKET:-?} was not readable, so nothing here is known -"
+    echo "  s3://$(cg_bucket || echo '?') was not readable, so nothing here is known -"
     echo "  this is NOT the same as the archive being empty."
     return 1
   fi
   rm -f "$err"
 
-  local objs
-  objs=$(aws s3 ls "s3://$GAME_S3_BUCKET/steam/" --recursive --summarize 2>/dev/null \
+  # Counted under steamapps/, not under steam/: steam/ also holds the account
+  # bundle and the metadata, so a BRAND NEW bucket carrying nothing but a
+  # 21.8 KB copied login counted as 1 object with no index and was announced as
+  # an old-format archive from a box that predates per-game archiving.
+  local objs lb
+  lb=$(cg_bucket) || return 0
+  objs=$(aws s3 ls "s3://$lb/steam/steamapps/" --recursive --summarize 2>/dev/null \
          | awk '/Total Objects:/{print $3}') || true
   if [[ ${objs:-0} -gt 0 ]] \
-     && ! aws s3 ls "s3://$GAME_S3_BUCKET/steam/index.json" >/dev/null 2>&1; then
+     && ! aws s3 ls "s3://$lb/steam/index.json" >/dev/null 2>&1; then
     local sz
-    sz=$(aws s3 ls "s3://$GAME_S3_BUCKET/steam/" --recursive --summarize 2>/dev/null \
+    sz=$(aws s3 ls "s3://$lb/steam/steamapps/" --recursive --summarize 2>/dev/null \
          | awk '/Total Size:/{print $3}') || true
     echo "  archive holds $objs objects, $(numfmt --to=iec --suffix=B "${sz:-0}" 2>/dev/null)"
     echo "  but no per-game index yet - this box predates per-game archiving."
     echo "  The next push from a rebuilt box writes one and this lists per game."
-    aws s3 ls "s3://$GAME_S3_BUCKET/steam/steamapps/common/" 2>/dev/null \
+    aws s3 ls "s3://$lb/steam/steamapps/common/" 2>/dev/null \
       | sed 's/^ *PRE /  - /' | sed 's|/$||'
     return 0
   fi
@@ -448,7 +474,7 @@ if g > 209: print("  the archive is larger than the disk - cg init asks which to
 # month, and `forget` could not touch it because forget works off the index too.
 # Cleaning it up meant hand-written `aws s3 rm` commands.
 library_orphans() {   # -> "<bytes>\t<prefix>" per orphan
-  local b="${GAME_S3_BUCKET:-}"; [[ -n $b ]] || return 0
+  local b; b=$(cg_bucket) || return 0
   local idx; idx=$(library_index 2>/dev/null) || return 0   # unreadable: the caller says so
   # Same empty-prefix exit-1 trap as library_list; an empty archive has no
   # orphans and must not abort the caller.
@@ -616,7 +642,7 @@ cmd_library() {
     --bucket|bucket)
       # Answerable without the box, which matters when it is gone: this is where
       # the games are, and the one thing worth knowing then.
-      echo "${GAME_S3_BUCKET:-(not set - run cg init)}" ;;
+      cg_bucket || echo "(unknown - AWS did not answer)"; echo ;;
     *) die "usage: cg library [list|status|push|pull [--apps <csv>]|account push|pull|check|forget <appid>|clean|--bucket]" ;;
   esac
 }
