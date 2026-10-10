@@ -46,11 +46,25 @@ function run({ repo, args, onEvent, env = {} }) {
   readline.createInterface({ input: child.stdout })
     .on('line', text => onEvent({ t: 'raw', stream: 'stdout', text }));
 
-  child.on('error', err => onEvent({ t: 'error', text: err.message }));
+  // Every job MUST end in exactly one exit event: the app deletes a job when it
+  // sees one, so a job that never emits it stays "running" for the life of the
+  // window. Node emits 'error' and 'close' but NOT 'exit' when the process
+  // could not be spawned at all, which is how a packaged build pointing at the
+  // wrong directory turned into a permanent "refreshing" with nothing to read.
+  let settled = false;
+  const settle = rc => { if (!settled) { settled = true; onEvent({ t: 'exit', rc }); } };
+
+  child.on('error', err => {
+    onEvent({ t: 'error', text: err.message });
+    settle(127);                       // could not run it at all
+  });
   // `exit`, not `close`: close waits for stdio to close, and a process cg left
-  // behind holds those pipes open - the job would never look finished.
+  // behind holds those pipes open - the job would never look finished. `close`
+  // stays only as a backstop for the case where 'exit' never comes; once
+  // settled it is a no-op, so the lateness that ruled it out cannot bite.
   child.on('exit', (rc, signal) =>
-    onEvent({ t: 'exit', rc: rc === null ? (signal === 'SIGINT' ? 130 : 1) : rc }));
+    settle(rc === null ? (signal === 'SIGINT' ? 130 : 1) : rc));
+  child.on('close', () => settle(1));
   return child;
 }
 

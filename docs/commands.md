@@ -40,11 +40,16 @@ rather than reimplementing them.
 | `cg machines` | What GPU shapes this region rents, their specs, and what each costs on spot and on demand. Reads only; costs nothing |
 | `cg machines --all` | The same, including shapes no quota covers |
 | `cg machines --json` | The same table as data - the app's instance picker is fed from this |
+| `cg machines <region>` | The same table for a region you are not in |
+| `cg sweep` | **Every AWS region**, scored for whether it can run this rig at all: measured latency, AWS's own spot capacity score, and your quota there. Reads only; costs nothing |
+| `cg sweep --all` | The same, listing the regions excluded for latency and how far they are |
+| `cg sweep --cached --json` | The LAST scan, instantly, without running one. This is what the desktop app reads when it opens; a scan takes about 90 seconds and no screen waits on one |
+| `cg regions` | The regions your account has enabled. One `describe-regions` call |
 | `cg notify` | Send a test push notification to `GAME_NTFY_URL` |
 | `cg ping [--watch]` | Latency, and **direct vs DERP relay** - the usual cause of a bad session |
 
 `--region` and `--host` override `.env` without editing it; `--json` works on `ping`,
-`machines` and `snapshot --list`.
+`machines`, `sweep`, `regions` and `snapshot --list`.
 
 ### Where the settings live
 
@@ -73,6 +78,64 @@ already covers, so the choice does not need a quota appeal first:
   *g6.xlarge     4     L4        22.4 GB  16 GB   250 GB   INR 13   / INR 85
    g6e.xlarge    4     L40S      44.7 GB  32 GB   250 GB   INR 49   / INR 197
 ```
+
+### Choosing the region
+
+`cg machines` answers "what does this region rent", which is only the right question once the
+region is settled. `cg sweep` asks the prior one, and exists because a week was lost retrying
+`g6.xlarge` in `ap-south-2` on the assumption that spot capacity comes back - while
+`get-spot-placement-scores`, free and available the whole time, scored `ap-south-2` at **1/10**
+for every type this rig can use and `ap-south-1` at **9/10**.
+
+```
+  REGION           CITY        LATENCY TYPE          SCORE  QUOTA     SPOT / ON DEMAND
+   ap-south-1      Mumbai      22 ms   g4dn.xlarge   9      ok/0      INR 18 / INR 51
+   ap-southeast-5  Malaysia    48 ms   g6.xlarge     9      opt-in    - / INR 89
+  *ap-south-2      Hyderabad   19 ms   g6.xlarge     1      ok/ok     INR 13 / INR 85
+```
+
+Three columns, because a region fails for three unrelated reasons and they need telling apart:
+
+- **LATENCY** is measured now, not looked up. A coarse parallel pass shortlists, then a quiet
+  second pass decides - ten simultaneous TLS handshakes inflate each other by 10ms or more, and
+  filtering on the inflated number drops regions that qualify. The budget is 80ms, which is
+  NVIDIA's own stated requirement for GeForce NOW; `CG_SWEEP_MAX_MS` moves it.
+- **SCORE** is AWS's spot placement score, 1-10, and the only forward-looking number AWS
+  publishes. A `1` has been a reliable "do not bother". A dash means AWS said nothing, which
+  means the type was never on sale there - *not* that it has no capacity.
+- **QUOTA** is on demand/spot. `0` means ask for quota; `opt-in` means the region is not
+  enabled so the quota cannot be read yet. Different actions, so they are never one symbol.
+
+Sorted by capacity rather than distance, on purpose: the nearest region is often the wrong
+answer, and saying so is the entire point. Every call behind it is free, including the Pricing
+API lookup that costs a region you have not opted into yet - the only number available before
+enabling one.
+
+A scan is remembered in `$XDG_CACHE_HOME/cg/sweep.json` (`~/.cache/cg/sweep.json`), because the
+answer changes over hours, not seconds. Nothing ever requires it: every reader works when it is
+missing, stale or unreadable, and `cg sweep` always scans afresh.
+
+### The desktop app's Machine table
+
+The app had three dropdowns - region, instance type, purchase model - and that was the
+complaint. They are not three decisions: the question is which COMBINATION to run, most
+combinations cannot launch, and a dropdown per axis hid exactly the comparison that decides it.
+
+Settings now carries one table fed by `cg sweep --cached`, one row per region and machine, and
+**picking a price sets all three settings together**. A price you cannot pick is disabled and
+says why in the cell - `no quota`, `needs opt-in`, `no spot market` - because "why can I not
+choose this" was the other half of the confusion. A spot cell showing `18-20` is the cheapest
+and dearest zone; nothing pins the zone, so either is possible.
+
+The Build screen deliberately has no copy of it. It states what will be built, warns when that
+choice cannot launch, and offers **Change setup**, which goes to Settings and flashes the table.
+
+**The archive does not follow a region change.** It is S3 in the region you are leaving, and
+inter-region transfer is $0.1093/GB, so moving 163GB costs about INR 1,234 each way - more than
+the compute. Data *into* EC2 is free, so the cheaper move is to reinstall from Steam in the new
+region (about an hour of instance time) and delete the old archive once the new box works.
+
+### Choosing the machine, continued
 
 Two things the single hard-coded type used to hide. **A shape may not fit your quota at all** -
 larger `g6`s are cheaper per hour on spot than `g6e.xlarge`, and all of them need a quota

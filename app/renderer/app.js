@@ -35,6 +35,12 @@ const writing = () => [...jobs.values()].some(j => isWrite(j.cmd));
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
 
+// job-line carries both the running list and a failure, so its colour has to be
+// set back as well as its text - otherwise one failed read left every later
+// "idle" painted as an error.
+const JOB_LINE_OK  = 'font-code-sm text-code-sm text-on-surface-variant';
+const JOB_LINE_ERR = 'font-code-sm text-code-sm text-error';
+
 function updateHeader() {
   const mine = jobsHere();
   const busy = writing();
@@ -70,6 +76,7 @@ function updateHeader() {
 
   $('job-line').textContent = jobs.size
     ? `running: ${names.map(n => 'cg ' + n).join(', ')}` : 'idle';
+  $('job-line').className = JOB_LINE_OK;
 }
 
 // The dashboard's activity list: what cg did in this window. The app keeps no
@@ -644,7 +651,8 @@ function paintLibrary(d) {
     : `${gb.toFixed(1)} GB of the ${cap} GB a box offers after its reserve`;
 }
 
-const ago = s => s == null ? '' : s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`;
+const ago = s => s == null ? '' : s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)}m ago`
+  : s < 172800 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`;
 
 // Rendered from `cg watcher --json`: one card per layer, in the order they fire.
 // The guard strip on the dashboard: one card per layer, in the order they fire,
@@ -958,6 +966,10 @@ function paintConfig(rows) {
   }
 }
 
+// The three settings the chooser table owns. They are one decision, so they
+// have one control - see chooseMachine.
+const CHOSEN_IN_TABLE = new Set(['GAME_REGION', 'GAME_INSTANCE_TYPE', 'GAME_SPOT']);
+
 // One row: what it is, what it is for, what it says now, and how to change it.
 function settingRow(r) {
   const row = document.createElement('div');
@@ -979,6 +991,25 @@ function settingRow(r) {
   val.className = 'font-code-md text-code-md '
     + (r.is_set ? 'text-on-surface-variant' : 'text-outline');
   val.textContent = settingValue(r);
+
+  // Region, machine and purchase model are chosen in the table above, together.
+  // Editing them one at a time is what made this confusing: three controls for
+  // one decision, and two of the three combinations they can produce cannot
+  // launch. The value is still shown here - it is still a setting - but there
+  // is exactly one place to change it.
+  // ...but only while the table can actually offer something. With no scan and
+  // a failing `cg machines` - no credentials, no aws binary - the table is
+  // empty, and locking the only other way to set a region would leave no way at
+  // all. Then the plain editor comes back.
+  if (CHOSEN_IN_TABLE.has(r.key) && !chooserDead()) {
+    const where = document.createElement('span');
+    where.className = 'font-code-sm text-code-sm text-outline';
+    where.textContent = 'set in Machine, above';
+    right.append(val, where);
+    row.append(left, right);
+    return row;
+  }
+
   const edit = document.createElement('button');
   edit.className = 'btn';
   edit.textContent = r.secret && r.is_set ? 'Replace' : 'Edit';
@@ -1020,29 +1051,7 @@ function editSetting(r, row) {
   right.textContent = '';
   row.classList.add('editing');
   let input;
-  // The instance type is declared `text` in cg's registry, and has to be: the
-  // shapes a region rents are not knowable until AWS is asked, so there is no
-  // fixed list to declare. Settings asks the same way the Build screen does,
-  // and falls back to typing a name when that answer has not arrived.
-  const machineRow = r.key === 'GAME_INSTANCE_TYPE' && machinesNow && !machinesNow.error
-                  && machinesNow.machines.some(m => m.fits_spot || m.fits_ondemand);
-  if (machineRow) {
-    input = document.createElement('select');
-    for (const m of machinesNow.machines) {
-      if (!m.fits_spot && !m.fits_ondemand) continue;     // no quota covers it
-      const bits = [m.type];
-      if (m.gpu) bits.push(m.vram_gib ? `${m.gpu} ${m.vram_gib} GB` : m.gpu);
-      const spot = m.inr_hour_spot, od = m.inr_hour_ondemand;
-      if (spot != null || od != null) {
-        bits.push([spot != null ? `spot INR ${spot}` : null,
-                   od != null ? `on demand INR ${od}` : null].filter(Boolean).join(' / ') + '/hr');
-      }
-      const o = document.createElement('option');
-      o.value = m.type; o.textContent = bits.join(' · ');
-      input.append(o);
-    }
-    input.value = r.value || r.default || '';
-  } else if (r.kind === 'choice') {
+  if (r.kind === 'choice') {
     input = document.createElement('select');
     for (const opt of (r.rule || '').split(',')) {
       const o = document.createElement('option');
@@ -1061,11 +1070,7 @@ function editSetting(r, row) {
   }
   input.className = 'bg-surface border border-surface-variant rounded px-space-sm py-0.5 '
                   + 'font-code-md text-code-md text-on-surface min-w-0 '
-                  // A machine's label carries its GPU and both prices, which does
-                  // not fit a fixed 16rem - sharing the line with Save and Cancel
-                  // clipped it. The row wraps, so taking the full width puts the
-                  // buttons underneath rather than squeezing the text.
-                  + (machineRow ? 'w-full' : 'w-64');
+                  + 'w-64';
   const save = document.createElement('button');
   save.className = 'btn btn-primary'; save.textContent = 'Save';
   const cancel = document.createElement('button');
@@ -1081,6 +1086,9 @@ function editSetting(r, row) {
     save.disabled = true;
     await runCg(['config', 'set', r.key, value], { collect: 's-check' });
     $('s-check').hidden = false;
+    // refresh() re-reads config, machines AND regions for this screen, so a new
+    // region repaints the Build picker too - different regions rent different
+    // machines, and the type in force may not exist in the one just chosen.
     await refresh();
   };
   right.append(input, save, cancel);
@@ -1193,99 +1201,311 @@ function paintFit() {
 // in this file. Choosing one writes GAME_INSTANCE_TYPE through `cg config set`,
 // so .env stays the single source of truth and the next build agrees with the
 // picker without being told.
-let machinesNow = null;
-function paintMachines(d) {
-  machinesNow = d;
-  const sel = $('b-type');
-  const note = $('b-type-note');
-  sel.textContent = '';
-  if (d.error) {
-    sel.append(new Option(d.error, ''));
-    sel.disabled = true;
-    note.textContent = '';
-    return;
-  }
-  // One row per machine AND purchase model, because the model is the bigger
-  // lever: on demand costs about six times spot, and when a region runs out of
-  // spot capacity it is the only way to launch at all. Picking a row sets both
-  // settings, so the choice is one decision rather than two.
-  const options = [];
-  for (const m of d.machines) {
-    for (const spot of [true, false]) {
-      if (spot ? !m.fits_spot : !m.fits_ondemand) continue;   // no quota covers it
-      const price = spot ? m.inr_hour_spot : m.inr_hour_ondemand;
-      if (price == null) continue;                            // no market, or no published price
-      const bits = [m.type, spot ? 'spot' : 'on demand'];
-      if (m.gpu) bits.push(m.vram_gib ? `${m.gpu} ${m.vram_gib} GB` : m.gpu);
-      bits.push(`${m.ram_gib} GB RAM`, `INR ${price}/hr`);
-      options.push({ type: m.type, spot, price, m, label: bits.join(' · ') });
-    }
-  }
-  options.sort((a, b) => a.price - b.price || a.type.localeCompare(b.type));
-  // 'auto' means spot wherever the quota allows, so it selects the spot row.
-  const spotOn = d.spot !== '0';
-  for (const o of options) {
-    const opt = new Option(o.label, `${o.type}|${o.spot ? '1' : '0'}`);
-    opt.selected = o.type === d.configured && o.spot === spotOn;
-    sel.append(opt);
-  }
-  if (!options.length) sel.append(new Option('no machine here fits your quota', ''));
-  // A running box cannot change shape, and silently writing a machine that is
-  // not the one billing is worse than refusing.
-  sel.disabled = !!boxNow || !options.length;
-  const chosen = options.find(o => o.type === d.configured && o.spot === spotOn);
-  const parts = [];
-  if (boxNow) parts.push('a box is running - destroy it before changing the machine');
-  else if (chosen && chosen.spot && chosen.m.spot_az)
-    parts.push(`cheapest in ${chosen.m.spot_az}; the zone is not pinned, so it can cost up to INR `
-             + `${Math.round(chosen.m.usd_hour_spot_max * d.inr_per_usd)}/hr`);
-  else if (chosen && !chosen.spot)
-    parts.push('on demand: it launches when spot has no capacity, and costs the full rate');
-  const noQuota = d.machines.length - new Set(options.map(o => o.type)).size;
-  if (noQuota > 0) parts.push(`${noQuota} larger shapes need more quota`);
-  note.textContent = parts.join(' · ');
+// The machine chooser: ONE table, rendered into both the Build and the Settings
+// screen, replacing three separate dropdowns for region, instance type and
+// purchase model. Those were not three decisions - the whole question is which
+// COMBINATION to run, and a dropdown per axis hid exactly the comparison that
+// matters. Picking a price picks all three.
+//
+// Rows come from `cg sweep`, which is free but takes about 90 seconds, so the
+// app reads the remembered scan (`cg sweep --cached`, instant) and rescans only
+// when asked. With no scan yet there is still a table: the current region's
+// machines, from `cg machines`, with a line saying what a scan would add.
+let sweepNow = null;
+let sweepAnswered = false;
+function paintSweep(d) { sweepNow = d; sweepAnswered = true; paintChooser(); }
+
+// The settings rows defer to the table - but they are painted by whichever read
+// lands first, and `cg config` usually beats `cg machines` and `cg sweep`. So
+// they default to deferring, and only get their own editor back once BOTH
+// answers are in AND neither produced a row, which means AWS is unreadable and
+// the table can offer nothing.
+function chooserDead() {
+  return sweepAnswered && machinesAnswered && chooserRows().rows.length === 0;
 }
 
-function paintSpec(s) {
-  const spec = s.spec || {};
-  boxNow = s.box || null;
-  const cells = [
-    ['vCPU',  spec.vcpus ?? '—',                                       s.quota ? `quota ${s.quota.vcpus}` : ''],
-    ['RAM',   spec.memory_mib ? `${Math.round(spec.memory_mib / 1024)} GB` : '—', ''],
-    ['GPU',   spec.gpu || '—', spec.gpu_memory_mib ? `${Math.round(spec.gpu_memory_mib / 1024)} GB VRAM` : ''],
-    ['PROTOCOL', 'Sunshine', 'Moonlight client'],
-  ];
-  const wrap = $('b-spec');
-  wrap.textContent = '';
-  for (const [label, value, meta] of cells) {
-    const box = document.createElement('div');
-    box.className = 'p-space-md rounded bg-surface-container';
-    const l = document.createElement('div');
-    l.className = 'font-code-sm text-code-sm text-outline uppercase tracking-wider';
-    l.textContent = label;
-    const v = document.createElement('div');
-    v.className = 'font-code text-code text-on-surface mt-0.5';
-    v.textContent = value;
-    const m = document.createElement('div');
-    m.className = 'font-code-sm text-code-sm text-outline';
-    m.textContent = meta;
-    box.append(l, v, m);
-    wrap.append(box);
-  }
-  $('b-ready').textContent = s.box ? `${s.box.state} for ${uptime(s.box.launched)}` : 'ready to build';
-  // The chip beside the button: what will be launched, and how it is paid for.
-  const spot = s.config && s.config.spot;
-  const pay = spot === '0' ? 'on demand' : spot === '1' ? 'spot' : 'spot when the quota allows';
-  const disk = s.config && s.config.disk_gb ? ` · ${s.config.disk_gb} GB root` : '';
-  $('b-chip').textContent = s.box
-    ? `${s.box.id} · ${s.box.type} · ${s.region} · billing`
-    : `${s.instance_type} · ${s.region} · ${pay}${disk}`;
-  // The two reads land in whatever order they finish, and the picker's enabled
-  // state depends on this one. Repaint it once a box is known, or a picker that
-  // arrived first would stay editable beside a running box.
-  if (machinesNow) paintMachines(machinesNow);
-  paintFit();
+// ONE mount. The table was on Build too, and two copies of a control that
+// writes the same three settings is the original confusion in a new shape.
+// Build states what will be built and sends you here to change it.
+const MOUNTS = [
+  { table: 's-chooser', note: 's-type-note', age: 's-sweep-age',
+    legend: 's-chooser-legend', name: 'mach-s' },
+];
+
+// What is in force, read from cg's own answer rather than remembered here.
+// GAME_SPOT 'auto' means spot wherever the quota allows, so it reads as spot -
+// the same rule the old picker used.
+function cfgVal(key) {
+  const r = (config || []).find(x => x.key === key);
+  return r ? (r.effective || r.value || r.default || null) : null;
 }
+function currentPick() {
+  return {
+    region: cfgVal('GAME_REGION') || (machinesNow && machinesNow.region) || null,
+    type: cfgVal('GAME_INSTANCE_TYPE') || (machinesNow && machinesNow.configured) || null,
+    spot: (cfgVal('GAME_SPOT') || 'auto') !== '0',
+  };
+}
+
+function shortCity(city) {
+  if (!city) return '';
+  const m = /\(([^)]+)\)/.exec(city);
+  return m ? m[1] : city;
+}
+
+// One flat list of (region, type) rows, whether the data came from a sweep or
+// from the current region alone. Everything downstream reads only this shape,
+// so the two sources cannot drift apart.
+function chooserRows() {
+  if (sweepNow && sweepNow.regions && sweepNow.regions.length) {
+    const out = [];
+    for (const r of sweepNow.regions) {
+      for (const m of r.machines) {
+        out.push({
+          region: r.region, city: shortCity(r.city), rtt: r.rtt_ms, enabled: r.enabled,
+          type: m.type, gpu: m.gpu, vram: m.vram_gib, score: m.score,
+          spot: m.inr_hour_spot, spotMax: m.inr_hour_spot_max, od: m.inr_hour_ondemand,
+          fitsSpot: m.fits_spot, fitsOd: m.fits_ondemand,
+        });
+      }
+    }
+    return { rows: out, swept: true };
+  }
+  // No scan yet. The current region is still worth showing, and comes from a
+  // read the app already does.
+  if (machinesNow && !machinesNow.error && machinesNow.machines) {
+    return {
+      rows: machinesNow.machines
+        .filter(m => m.fits_spot || m.fits_ondemand)
+        .map(m => ({
+          region: machinesNow.region, city: '', rtt: null, enabled: true,
+          type: m.type, gpu: m.gpu, vram: m.vram_gib, score: null,
+          spot: m.inr_hour_spot, spotMax: m.usd_hour_spot_max != null
+            ? Math.round(m.usd_hour_spot_max * (machinesNow.inr_per_usd || 88)) : null,
+          od: m.inr_hour_ondemand,
+          fitsSpot: m.fits_spot, fitsOd: m.fits_ondemand,
+        })),
+      swept: false,
+    };
+  }
+  return { rows: [], swept: false };
+}
+
+function cell(tr, text, cls) {
+  const td = tr.insertCell();
+  td.textContent = text;
+  if (cls) td.className = cls;
+  return td;
+}
+
+// A price cell IS the control. Disabled for a reason the cell itself states,
+// because "why can I not pick this" was the other half of the confusion.
+function priceCell(tr, mount, row, spot, inr, cur) {
+  const td = tr.insertCell();
+  td.className = 'num';
+  const fits = spot ? row.fitsSpot : row.fitsOd;
+  let why = null;
+  if (inr == null) why = spot ? 'no spot market' : 'no price';
+  else if (!row.enabled) why = 'needs opt-in';
+  else if (fits === false) why = 'no quota';
+
+  const label = document.createElement('label');
+  const usable = !why && !boxNow;
+  label.className = 'pick ' + (usable ? '' : 'off');
+  const radio = document.createElement('input');
+  radio.type = 'radio';
+  radio.name = mount.name;
+  radio.value = `${row.region}|${row.type}|${spot ? '1' : '0'}`;
+  radio.disabled = !usable;
+  radio.checked = row.region === cur.region && row.type === cur.type && spot === cur.spot;
+  if (radio.checked) label.classList.add('on');
+  radio.onchange = () => { if (radio.checked) chooseMachine(row, spot); };
+  label.append(radio);
+
+  // The cheapest zone, and nothing pins the zone: show the spread when the
+  // zones disagree, because the cheap number alone is a promise cg cannot keep.
+  const range = spot && inr != null && row.spotMax != null && row.spotMax > inr
+    ? `${inr}-${row.spotMax}` : (inr == null ? null : String(inr));
+  const amount = document.createElement('span');
+  amount.className = 'amount';
+  amount.textContent = range == null ? '-' : range;
+  label.append(amount);
+
+  // Why, as its own short tag rather than appended to the number: it keeps the
+  // prices readable down the column, and the full sentence is in the legend.
+  if (why) {
+    const tag = document.createElement('span');
+    tag.className = 'reason';
+    tag.textContent = why;
+    label.append(tag);
+    label.title = PICK_WHY[why] || why;
+  }
+  td.append(label);
+  return { td, usable, why };
+}
+
+// Said once, under the table, instead of a sentence in every cell.
+const PICK_WHY = {
+  'no quota': 'Your G-instance quota in this region does not cover 4 vCPU for this '
+            + 'purchase model. Ask AWS for it in Service Quotas - it is free and takes a day or two.',
+  'needs opt-in': 'This region is not enabled on your account. Enabling it is an '
+                + 'account-level change, so this app will not do it for you.',
+  'no spot market': 'AWS publishes no spot price for this machine here, so there is '
+                  + 'nothing to bid on. On demand may still work.',
+  'no price': 'The Pricing API returned nothing for this machine here.',
+};
+
+let lastDead = null;
+let repainting = false;
+function paintChooser() {
+  const { rows, swept } = chooserRows();
+  const cur = currentPick();
+
+  // The settings rows were painted before this had data, so their choice of
+  // editor-or-pointer may now be wrong. Repaint them once, when the verdict
+  // actually changes, and never from inside their own paint.
+  const dead = chooserDead();
+  if (!repainting && dead !== lastDead && config.length && $('s-groups').children.length) {
+    lastDead = dead;
+    repainting = true;
+    try { paintConfig(config); } finally { repainting = false; }
+  } else {
+    lastDead = dead;
+  }
+
+  for (const mount of MOUNTS) {
+    const table = $(mount.table);
+    if (!table) continue;
+    table.textContent = '';
+    const reasons = new Set();
+    if (!rows.length) {
+      const td = table.insertRow().insertCell();
+      td.colSpan = 8;
+      td.className = 'why';
+      td.textContent = !machinesAnswered ? 'reading what this region rents…'
+        : machinesNow && machinesNow.error ? machinesNow.error
+        : 'no machine here fits your quota - Scan all regions to compare every region';
+    } else {
+      const head = table.createTHead().insertRow();
+      // The price headers do NOT get text-right: the cells under them lead with
+      // a radio at the cell's left edge, so a right-aligned header sat over
+      // nothing. capacity is the only genuinely right-aligned column.
+      for (const [label, cls] of [['region', ''], ['city', ''], ['latency', ''],
+                                  ['machine', ''], ['gpu', ''], ['capacity', 'text-right'],
+                                  ['spot INR/hr', ''], ['on demand INR/hr', '']]) {
+        const th = document.createElement('th');
+        th.textContent = label; th.className = cls;
+        head.append(th);
+      }
+      const body = table.createTBody();
+      let lastRegion = null;
+      for (const row of rows) {
+        const tr = body.insertRow();
+        const first = row.region !== lastRegion;
+        if (first && lastRegion !== null) tr.classList.add('group');
+        if (row.region === cur.region) tr.classList.add('here');
+
+        cell(tr, first ? row.region : '', 'region');
+        cell(tr, first ? row.city : '', 'city');
+        cell(tr, first && row.rtt != null ? `${Math.round(row.rtt)} ms` : '', 'ms');
+        cell(tr, row.type, '');
+        cell(tr, row.gpu ? (row.vram ? `${row.gpu} ${row.vram} GB` : row.gpu) : '-', 'city');
+
+        const sc = tr.insertCell();
+        sc.className = 'num';
+        if (row.score == null) { sc.textContent = swept ? '-' : ''; sc.classList.add('why'); }
+        else {
+          const s = document.createElement('span');
+          s.className = 'score ' + (row.score >= 7 ? 'good' : row.score <= 2 ? 'bad' : '');
+          s.textContent = `${row.score}/10`;
+          sc.append(s);
+        }
+        const a = priceCell(tr, mount, row, true, row.spot, cur);
+        const b = priceCell(tr, mount, row, false, row.od, cur);
+        // A row with nothing pickable should recede, not look broken.
+        if (!a.usable && !b.usable) tr.classList.add('dim');
+        for (const r of [a.why, b.why]) if (r) reasons.add(r);
+        lastRegion = row.region;
+      }
+    }
+
+    // What the table cannot show on its own: how old it is, and what is missing.
+    const parts = [];
+    if (boxNow) parts.push('a box is running - destroy it before changing the machine');
+    else if (!swept && rows.length) parts.push('showing this region only - Scan all regions '
+      + 'compares every region AWS has, measures latency and reads spot capacity (free)');
+    if (swept) {
+      parts.push("capacity is AWS's spot placement score: 1 means a launch will almost "
+        + 'certainly be refused, whatever the price says');
+      // Two numbers in a spot cell are the cheapest and dearest zone, and the
+      // zone is not pinned, so the bill can be either.
+      if (rows.some(r => r.spotMax != null && r.spot != null && r.spotMax > r.spot))
+        parts.push('a spot range is the cheapest and dearest zone - nothing pins the zone, '
+                 + 'so either is possible');
+      const far = (sweepNow.too_far || []).length;
+      if (far) parts.push(`${far} regions are too far to stream and are not listed`);
+    }
+    $(mount.note).textContent = parts.join(' · ');
+
+    // The legend. Only the reasons actually on screen, in plain words, so a
+    // greyed-out half of a column reads as deliberate rather than broken.
+    const legend = $(mount.legend);
+    if (legend) {
+      legend.textContent = '';
+      if (reasons.size) {
+        const intro = document.createElement('div');
+        intro.textContent = 'A price you cannot pick would be refused at launch:';
+        legend.append(intro);
+        for (const r of ['no quota', 'needs opt-in', 'no spot market', 'no price']) {
+          if (!reasons.has(r)) continue;
+          const line = document.createElement('div');
+          const b = document.createElement('b');
+          b.textContent = r;
+          line.append(b, document.createTextNode(' - ' + PICK_WHY[r]));
+          legend.append(line);
+        }
+      }
+    }
+    const ageEl = $(mount.age);
+    if (ageEl) ageEl.textContent = sweepNow && sweepNow.cached && sweepNow.age_seconds != null
+      ? `scanned ${ago(sweepNow.age_seconds)}` : '';
+  }
+  paintBuildPick(rows, cur);
+}
+
+// Build shows the one line that matters: what is about to be built, and what it
+// costs an hour. Everything it says comes from the same rows the table uses, so
+// the two can never disagree.
+function paintBuildPick(rows, cur) {
+  const el = $('b-pick');
+  if (!el) return;
+  const hit = rows.find(r => r.region === cur.region && r.type === cur.type);
+  const price = hit && (cur.spot ? hit.spot : hit.od);
+  const bits = [cur.region, cur.type, cur.spot ? 'spot' : 'on demand'].filter(Boolean);
+  if (hit && hit.gpu) bits.push(hit.vram ? `${hit.gpu} ${hit.vram} GB` : hit.gpu);
+  if (price != null) bits.push(`INR ${price}/hr`);
+  el.textContent = bits.length ? bits.join(' · ') : '—';
+
+  // The warnings belong here too: the only place that shows the choice should
+  // also say when the choice cannot launch.
+  const warn = [];
+  if (boxNow) warn.push('a box is running - it keeps the machine it started on');
+  else if (hit && cur.spot && hit.score != null && hit.score <= 2)
+    warn.push(`AWS scores spare ${cur.type} capacity here ${hit.score}/10 - a spot launch will `
+            + 'very likely be refused');
+  else if (hit && cur.spot && hit.fitsSpot === false)
+    warn.push('your spot quota here is 0, so this cannot launch on spot');
+  else if (!hit && rows.length)
+    warn.push('this machine is not offered in this region - change the setup before building');
+  $('b-type-note').textContent = warn.join(' · ');
+}
+
+let machinesNow = null;
+// Just the store now. `cg machines` is still read - it is the only answer for
+// the region in force, and the table falls back to it before any sweep - but
+// the single <select> it used to fill is gone, replaced by the chooser table.
+let machinesAnswered = false;
+function paintMachines(d) { machinesNow = d; machinesAnswered = true; paintChooser(); }
 
 // Numbered steps, the way cg reports them: the one running is marked, the ones
 // before it carry how long they took. No timer - each event repaints.
@@ -1466,22 +1686,44 @@ window.cg.onEvent(({ id, event }) => {
   // JSON comes back on stdout as the command's own data; reports arrive as events.
   if (event.t === 'raw' && event.stream === 'stdout' && (job.json || job.capture)) job.out.push(event.text);
   if (event.t === 'report' && job.panel) $(job.panel).textContent = event.text;
+  if (event.t === 'error' && event.text) job.err = event.text;
   if (job.collect && (event.t === 'line' || event.t === 'step' || event.t === 'error')) {
     const box = $(job.collect);
     if (box.textContent === 'running…') box.textContent = '';
     box.textContent += (event.t === 'step' ? '\n' + event.text : '  ' + (event.text || '')) + '\n';
   }
   if (event.t === 'exit') {
+    // Why the reason is kept rather than painted here: updateHeader() runs a few
+    // lines below and rewrites job-line, so anything written now is wiped in the
+    // same tick. A failing painter was therefore completely silent - the screen
+    // stayed empty and the only clue was that nothing ever appeared.
+    let failure = null;
     if (job.json && event.rc === 0) {
       try {
         const data = JSON.parse(job.out.join('\n'));
-        ({ cost: paintCost, library: paintLibrary, guards: paintGuards,
-           config: paintConfig, status: paintStatus, machines: paintMachines }[job.json])(data);
-      } catch (err) { $('job-line').textContent = `could not read cg ${job.cmd[0]} --json`; }
+        const paint = { cost: paintCost, library: paintLibrary, guards: paintGuards,
+                        config: paintConfig, status: paintStatus, machines: paintMachines,
+                        sweep: paintSweep }[job.json];
+        if (!paint) throw new Error(`no painter for ${job.json}`);
+        paint(data);
+      } catch (err) {
+        failure = `could not show cg ${job.cmd[0]}: ${err && err.message ? err.message : err}`;
+      }
     }
     if (job.age) $(job.age).textContent = new Date().toLocaleTimeString();
     jobs.delete(id);
     updateHeader();
+    // A FAILED read used to be silent: note() and the follow-up refresh are
+    // behind isWrite, so a read that could not run at all left the screen empty
+    // and the header busy with nothing anywhere saying why - which is exactly
+    // what a packaged app pointed at the wrong directory looked like. This runs
+    // AFTER updateHeader because updateHeader rewrites the same line.
+    if (job.json && (event.rc !== 0 || failure)) {
+      $('job-line').textContent = failure ? failure
+        : job.err ? `cg ${job.cmd[0]} could not run: ${job.err}`
+        : `cg ${job.cmd[0]} failed (exit ${event.rc})`;
+      $('job-line').className = JOB_LINE_ERR;
+    }
     // A build, a destroy or a session changes what every free screen shows -
     // the box, the archive, the guards - so read them again once it is over.
     if (isWrite(job.cmd)) {
@@ -1513,11 +1755,12 @@ const NEEDS = {
   dashboard: [[['status', '--json'], 'status'], [['watcher', '--json'], 'guards']],
   // machines too: the instance-type row is a picker, and its options are
   // whatever this region rents - see editSetting.
-  settings:  [[['config', '--json'], 'config'], [['machines', '--json'], 'machines']],
+  settings:  [[['config', '--json'], 'config'], [['machines', '--json'], 'machines'],
+              [['sweep', '--cached', '--json'], 'sweep']],
   // Build reads status too: if a box is already up there is nothing to build,
   // and its own Refresh must be able to find that out.
   build:     [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status'],
-              [['machines', '--json'], 'machines']],
+              [['machines', '--json'], 'machines'], [['sweep', '--cached', '--json'], 'sweep']],
   library:   [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status']],
   guards:    [[['watcher', '--json'], 'guards']],
 };
@@ -1541,6 +1784,9 @@ const ALL_READS = [
   [['watcher', '--json'], 'guards'],
   [['library', 'list', '--json'], 'library'],
   [['machines', '--json'], 'machines'],
+  // The REMEMBERED scan, never a fresh one: a scan takes 90 seconds and an
+  // opening window must not wait on it. Rescanning is a button.
+  [['sweep', '--cached', '--json'], 'sweep'],
 ];
 function refreshAll() {
   for (const v of Object.keys(NEEDS)) loaded.add(v);
@@ -1620,33 +1866,79 @@ $('lib-clean').onclick = async () => {
 // Changing the machine is a `config set` - .env is where cg keeps it, and the
 // next build reads it from there. Re-read afterwards rather than assuming the
 // write landed: the note and the chip both describe the new choice.
-$('b-type').onchange = async () => {
-  const [type, spot] = ($('b-type').value || '').split('|');
-  if (!type || !machinesNow) return;
-  const was = machinesNow.spot !== '0' ? '1' : '0';
-  if (type === machinesNow.configured && spot === was) return;
-  const m = machinesNow.machines.find(x => x.type === type);
-  const onSpot = spot === '1';
-  const price = m && (onSpot ? m.inr_hour_spot : m.inr_hour_ondemand);
-  const ok = await askConfirm({
-    title: `Build on ${type}, ${onSpot ? 'spot' : 'on demand'}?`,
-    body: (m && m.gpu ? `${m.gpu}${m.vram_gib ? `, ${m.vram_gib} GB VRAM` : ''}, ${m.ram_gib} GB RAM.\n\n` : '')
-        + (price != null ? `About INR ${price} an hour. ` : '')
-        + (onSpot
-            ? 'Spot is far cheaper, and a region with no spare capacity will refuse to launch it.'
+// Picking a price in the chooser sets THREE settings, because it is one
+// decision. Region last on purpose: it is the one that invalidates the other
+// two - a type that exists in Mumbai may not exist where you came from - so the
+// type and model are already correct by the time the region moves to match.
+async function chooseMachine(row, spot) {
+  const cur = currentPick();
+  if (row.region === cur.region && row.type === cur.type && spot === cur.spot) return;
+  const price = spot ? row.spot : row.od;
+  const moving = row.region !== cur.region;
+  const body =
+    (row.gpu ? `${row.gpu}${row.vram ? `, ${row.vram} GB VRAM` : ''}. ` : '')
+    + (price != null ? `About INR ${price} an hour. ` : '')
+    + (spot ? 'Spot is far cheaper, and a region with no spare capacity will refuse to launch it.'
             : 'On demand costs the full rate and launches even when spot has none left.')
-        + '\n\nThis applies to the next build; a box that is already running is untouched.',
-    yes: 'Use it',
+    + (row.score != null && row.score <= 2
+        ? `\n\nAWS scores spare ${row.type} capacity here ${row.score}/10, so a spot launch will `
+          + 'very likely be refused however cheap it looks.' : '')
+    + (moving
+        ? `\n\nThis MOVES the rig to ${row.region}. Your game library is in S3 in `
+          + `${cur.region || 'the old region'} and does not follow: the next build creates a new `
+          + 'bucket and reinstalls from Steam. Nothing is deleted or moved by this change, and '
+          + 'the old archive keeps costing storage until you delete it.'
+        : '')
+    + '\n\nThis applies to the next build; a box that is already running is untouched.';
+  const ok = await askConfirm({
+    title: moving ? `Move to ${row.region} on ${row.type}?`
+                  : `Build on ${row.type}, ${spot ? 'spot' : 'on demand'}?`,
+    body, yes: moving ? 'Move' : 'Use it', danger: moving,
   });
-  if (!ok) { paintMachines(machinesNow); return; }   // put the old choice back
-  // Two settings, one decision. The type first: a half-applied change that left
-  // the purchase model pointing at a machine nobody chose would be worse than
-  // either value alone.
-  await runCg(['config', 'set', 'GAME_INSTANCE_TYPE', type]);
-  await runCg(['config', 'set', 'GAME_SPOT', spot]);
-  await Promise.all([runCg(['machines', '--json'], { json: 'machines' }),
+  if (!ok) { paintChooser(); return; }            // put the old choice back
+  // Type and model first, then the region. A half-applied change is possible
+  // whatever the order, so the order is chosen to leave the least wrong state:
+  // the wrong type in the right region is a refused launch with a clear reason,
+  // while the right type in the wrong region silently builds the wrong box.
+  await runCg(['config', 'set', 'GAME_INSTANCE_TYPE', row.type]);
+  await runCg(['config', 'set', 'GAME_SPOT', spot ? '1' : '0']);
+  if (moving) await runCg(['config', 'set', 'GAME_REGION', row.region]);
+  // machines is per-region, so a move makes the old answer wrong.
+  await Promise.all([runCg(['config', '--json'], { json: 'config' }),
+                     runCg(['machines', '--json'], { json: 'machines' }),
                      runCg(['status', '--json'], { json: 'status' })]);
+}
+
+// Scanning every region is free but takes about 90 seconds, so it is a button
+// and never something a screen does on its own.
+async function scanRegions(btn) {
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'scanning all regions…';
+  await runCg(['sweep', '--json'], { json: 'sweep' });
+  btn.disabled = false;
+  btn.textContent = was;
+}
+const sweepBtn = $('s-sweep');
+if (sweepBtn) sweepBtn.onclick = () => scanRegions(sweepBtn);
+
+// Build's "Change setup". Settings is a long screen and the table is at the
+// top of it, so arriving there is not enough - the first instance-type picker
+// went unnoticed for exactly this reason. Scroll to it and flash it.
+$('b-setup').onclick = () => {
+  goView('settings');
+  const card = $('s-machine-card');
+  if (!card) return;
+  card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  // Restarting a running animation needs the class off, a reflow, then on.
+  card.classList.remove('flash-attn');
+  void card.offsetWidth;
+  // The animation says when it is finished, so nothing here runs on a timer.
+  card.addEventListener('animationend', () => card.classList.remove('flash-attn'),
+                        { once: true });
+  card.classList.add('flash-attn');
 };
+
 $('d-guards').onclick = () => goView('guards');
 $('g-settings').onclick = () => goView('settings');
 // The only button on the dashboard that spends money, and it says so.

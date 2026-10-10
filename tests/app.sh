@@ -94,7 +94,11 @@ contains "  and a read waits only for a write" "$main" "find(j => !j.readOnly)"
 contains "  config counts as a read"     "$main" "'games', 'config'"
 # `machines` reads describe-* and the Pricing API: free, and it launches nothing,
 # so the picker must not be refused while the other reads are in flight.
-contains "  so does machines"             "$main" "'config', 'machines']"
+contains "  so does machines"             "$main" "'config', 'machines'"
+# `regions` is one describe-regions call and `sweep` is a pile of free describe-*
+# and Pricing reads. Both launch nothing, and the region picker is refused at
+# startup if they are not here - the same way the Settings screen once was.
+contains "  and so do regions and sweep"  "$main" "'regions', 'sweep']"
 contains "quitting mid-run asks first"   "$main" "before-quit"
 contains "the cost refresh carries its price" "$(tr -s ' ' < app/renderer/index.html)" 'id="refresh-cost"'
 contains "  shown only on the cost screen" "$js" "refresh-cost').hidden = view !== 'cost'"
@@ -209,33 +213,59 @@ contains "  an error event lands there too" "$js" "if (event.t === 'error') buil
 contains "  a nonzero exit is never silent" "$js" 'exited ${event.rc} without saying why'
 contains "  and the next run clears it"    "$js" "buildFailClear();"
 
-# The machine picker. Its whole point is that the app knows nothing about any
+# The machine chooser. Its whole point is that the app knows nothing about any
 # machine: a list of types typed in here goes stale the first time the region
 # gains a shape, and this rig hit exactly that - a launch that failed for
 # capacity on the only type it had ever used.
-contains "an instance-type dropdown"      "$html" 'id="b-type"'
-# It first went in the machine panel further down the column, where a narrow
-# window - the grid collapses to one column under lg - put it below the fold
-# and it could not be found at all. It belongs beside the button that spends
-# the money.
-check    "  above the Build button, not below it" \
-         "$(awk '/id="b-type"/{a=NR} /id="b-build"/{b=NR} END{print (a && b && a < b) ? "yes" : "no"}' app/renderer/index.html)" "yes"
-contains "  fed by cg machines"           "$js" "[['machines', '--json'], 'machines']"
-contains "  and read at startup with the rest" "$js" "[['machines', '--json'], 'machines'],"
-contains "  only what a quota covers is offered" "$js" "if (spot ? !m.fits_spot : !m.fits_ondemand) continue"
-contains "  the GPU and price come from cg" "$js" "spot ? m.inr_hour_spot : m.inr_hour_ondemand"
-# The purchase model is the bigger lever - on demand is about six times spot,
-# and it is the only thing that launches when a region has no spare capacity -
-# so it is the same choice, not a separate setting to go and find.
-contains "  each row is a machine AND a purchase model" "$js" "for (const spot of [true, false])"
-contains "  priced cheapest first"        "$js" "options.sort((a, b) => a.price - b.price"
-contains "  'auto' counts as spot"        "$js" "d.spot !== '0'"
-contains "  a row with no market is not offered" "$js" "if (price == null) continue"
-contains "  choosing one writes the type" "$js" "'config', 'set', 'GAME_INSTANCE_TYPE'"
+#
+# It was three dropdowns - region, type, purchase model - and that was the
+# complaint: three controls for one decision, most of whose combinations cannot
+# launch. It is one table now, on Settings, where a row is a (region, machine)
+# and picking a PRICE sets all three settings together. What it RENDERS is
+# pinned in tests/chooser-dom.sh, which loads the real page; this file holds
+# the wiring either side of it.
+contains "the table is fed by cg sweep"   "$js" "[['sweep', '--cached', '--json'], 'sweep']"
+# --cached, never a fresh scan: a scan is 90 seconds and an opening window must
+# not wait on it.
+contains "  the remembered scan, not a new one" "$js" "[['sweep', '--cached', '--json'], 'sweep'],"
+lacks    "  a startup read never scans"   "$js" "[['sweep', '--json'], 'sweep'],"
+contains "  and falls back to this region" "$js" "[['machines', '--json'], 'machines']"
+contains "  rescanning is a button"       "$js" "function scanRegions"
+contains "a price cell is the control"    "$js" "function priceCell"
+contains "  disabled when no quota covers it" "$js" "fits === false) why = 'no quota'"
+contains "  or the region is not enabled" "$js" "!row.enabled) why = 'needs opt-in'"
+contains "  capacity is shown beside price" "$js" "row.score >= 7 ? 'good'"
+contains "choosing one writes the type"   "$js" "'config', 'set', 'GAME_INSTANCE_TYPE'"
 contains "  and the purchase model"       "$js" "'config', 'set', 'GAME_SPOT'"
-contains "  after confirming the rate"    "$js" 'Build on ${type}, ${onSpot ? '"'"'spot'"'"' : '"'"'on demand'"'"'}?'
+contains "  and the region, last"         "$js" "if (moving) await runCg(['config', 'set', 'GAME_REGION'"
+contains "  after confirming the rate"    "$js" 'Build on ${row.type}, ${spot ? '"'"'spot'"'"' : '"'"'on demand'"'"'}?' 
 contains "  saying what each model means" "$js" "launches even when spot has none left"
-contains "  a running box locks it"       "$js" "sel.disabled = !!boxNow"
+contains "  and warning when capacity says no" "$js" "very likely be refused"
+contains "a running box locks every pick" "$js" "const usable = !why && !boxNow"
+# The three settings it owns get no second editor, or the dropdowns are back.
+contains "settings defer to the table"    "$js" "CHOSEN_IN_TABLE"
+contains "  listing exactly those three"  "$js" "new Set(['GAME_REGION', 'GAME_INSTANCE_TYPE', 'GAME_SPOT'])"
+# ...unless AWS cannot be read at all, when the table can offer nothing and
+# locking the only other way in would leave no way in.
+contains "  but come back if the table is dead" "$js" "function chooserDead"
+
+# Build does not carry a second copy of the table. It says what will be built
+# and sends you to the one that exists.
+lacks    "no picker on the Build screen"  "$html" 'id="b-type"'
+lacks    "  and no table either"          "$html" 'id="b-chooser"'
+contains "Build names the chosen machine" "$html" 'id="b-pick"'
+contains "  and offers a way to change it" "$html" 'id="b-setup"'
+contains "  which goes to Settings"       "$js" "goView('settings');"
+# Settings is a long screen. Arriving is not enough - the first picker went
+# unnoticed because it was below the fold - so the table is scrolled to and
+# flashed.
+contains "  and flashes the table"        "$js" "card.classList.add('flash-attn')"
+contains "  having scrolled to it"        "$js" "card.scrollIntoView"
+contains "  with the animation defined"   "$(cat app/renderer/src.css)" "@keyframes flash-attn"
+check    "  and the card it points at exists"          "$(grep -c 'id="s-machine-card"' app/renderer/index.html)" "1"
+# The summary must sit above the button that spends the money, not below it.
+check    "the summary is above Build"    \
+         "$(awk '/id="b-pick"/{a=NR} /id="b-build"/{b=NR} END{print (a && b && a < b) ? "yes" : "no"}' app/renderer/index.html)" "yes"
 contains "  and says why"                 "$js" "destroy it before changing the machine"
 contains "  the unpinned zone is priced too" "$js" "usd_hour_spot_max"
 check    "  and still no machine is named here" \
@@ -334,21 +364,24 @@ if [[ -z $bad ]]; then echo "  ok   every needle with a \$ is single-quoted"; pa
 else echo "  FAIL double-quoted needles bash will expand:"; echo "$bad"; fail=$((fail+1)); fi
 
 echo "5h. the logs and settings screens"
-# The instance type is `text` in cg's registry - it has to be, because what a
-# region rents is not knowable until AWS is asked - so Settings rendered it as a
-# box to type a machine name into, beside a Build screen that offered a picker.
-contains "the instance type is a picker here too" "$js" "r.key === 'GAME_INSTANCE_TYPE' && machinesNow"
-contains "  offering only what a quota covers"    "$js" "if (!m.fits_spot && !m.fits_ondemand) continue"
-contains "  with both prices on the row"          "$js" 'on demand INR ${od}'
-contains "  and settings asks cg for them"        "$js" "[['config', '--json'], 'config'], [['machines', '--json'], 'machines']"
-contains "  falling back to typing a name"        "$js" "} else if (r.kind === 'choice') {"
+# Settings used to render the instance type as a box to TYPE a machine name
+# into, beside a Build screen that offered a picker - two controls, one setting.
+# Both are gone: the chooser table owns region, type and model together, and
+# this screen is where it lives.
+contains "the chooser table is on this screen"    "$html" 'id="s-chooser"'
+contains "  and settings asks cg for its rows"    "$js" "[['config', '--json'], 'config'], [['machines', '--json'], 'machines']"
+lacks    "  no second editor for what it owns"    "$js" "r.key === 'GAME_INSTANCE_TYPE' && machinesNow"
+contains "  those rows point at the table"        "$js" "set in Machine, above"
 # The row is flex/justify-between with a shrink-0 right side, so the editor's
 # control and its two buttons took their width out of the only flexible thing
 # in the row - the label, which squeezed and wrapped on every Edit click.
 contains "editing stacks instead of squeezing" "$css" '.row.editing'
 contains "  the controls get their own line"   "$css" 'flex-col'
 contains "  and the editor marks the row"      "$js" "row.classList.add('editing')"
-contains "  a machine label is too long for a fixed width" "$js" "machineRow ? 'w-full' : 'w-64'"
+# The editor that remains is for ordinary settings, which fit a fixed width -
+# the full-width special case existed only for a machine label carrying a GPU
+# and two prices, and that lives in the table now.
+contains "  the editor keeps its fixed width"  "$js" "+ 'w-64';"
 contains "the event stream can be filtered" "$js" "function applyLogFilter(which)"
 contains "  and copied"                  "$html" 'id="log-copy"'
 contains "  and cleared"                 "$html" 'id="log-clear"'
@@ -373,8 +406,14 @@ echo "5i. packaging keeps the scripts outside the package"
 # the repo instead - and still works when it is somewhere else.
 check "the build config exists"          "$(node -e 'console.log(require("./app/package.json").build ? 1 : 0)')" "1"
 check "  and ships only the app"         "$(node -e 'console.log(require("./app/package.json").build.files.join(","))')" "main/**,renderer/**,package.json"
-contains "the scripts are found, wherever they are" "$main" "function findRepo()"
-contains "  CG_REPO can say where it is" "$main" "process.env.CG_REPO"
+# findRepo lives in main/repo.js, not in here: inside index.js it could not be
+# required without starting Electron, and the bug that shipped - a DIRECTORY
+# named cg winning over the script - went uncaught for exactly that reason.
+contains "the scripts are found, wherever they are" "$main" "require('./repo')"
+repo=$(cat app/main/repo.js)
+contains "  CG_REPO can say where it is" "$repo" "env.CG_REPO"
+contains "  and cg must be a file, not a directory" "$repo" "isFile()"
+lacks    "  the old existsSync test is gone" "$repo" "existsSync(path.join(dir, 'cg'))"
 check "an icon is committed"             "$([[ -s app/build/icon.png ]] && echo yes || echo no)" "yes"
 check "  the binary is called cg"        "$(node -e 'console.log(require("./app/package.json").build.executableName)')" "cg"
 # Four Linux formats, because one was not enough. A type-2 AppImage dlopens

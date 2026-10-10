@@ -37,6 +37,45 @@ cg_env_file() {
   printf '%s/cg/.env' "${XDG_CONFIG_HOME:-$HOME/.config}"
 }
 
+# Where throwaway answers live. NOT beside .env: a cache is not a setting, and
+# an installed copy of the scripts is read-only anyway. XDG_CACHE_HOME so that
+# clearing a cache is the one thing a user already knows how to do.
+#
+# This exists for `cg sweep`, which is free but takes a minute and a half - too
+# slow for a screen to wait on, and its answer changes over hours rather than
+# seconds. Nothing in here is ever required: every reader must work when the
+# cache is absent, stale or unreadable.
+cg_cache_dir() {
+  if [[ -n ${CG_CACHE_DIR:-} ]]; then printf '%s' "$CG_CACHE_DIR"; return 0; fi
+  printf '%s/cg' "${XDG_CACHE_HOME:-$HOME/.cache}"
+}
+
+# cg_cache_write <name> - stdin to the named cache file, atomically. Silent on
+# failure: a cache that cannot be written must never break the command.
+cg_cache_write() {
+  local d f tmp; d=$(cg_cache_dir); f="$d/$1"
+  mkdir -p "$d" 2>/dev/null || return 0
+  tmp=$(mktemp "$f.XXXXXX" 2>/dev/null) || return 0
+  if cat > "$tmp" 2>/dev/null && [[ -s $tmp ]]; then mv -f "$tmp" "$f" 2>/dev/null || rm -f "$tmp"
+  else rm -f "$tmp"; fi
+  return 0
+}
+
+# cg_cache_read <name> - the file, or nothing.
+cg_cache_read() {
+  local f; f="$(cg_cache_dir)/$1"
+  [[ -s $f ]] || return 1
+  cat "$f" 2>/dev/null
+}
+
+# cg_cache_age <name> - seconds since it was written, or nothing.
+cg_cache_age() {
+  local f; f="$(cg_cache_dir)/$1"
+  [[ -s $f ]] || return 1
+  local m now; m=$(stat -c %Y "$f" 2>/dev/null) || return 1
+  now=$(date +%s); printf '%s' "$(( now - m ))"
+}
+
 # The file, created with its directory, 0600. Printed, so a writer can use it.
 # Fails loudly rather than writing settings somewhere nobody will look again.
 cg_env_ensure() {

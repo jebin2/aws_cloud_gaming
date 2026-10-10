@@ -7,28 +7,10 @@
 const path = require('node:path');
 const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
 const { run, answer, interrupt } = require('./runner');
+const { findRepo } = require('./repo');
 
-// The repo that owns cg. Running from source that is app/.. ; packaged, the app
-// lives somewhere else entirely and must be told - CG_REPO, or the default
-// checkout. The scripts are deliberately NOT bundled into the app: a copy
-// inside an .asar would be a second, stale source of truth.
-// Where the scripts are. A packaged build carries its own copy in
-// resources/cg, so the app works from a cold download; a checkout beside the
-// app wins over it, because someone running from source is editing that one and
-// expects to see their edits. The bundled copy is read-only, which is exactly
-// why cg keeps settings outside its own directory - see lib/env-file.sh.
-function findRepo() {
-  const candidates = [
-    process.env.CG_REPO,
-    path.resolve(__dirname, '..', '..'),              // a checkout: app/ -> repo
-    process.resourcesPath && path.join(process.resourcesPath, 'cg'),  // packaged
-    path.join(require('node:os').homedir(), 'cloud_gaming'),
-  ].filter(Boolean);
-  for (const dir of candidates) {
-    try { if (require('node:fs').existsSync(path.join(dir, 'cg'))) return dir; } catch {}
-  }
-  return candidates[1];
-}
+// Where the scripts are - see main/repo.js, which owns the order and the one
+// rule that matters: `cg` has to be a file, not a directory with that name.
 const REPO = findRepo();
 let win = null;
 let nextId = 1;
@@ -48,7 +30,7 @@ const ENV_ALLOWED = new Set(['GAME_APPS']);
 // `config set` only writes .env locally - it cannot collide with a build. Left
 // out, it counted as a write and was refused while the other reads ran, so the
 // Settings screen stayed empty until someone pressed Refresh.
-const READ_ONLY = new Set(['status', 'watcher', 'library', 'cost', 'check', 'ping', 'games', 'config', 'machines']);
+const READ_ONLY = new Set(['status', 'watcher', 'library', 'cost', 'check', 'ping', 'games', 'config', 'machines', 'regions', 'sweep']);
 const isReadOnly = args =>
   READ_ONLY.has(args[0]) && !['push', 'pull', 'forget', 'clean', 'account'].includes(args[1] || '');
 

@@ -100,11 +100,14 @@ echo "8. the app ships those scripts, and knows where they are"
 contains "the package carries cg"     "$(cat app/package.json)" '"to": "cg/cg"'
 contains "  and lib"                  "$(cat app/package.json)" '"to": "cg/lib"'
 contains "  and the lambda"           "$(cat app/package.json)" '"to": "cg/lambda"'
-contains "the app looks in resources" "$(cat app/main/index.js)" "process.resourcesPath, 'cg'"
+contains "the app looks in resources" "$(cat app/main/repo.js)" "path.join(resourcesPath, 'cg')"
 # A checkout beside the app comes first: someone running from source is editing
 # that one and must see their edits, not a stale bundled copy.
 check "  but a checkout beside it wins" \
-      "$(awk '/path.resolve\(__dirname/{a=NR} /process.resourcesPath/{b=NR} END{print (a && b && a < b) ? "yes" : "no"}' app/main/index.js)" "yes"
+      "$(awk '/path.resolve\(dirname/{a=NR} /resourcesPath, .cg.\)/{b=NR} END{print (a && b && a < b) ? "yes" : "no"}' app/main/repo.js)" "yes"
+# resources/ CONTAINS a directory called cg, so "does cg exist here" says yes to
+# the wrong directory. The packaged app chose it and could not run one command.
+contains "  and resources/cg must be a file" "$(cat app/main/repo.js)" ".isFile()"
 
 echo
 echo "standalone: $pass passed, $fail failed"

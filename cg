@@ -62,6 +62,7 @@ source lib/session.sh
 # instance picker is fed from here, so no list of types lives in the renderer.
 # shellcheck source=lib/machines.sh
 source lib/machines.sh
+source lib/sweep.sh
 
 # lib/setup and lib/game are dispatch targets, not commands - see docs/commands.md
 # is not needed, their headers say so.
@@ -1291,6 +1292,10 @@ info (read-only)
   cg watcher [--watch]       every guard, and whether each is armed
   cg watchdog [status|check|logs|install|remove]
                              layer 3: the cloud watchdog (Lambda); check is a dry run
+  cg machines [--all]        what GPU shapes THIS region rents, and what each costs
+  cg sweep [--all]           every AWS region scored for latency, capacity and quota -
+                             the one that answers "should the box be somewhere else"
+  cg regions                 the regions you have enabled, for the app's picker
   cg config [set|get <k>]    what .env decides; set validates and writes, get reveals one
   cg notify                  send a test notification to GAME_NTFY_URL
   cg ping [--watch]          latency, and direct vs DERP relay
@@ -1345,8 +1350,31 @@ case "$CMD" in
              esac ;;
   # Every call behind this is free, and none of them launch anything.
   machines|types)
-             if (( JSON )); then machines_json "$REGION"; exit 0; fi
-             machines_show "$REGION" "${1:-}" | cg_report "🖥" "Machines" ;;
+             # An explicit region used to be swallowed as if it were the --all
+             # flag, so `cg machines ap-south-1 --all` reported the CURRENT
+             # region and dropped --all. Take the region when one is given.
+             if [[ ${1:-} =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]]; then MREG=$1; shift; else MREG=$REGION; fi
+             case "${1:-}" in
+               --sweep|sweep) shift
+                          if (( JSON )); then sweep_fresh; exit 0; fi
+                          sweep_show "${1:-}" | cg_report "🌏" "Regions" ;;
+               *)         if (( JSON )); then machines_json "$MREG"; exit 0; fi
+                          machines_show "$MREG" "${1:-}" | cg_report "🖥" "Machines" ;;
+             esac ;;
+  # The region question, which machines cannot answer: it only ever describes
+  # the region already chosen, and the week lost to a dry ap-south-2 was spent
+  # entirely inside that blind spot.
+  sweep|regions-sweep)
+             # --cached never scans: it is what an opening screen reads, so the
+             # table has rows instantly and rescans only when asked.
+             if [[ ${1:-} == --cached ]]; then shift
+               if (( JSON )); then sweep_cached; exit 0; fi
+               die "cg sweep --cached is for the app; run cg sweep to scan"
+             fi
+             if (( JSON )); then sweep_fresh; exit 0; fi
+             sweep_show "${1:-}" | cg_report "🌏" "Regions" ;;
+  regions)   if (( JSON )); then regions_json; exit 0; fi
+             regions_show | cg_report "🌏" "Regions" ;;
   notify)    cmd_notify ;;
   log|logs)  cmd_log "$@" ;;
   ssh)       if [[ $# -gt 0 ]]; then box "$@"; else need_node; exec ssh -i "$KEY" \

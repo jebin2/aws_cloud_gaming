@@ -16,7 +16,7 @@ CONFIG_ROWS() {
 GAME_DISK_GB|number|50|30|Root disk in GB. Cannot be shrunk later; applies to the next build.
 GAME_ARCHIVE_EXPIRY_DAYS|number|14|0|Days with no box before the cloud watchdog deletes the archive. 0 keeps it forever.
 GAME_INSTANCE_TYPE|text|g6.xlarge||The EC2 instance type. Its GPU quota must cover it.
-GAME_REGION|text|ap-south-2||The AWS region everything lives in.
+GAME_REGION|region|ap-south-2||The AWS region everything lives in. Changing it starts over: the archive does not follow.
 GAME_SPOT|choice|auto|auto,1,0|Purchase model: spot, on demand, or spot whenever the quota allows.
 GAME_BUDGET_INR|number|5000|100|Monthly budget. It emails you; it stops nothing.
 GAME_WATCHDOG_IDLE_MIN|number|30|10|Minutes of quiet before the cloud watchdog ends the box.
@@ -53,6 +53,14 @@ config_validate() {
         || { echo "not a valid ntfy topic or URL"; return; } ;;
     email)
       [[ $value == *@*.* ]] || { echo "does not look like an email address"; return; } ;;
+    region)
+      # Shape only. Whether a region exists, is enabled, and rents a GPU is
+      # three AWS calls, and validation must stay a pure function - `cg sweep`
+      # and the app's picker are where the real answer comes from. The check is
+      # here because the field used to be free text, and a typo was written
+      # happily and then failed as an unrelated-looking error on the next read.
+      [[ $value =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]] \
+        || { echo "does not look like an AWS region, e.g. ap-south-1"; return; } ;;
     text)
       [[ -n $value ]] || { echo "cannot be empty"; return; } ;;
   esac
