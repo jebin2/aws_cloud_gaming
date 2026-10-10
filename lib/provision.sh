@@ -11,6 +11,7 @@ source lib/env-file.sh
 source lib/ssh-key.sh
 # shellcheck source=lib/launch-error.sh
 source lib/launch-error.sh
+source lib/s3-region.sh
 
 REGION="${GAME_REGION:-ap-south-2}"
 TS_HOST="${GAME_TS_HOST:-gamevps}"
@@ -141,10 +142,27 @@ else
     # install-watchdog.sh turns the file into a root-only config. Absent is off.
     [[ -n ${CG_NTFY_URL:-} ]] && printf '%s\n' "$CG_NTFY_URL" > "$HOST_SRC/notify.url"
     HOST_TGZ=$(mktemp); tar -cz -C "$HOST_SRC" . > "$HOST_TGZ" 2>/dev/null
-    aws s3 cp "$HOST_TGZ" "s3://$S3_BUCKET/boot/host.tgz" --region "$REGION" >/dev/null \
+    # The BUCKET's region, not the box's. They are the same until GAME_REGION
+    # moves, and then they are not: the bucket name has no region in it, so a
+    # move reuses the old bucket where it stands. `aws s3 cp` hides this by
+    # following S3's redirect; `presign` cannot, and a URL signed for the wrong
+    # region is a 400 that kills user-data before tailscale exists.
+    BUCKET_REGION=$(s3_bucket_region "$S3_BUCKET") || BUCKET_REGION=$REGION
+    aws s3 cp "$HOST_TGZ" "s3://$S3_BUCKET/boot/host.tgz" --region "$BUCKET_REGION" >/dev/null \
       || { echo "could not upload host/ to s3://$S3_BUCKET/boot/host.tgz"; exit 1; }
-    HOST_TGZ_URL=$(aws s3 presign "s3://$S3_BUCKET/boot/host.tgz" --region "$REGION" --expires-in 7200)
+    HOST_TGZ_URL=$(aws s3 presign "s3://$S3_BUCKET/boot/host.tgz" \
+                     --region "$BUCKET_REGION" --expires-in 7200)
     [[ $HOST_TGZ_URL == https://* ]] || { echo "could not presign the host bundle"; exit 1; }
+    # Said out loud, because it is money and it is invisible otherwise: every
+    # byte the box pulls from a bucket in another region is billed inter-region
+    # egress, and the game archive is the big one.
+    if [[ $BUCKET_REGION != "$REGION" ]]; then
+      echo "!! the archive is in $BUCKET_REGION but the box is in $REGION"
+      echo "   the box can read it, but every GB crossing regions is billed at"
+      echo "   \$0.086/GB - about INR 1,234 for a 163 GB library, each pull."
+      echo "   cg library list shows the size. To start fresh in $REGION instead,"
+      echo "   set GAME_S3_BUCKET to a new name and let cg init create it there."
+    fi
     rm -rf "$HOST_SRC" "$HOST_TGZ"
     # Substituted in python, not sed. A presigned URL is full of `&`, and in a
     # sed replacement an unescaped `&` means "the entire matched text" - so every
