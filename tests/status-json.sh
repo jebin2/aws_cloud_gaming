@@ -44,7 +44,26 @@ case "$args" in
   *describe-key-pairs*)               echo gamevps ;;
   *"describe-security-groups"*group-name*) echo sg-test ;;
   *"describe-security-groups"*IpPermissions*) printf 'udp\t41641\t0.0.0.0/0\n' ;;
-  *"s3 ls"*)                          printf 'Total Objects: 6218\n   Total Size: 172000000000\n' ;;
+  # status_facts lists the objects and partitions them by prefix, because the
+  # archived Steam LOGIN lives under steam/account/ while the games live under
+  # steam/steamapps/ - summing the whole steam/ prefix counted 22 KB of login as
+  # archived games. So this emits real listing lines, not a summary.
+  #
+  # One game directory is deliberately named with a SPACE in it: `aws s3 ls`
+  # prints "date time size key", so a key read as $4 would be cut at the space
+  # and counted as neither games nor login.
+  *"s3 ls"*--recursive*)
+    awk 'BEGIN {
+      n = 6218; tot = 172000000000; each = int(tot / n); rem = tot - each * (n - 1)
+      for (i = 1; i < n; i++)
+        printf "2026-10-10 12:00:00 %d steam/steamapps/common/Game %d/pak.bin\n", each, i
+      printf "2026-10-10 12:00:00 %d steam/steamapps/common/Game last/pak.bin\n", rem
+      printf "2026-10-10 16:30:03 22458 steam/account/steam-account.tgz\n"
+    }' ;;
+  # The `cg cost` report still asks with --summarize, per prefix.
+  *"s3 ls"*steam/account/*)           printf 'Total Objects: 1\n   Total Size: 22458\n' ;;
+  *"s3 ls"*steam/steamapps/*)         printf 'Total Objects: 6218\n   Total Size: 172000000000\n' ;;
+  *"s3 ls"*)                          printf 'Total Objects: 0\n   Total Size: 0\n' ;;
   *"describe-budget"*BudgetLimit*)    echo 57.0 ;;
   *"describe-budget"*CalculatedSpend*) echo 0 ;;
   *describe-notifications-for-budget*) echo 2 ;;
@@ -80,6 +99,13 @@ check    "json: box is null"            "$(jq_ box <<<"$json")" "null"
 contains "report: the archive line"     "$text" "6218 objects"
 check    "json: the same object count"  "$(jq_ archive.objects <<<"$json")" "6218"
 check    "  bytes as a number"          "$(jq_ archive.bytes <<<"$json")" "172000000000"
+# The stub ALSO emits steam/account/steam-account.tgz. That the game count is
+# 6218 and not 6219 is the whole point: the archived Steam login is not a game,
+# and counting it as one reported 22 KB of games for an empty archive.
+check    "the login is counted separately, not as a game" \
+         "$(jq_ login.present <<<"$json")" "true"
+check    "  with its own size"          "$(jq_ login.bytes <<<"$json")" "22458"
+contains "  and its own report line"    "$text" "steam login"
 check    "  and its monthly cost"       "$(jq_ archive.usd_month <<<"$json")" "4.0"
 check    "json: the account plan"       "$(jq_ account.plan <<<"$json")" '"PAID"'
 check    "  credits"                    "$(jq_ account.credits <<<"$json")" '"139.35"'

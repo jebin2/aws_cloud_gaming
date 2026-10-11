@@ -368,12 +368,21 @@ library_json() {
 import json, os
 print(json.dumps({"bucket": os.environ.get("BUCKET") or None,
                   "error": os.environ["ERR"], "games": None,
-                  "total_bytes": None, "usd_month": None}, indent=2))'
+                  "total_bytes": None, "usd_month": None,
+                  # The index could not be read; that says nothing either way
+                  # about the login, so it is unknown rather than absent.
+                  "login": None}, indent=2))'
     return 1
   fi
   rm -f "$err"
   orph=$(library_orphans)
-  printf '%s' "$idx" | ORPHANS="$orph" BUCKET="$(cg_bucket || true)" python3 -c '
+  # The archived Steam login rides along in this one payload rather than needing
+  # a read of its own: it is what the library screen is about as much as the
+  # games are, and it was invisible on every surface while being counted as a
+  # game. account_json caches the 22 KB fetch against the object's ETag, so the
+  # cost here is one head-object.
+  local login; login=$(account_json 2>/dev/null) || login=""
+  printf '%s' "$idx" | ORPHANS="$orph" LOGIN="$login" BUCKET="$(cg_bucket || true)" python3 -c '
 import json, os, sys
 try:    apps = json.load(sys.stdin).get("apps", [])
 except Exception: apps = []
@@ -396,6 +405,8 @@ print(json.dumps({
   "usd_month": round(total / GB * S3, 2),
   "orphan_bytes": orphan_bytes or None,
   "orphan_usd_month": round(orphan_bytes / GB * S3, 2) if orphan_bytes else None,
+  # null means "could not look", which is not the same as present=false.
+  "login": (lambda t: (json.loads(t) if t.strip() else None))(os.environ.get("LOGIN") or ""),
   # What the box can hold at once, and what cg init offers after its reserve.
   "disk_gb": 229, "selectable_gb": 209,
   "usd_per_gb_month": S3,
@@ -528,6 +539,200 @@ library_clean() {
   log "storage charges for those stop now"
 }
 
+# --- the archived Steam login ------------------------------------------------
+# A ~22 KB tarball at steam/account/steam-account.tgz. It is what makes a
+# rebuilt box come up already signed in, and it is why a region move carried the
+# login across while leaving 163 GB of games behind: the login is tiny and
+# separate, the games are neither.
+#
+# It sits UNDER the steam/ prefix but is not part of the game archive, and
+# conflating the two misreported both. `cg status` counted it and announced
+# "1 objects, 22KB" beside the words "game library" for an account with no games
+# archived whatsoever.
+#
+# Nothing here needs the box. That is the point: the login outlives every box,
+# and the question "which account would a new box sign in as" has to be
+# answerable when there is no box at all.
+CG_ACCOUNT_KEY="steam/account/steam-account.tgz"
+
+# bytes <TAB> modified <TAB> etag, or non-zero when there is no archived login.
+account_head() {
+  local bucket region
+  bucket=$(cg_bucket) || return 2
+  region=$(s3_bucket_region "$bucket" 2>/dev/null) || region="$REGION"
+  aws s3api head-object --bucket "$bucket" --key "$CG_ACCOUNT_KEY" \
+      --region "$region" --query '[ContentLength,LastModified,ETag]' \
+      --output text 2>/dev/null
+}
+
+# The accounts inside the tarball. The names live in loginusers.vdf, so this
+# needs the object itself - 22 KB, one GET. Cached against the ETag rather than
+# a clock: the blob changes only when a push replaces it, and then the ETag
+# changes with it, so the cache can never be stale.
+account_names() { # account_names <etag> -> steamid<TAB>account<TAB>persona<TAB>recent<TAB>ts
+  local tag="${1:-none}" cache="account-${1:-none}.tsv"
+  cg_cache_read "$cache" 2>/dev/null && return 0
+  local bucket region tmp out
+  bucket=$(cg_bucket) || return 1
+  region=$(s3_bucket_region "$bucket" 2>/dev/null) || region="$REGION"
+  tmp=$(mktemp -d) || return 1
+  out=""
+  if aws s3 cp "s3://$bucket/$CG_ACCOUNT_KEY" "$tmp/a.tgz" --region "$region" >/dev/null 2>&1; then
+    # Only the one member, and only if it is there: ssfn files and userdata are
+    # none of this function's business, and tar fails the lot on a missing name.
+    tar -xzf "$tmp/a.tgz" -C "$tmp" --wildcards '*loginusers.vdf' 2>/dev/null || true
+    local vdf; vdf=$(find "$tmp" -name loginusers.vdf -type f 2>/dev/null | head -1)
+    [[ -n $vdf ]] && out=$(python3 -I - "$vdf" <<'PYEOF'
+import re, sys
+# loginusers.vdf is Valve KeyValues: a "users" block, one nested block per
+# account keyed by steamid. Parsed with a scanner rather than a regex per field
+# so two accounts cannot have their fields crossed.
+try:
+    t = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except Exception:
+    sys.exit(0)
+rows = []
+for m in re.finditer(r'"(\d{6,})"\s*\{(.*?)\}', t, re.S):
+    sid, body = m.group(1), m.group(2)
+    f = dict(re.findall(r'"([^"]+)"\s+"([^"]*)"', body))
+    rows.append((sid,
+                 f.get("AccountName", ""),
+                 f.get("PersonaName", ""),
+                 f.get("MostRecent", "0"),
+                 f.get("Timestamp", "")))
+# Most recent first, then by timestamp: the one a new box would land on is the
+# one worth reading first.
+rows.sort(key=lambda r: (r[3] != "1", -int(r[4] or 0)))
+for r in rows:
+    print("\t".join(r))
+PYEOF
+)
+  fi
+  rm -rf "$tmp"
+  [[ -n ${out//[[:space:]]/} ]] || return 1
+  printf '%s\n' "$out" | cg_cache_write "$cache"
+  printf '%s\n' "$out"
+}
+
+# The whole thing as data, for the app and for account_show.
+account_json() {
+  local head bytes modified etag names bucket
+  bucket=$(cg_bucket 2>/dev/null) || bucket=""
+  if ! head=$(account_head) || [[ -z ${head//[[:space:]]/} ]]; then
+    BUCKET="$bucket" python3 -I -c '
+import json, os
+print(json.dumps({"bucket": os.environ.get("BUCKET") or None,
+                  "present": False, "accounts": []}, indent=2))'
+    return 0
+  fi
+  IFS=$'\t' read -r bytes modified etag <<<"$head"
+  names=$(account_names "${etag//\"/}" 2>/dev/null) || names=""
+  BUCKET="$bucket" KEY="$CG_ACCOUNT_KEY" BYTES="$bytes" WHEN="$modified" \
+  NAMES="$names" python3 -I -c '
+import json, os
+rows = []
+for line in (os.environ.get("NAMES") or "").splitlines():
+    p = line.split("\t")
+    if len(p) < 5 or not p[0]:
+        continue
+    rows.append({"steamid": p[0], "account": p[1] or None, "persona": p[2] or None,
+                 "most_recent": p[3] == "1",
+                 "last_used": int(p[4]) if p[4].isdigit() else None})
+# Steam writes MostRecent only when there is a choice to record. With exactly
+# one archived account that key is absent, and leaving the row unmarked implied
+# a new box would sign in as nobody - when that one account is precisely what it
+# signs in as.
+if len(rows) == 1:
+    rows[0]["most_recent"] = True
+b = int(os.environ["BYTES"]) if os.environ["BYTES"].isdigit() else 0
+print(json.dumps({
+  "bucket": os.environ.get("BUCKET") or None,
+  "key": os.environ["KEY"],
+  "present": True,
+  "bytes": b,
+  "modified": os.environ.get("WHEN") or None,
+  # Said out loud because it governs whether deleting is worth doing: it is not
+  # a saving, it is a choice about which account a new box signs in as.
+  "usd_month": round(b / 1073741824.0 * float(os.environ["CG_S3_USD_GB_MONTH"]), 6),
+  # None means "could not read the names", NOT "no accounts" - the archive
+  # cannot exist with nobody in it, so an empty list would be a lie.
+  "accounts": rows or None,
+}, indent=2))'
+}
+
+account_show() {
+  if (( JSON )); then account_json; return; fi
+  account_json | python3 -I -c '
+import json, sys, datetime
+d = json.load(sys.stdin)
+if not d.get("present"):
+    print("no archived Steam login - a new box would ask you to sign in")
+    print("  one is pushed automatically when a box shuts down, or now with:")
+    print("      cg library account push")
+    sys.exit()
+kb = d["bytes"] / 1024.0
+print("archived login   %s  (%.1f KB)" % (d["key"], kb))
+when = d.get("modified")
+if when:
+    print("pushed           %s" % when)
+# A cost line, because every other archive view has one - and this one exists
+# mainly to say the number is nothing, so deleting it is not a saving.
+print("storage          $%.6f/month - effectively nothing" % d["usd_month"])
+rows = d.get("accounts")
+if rows is None:
+    print("accounts         could not read them from the archive")
+    sys.exit()
+print()
+print("  %-20s %-20s %-12s %s" % ("ACCOUNT", "PERSONA", "LAST USED", ""))
+for r in rows:
+    ts = r.get("last_used")
+    when = datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else "-"
+    mark = "<- a new box signs in as this one" if r.get("most_recent") else ""
+    print("  %-20s %-20s %-12s %s" % (r.get("account") or "?",
+                                      r.get("persona") or "-", when, mark))
+if len(rows) > 1:
+    print()
+    print("  More than one account is archived. The tarball is restored whole, so")
+    print("  a new box gets all of them and signs in as the most recent. To keep")
+    print("  only one: sign in as it on the box, then cg library account push.")
+'
+}
+
+# Deleting is all-or-nothing on purpose. Removing ONE account would mean editing
+# loginusers.vdf, that account's ConnectCache entry in local.vdf and its
+# userdata/<id>/, then repacking - undocumented Steam internals where a near
+# miss produces an archive that restores a BROKEN login, which is worse than
+# having none. Replacing the blob is the supported way to change accounts.
+account_forget() {
+  local j; j=$(account_json)
+  python3 -I -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("present") else 1)' <<<"$j" \
+    || { echo "there is no archived Steam login - nothing to delete"; return 0; }
+  printf '%s' "$j" | python3 -I -c '
+import json, sys
+d = json.load(sys.stdin)
+rows = d.get("accounts") or []
+print("This permanently deletes the archived Steam login.")
+if rows:
+    print("It holds %d account%s: %s" % (len(rows), "" if len(rows) == 1 else "s",
+          ", ".join(r.get("account") or "?" for r in rows)))
+print()
+print("  No undo, no versioning. Your games are NOT affected - they are a")
+print("  separate archive. What you lose is the signed-in state: the next box")
+print("  will ask for your password and Steam Guard code.")
+print()
+print("  It saves $%.6f a month, which is to say nothing. Delete it to change" % d["usd_month"])
+print("  which account a new box uses, not to save money.")'
+  cg_ask_typed forget-login "type FORGET to confirm: " FORGET \
+    || { echo "aborted - nothing was deleted"; return 1; }
+  local bucket region
+  bucket=$(cg_bucket) || die "could not work out the archive bucket - AWS did not answer"
+  region=$(s3_bucket_region "$bucket" 2>/dev/null) || region="$REGION"
+  aws s3 rm "s3://$bucket/$CG_ACCOUNT_KEY" --region "$region" >/dev/null 2>&1 \
+    || die "could not delete s3://$bucket/$CG_ACCOUNT_KEY"
+  log "deleted the archived Steam login"
+  log "the next box will ask you to sign in; it is re-archived on shutdown"
+}
+
 library_forget() {
   local id="${1:-}"
   [[ -n $id ]] || die "which game? see: cg library list"
@@ -630,10 +835,19 @@ cmd_library() {
       } | cg_report "📦" "Game archive" ;;
     account|login)
       shift
-      need_node
-      case "${1:-}" in
-        push|pull|restore) box "/usr/local/bin/cg-library account ${1/restore/pull}" ;;
-        *) die "usage: cg library account push|pull" ;;
+      # Flags are recognised globally but NOT removed from "$@" (see the loop at
+      # the top), so `cg library account --json` arrived here with --json as the
+      # subcommand and died on the usage line. `list` never noticed because it
+      # ignores its arguments entirely and only reads $JSON.
+      while [[ ${1:-} == -* ]]; do shift; done
+      # status and forget answer from S3 and must NOT need the box: the whole
+      # point of the archived login is that it outlives every box, so "which
+      # account would a new box use" has to be answerable when there is none.
+      case "${1:-status}" in
+        status|"")         account_show ;;
+        forget|delete|rm)  account_forget ;;
+        push|pull|restore) need_node; box "/usr/local/bin/cg-library account ${1/restore/pull}" ;;
+        *) die "usage: cg library account [status|push|pull|forget]" ;;
       esac ;;
     forget)
       shift; library_forget "$@" ;;
@@ -643,7 +857,7 @@ cmd_library() {
       # Answerable without the box, which matters when it is gone: this is where
       # the games are, and the one thing worth knowing then.
       cg_bucket || echo "(unknown - AWS did not answer)"; echo ;;
-    *) die "usage: cg library [list|status|push|pull [--apps <csv>]|account push|pull|check|forget <appid>|clean|--bucket]" ;;
+    *) die "usage: cg library [list|status|push|pull [--apps <csv>]|account [status|push|pull|forget]|check|forget <appid>|clean|--bucket]" ;;
   esac
 }
 

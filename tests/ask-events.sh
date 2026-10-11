@@ -71,8 +71,17 @@ echo "6. every prompt goes through the helpers"
 check "no bare read -rp outside lib/common.sh" \
       "$(grep -rn 'read -rp\|read -rsp\|read -r -p' cg lib/*.sh lib/setup lib/game | grep -vc '^lib/common.sh:')" "0"
 for w in DESTROY-ALL FORGET CLEAN DELETE; do
-  check "$w is a typed confirmation" "$(grep -c "cg_ask_typed [a-z-]* \"type $w" cg)" "1"
+  check "$w is a typed confirmation" \
+        "$([[ $(grep -c "cg_ask_typed [a-z-]* \"type $w" cg) -ge 1 ]] && echo yes)" "yes"
 done
+# The whole inventory, not a count per word: FORGET guards two different things
+# now - a game and the archived Steam login - and "exactly one of each word" was
+# only ever true by accident. Listing the ids means a new destructive path has
+# to be added here on purpose rather than slipping in unconfirmed.
+check "and these are all of them" \
+      "$(grep -oE 'cg_ask_typed [a-z-]+ "type [A-Z-]+' cg \
+         | sed -E 's/cg_ask_typed ([a-z-]+) "type ([A-Z-]+)/\1=\2/' | sort | tr '\n' ' ')" \
+      "clean-orphans=CLEAN delete-volume=DELETE destroy-all=DESTROY-ALL forget-game=FORGET forget-login=FORGET "
 check "the session-end prompt asks"  "$(grep -c 'cg_ask session-end' lib/game)" "1"
 
 echo "7. the settings prompts, driven"

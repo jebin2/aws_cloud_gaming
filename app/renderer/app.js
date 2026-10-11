@@ -569,6 +569,7 @@ function paintLibrary(d) {
   paintArchiveCard(d);
   // cg says which it is; the app must never turn "I could not look" into
   // "there is nothing there".
+  paintLogin(d.login);
   $('lib-error').hidden = !d.error;
   if (d.error) {
     $('lib-error').textContent = `cannot read the archive: ${d.error}`;
@@ -689,6 +690,73 @@ async function forgetGame(g) {
     yes: 'Forget', danger: true,
   });
   if (ok) await startRun(['library', 'forget', String(g.appid)]);
+}
+
+// The archived Steam login. Three states, and the third is the one that matters:
+// null is "could not look", which must never be painted as "none archived" -
+// that would invite someone to rebuild expecting a fresh login prompt and get
+// a box signed in as an account they thought they had deleted.
+function paintLogin(l) {
+  const head = $('lib-login-head'), sub = $('lib-login-sub');
+  const accts = $('lib-login-accounts'), btn = $('lib-login-forget');
+  if (!head) return;
+  accts.textContent = '';
+  if (!l) {
+    head.textContent = 'Steam login';
+    sub.textContent = 'could not read it - this says nothing about whether one is archived';
+    btn.hidden = true;
+    return;
+  }
+  if (!l.present) {
+    head.textContent = 'No Steam login archived';
+    sub.textContent = 'A new box will ask you to sign in. One is pushed automatically when a box shuts down.';
+    btn.hidden = true;
+    return;
+  }
+  head.textContent = 'Steam login archived';
+  const kb = (l.bytes || 0) / 1024;
+  // The cost is stated and then dismissed on purpose: it is the reason NOT to
+  // treat Forget as a saving.
+  sub.textContent = `${kb.toFixed(1)} KB${l.modified ? `, pushed ${daysAgo(l.modified)}` : ''}`
+    + ' - a new box comes up already signed in. Deleting it saves nothing; it changes which account a new box uses.';
+  const rows = l.accounts;
+  if (rows === null || rows === undefined) {
+    accts.textContent = 'the account names could not be read from the archive';
+  } else {
+    for (const r of rows) {
+      const line = document.createElement('div');
+      const who = r.account || r.persona || r.steamid || '?';
+      line.textContent = r.most_recent
+        ? `${who} - a new box signs in as this one`
+        : who;
+      if (r.most_recent) line.className = 'text-on-surface-variant';
+      accts.append(line);
+    }
+    if (rows.length > 1) {
+      const note = document.createElement('div');
+      note.className = 'text-tertiary mt-space-xs';
+      note.textContent = `${rows.length} accounts are archived together. The tarball restores whole, `
+        + 'so a new box gets all of them. To keep one: sign in as it on the box, then push.';
+      accts.append(note);
+    }
+  }
+  btn.hidden = false;
+  btn.onclick = () => forgetLogin(l);
+}
+
+async function forgetLogin(l) {
+  const rows = l.accounts || [];
+  const who = rows.length ? rows.map(r => r.account || r.steamid || '?').join(', ') : 'the archived account';
+  const ok = await askConfirm({
+    title: 'Forget the archived Steam login?',
+    body: `This deletes the archived login for ${who}. No undo, no versioning.\n\n`
+        + 'Your games are NOT affected - they are a separate archive. What you lose is '
+        + 'the signed-in state: the next box will ask for your password and Steam Guard code.\n\n'
+        + 'It is 22 KB, so this saves no money. Do it to change which account a new box '
+        + 'uses. cg will ask you to type FORGET.',
+    yes: 'Forget', danger: true,
+  });
+  if (ok) await startRun(['library', 'account', 'forget']);
 }
 
 function paintArchiveCard(d) {

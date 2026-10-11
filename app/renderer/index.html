@@ -397,6 +397,23 @@
           <tfoot id="lib-foot" class="border-t border-surface-variant"></tfoot>
         </table>
       </div>
+      <!-- The archived Steam login: a ~22 KB tarball, separate from the games and
+           separate from any box, and the reason a rebuilt box comes up signed in.
+           It was invisible on every screen while being counted as an archived
+           game, so an archive with no games reported 22 KB of games. -->
+      <div class="flex items-start justify-between gap-space-md mt-space-md p-space-md rounded bg-surface-container" id="lib-login-box">
+        <div class="min-w-0">
+          <p class="row font-code-sm text-code-sm text-on-surface">
+            <span class="material-symbols-outlined text-[16px]" data-icon="person">&#xe7fd;</span>
+            <span id="lib-login-head">Steam login</span>
+          </p>
+          <p class="font-code-sm text-code-sm text-outline mt-space-xs" id="lib-login-sub"></p>
+          <p class="font-code-sm text-code-sm text-outline" id="lib-login-accounts"></p>
+        </div>
+        <button class="btn btn-danger shrink-0" id="lib-login-forget" hidden>
+          <span class="material-symbols-outlined text-[16px]" data-icon="delete">&#xe92e;</span>Forget
+        </button>
+      </div>
       <div class="flex items-start justify-between gap-space-md mt-space-md p-space-md rounded bg-surface-container" id="lib-orphan-box" hidden>
         <p class="font-code-sm text-code-sm text-tertiary" id="lib-orphans"></p>
         <button class="btn btn-danger shrink-0" id="lib-clean">

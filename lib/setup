@@ -52,10 +52,48 @@ box() {
 # it - not merely name the bucket. Printing a bucket name next to the words
 # "game library" reads as reassurance, and read exactly the same when the
 # archive had just been emptied.
+# The archived Steam login, on its own line because it is its own thing: a ~22 KB
+# tarball that is what makes a rebuilt box come up already signed in. It was
+# invisible on every screen while being counted as a game, which is how an
+# archive with no games reported 22 KB of games.
+login_line() {
+  local b="${GAME_S3_BUCKET:-}" out sz
+  [[ -n $b ]] || return 0
+  out=$(aws s3 ls "s3://$b/steam/account/" --recursive --summarize 2>/dev/null | tail -2) || true
+  sz=$(awk '/Total Size:/{print $3}' <<<"$out")
+  _login_print "$([[ ${sz:-0} -gt 0 ]] && echo yes || echo no)" "${sz:-0}" ""
+}
+
+# Same line from already-collected facts, so `status --json` and the plain
+# status cannot drift into saying different things.
+login_line_from_facts() {
+  [[ -n ${F[archive.bucket]:-} ]] || return 0
+  _login_print "${F[login.present]:-}" "${F[login.bytes]:-0}" "${F[login.pushed]:-}"
+}
+
+_login_print() { # _login_print <yes|no|""> <bytes> <pushed>
+  local present=$1 bytes=$2 pushed=$3
+  if [[ -z $present ]]; then
+    # Unknown is its own answer. Saying "none" because the listing failed is the
+    # lie this whole file keeps having to unlearn.
+    printf '  steam login     unknown - the archive could not be listed\n'
+  elif [[ $present == yes ]]; then
+    printf '  steam login     archived%s - a new box comes up signed in  (cg library account)\n' \
+      "$([[ ${bytes:-0} -gt 0 ]] && printf ', %s' "$(numfmt --to=iec --suffix=B "$bytes" 2>/dev/null || echo "${bytes}B")")"
+    [[ -n $pushed ]] && printf '                  pushed %s\n' "$pushed"
+  else
+    printf '  steam login     none archived - a new box will ask you to sign in\n'
+  fi
+  return 0
+}
+
 archive_line() {
   local b="${GAME_S3_BUCKET:-}" out n sz
   [[ -n $b ]] || { printf '  game library    not set up yet - cg init creates it\n'; return; }
-  out=$(aws s3 ls "s3://$b/steam/" --recursive --summarize 2>/dev/null | tail -2) || true
+  # steamapps/ only. The archived Steam login is under steam/account/ and is
+  # reported by login_line - counting it here announced "1 objects, 22KB" under
+  # the heading "game library" for an archive holding no games whatsoever.
+  out=$(aws s3 ls "s3://$b/steam/steamapps/" --recursive --summarize 2>/dev/null | tail -2) || true
   n=$(awk '/Total Objects:/{print $3}' <<<"$out")
   sz=$(awk '/Total Size:/{print $3}' <<<"$out")
   if [[ ${n:-0} -eq 0 ]]; then
@@ -172,14 +210,35 @@ status_facts() {
     # credentials expired is the same lie `cg library list` used to tell, and
     # this is the screen people check when they are worried.
     local s3err; s3err=$(mktemp)
-    out=$(aws s3 ls "s3://$b/steam/" --recursive --summarize 2>"$s3err" | tail -2) && s3rc=0 || s3rc=$?
-    n=$(awk '/Total Objects:/{print $3}' <<<"$out"); sz=$(awk '/Total Size:/{print $3}' <<<"$out")
-    if [[ -z ${n:-} && $s3rc -ne 0 ]]; then
+    # ONE listing, partitioned by prefix - not two requests. The archived Steam
+    # LOGIN lives under steam/account/ and the games under steam/steamapps/.
+    # Summing the whole steam/ prefix as "game library" reported the 22 KB login
+    # blob as an archived game: a box with nothing archived read as "1 objects,
+    # 22KB" beside the words "game library".
+    #
+    # The key is rebuilt by stripping the three leading columns rather than
+    # taken as $4, because game keys contain spaces - "common/Diablo IV/..."
+    # would be cut at the space and match no prefix at all.
+    out=$(aws s3 ls "s3://$b/steam/" --recursive 2>"$s3err") && s3rc=0 || s3rc=$?
+    read -r n sz lsz lwhen < <(awk '
+      {
+        size = $3; key = $0
+        sub(/^[^ ]+[ ]+[^ ]+[ ]+[0-9]+[ ]+/, "", key)
+        if (key ~ /^steam\/steamapps\//)   { gn++; gb += size }
+        else if (key ~ /^steam\/account\//) { lb += size; lw = $1 "T" $2 }
+      }
+      END { printf "%d %d %d %s\n", gn+0, gb+0, lb+0, (lw ? lw : "-") }' <<<"$out")
+    if [[ $s3rc -ne 0 ]]; then
       f archive.error "$(head -1 "$s3err" | sed 's/^[[:space:]]*//')"
       f archive.objects ""; f archive.bytes ""; f archive.usd_month ""
+      # Unknown, not absent: a listing that failed says nothing about the login.
+      f login.present ""; f login.bytes ""; f login.pushed ""
     else
       f archive.objects "${n:-0}"; f archive.bytes "${sz:-0}"
       f archive.usd_month "$(awk -v x="${sz:-0}" -v r="$CG_S3_USD_GB_MONTH" 'BEGIN{printf "%.2f", x/1073741824*r}')"
+      f login.present "$([[ ${lsz:-0} -gt 0 ]] && echo yes || echo no)"
+      f login.bytes "${lsz:-0}"
+      f login.pushed "$([[ $lwhen == - ]] && echo "" || printf '%s' "$lwhen")"
     fi
     rm -f "$s3err"
   fi
@@ -315,6 +374,7 @@ status() { # status [--json]
           "$(numfmt --to=iec --suffix=B "${F[archive.bytes]:-}" 2>/dev/null || echo "${F[archive.bytes]:-}B")" \
           "${F[archive.usd_month]:-}"
       fi
+      login_line_from_facts
       iam_lines
       stranded_spot_note "$REGION" "${INSTANCE_ID:-}"
     fi
@@ -380,14 +440,22 @@ NUM = {"config.disk_gb","quota.vcpus","quota.on_demand","quota.spot","res.volume
        "spec.vcpus","spec.memory_mib","spec.gpu_memory_mib",
        "session.pid","session.started","session.age_s",
        "res.images","res.elastic_ips","archive.objects","archive.bytes","archive.usd_month",
-       "archive.expiry_days","budget.limit","budget.spent","budget.alerts","old_volume.gb"}
+       "archive.expiry_days","budget.limit","budget.spent","budget.alerts","old_volume.gb",
+       "login.bytes"}
 BOOL = {"local.tailscale": "up", "local.moonlight": "yes", "local.ssh_key": "yes",
         "local.auth_key": "yes", "tailnet.online": "yes", "config.notifications": "yes",
-        "config.tailscale_api_key": "yes", "config.alert_email": "yes"}
+        "config.tailscale_api_key": "yes", "config.alert_email": "yes",
+        # Left EMPTY when the listing failed, which must read as null - neither
+        # true nor false. "I could not look" is not "there is none".
+        "login.present": "yes"}
 for line in sys.stdin:
     k, _, v = line.rstrip("\n").partition("\t")
     if not k: continue
-    if k in BOOL:      val = (v == BOOL[k])
+    # Empty is UNKNOWN, not false. Every other boolean fact is always written
+    # as a definite yes/no, but login.present is left empty when the archive
+    # listing failed - and reporting false there would say "no login archived"
+    # on the strength of a failed request.
+    if k in BOOL:      val = (v == BOOL[k]) if v != "" else None
     elif k in NUM:
         try: val = float(v) if "." in v else int(v)
         except ValueError: val = None
@@ -535,6 +603,7 @@ cost() {
       "$gv" "$gsz" "$gaz" "$(awk -v s="$gsz" -v r="$CG_EBS_USD_GB_MONTH" 'BEGIN{printf "%.2f", s*r}')"
   else
     archive_line
+    login_line
     # The countdown belongs here too: this is the command people run while
     # thinking about money, and the archive is the one thing still billing.
     printf '  game archive    %s\n' "$(cw_archive_line)"
