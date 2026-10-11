@@ -39,6 +39,7 @@ case "$*" in
       ok)      cat "$IDX" ;;
       missing) echo 'fatal error: An error occurred (404) when calling the HeadObject operation: Key "steam/index.json" does not exist' >&2; exit 1 ;;
       denied)  echo 'fatal error: An error occurred (403) when calling the HeadObject operation: Forbidden' >&2; exit 1 ;;
+      nobucket) echo 'fatal error: An error occurred (NoSuchBucket) when calling the ListObjectsV2 operation: The specified bucket does not exist' >&2; exit 1 ;;
     esac ;;
   *) echo "" ;;
 esac
@@ -157,11 +158,16 @@ cat > "$T/index.json" <<'JSON'
  {"appid":"438040","name":"Shakes and Fidget","installdir":"Shakes & Fidget","bytes":2644378735,"pushed":"2026-09-12T20:44:00Z"}
 ]}
 JSON
-h=$(printf '%s' "123456789012-gamevps" | sha256sum | cut -c1-12)
+# From the shared helper, NOT typed out here. This line used to carry the old
+# region-less formula - sha256(account-host) - which is what lib/choose-games.sh
+# carried too, so the test and the bug agreed with each other and the drift was
+# invisible. A name asserted by reimplementing it proves only that two copies
+# match.
+want=$(bash -c 'source lib/s3-region.sh; cg_bucket_name 123456789012 gamevps ap-south-1')
 rm -f "$T/awslog"
-got=$(BKT="" AWSLOG="$T/awslog" ask "2")
+got=$(BKT="" GAME_REGION=ap-south-1 AWSLOG="$T/awslog" ask "2")
 check    "asked, and the answer taken"      "$got" "438040"
-contains "  from the account's own bucket"  "$(cat "$T/awslog")" "s3://cg-library-$h/steam/index.json"
+contains "  from the account's own bucket"  "$(cat "$T/awslog")" "s3://$want/steam/index.json"
 got=$(BKT="" STS_FAIL=1 ask "2")
 check    "account unknown: none, not all"   "$got" "none"
 contains "  and says so"                    "$(errs)" "could not tell which game archive"
@@ -172,5 +178,28 @@ check    "access denied: none, not all"     "$got" "none"
 contains "  and says so"                    "$(errs)" "could not read the game archive's index"
 got=$(CP=missing ask "2")
 check    "no index at all: nothing archived, all" "$got" "all"
+
+echo "13. a DERIVED bucket that is not there is not an empty archive"
+# The consequence of the drift, and why it mattered. A derived name that does
+# not resolve used to answer "all", and "all" is sent to the box, which derives
+# the name correctly - so the box restored every game in the REAL archive:
+# 163 GB onto a 229 GB disk, the exact overflow this chooser exists to prevent.
+got=$(BKT="" CP=nobucket GAME_REGION=ap-south-1 ask "2")
+check    "it restores none, not all"  "$got" "none"
+contains "  and says why"             "$(errs)" "no archive found at the derived name"
+contains "  naming the way back"      "$(errs)" "cg library pull"
+# A missing INDEX inside a bucket we were TOLD about really is an empty archive,
+# and "all" of nothing restores nothing. That must keep working.
+got=$(BKT=b CP=missing ask "2")
+check "a NAMED bucket with no index is still all" "$got" "all"
+
+echo "14. the formula is not reimplemented here either"
+check "no local copy in the chooser" "$(grep -cE 'cg-library-.*sha256sum' lib/choose-games.sh)" "0"
+# A copy in the TEST is what hid the drift for weeks: this file typed out
+# sha256(account-host) and asserted the chooser produced it, so the two agreed
+# and nobody was wrong. Lines that are themselves greps are excluded, or this
+# check matches its own pattern.
+check "  nor in this test"           "$(grep -E 'cg-library-.*sha256sum' "$0" | grep -vc 'grep -')" "0"
+contains "the chooser sources the helper" "$(cat lib/choose-games.sh)" "s3-region.sh"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

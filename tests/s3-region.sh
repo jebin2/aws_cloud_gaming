@@ -87,6 +87,21 @@ lib=$(cat lib/library-aws.sh)
 contains "the region is in the hash"        "$(cat lib/s3-region.sh)" '"$1-$2-$3" | sha256sum'
 contains "  and library-aws calls it"       "$lib" 'cg_bucket_name "$ACCOUNT" "$TS_HOST" "$REGION"'
 lacks    "and no local copy of the formula" "$lib" "sha256sum"
+# ONE copy, repo-wide. This file previously checked only lib/library-aws.sh -
+# the file the region fix touched - and a THIRD copy sat in lib/choose-games.sh
+# carrying the old region-less formula. With no bucket in .env it derived a name
+# that has never existed, got NoSuchBucket, and read that as "nothing archived".
+# Both on ONE LINE: a cg-library-* name built straight out of a hash. The
+# looser forms are too broad and each gave a false positive - `sha256sum`
+# alone matches lib/cloud-watchdog.sh fingerprinting its own config, and
+# `cg-library-` anywhere in a file matches host/install-library.sh naming its
+# systemd units cg-library-restore.service. Verified against the old line this
+# is meant to catch.
+check "the bucket formula lives in exactly one file" \
+      "$(grep -rlE 'cg-library-.*sha256sum' cg lib host 2>/dev/null | sort | tr '\n' ' ')" \
+      "lib/s3-region.sh "
+contains "and choose-games uses the helper" "$(cat lib/choose-games.sh)" 'cg_bucket_name "$acct"'
+contains "  sourcing it rather than copying" "$(cat lib/choose-games.sh)" 's3-region.sh"'
 contains "an explicit name still wins"      "$lib" 'if [[ -n ${GAME_S3_BUCKET:-} ]]; then'
 
 # Two regions must not collide, and one region must be stable across runs.
