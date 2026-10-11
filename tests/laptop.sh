@@ -209,7 +209,10 @@ contains "cg check lists the missing tools"  "$r" "missing: AWS CLI v2"
 contains "  all of them"                     "$r" "missing: Tailscale"
 contains "  and stops before AWS"            "$r" "the laptop is not ready"
 contains "  failing"                         "$(sed -n '$p' <<<"$r")" "rc=1"
-check    "cg passes --fix through"           "$(grep -c 'check)     exec lib/setup check "$@"' cg)" "1"
+# cg_exec, not exec: every repo hand-off goes through a wrapper that checks the
+# executable bit first, because `exec` on a file missing it is exit 126 with no
+# output at all. See tests/exec-bits.sh.
+check    "cg passes --fix through"           "$(grep -c 'check)     cg_exec lib/setup check "$@"' cg)" "1"
 
 echo "11. --fix asks for an AWS access key: the key and the secret, nothing else"
 fresh python3 ssh curl tailscale moonlight

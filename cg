@@ -265,7 +265,7 @@ cmd_stop() {
     esac
   done
   steam_shutdown_for_cloud_sync
-  exec lib/game stop
+  cg_exec lib/game stop
 }
 
 # Ask which games to restore, before anything launches. The answer is exported
@@ -1333,13 +1333,30 @@ flags
 EOF
 }
 
+# `exec` on a file whose executable bit is missing exits 126 and prints NOTHING.
+# That reads as a crash in the engine, not a file mode: `cg open` died instantly
+# with "exited 126" and an empty log. Two ways to arrive there - a `mv new old`
+# rewrite, which creates the file at the umask default and drops the bit, or a
+# packaging step that does not preserve modes - and neither leaves a clue.
+# One test turns it into a sentence. tests/exec-bits.sh keeps the repo honest;
+# this keeps a package honest.
+cg_exec() { # cg_exec <script> [args...]
+  if [[ ! -x $1 ]]; then
+    if [[ -e $1 ]]; then
+      die "$1 is not executable (mode $(stat -c %a "$1" 2>/dev/null || echo '?')) - run: chmod +x $1"
+    fi
+    die "$1 is missing - this copy of cg is incomplete"
+  fi
+  exec "$@"
+}
+
 case "$CMD" in
-  init)      watchdog_ensure; choose_games; exec lib/setup ;;
-  check)     exec lib/setup check "$@" ;;
+  init)      watchdog_ensure; choose_games; cg_exec lib/setup ;;
+  check)     cg_exec lib/setup check "$@" ;;
   # Reports go through cg_report: on a terminal it boxes and colours them, and
   # anywhere else it is `cat`, so a redirected report is byte-for-byte as before.
   # --json is the app's view: one object from lib/setup, no box round-trips.
-  status)    if (( JSON )); then exec lib/setup status --json; fi
+  status)    if (( JSON )); then cg_exec lib/setup status --json; fi
              { lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true
                # `tailscale ip` succeeds for a node that is registered but OFFLINE, so it
                # does not mean the box answers - and the heading used to print with
@@ -1352,11 +1369,11 @@ case "$CMD" in
                fi
                stream_usage; } | cg_report ;;
   # --json is the app's view of the same single Cost Explorer call.
-  cost)      if (( JSON )); then exec lib/setup cost --json; fi
+  cost)      if (( JSON )); then cg_exec lib/setup cost --json; fi
              lib/setup cost "$@" | cg_report ;;
-  clean)     exec lib/setup clean ;;
+  clean)     cg_exec lib/setup clean ;;
   destroy)   cmd_destroy "$@" ;;
-  open|up)   ensure_moonlight_syskeys; exec lib/game up ;;
+  open|up)   ensure_moonlight_syskeys; cg_exec lib/game up ;;
   stop|down) cmd_stop "$@" ;;
   snapshot)  cmd_snapshot "$@" ;;
   # Only the bare report is piped: `games --volume --delete` asks a question.
