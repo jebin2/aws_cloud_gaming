@@ -722,6 +722,11 @@
     <p class="font-code-md text-code-md mb-space-md" id="ask-prompt"></p>
     <input id="ask-input" autocomplete="off" spellcheck="false"
            class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
+    <!-- cg says in the ask event which answers it will accept. When it does,
+         the answer is a CHOICE and typing it into a free-text box is both
+         harder and easier to get wrong - a build asking "choice [1]:" with a
+         text field is not a thing anyone can see the options in. -->
+    <div id="ask-choices" class="flex flex-col gap-space-xs" hidden></div>
     <menu class="flex justify-end gap-space-sm mt-space-md p-0">
       <button value="send" class="btn btn-primary">Answer</button>
     </menu>

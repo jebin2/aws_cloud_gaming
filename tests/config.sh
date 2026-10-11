@@ -32,7 +32,13 @@ print(json.dumps(r[sys.argv[2]]))' "$1" "$2"; }
 
 echo "1. the registry, as data"
 j=$(cg_ config --json)
-check    "valid JSON"                    "$(python3 -c 'import json,sys;print(len(json.load(sys.stdin)))' <<<"$j")" "14"
+check    "valid JSON"                    "$(python3 -c 'import json,sys;print(type(json.load(sys.stdin)).__name__)' <<<"$j")" "list"
+# The KEYS, not a count. A bare number told me 15 where it wanted 14 and
+# nothing about which setting had appeared - and it would have said the same for
+# one added and one silently dropped.
+check    "and these are the settings" \
+         "$(python3 -c 'import json,sys;print(" ".join(r["key"] for r in json.load(sys.stdin)))' <<<"$j")" \
+         "GAME_DISK_GB GAME_ARCHIVE_EXPIRY_DAYS GAME_INSTANCE_TYPE GAME_REGION GAME_SPOT GAME_STEAM_LOGIN GAME_BUDGET_INR GAME_WATCHDOG_IDLE_MIN GAME_WATCHDOG_STUCK_MIN GAME_NTFY_URL TAILSCALE_API_KEY EMAIL_ALERTS GAME_RES GAME_FPS GAME_BITRATE_KBPS"
 check    "a set value is reported"       "$(jq_ GAME_DISK_GB value <<<"$j")" '"80"'
 check    "  with its default"            "$(jq_ GAME_DISK_GB default <<<"$j")" '"50"'
 check    "  and its minimum"             "$(jq_ GAME_DISK_GB rule <<<"$j")" '"30"'

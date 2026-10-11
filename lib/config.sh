@@ -18,6 +18,7 @@ GAME_ARCHIVE_EXPIRY_DAYS|number|14|0|Days with no box before the cloud watchdog 
 GAME_INSTANCE_TYPE|text|g6.xlarge||The EC2 instance type. Its GPU quota must cover it.
 GAME_REGION|region|ap-south-2||The AWS region everything lives in. Changing it starts over: the archive does not follow.
 GAME_SPOT|choice|auto|auto,1,0|Purchase model: spot, on demand, or spot whenever the quota allows.
+GAME_STEAM_LOGIN|choice|use|use,fresh|Whether a new box restores the archived Steam login, or asks you to sign in.
 GAME_BUDGET_INR|number|5000|100|Monthly budget. It emails you; it stops nothing.
 GAME_WATCHDOG_IDLE_MIN|number|30|10|Minutes of quiet before the cloud watchdog ends the box.
 GAME_WATCHDOG_STUCK_MIN|number|60|40|Minutes before a stuck shutdown is forced. Never inside the push's 30.

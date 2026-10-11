@@ -43,6 +43,14 @@ S5="${CG_S5CMD:-/usr/local/bin/s5cmd}"
 # baked into /etc/cg-library.conf, because the restore runs here at boot with no
 # terminal to ask at.
 APPS="${CG_APPS:-all}"
+# Whether to restore the archived Steam login, decided on the LAPTOP at build
+# time for the same reason CG_APPS is: the restore runs at boot with no terminal
+# to ask at. "use" restores it and the box comes up signed in; "fresh" skips it
+# and Steam asks for a password. Default "use" - that is what every box did
+# before this existed, and a new default would silently change what a rebuild
+# does. An explicit `cg library account pull` ignores this entirely: asking for
+# it outright is not the same as a build-time preference.
+LOGIN="${CG_LOGIN:-use}"
 
 # s5cmd holds roughly workers x concurrency x part-size in memory. The defaults
 # (256 x 5 x 50 MB) want tens of GB. 64 x 4 x 16 MB measured at 323 MB peak.
@@ -235,7 +243,16 @@ cmd_pull() {
   # Before anything else, and regardless of which games were chosen: the login
   # lives on the root disk, so it is gone on every new box, and a boot that
   # restores no games at all still wants Steam signed in.
-  account_pull
+  #
+  # Unless it was asked for fresh. Skipping the pull is the whole mechanism -
+  # nothing is edited, nothing is deleted, and the archived login stays exactly
+  # where it is for the next box that wants it.
+  if [[ $LOGIN == fresh ]]; then
+    log "CG_LOGIN=fresh - not restoring the archived login; Steam will ask you to sign in"
+    log "  the archived login is untouched: cg library account pull restores it later"
+  else
+    account_pull
+  fi
 
   if [[ $want == none ]]; then
     log "CG_APPS=none - restoring nothing by request (the box is for something else)"

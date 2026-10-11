@@ -271,6 +271,61 @@ cmd_stop() {
 # Ask which games to restore, before anything launches. The answer is exported
 # for provision.sh to bake into user-data, and remembered in .env so the common
 # case next time is pressing Enter.
+# Asks whether the new box should restore the archived Steam login.
+#
+# It runs HERE, on the laptop, before the instance launches - for the same
+# reason choose_games does: the restore happens on the box at boot, started
+# --no-block so it overlaps the build, and there is no terminal there to ask at.
+# The answer travels in user-data as CG_LOGIN and lands in /etc/cg-library.conf.
+#
+# "fresh" does not delete or edit anything. It skips the pull, so the archived
+# login stays exactly where it is for the next box - and signing in on the new
+# box replaces it at the next push. Deleting the archive is a separate,
+# deliberate act: cg library account forget.
+#
+# No archived login, or a bucket that cannot be read: no question worth asking.
+# A chooser that could not look must not decide, so .env stands.
+choose_login() {
+  local j rows present
+  j=$(account_json 2>/dev/null) || j=""
+  present=$(python3 -I -c '
+import json, sys
+try:    d = json.load(sys.stdin)
+except Exception: print("unknown"); sys.exit()
+print("yes" if d.get("present") else "no")' <<<"${j:-}" 2>/dev/null) || present=unknown
+  if [[ $present != yes ]]; then
+    export GAME_STEAM_LOGIN="${GAME_STEAM_LOGIN:-use}"
+    return 0
+  fi
+  rows=$(python3 -I -c '
+import json, sys, datetime
+d = json.load(sys.stdin)
+acc = d.get("accounts")
+if acc is None:
+    print("  (the account names could not be read from the archive)"); sys.exit()
+for a in acc:
+    ts = a.get("last_used")
+    when = datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else "-"
+    mark = "  <- signs in as this one" if a.get("most_recent") else ""
+    print("  %-22s last used %s%s" % (a.get("account") or a.get("steamid") or "?", when, mark))
+' <<<"$j" 2>/dev/null) || rows=""
+  say "steam login"
+  [[ -n ${rows//[[:space:]]/} ]] && printf '%s\n' "$rows"
+  log "  [1] use it - the box comes up already signed in   (default)"
+  log "  [2] start fresh - sign in on the box; the archive is left alone"
+  local a
+  # The prompt has to stand alone: in the app it is the one line of a modal
+  # dialog, and the options printed above it are in the log pane BEHIND that
+  # modal. "choice [1]:" there said nothing at all.
+  a=$(cg_ask steam-login "  use the archived Steam login? [1]: " 1 "1,2")
+  case ${a:-1} in
+    2|fresh|f) export GAME_STEAM_LOGIN=fresh
+               log "  starting fresh - Steam will ask you to sign in" ;;
+    *)         export GAME_STEAM_LOGIN=use ;;
+  esac
+  cg_env_set GAME_STEAM_LOGIN "$GAME_STEAM_LOGIN"
+}
+
 choose_games() {
   local sel
   # On failure keep whatever .env already said rather than reaching for "all":
@@ -1565,7 +1620,7 @@ cg_exec() { # cg_exec <script> [args...]
 }
 
 case "$CMD" in
-  init)      watchdog_ensure; choose_games; cg_exec lib/setup ;;
+  init)      watchdog_ensure; choose_games; choose_login; cg_exec lib/setup ;;
   check)     cg_exec lib/setup check "$@" ;;
   # Reports go through cg_report: on a terminal it boxes and colours them, and
   # anywhere else it is `cat`, so a redirected report is byte-for-byte as before.

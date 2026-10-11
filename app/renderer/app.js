@@ -184,12 +184,54 @@ function askConfirm({ title, body, yes = 'Continue', danger = false }) {
 function ask(id, event) {
   $('ask-prompt').textContent = event.prompt || event.id;
   const input = $('ask-input');
-  input.value = event.default || '';
-  input.type = event.secret ? 'password' : 'text';
+  const box = $('ask-choices');
+  // cg states the answers it accepts. When it does, this is a CHOICE, and a
+  // free-text field is the wrong control for one: the build sat on a dialog
+  // reading "choice [1]:" with no sign of what the choices were, because the
+  // options cg had printed went to the log pane behind the modal.
+  const choices = (event.choices || '').split(',').map(c => c.trim()).filter(Boolean);
+  box.textContent = '';
+  box.hidden = choices.length === 0;
+  input.hidden = choices.length > 0;
+  if (choices.length) {
+    // Radios, not a <select>: two or three options are worth showing at once,
+    // and the default has to be visibly the default.
+    for (const c of choices) {
+      const row = document.createElement('label');
+      row.className = 'row font-code-md text-code-md cursor-pointer';
+      const r = document.createElement('input');
+      r.type = 'radio'; r.name = 'ask-choice'; r.value = c;
+      r.checked = c === (event.default || choices[0]);
+      const txt = document.createElement('span');
+      txt.textContent = ASK_CHOICE_LABEL[`${event.id}:${c}`] || c;
+      row.append(r, txt);
+      box.append(row);
+    }
+  } else {
+    input.value = event.default || '';
+    input.type = event.secret ? 'password' : 'text';
+  }
   $('ask').showModal();
-  input.focus();
-  $('ask').onclose = () => window.cg.answer(id, input.value);
+  if (choices.length) box.querySelector('input:checked')?.focus(); else input.focus();
+  $('ask').onclose = () => {
+    const picked = choices.length
+      ? (box.querySelector('input:checked')?.value ?? event.default ?? '')
+      : input.value;
+    window.cg.answer(id, picked);
+  };
 }
+
+// A bare "1" or "2" in a dialog says nothing. cg prints the meaning to the log,
+// which is behind the modal, so the words are repeated here for the prompts
+// where the answer is a number. Anything not listed falls back to the raw
+// value, so a new prompt is terse rather than broken.
+// Keyed <ask id>:<answer>. Distinct from CHOICE_LABEL further down, which maps
+// a SETTING to labels for its values - same idea, different shape, and sharing
+// one name for both silently shadowed the other.
+const ASK_CHOICE_LABEL = {
+  'steam-login:1': '1 - use the archived Steam login (the box comes up signed in)',
+  'steam-login:2': '2 - start fresh; sign in on the box (the archive is left alone)',
+};
 
 const GB = bytes => (bytes / 1073741824).toFixed(1) + ' GB';
 function uptime(iso) {
@@ -992,6 +1034,7 @@ const LABEL = {
 // "1" means nothing to a person: a choice shows what it chose.
 const CHOICE_LABEL = {
   GAME_SPOT: { '1': 'spot', '0': 'on demand', auto: 'spot when the quota allows' },
+  GAME_STEAM_LOGIN: { use: 'restore the archived login', fresh: 'sign in on the box' },
 };
 const choiceLabel = (key, v) => (CHOICE_LABEL[key] || {})[v] || v;
 

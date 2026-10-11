@@ -22,16 +22,25 @@ contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 
 # The render, lifted out of provision.sh so the test exercises the real code
 # rather than a copy of it.
-render() { # render <text-on-stdin>
+render() { # render <authkey> <host> <url> <bucket> <apps> [login]
+  # The tokens are taken from the TEXT, not from a list typed in here. This
+  # file used to carry its own copy of provision.sh's tuple, so when a sixth
+  # placeholder (__CG_LOGIN__) was added to a module the two lists disagreed and
+  # the test went looking for the wrong five - the same shape of bug as the
+  # bucket formula existing in four places. Deriving it means a new placeholder
+  # fails loudly here the moment it has no value.
   TS_AUTHKEY="$1" TS_HOST="$2" HOST_TGZ_URL="$3" S3_BUCKET="$4" CG_APPS="$5" \
-  python3 -c 'import os,sys
+  CG_LOGIN="${6:-use}" \
+  python3 -c 'import os, re, sys
 s = sys.stdin.read()
-for k in ("TS_AUTHKEY", "TS_HOST", "HOST_TGZ_URL", "S3_BUCKET", "CG_APPS"):
-    s = s.replace("__%s__" % k, os.environ.get(k, ""))
-missing = [w for w in ("__TS_AUTHKEY__", "__TS_HOST__", "__HOST_TGZ_URL__",
-                       "__S3_BUCKET__", "__CG_APPS__") if w in s]
-if missing:
-    sys.exit("placeholders left unsubstituted: %s" % ", ".join(missing))
+# [A-Z0-9_] - S3_BUCKET has a DIGIT in it, and a class without one matched
+# every placeholder except that one.
+toks = sorted(set(re.findall(r"__([A-Z0-9_]+)__", s)))
+unknown = [t for t in toks if t not in os.environ]
+if unknown:
+    sys.exit("no value for placeholder(s): %s" % ", ".join(unknown))
+for t in toks:
+    s = s.replace("__%s__" % t, os.environ[t])
 sys.stdout.write(s)'
 }
 # Byte-for-byte the shape aws s3 presign emits.
@@ -76,8 +85,18 @@ echo "5. the real modules render without leaving a placeholder"
 out=$(cat lib/bootstrap.d/*.sh | grep -vE '^[[:space:]]*#([^!]|$)' \
       | render "tskey-auth-xyz" gamevps "$URL" "cg-library-abc" all); rc=$?
 check    "render succeeded"          "$rc" "0"
-check    "no placeholder survives"   "$(grep -c '__[A-Z_]*__' <<<"$out" || true)" "0"
+# [A-Z0-9_], because S3_BUCKET has a digit: as [A-Z_]* this could never have
+# matched __S3_BUCKET__ surviving, which is the single most important one to
+# catch - a box that boots with a literal bucket name fails on the machine.
+check    "no placeholder survives"   "$(grep -c '__[A-Z0-9_]*__' <<<"$out" || true)" "0"
 contains "the URL is intact in place" "$out" "$URL"
+# Every placeholder the modules use must be one provision.sh substitutes, and
+# vice versa. Two lists that drift is how __CG_LOGIN__ would have shipped as a
+# literal into /etc/cg-library.conf and been read as a login choice of "".
+mods=$(grep -ohE '__[A-Z0-9_]+__' lib/bootstrap.d/*.sh | sed -E 's/^__//; s/__$//' | sort -u | tr '\n' ' ')
+prov=$(sed -n 's/^for k in (\(.*\)):$/\1/p' lib/provision.sh | tr -d '", ' )
+check "the modules' placeholders are exactly what provision substitutes" \
+      "$(for m in $mods; do grep -q "$m" <<<"$prov" || echo "MISSING:$m"; done)" ""
 # And it still has to fit: EC2 caps user-data at 16 KB, gzipped.
 gz=$(printf '%s' "$out" | gzip -9 | wc -c)
 if (( gz < 16384 )); then echo "  ok   fits user-data ($gz of 16384 gzipped)"; pass=$((pass+1));

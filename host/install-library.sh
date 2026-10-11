@@ -6,6 +6,9 @@ set -euo pipefail
 BUCKET="${1:?usage: install-library.sh <s3-bucket> [prefix] [apps-csv]}"
 PREFIX="${2:-steam}"
 CG_APPS="${3:-${CG_APPS:-all}}"
+# "use" or "fresh" - whether this box restores the archived Steam login. Decided
+# on the laptop, for the same reason CG_APPS is.
+CG_LOGIN="${4:-${CG_LOGIN:-use}}"
 S5_VERSION="${S5_VERSION:-2.2.2}"
 
 # The AWS CLI can do this, but at roughly 80 MB/s single-threaded; s5cmd
@@ -46,6 +49,7 @@ CG_S3_BUCKET=$BUCKET
 CG_S3_PREFIX=$PREFIX
 CG_LIB_DIR=${CG_LIB_DIR:-/scratch/steam}
 CG_APPS=${CG_APPS:-all}
+CG_LOGIN=${CG_LOGIN:-use}
 EOF
 chmod 644 /etc/cg-library.conf
 

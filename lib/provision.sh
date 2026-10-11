@@ -176,12 +176,13 @@ else
       | grep -vE '^[[:space:]]*#([^!]|$)' \
       | TS_AUTHKEY="$TS_AUTHKEY" TS_HOST="$TS_HOST" HOST_TGZ_URL="$HOST_TGZ_URL" \
         S3_BUCKET="$S3_BUCKET" CG_APPS="${GAME_APPS:-all}" \
+        CG_LOGIN="${GAME_STEAM_LOGIN:-use}" \
         python3 -c 'import os,sys
 s = sys.stdin.read()
-for k in ("TS_AUTHKEY", "TS_HOST", "HOST_TGZ_URL", "S3_BUCKET", "CG_APPS"):
+for k in ("TS_AUTHKEY", "TS_HOST", "HOST_TGZ_URL", "S3_BUCKET", "CG_APPS", "CG_LOGIN"):
     s = s.replace("__%s__" % k, os.environ.get(k, ""))
 missing = [w for w in ("__TS_AUTHKEY__", "__TS_HOST__", "__HOST_TGZ_URL__",
-                       "__S3_BUCKET__", "__CG_APPS__") if w in s]
+                       "__S3_BUCKET__", "__CG_APPS__", "__CG_LOGIN__") if w in s]
 if missing:
     sys.exit("placeholders left unsubstituted: %s" % ", ".join(missing))
 sys.stdout.write(s)' > "$USERDATA" \
