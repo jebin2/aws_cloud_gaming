@@ -155,8 +155,14 @@ up() {
   [[ $path == *relay* ]] && cg_echo "  WARNING: relayed, not direct - latency will suffer"
 
   local ip; ip=$(tailscale ip -4 "$TS_NODE")
-  wait_for "waiting for sunshine" 60 \
-    timeout 2 bash -c ">/dev/tcp/$ip/47989"
+  if ! wait_for "waiting for sunshine" 60 \
+       timeout 2 bash -c ">/dev/tcp/$ip/47989"; then
+    # Two minutes of dots and then `exit 1`, for a box that could never work:
+    # if user-data aborted, there is no sunshine on it AT ALL, and no amount of
+    # waiting will open that port. Ask the box which it is before giving up.
+    open_no_sunshine "$ip" || true
+    die "sunshine never answered on $ip:47989"
+  fi
 
   echo "disk:"; disks
 
@@ -178,6 +184,55 @@ up() {
   else printf 'session ended after %dm\n' $(( (SECONDS - t0) / 60 )); fi
 
   end_session
+}
+
+# Sunshine never answered. The useful question is not "is it slow" but "was it
+# ever installed", because a build that aborted leaves a box that is reachable,
+# pingable, has an address and a tailnet name - and no streaming stack whatever.
+# That box looked indistinguishable from a slow one: `cg open` waited the full
+# 60 tries and died with exit 1 and no reason.
+#
+# Returns 0 only when it is certain the build never finished, so the caller
+# still reports the plain timeout for every other cause.
+open_no_sunshine() { # open_no_sunshine <ip>
+  local diag sunshine marker failed
+  diag=$(box 'test -x /usr/bin/sunshine && echo sunshine=yes || echo sunshine=no
+              test -f /var/lib/cloud-gaming-ready && echo marker=yes || echo marker=no
+              grep ">>> FAILED: " /var/log/cloud-gaming-bootstrap.log 2>/dev/null | tail -1' 2>/dev/null) \
+    || { cg_echo "  the box answers tailscale but not ssh, so I cannot ask it why"; return 1; }
+  sunshine=$(sed -n 's/^sunshine=//p' <<<"$diag")
+  marker=$(sed -n 's/^marker=//p' <<<"$diag")
+  failed=$(sed -n 's/^.*>>> FAILED: //p' <<<"$diag" | tail -1)
+  # Both, not either. Sunshine present means this is a real streaming fault and
+  # the caller's plain timeout is the right message; the readiness marker
+  # present means the build DID finish, whatever else is wrong. Only when both
+  # say otherwise is "it never finished building" a claim worth making.
+  [[ $sunshine == no && $marker == no ]] || return 1
+  {
+  echo
+  echo "Sunshine is not installed on this box, so nothing can connect to it."
+  echo
+  echo "  The build stopped partway. user-data runs under 'set -e', so a failed"
+  echo "  step ends it - the box still boots, joins the tailnet and answers ssh,"
+  echo "  which is why it looks alive. It has no desktop, no Steam and no"
+  echo "  Sunshine, and waiting longer cannot change that."
+  if [[ -n $failed ]]; then
+  echo
+  echo "  It stopped at:  $failed"
+  fi
+  echo
+  echo "  There is nothing to repair here - the box is disposable and your games"
+  echo "  are in S3:"
+  echo
+  echo "      cg destroy && cg init"
+  echo
+  echo "  To read the whole build log first:"
+  echo
+  echo "      ssh -i ~/.ssh/$TS_HOST.pem ubuntu@$1"
+  echo "      sudo tail -50 /var/log/cloud-gaming-bootstrap.log"
+  echo
+  } | cg_block "🚧" "This box never finished building"
+  return 0
 }
 
 # How a session ends, for both `cg stop` and the prompt above - one function so
