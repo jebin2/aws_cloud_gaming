@@ -25,13 +25,21 @@ echo "1. the scheduler lets the ask through"
 # may start while something else is in flight, and getting it wrong is silent.
 sched=$(node -e '
 const src = require("node:fs").readFileSync("app/main/index.js", "utf8");
-const m = src.match(/const READ_ONLY[\s\S]*?const isReadOnly = args =>[\s\S]*?;\n/);
+const m = src.match(/const READ_ONLY[\s\S]*?\(verb\(raw\)\);\n/);
 if (!m) { console.log("NO RULE FOUND"); process.exit(0); }
 eval(m[0].replace(/^const /gm, "var "));
 const want = [
   [["quota", "--json"], true], [["quota", "request", "spot"], true],
   [["quota", "appeal", "spot"], true],
   [["status", "--json"], true], [["config", "--json"], true],
+  // Flags come BEFORE the command, so a classifier that reads args[0] sees
+  // "--region" and calls a read a mutation - which is refused while any read
+  // is in flight, silently, and the dialog shows nothing at all.
+  [["--region", "ap-south-1", "quota", "--json"], true],
+  [["--region", "ap-south-1", "quota", "request", "spot"], true],
+  [["--json", "status"], true],
+  [["--region", "ap-south-1", "destroy"], false],
+  [["--region", "ap-south-1", "init"], false],
   [["init"], false], [["destroy"], false], [["open"], false],
   [["creds", "set"], false], [["deps", "install"], false],
   [["creds", "tailscale", "signin"], false], [["library", "forget", "1"], false],
@@ -49,6 +57,8 @@ contains "the rule was found"         "$sched" "checked"
 lacks    "nothing is misclassified"   "$sched" "WRONG"
 contains "the renderer still counts it as a write" \
          "$(cat app/renderer/app.js)" "cmd[0] === 'quota' && cmd[1] === 'request'"
+# Both sides skip the flags, and both must agree about what is left.
+contains "  and skips the flags too"   "$(cat app/renderer/app.js)" "const bare = args =>"
 
 BROWSER=""
 for b in chromium chromium-browser google-chrome-stable google-chrome; do

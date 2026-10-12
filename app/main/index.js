@@ -31,7 +31,21 @@ const ENV_ALLOWED = new Set(['GAME_APPS']);
 // out, it counted as a write and was refused while the other reads ran, so the
 // Settings screen stayed empty until someone pressed Refresh.
 const READ_ONLY = new Set(['status', 'watcher', 'library', 'cost', 'check', 'ping', 'games', 'config', 'machines', 'regions', 'sweep', 'creds', 'deps', 'quota']);
-const isReadOnly = args =>
+// `cg --region ap-south-1 quota --json` is a quota read, not a command called
+// "--region". cg takes its flags before the command, so the classifiers have to
+// skip them - and getting this wrong is the silent kind: the command is treated
+// as mutating, refused while any read is in flight, and the dialog that asked
+// for it shows nothing at all.
+const FLAG_TAKES_VALUE = new Set(['--region', '--host']);
+const verb = args => {
+  const rest = [...args];
+  while (rest.length && rest[0].startsWith('-')) {
+    const flag = rest.shift();
+    if (FLAG_TAKES_VALUE.has(flag)) rest.shift();
+  }
+  return rest;
+};
+const isReadOnly = raw => ((args) =>
   READ_ONLY.has(args[0]) && !['push', 'pull', 'forget', 'clean', 'account'].includes(args[1] || '')
   // `cg creds` reads a local file and makes one free call, so it rides along
   // with the other opening reads. `cg creds set` asks for a secret and
@@ -40,7 +54,7 @@ const isReadOnly = args =>
   // `cg deps` is six command -v checks. `cg deps install` shells out to the
   // package manager as root, so it waits like any other write.
   && !(args[0] === 'deps' && args[1] === 'install')
-  && !(args[0] === 'creds' && args[1] === 'tailscale' && args[2] === 'signin');
+  && !(args[0] === 'creds' && args[1] === 'tailscale' && args[2] === 'signin'))(verb(raw));
 
 // `cg quota request` is deliberately NOT excluded above, and the reason is what
 // this list is for. It is not "does this change anything" - a quota request

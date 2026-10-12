@@ -30,14 +30,26 @@ const WRITES = new Set(['init', 'destroy', 'open']);
 // `clean` and `forget` delete from S3 for good. The main process draws the same
 // line in isReadOnly(); these two must not drift apart.
 const LIBRARY_WRITES = new Set(['push', 'pull', 'forget', 'clean', 'account']);
-const isWrite = cmd => WRITES.has(cmd[0]) || (cmd[0] === 'library' && LIBRARY_WRITES.has(cmd[1]))
+// Flags come before the command - `cg --region X quota request spot` - so they
+// are skipped before anything is decided. The main process does the same, and
+// the two must agree.
+const FLAG_TAKES_VALUE = new Set(['--region', '--host']);
+const bare = args => {
+  const rest = [...args];
+  while (rest.length && rest[0].startsWith('-')) {
+    const flag = rest.shift();
+    if (FLAG_TAKES_VALUE.has(flag)) rest.shift();
+  }
+  return rest;
+};
+const isWrite = raw => ((cmd) => WRITES.has(cmd[0]) || (cmd[0] === 'library' && LIBRARY_WRITES.has(cmd[1]))
   // Same line as isReadOnly() in the main process, for the same reason: `creds`
   // is a read that runs on every refresh, `creds set` writes a credentials file.
   || (cmd[0] === 'creds' && cmd[1] === 'set')
   || (cmd[0] === 'deps' && cmd[1] === 'install')
   || (cmd[0] === 'creds' && cmd[1] === 'tailscale' && cmd[2] === 'signin')
   || (cmd[0] === 'quota' && cmd[1] === 'request')
-  || (cmd[0] === 'regions' && cmd[1] === 'enable');
+  || (cmd[0] === 'regions' && cmd[1] === 'enable'))(bare(raw));
 const writing = () => [...jobs.values()].some(j => isWrite(j.cmd));
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
