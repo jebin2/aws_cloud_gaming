@@ -39,6 +39,7 @@
       <a class="nav-item" data-view="library" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="stadia_controller">&#xf135;</span><span>Library</span></a>
       <a class="nav-item" data-view="guards" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="shield">&#xe9e0;</span><span>Guards</span></a>
       <a class="nav-item" data-view="cost" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="attach_money">&#xe227;</span><span>Cost</span></a>
+      <a class="nav-item" data-view="deps" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="build_circle">&#xef48;</span><span>Dependencies</span></a>
       <a class="nav-item" data-view="settings" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="settings">&#xe8b8;</span><span>Settings</span></a>
       <a class="nav-item" data-view="logs" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="terminal">&#xeb8e;</span><span>Logs</span></a>
     </nav>
@@ -56,8 +57,17 @@
 
   <!-- Something cg could not read at all. Not a screen's problem: every screen's. -->
   <div class="mb-space-lg p-space-md rounded-lg border border-error/50 bg-error/5" id="banner" hidden>
-    <p class="font-code-md text-code-md text-error" id="banner-title">—</p>
-    <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="banner-body"></p>
+    <div class="flex items-start justify-between gap-space-md">
+      <div class="min-w-0 flex-1">
+        <p class="font-code-md text-code-md text-error" id="banner-title">—</p>
+        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="banner-body"></p>
+      </div>
+      <!-- The banner is where you are told, so it is where the fix lives.
+           It used to name two ways to fix this and neither worked from here. -->
+      <button id="banner-fix" class="btn shrink-0" hidden>
+        <span class="material-symbols-outlined text-[16px]" data-icon="person">&#xe7fd;</span><span id="banner-fix-label">Set AWS key</span>
+      </button>
+    </div>
   </div>
 
   <div class="flex items-center justify-between gap-space-md pb-space-lg">
@@ -635,6 +645,22 @@
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-gutter-desktop" id="s-groups"></div>
 
     <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop">
+      <div class="flex items-start justify-between gap-space-md">
+        <div class="min-w-0 flex-1">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">AWS credentials</span>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5">
+            The one thing cg cannot install for you. Saved to ~/.aws/credentials, never to .env.
+          </p>
+          <p class="font-code-md text-code-md mt-space-sm" id="creds-state">reading…</p>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5" id="creds-detail"></p>
+        </div>
+        <button id="creds-set" class="btn shrink-0">
+          <span class="material-symbols-outlined text-[16px]" data-icon="person">&#xe7fd;</span>Set access key
+        </button>
+      </div>
+    </div>
+
+    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop">
       <div class="flex items-center justify-between gap-space-md">
         <div>
           <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Preflight</span>
@@ -647,6 +673,45 @@
         </button>
       </div>
       <pre class="font-code-sm text-code-sm whitespace-pre-wrap mt-space-md max-h-[40vh] overflow-auto text-on-surface-variant" id="s-check" hidden></pre>
+    </div>
+  </section>
+
+  <!-- Dependencies: what this laptop needs before cg can do anything -->
+  <section data-view="deps" hidden>
+    <div class="flex flex-wrap items-center gap-space-sm mb-space-lg font-code-sm text-code-sm">
+      <span class="pill" id="d-ready">—</span>
+      <span class="text-outline" id="d-pm"></span>
+      <span class="text-outline ml-auto" id="age-deps"></span>
+    </div>
+
+    <div class="p-space-lg rounded-lg bg-surface-container-low">
+      <div class="flex items-start justify-between gap-space-md pb-space-md">
+        <div class="min-w-0 flex-1">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">What cg needs here</span>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5">
+            Six tools, and cg needs all of them. Installing uses your package manager.
+          </p>
+        </div>
+        <button id="d-install-all" class="btn btn-primary shrink-0" hidden>
+          <span class="material-symbols-outlined text-[16px]" data-icon="build_circle">&#xef48;</span><span id="d-install-all-label">Install what is missing</span>
+        </button>
+      </div>
+      <!-- How this window would become root, said out loud: a button that
+           cannot work is worse than no button. -->
+      <p class="font-code-sm text-code-sm text-outline pb-space-sm" id="d-root"></p>
+      <div class="overflow-x-auto"><table class="chooser" id="d-rows"></table></div>
+    </div>
+
+    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop">
+      <div class="flex items-center justify-between gap-space-md pb-space-md">
+        <div>
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Install log</span>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5" id="d-log-note">
+            Whatever the package manager says, as it says it.
+          </p>
+        </div>
+      </div>
+      <pre class="font-code-sm text-code-sm whitespace-pre-wrap max-h-[40vh] overflow-auto text-on-surface-variant" id="d-log" hidden></pre>
     </div>
   </section>
 

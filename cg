@@ -1385,9 +1385,9 @@ watcher_json() {
     ohw=${ohw//[$'\r\n']/}
     sb=$(ec2 describe-instance-attribute --instance-id "$INSTANCE_ID" \
          --attribute instanceInitiatedShutdownBehavior \
-         --query 'InstanceInitiatedShutdownBehavior.Value' --output text 2>/dev/null)
+         --query 'InstanceInitiatedShutdownBehavior.Value' --output text 2>/dev/null) || sb=""
     lifecycle=$(ec2 describe-instances --instance-ids "$INSTANCE_ID" \
-                --query 'Reservations[0].Instances[0].InstanceLifecycle' --output text 2>/dev/null)
+                --query 'Reservations[0].Instances[0].InstanceLifecycle' --output text 2>/dev/null) || lifecycle=""
     [[ $lifecycle == spot ]] && want=terminate || want=stop
   fi
   rule=$(cw_aws events describe-rule --name "$CW_NAME" --query State --output text 2>/dev/null) || rule=""
@@ -1397,7 +1397,11 @@ watcher_json() {
   IFS=$'\t' read -r ms msg <<<"$last"
 
   local acct budget alerts
-  acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
+  # || acct="" matters: with no AWS CLI at all this assignment fails with 127,
+  # and under `set -e` the whole read died there - printing NOTHING, so the app
+  # had only "cg watcher failed (exit 127)" to show for it. A guard panel that
+  # says every guard is unknown is a usable answer; an empty screen is not.
+  acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || acct=""
   budget=$(aws budgets describe-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" \
     --query 'Budget.BudgetLimit.Amount' --output text 2>/dev/null || echo "")
   alerts=$(aws budgets describe-notifications-for-budget --account-id "$acct" \
@@ -1538,6 +1542,9 @@ info (read-only)
                              the one that answers "should the box be somewhere else"
   cg regions                 the regions you have enabled, for the app's picker
   cg config [set|get <k>]    what .env decides; set validates and writes, get reveals one
+  cg deps [install]          the tools this laptop needs, and what is missing
+  cg creds [set]             the AWS access key: where it comes from, whether AWS takes
+                             it, and `set` to paste a new one (saved to ~/.aws/credentials)
   cg notify                  send a test notification to GAME_NTFY_URL
   cg ping [--watch]          latency, and direct vs DERP relay
 
@@ -1567,6 +1574,18 @@ cg_exec() { # cg_exec <script> [args...]
 case "$CMD" in
   init)      watchdog_ensure; choose_games; cg_exec lib/setup ;;
   check)     cg_exec lib/setup check "$@" ;;
+  # The AWS access key: the one thing cg cannot install for you, and the thing
+  # a new laptop is missing. Every call behind it is free - `aws configure` is
+  # local, and sts get-caller-identity costs nothing.
+  # The laptop's tools: python3, ssh, curl, the AWS CLI, Tailscale, Moonlight.
+  # Listing is free and installs nothing; `install` shells out to the package
+  # manager through sudo, or polkit when there is no terminal.
+  deps|dependencies)
+             if (( JSON )); then cg_exec lib/setup deps --json; fi
+             cg_exec lib/setup deps "$@" ;;
+  creds|credentials)
+             if (( JSON )); then cg_exec lib/setup creds --json; fi
+             cg_exec lib/setup creds "$@" ;;
   # Reports go through cg_report: on a terminal it boxes and colours them, and
   # anywhere else it is `cat`, so a redirected report is byte-for-byte as before.
   # --json is the app's view: one object from lib/setup, no box round-trips.

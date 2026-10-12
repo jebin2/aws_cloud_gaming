@@ -11,7 +11,16 @@ LAPTOP_TOOLS=(python3 ssh curl aws tailscale moonlight)
 
 laptop_has() { command -v "$1" >/dev/null 2>&1; }
 
-# On its own, so a test can stand in for a terminal.
+# A REAL terminal, and only that. This gates the half of --fix that shells out
+# to sudo: `sudo pacman -S aws-cli-v2` has to be able to prompt for a password,
+# and in the app there is nowhere to type one - sudo exits with "no tty present
+# and no askpass program specified". So installing stays a terminal job.
+#
+# Asking a question is a different matter, and `cg_can_ask` is that one: under
+# the app a question is an event and the answer comes back on stdin. Sharing one
+# test for both is what made `cg check --fix` in the app install everything it
+# could and then silently skip the one thing it cannot install - the access key,
+# which needs no terminal and no sudo at all.
 laptop_tty() { [[ -t 0 ]]; }
 
 laptop_pm() {
@@ -83,16 +92,40 @@ laptop_plan() { # laptop_plan <pm> <tool> -> what --fix will run, in words
   esac
 }
 
+# How to become root from HERE. A terminal has sudo; the app has neither a
+# terminal nor anywhere for sudo to ask for a password, so it goes through
+# polkit, which puts the password prompt on the desktop where the person is
+# already looking. With neither, installing is not possible from here and the
+# caller says so rather than failing inside pacman.
+#
+# pkexec resets the environment and wants an absolute path, so the program is
+# resolved here rather than left to a PATH it will not have.
+laptop_root() {
+  if laptop_tty; then echo sudo; return 0; fi
+  if laptop_has pkexec && [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]]; then echo pkexec; return 0; fi
+  return 1
+}
+laptop_root_why() {   # why root is out of reach, in one line
+  laptop_has pkexec || { echo "no terminal, and polkit (pkexec) is not installed"; return; }
+  echo "no terminal, and no desktop session for polkit to show a password prompt on"
+}
+
 laptop_pkg_install() { # laptop_pkg_install <pm> <package>
+  local as; as=$(laptop_root) || {
+    log "cannot install from here: $(laptop_root_why)"
+    log "  in a terminal:  cg deps install"
+    return 1
+  }
+  local pm; pm=$(command -v "$1") || return 1
   case $1 in
-    pacman)  sudo pacman -S --needed --noconfirm "$2" ;;
+    pacman)  "$as" "$pm" -S --needed --noconfirm "$2" ;;
     apt-get) if [[ -z ${_LAPTOP_APT_FRESH:-} ]]; then
-               sudo apt-get update -qq || return 1
+               "$as" "$pm" update -qq || return 1
                _LAPTOP_APT_FRESH=1
              fi
-             sudo apt-get install -y "$2" ;;
-    dnf)     sudo dnf install -y "$2" ;;
-    zypper)  sudo zypper --non-interactive install "$2" ;;
+             "$as" "$pm" install -y "$2" ;;
+    dnf)     "$as" "$pm" install -y "$2" ;;
+    zypper)  "$as" "$pm" --non-interactive install "$2" ;;
   esac
 }
 
@@ -226,7 +259,9 @@ laptop_fix() {
     return 1
   fi
   if ! laptop_tty; then
-    log "--fix asks before it uses sudo - run it in a terminal"
+    log "--fix installs with sudo, which needs a terminal to ask for your password"
+    log "  run this in a terminal:  cg check --fix"
+    log "  the access key does not need sudo: cg creds set, or Settings > AWS credentials"
     return 1
   fi
 
@@ -248,4 +283,195 @@ laptop_fix() {
     laptop_tailscale_up || log "the Tailscale sign-in did not finish"
   fi
   [[ -z $(laptop_missing) ]] && ! laptop_tailscale_down
+}
+
+# --- the AWS access key, as a command ----------------------------------------
+# A new laptop has no credentials, and everything on every screen is then
+# UNKNOWN - not empty. The banner used to say "Settings - or cg check --fix -
+# takes a new key", and neither was true: Settings had no field for it, and
+# --fix skipped the question for want of a terminal. This is what both now call.
+
+# creds_mask <key-id> - the last four, which is what AWS shows in the console.
+creds_mask() { local k=${1:-}; [[ -n $k ]] && printf '****%s' "${k: -4}"; }
+
+# creds_facts - cli|source|key_id|account|arn|error, one per line as k=v.
+# Each line is one fact so a caller never parses prose, and an absent fact is an
+# empty value rather than a missing line.
+creds_facts() {
+  local src="" kid="" acct="" arn="" err=""
+  if ! laptop_has aws; then
+    printf 'cli=no\nsource=\nkey_id=\naccount=\narn=\nerror=%s\n' \
+      "the AWS CLI is not installed - cg check --fix installs it"
+    return 0
+  fi
+  src=$(laptop_aws_source 2>/dev/null) || src=""
+  kid=$(aws configure get aws_access_key_id 2>/dev/null) || kid=""
+  # One free call, and the only one that can say whether a key actually works.
+  local who
+  if who=$(aws sts get-caller-identity --query 'join(`|`, [Account, Arn])' \
+             --output text 2>&1); then
+    acct=${who%%|*}; arn=${who##*|}
+  else
+    # The CLI's own words, flattened to one line: "InvalidClientTokenId" and
+    # "SignatureDoesNotMatch" mean different things to whoever has to fix it.
+    err=$(printf '%s' "$who" | tr '\n' ' ' | sed -E 's/  +/ /g; s/^ +| +$//g')
+    err=${err:-AWS rejected the credentials}
+  fi
+  printf 'cli=yes\nsource=%s\nkey_id=%s\naccount=%s\narn=%s\nerror=%s\n' \
+    "$src" "$(creds_mask "$kid")" "$acct" "$arn" "$err"
+}
+
+creds_json() {
+  creds_facts | python3 -I -c '
+import json, sys
+d = dict(l.split("=", 1) for l in sys.stdin.read().splitlines() if "=" in l)
+# valid is a THIRD state short of true/false everywhere else in this app: with
+# no CLI nothing was asked, so nothing was rejected either.
+valid = None if d.get("cli") == "no" else (not d.get("error"))
+print(json.dumps({
+    "cli":     d.get("cli") == "yes",
+    "source":  d.get("source") or None,
+    "key_id":  d.get("key_id") or None,
+    "account": d.get("account") or None,
+    "arn":     d.get("arn") or None,
+    "valid":   valid,
+    "error":   d.get("error") or None,
+}, indent=2))'
+}
+
+creds_show() {
+  local cli source key_id account arn error
+  while IFS='=' read -r k v; do
+    case $k in cli) cli=$v ;; source) source=$v ;; key_id) key_id=$v ;;
+               account) account=$v ;; arn) arn=$v ;; error) error=$v ;; esac
+  done < <(creds_facts)
+  say "aws credentials"
+  if [[ $cli == no ]]; then
+    log_as fail "aws cli          not installed  <- cg check --fix installs it"
+    return 1
+  fi
+  log_as "$([[ -n ${key_id:-} ]] && echo ok || echo warn)" \
+    "access key       ${key_id:-none configured}"
+  log_as info "from             ${source:-not known}"
+  if [[ -n ${error:-} ]]; then
+    log_as fail "accepted         no  <- $error"
+    log "  set a working key: cg creds set   (or the Set access key button in Settings)"
+    return 1
+  fi
+  log_as ok "accepted         yes"
+  log_as info "account          ${account:-unknown}"
+  log_as info "identity         ${arn:-unknown}"
+}
+
+# creds_set <region> - ask for an access key and keep it if AWS takes it.
+creds_set() {
+  local region=${1:-${REGION:-}}
+  laptop_has aws || die "the AWS CLI is not installed - run cg check --fix first"
+  cg_can_ask || die "cg creds set has to ask for the key - run it in a terminal, or use the app"
+  laptop_aws_keys "$region" || return 1
+  # Saying "saved" about a key AWS will not take is how a new laptop ends up
+  # looking fixed and reporting UNKNOWN everywhere.
+  local who
+  if ! who=$(aws sts get-caller-identity --query Account --output text 2>&1); then
+    log_as fail "AWS rejected that key: $(printf '%s' "$who" | tr '\n' ' ')"
+    log "  the key is still saved, so a typo can be corrected by running this again"
+    log "  check the key is Active: IAM > Users > Security credentials"
+    return 1
+  fi
+  log_as ok "credentials work (account $who)"
+}
+
+# --- the dependency list, as data ---------------------------------------------
+# One row per tool: what it is, whether it is here, what would install it, and
+# how to do it by hand. The app draws a page from this; `cg check` says the same
+# thing in prose.
+deps_json() {
+  local pm t miss; pm=$(laptop_pm 2>/dev/null) || pm=""
+  miss=$(laptop_missing)
+  local root why=""; root=$(laptop_root 2>/dev/null) || { root=""; why=$(laptop_root_why); }
+  {
+    for t in "${LAPTOP_TOOLS[@]}"; do
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$t" "$(laptop_label "$t")" \
+        "$(grep -qx "$t" <<<"$miss" && echo no || echo yes)" \
+        "$(laptop_why "$t")" \
+        "$([[ -n $pm ]] && laptop_plan "$pm" "$t")" \
+        "$(laptop_manual "$t")"
+    done
+  } | PM="$pm" ROOT="$root" WHY="$why" \
+      TS_SIGNED="$(laptop_has tailscale && { laptop_tailscale_down && echo no || echo yes; } || echo -)" \
+      python3 -I -c '
+import json, os, sys
+tools = []
+for line in sys.stdin.read().splitlines():
+    if not line.strip(): continue
+    tool, label, present, why, plan, manual = (line.split("\t") + [""] * 6)[:6]
+    tools.append({"tool": tool, "label": label, "present": present == "yes",
+                  "why": why or None, "plan": plan or None, "manual": manual or None})
+g = os.environ.get
+ts = g("TS_SIGNED")
+print(json.dumps({
+  "tools": tools,
+  "package_manager": g("PM") or None,
+  # How this process would become root, and why it cannot when it cannot. The
+  # app needs this to know whether an Install button can do anything at all.
+  "root": g("ROOT") or None,
+  "root_blocked": g("WHY") or None,
+  # Installed but not signed in is its own state: nothing to install, and
+  # nothing works until someone signs in.
+  "tailscale_signed_in": None if ts == "-" else ts == "yes",
+}, indent=2))'
+}
+
+# What each tool is FOR. A list of names tells you nothing about which ones you
+# can live without, and the honest answer is that cg needs all of them.
+laptop_why() {
+  case $1 in
+    python3)   echo "renders every --json answer this app reads" ;;
+    ssh)       echo "every command cg runs on the box goes through it" ;;
+    curl)      echo "fetches the AWS CLI and Tailscale where there is no package" ;;
+    aws)       echo "the only thing that talks to AWS - without it nothing can be read" ;;
+    tailscale) echo "the private network the box joins; there is no public SSH port" ;;
+    moonlight) echo "the stream itself - this is what you play on" ;;
+    *)         echo "" ;;
+  esac
+}
+
+# deps_install [tool...] - install what is missing, or just the ones named.
+deps_install() {
+  local pm t want=("$@") miss rc=0
+  miss=$(laptop_missing)
+  if [[ -z $miss ]]; then
+    log_as ok "nothing to install - every tool cg needs is here"
+    # Installed but signed out is the other half of being ready.
+    laptop_tailscale_down || return 0
+    log "Tailscale is installed but not signed in"
+    laptop_tty || { log "  signing in needs a terminal:  sudo tailscale up"; return 1; }
+    laptop_tailscale_up || return 1
+    return 0
+  fi
+  if ! pm=$(laptop_pm); then
+    log "no supported package manager (pacman, apt, dnf, zypper) - install these by hand:"
+    for t in $miss; do log "  $(laptop_label "$t"): $(laptop_manual "$t")"; done
+    return 1
+  fi
+  (( ${#want[@]} )) || mapfile -t want <<<"$miss"
+  say "installing"
+  for t in "${want[@]}"; do
+    [[ -n $t ]] || continue
+    if ! grep -qx "$t" <<<"$miss"; then
+      log_as ok "$(laptop_label "$t") is already here"
+      continue
+    fi
+    log "installing $(laptop_label "$t") - $(laptop_plan "$pm" "$t")"
+    if laptop_install "$pm" "$t"; then
+      hash -r
+      log_as ok "$(laptop_label "$t") installed"
+    else
+      log_as fail "could not install $(laptop_label "$t")"
+      log "  by hand: $(laptop_manual "$t")"
+      rc=1
+    fi
+  done
+  return $rc
 }

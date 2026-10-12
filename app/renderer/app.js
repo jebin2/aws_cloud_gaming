@@ -30,7 +30,11 @@ const WRITES = new Set(['init', 'destroy', 'open']);
 // `clean` and `forget` delete from S3 for good. The main process draws the same
 // line in isReadOnly(); these two must not drift apart.
 const LIBRARY_WRITES = new Set(['push', 'pull', 'forget', 'clean', 'account']);
-const isWrite = cmd => WRITES.has(cmd[0]) || (cmd[0] === 'library' && LIBRARY_WRITES.has(cmd[1]));
+const isWrite = cmd => WRITES.has(cmd[0]) || (cmd[0] === 'library' && LIBRARY_WRITES.has(cmd[1]))
+  // Same line as isReadOnly() in the main process, for the same reason: `creds`
+  // is a read that runs on every refresh, `creds set` writes a credentials file.
+  || (cmd[0] === 'creds' && cmd[1] === 'set')
+  || (cmd[0] === 'deps' && cmd[1] === 'install');
 const writing = () => [...jobs.values()].some(j => isWrite(j.cmd));
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
@@ -265,9 +269,20 @@ function paintStatus(s) {
   const credErr = s.error && s.error.credentials;
   $('banner').hidden = !credErr;
   if (credErr) {
-    $('banner-title').textContent = 'AWS rejected these credentials';
+    // A laptop with no AWS CLI used to read "AWS rejected these credentials",
+    // which sends you off to re-create a key that was never the problem. cg
+    // says which of the two it is; the button then does that one thing.
+    const noCli = s.error.cause === 'no-cli';
+    $('banner-title').textContent = noCli
+      ? 'The AWS CLI is not installed' : 'AWS rejected these credentials';
     $('banner-body').textContent = `${s.error.credentials} Your games are in S3; nothing here can see `
-      + 'them until this is fixed. Settings - or cg check --fix - takes a new key.';
+      + (noCli ? 'them until it is installed - the Dependencies page does that.'
+               : 'them until this is fixed. Settings has the same button.');
+    // Both causes have somewhere to go: a missing CLI is the Dependencies
+    // page's business, a dead key is this one's.
+    $('banner-fix').hidden = false;
+    $('banner-fix-label').textContent = noCli ? 'Open Dependencies' : 'Set AWS key';
+    $('banner-fix').onclick = () => noCli ? goView('deps') : setCreds();
     $('arch-size').textContent = 'unknown';
     $('arch-objects').textContent = '—';
     $('arch-cost').textContent = '—';
@@ -1031,6 +1046,131 @@ const LABEL = {
   EMAIL_ALERTS: 'billing alerts to', GAME_RES: 'stream resolution',
   GAME_FPS: 'stream fps', GAME_BITRATE_KBPS: 'stream bitrate (kbps)',
 };
+
+// --- Dependencies -----------------------------------------------------------
+// The tools cg needs on this laptop. It exists because a new laptop reports
+// UNKNOWN everywhere and the reason is six lines down in a preflight report:
+// the AWS CLI is not installed, so nothing can be read, so every screen says
+// nothing. This page says which tool, what it is for, and installs it.
+let depsNow = null;
+function paintDeps(d) {
+  depsNow = d;
+  const tools = d.tools || [];
+  const missing = tools.filter(x => !x.present);
+  const signedOut = d.tailscale_signed_in === false;
+
+  const ready = $('d-ready');
+  if (!missing.length && !signedOut) {
+    ready.className = 'pill pill-ok';
+    ready.textContent = 'everything cg needs is here';
+  } else {
+    ready.className = 'pill pill-bad';
+    ready.textContent = missing.length
+      ? `${missing.length} of ${tools.length} missing`
+      : 'Tailscale is not signed in';
+  }
+  $('d-pm').textContent = d.package_manager
+    ? `installs with ${d.package_manager}`
+    : 'no supported package manager - these go in by hand';
+
+  // Say whether an Install button can do anything BEFORE it is pressed.
+  $('d-root').textContent = d.root === 'sudo'
+    ? 'installing uses sudo in this terminal'
+    : d.root === 'pkexec'
+    ? 'installing asks for your password in a desktop dialog (polkit)'
+    : `installing is not possible from here: ${d.root_blocked || 'no way to become root'}`;
+
+  const canInstall = Boolean(d.package_manager && d.root);
+  $('d-install-all').hidden = !missing.length || !canInstall;
+  $('d-install-all-label').textContent = `Install ${missing.length} missing`;
+
+  const table = $('d-rows');
+  table.textContent = '';
+  const head = table.insertRow();
+  for (const h of ['TOOL', 'WHAT IT IS FOR', 'STATE', '']) {
+    const th = document.createElement('th');
+    th.textContent = h;
+    head.append(th);
+  }
+  for (const x of tools) {
+    const tr = table.insertRow();
+    tr.className = 'group';
+    tr.insertCell().textContent = x.label;
+    const why = tr.insertCell();
+    why.className = 'city whitespace-normal';
+    why.textContent = x.why || '';
+    const st = tr.insertCell();
+    st.textContent = x.present ? 'installed' : 'missing';
+    st.className = x.present ? 'city' : 'text-error';
+    const act = tr.insertCell();
+    if (!x.present) {
+      if (canInstall) {
+        const b = document.createElement('button');
+        b.className = 'btn';
+        b.textContent = 'Install';
+        b.onclick = () => installDeps([x.tool]);
+        act.append(b);
+      } else {
+        // Nothing can be pressed, so hand over the command instead.
+        act.className = 'city whitespace-normal';
+        act.textContent = x.manual || '';
+      }
+    }
+  }
+  // Installed but signed out: there is nothing to install, and nothing works.
+  const note = $('d-log-note');
+  note.textContent = signedOut
+    ? 'Tailscale is installed but not signed in. In a terminal:  sudo tailscale up'
+    : 'Whatever the package manager says, as it says it.';
+}
+
+function installDeps(tools) {
+  $('d-log').hidden = false;
+  $('d-log').textContent = 'running\u2026';
+  return runCg(['deps', 'install', ...tools], { collect: 'd-log', age: 'age-deps' });
+}
+$('d-install-all').onclick = () => installDeps([]);
+
+// The AWS access key: three states, and the third is why this card exists at
+// all. No CLI is not a rejected key, and a rejected key is not an absent one -
+// a new laptop hits the first and used to be told the second.
+function paintCreds(c) {
+  const state = $('creds-state'), detail = $('creds-detail'), btn = $('creds-set');
+  btn.hidden = false;
+  if (!c.cli) {
+    state.textContent = 'the AWS CLI is not installed';
+    state.className = 'font-code-md text-code-md text-error mt-space-sm';
+    detail.textContent = 'Nothing can be read from AWS until it is. The Dependencies page '
+      + 'installs it; then this card can take a key.';
+    btn.textContent = 'Open Dependencies';
+    btn.onclick = () => goView('deps');
+    return;
+  }
+  btn.textContent = 'Set access key';
+  btn.onclick = setCreds;
+  if (c.valid) {
+    state.textContent = `${c.key_id || 'a key'} works`;
+    state.className = 'font-code-md text-code-md text-on-surface mt-space-sm';
+    // The account is the thing worth seeing on a new laptop: a key that works
+    // for the WRONG account reads as "fine" everywhere else in the app.
+    detail.textContent = [c.account && `account ${c.account}`, c.arn, c.source && `from ${c.source}`]
+      .filter(Boolean).join('  \u00b7  ');
+    return;
+  }
+  state.textContent = c.key_id ? `${c.key_id} was rejected` : 'no access key is configured';
+  state.className = 'font-code-md text-code-md text-error mt-space-sm';
+  detail.textContent = c.error || 'AWS would not accept it.';
+}
+
+// cg asks for the two halves of the key as events; the dialog answers them, and
+// the secret one renders as a password field. Nothing is typed into the app's
+// own storage - cg writes ~/.aws/credentials.
+function setCreds() {
+  // No view jump: this is two questions in a modal, not a build. It counts as a
+  // write, so every screen - this card and the banner among them - re-reads
+  // when it finishes.
+  return runCg(['creds', 'set']);
+}
 
 // "1" means nothing to a person: a choice shows what it chose.
 const CHOICE_LABEL = {
@@ -1868,13 +2008,14 @@ window.cg.onEvent(({ id, event }) => {
     // lines below and rewrites job-line, so anything written now is wiped in the
     // same tick. A failing painter was therefore completely silent - the screen
     // stayed empty and the only clue was that nothing ever appeared.
-    let failure = null;
-    if (job.json && event.rc === 0) {
+    let failure = null, painted = null;
+    if (job.json && job.out.length) {
       try {
         const data = JSON.parse(job.out.join('\n'));
+        painted = data;
         const paint = { cost: paintCost, library: paintLibrary, guards: paintGuards,
                         config: paintConfig, status: paintStatus, machines: paintMachines,
-                        sweep: paintSweep }[job.json];
+                        sweep: paintSweep, creds: paintCreds, deps: paintDeps }[job.json];
         if (!paint) throw new Error(`no painter for ${job.json}`);
         paint(data);
       } catch (err) {
@@ -1893,6 +2034,10 @@ window.cg.onEvent(({ id, event }) => {
       if (event.rc !== 0 || failure) {
         readFailures.set(job.json, failure ? failure
           : job.err ? `cg ${job.cmd[0]} could not run: ${job.err}`
+          // A read that answered WITH its reason has already said it on the
+          // screen it belongs to; repeating "exit 1" in the header adds a
+          // number and takes away the reason.
+          : painted && painted.error ? `cg ${job.cmd[0]}: ${painted.error}`
           : `cg ${job.cmd[0]} failed (exit ${event.rc})`);
       } else {
         readFailures.delete(job.json);       // it worked this time
@@ -1931,13 +2076,14 @@ const NEEDS = {
   // machines too: the instance-type row is a picker, and its options are
   // whatever this region rents - see editSetting.
   settings:  [[['config', '--json'], 'config'], [['machines', '--json'], 'machines'],
-              [['sweep', '--cached', '--json'], 'sweep']],
+              [['sweep', '--cached', '--json'], 'sweep'], [['creds', '--json'], 'creds']],
   // Build reads status too: if a box is already up there is nothing to build,
   // and its own Refresh must be able to find that out.
   build:     [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status'],
               [['machines', '--json'], 'machines'], [['sweep', '--cached', '--json'], 'sweep']],
   library:   [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status']],
   guards:    [[['watcher', '--json'], 'guards']],
+  deps:      [[['deps', '--json'], 'deps']],
 };
 const loaded = new Set();
 
@@ -1962,6 +2108,12 @@ const ALL_READS = [
   // The REMEMBERED scan, never a fresh one: a scan takes 90 seconds and an
   // opening window must not wait on it. Rescanning is a button.
   [['sweep', '--cached', '--json'], 'sweep'],
+  // Local and free: aws configure reads a file, and sts get-caller-identity
+  // costs nothing. It is in the opening set because it is the one read that can
+  // explain why every other one came back unknown.
+  [['creds', '--json'], 'creds'],
+  // Six `command -v` checks: nothing is installed by reading this.
+  [['deps', '--json'], 'deps'],
 ];
 function refreshAll() {
   for (const v of Object.keys(NEEDS)) loaded.add(v);

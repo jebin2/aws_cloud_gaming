@@ -30,9 +30,16 @@ const ENV_ALLOWED = new Set(['GAME_APPS']);
 // `config set` only writes .env locally - it cannot collide with a build. Left
 // out, it counted as a write and was refused while the other reads ran, so the
 // Settings screen stayed empty until someone pressed Refresh.
-const READ_ONLY = new Set(['status', 'watcher', 'library', 'cost', 'check', 'ping', 'games', 'config', 'machines', 'regions', 'sweep']);
+const READ_ONLY = new Set(['status', 'watcher', 'library', 'cost', 'check', 'ping', 'games', 'config', 'machines', 'regions', 'sweep', 'creds', 'deps']);
 const isReadOnly = args =>
-  READ_ONLY.has(args[0]) && !['push', 'pull', 'forget', 'clean', 'account'].includes(args[1] || '');
+  READ_ONLY.has(args[0]) && !['push', 'pull', 'forget', 'clean', 'account'].includes(args[1] || '')
+  // `cg creds` reads a local file and makes one free call, so it rides along
+  // with the other opening reads. `cg creds set` asks for a secret and
+  // rewrites ~/.aws/credentials, so it waits its turn like any other write.
+  && !(args[0] === 'creds' && args[1] === 'set')
+  // `cg deps` is six command -v checks. `cg deps install` shells out to the
+  // package manager as root, so it waits like any other write.
+  && !(args[0] === 'deps' && args[1] === 'install');
 
 const jobs = new Map();          // id -> { id, args, child, readOnly }
 const anyMutating = () => [...jobs.values()].some(j => !j.readOnly);

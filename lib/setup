@@ -150,8 +150,22 @@ status_facts() {
   plan=$(aws freetier get-account-plan-state --region us-east-1 --query accountPlanType --output text 2>/dev/null || echo '?')
   credits=$(aws freetier get-account-plan-state --region us-east-1 --query accountPlanRemainingCredits.amount --output text 2>/dev/null || echo '?')
   f account.id "$acct"; f account.plan "$plan"; f account.credits "$credits"
-  [[ $acct == "NO CREDENTIALS" ]] && f error.credentials \
-    "AWS rejected these credentials - everything below is UNKNOWN, not empty. Check: aws sts get-caller-identity"
+  # Why the cause and not just the sentence: a laptop with no AWS CLI failed
+  # this check exactly like a laptop with a dead key, and the app said "AWS
+  # rejected these credentials" about a key AWS had never been shown. On a new
+  # laptop that is the first thing you read, and it sends you to re-create a key
+  # that was fine.
+  if [[ $acct == "NO CREDENTIALS" ]]; then
+    if ! command -v aws >/dev/null 2>&1; then
+      f error.cause no-cli
+      f error.credentials \
+        "The AWS CLI is not installed, so nothing here could be read - everything below is UNKNOWN, not empty."
+    else
+      f error.cause rejected
+      f error.credentials \
+        "AWS rejected these credentials - everything below is UNKNOWN, not empty. Check: aws sts get-caller-identity"
+    fi
+  fi
 
   # One call answers the quota question and describes the machine the Build
   # screen shows - vCPU, memory, GPU - so nothing about the type is hardcoded.
@@ -327,7 +341,9 @@ status() { # status [--json]
     echo "CREDENTIALS"
     printf '  %s\n' "${F[error.credentials]}"
     printf '  Your games are in S3 and nothing here can see them right now.\n'
-    printf '  Fix the credentials (cg check --fix asks for a key), then run this again.\n'
+    printf '  %s, then run this again.\n' \
+      "$([[ ${F[error.cause]:-} == no-cli ]] && echo 'Install the AWS CLI (cg check --fix)' \
+                                             || echo 'Set a working key (cg creds set)')"
   fi
   echo
   echo "RESOURCES in $REGION"
@@ -1019,7 +1035,29 @@ case "${1:-}" in
            case "${2:-}" in
              "")    ;;
              --fix) FIX=1 ;;
-             *) echo "usage: setup [check [--fix]|status|cost [--daily]|clean|rebuild|destroy]" >&2; exit 1 ;;
+             *) echo "usage: setup [check [--fix]|deps [install]|creds [set]|status|cost [--daily]|clean|rebuild|destroy]" >&2; exit 1 ;;
+           esac ;;
+  # Credentials are a laptop matter, and the only mode that works BEFORE the
+  # preflight below can run - a laptop with no key cannot get past it.
+  # The laptop's own tools, listed and installed. Like creds, it must work
+  # BEFORE the preflight below - a laptop with no aws cannot get past it.
+  deps)    shift
+           # shellcheck source=lib/laptop.sh
+           source lib/laptop.sh
+           case "${1:-status}" in
+             --json)     deps_json; exit 0 ;;
+             status|"")   laptop_report 0; exit $? ;;
+             install)    shift; deps_install "$@"; exit $? ;;
+             *) echo "usage: setup deps [status|install [tool...]|--json]" >&2; exit 1 ;;
+           esac ;;
+  creds)   shift
+           # shellcheck source=lib/laptop.sh
+           source lib/laptop.sh
+           case "${1:-status}" in
+             --json)        creds_json; exit 0 ;;
+             status|"")     creds_show; exit $? ;;
+             set)           creds_set "$REGION"; exit $? ;;
+             *) echo "usage: setup creds [status|set|--json]" >&2; exit 1 ;;
            esac ;;
   status)  shift; status "$@"; exit 0 ;;
   cost)    shift; cost "$@"; exit 0 ;;
@@ -1027,7 +1065,7 @@ case "${1:-}" in
   rebuild) rebuild ;;
   destroy) destroy_all; exit 0 ;;
   "")      ;;
-  *) echo "usage: setup [check [--fix]|status|cost [--daily]|clean|rebuild|destroy]" >&2; exit 1 ;;
+  *) echo "usage: setup [check [--fix]|deps [install]|creds [set]|status|cost [--daily]|clean|rebuild|destroy]" >&2; exit 1 ;;
 esac
 
 say "preflight"
@@ -1098,7 +1136,10 @@ if ! aws sts get-caller-identity >/dev/null 2>&1; then
   fi
 
   # --fix: the access key is the one thing it cannot install, so ask for it.
-  if (( FIX )) && ! aws sts get-caller-identity >/dev/null 2>&1 && laptop_tty; then
+  # cg_can_ask, not laptop_tty: pasting a key needs someone to ask, not a
+  # terminal - `aws configure set` writes a file and uses no sudo. Behind
+  # laptop_tty this was the one thing --fix skipped in the app.
+  if (( FIX )) && ! aws sts get-caller-identity >/dev/null 2>&1 && cg_can_ask; then
     laptop_aws_keys "$REGION" || true
   fi
 

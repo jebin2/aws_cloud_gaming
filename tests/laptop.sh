@@ -126,8 +126,9 @@ fake pacman "pkg=\${@: -1}; $(provides)"
 r=$(run 'laptop_fix; echo "rc=$?"; laptop_missing' y)
 contains "shows the plan first"              "$r" "install AWS CLI v2 - sudo pacman -S aws-cli-v2"
 contains "  including the sign-in"           "$r" "sign this laptop in to Tailscale"
-contains "installs the AWS CLI"              "$(cat "$T/log")" "sudo pacman -S --needed --noconfirm aws-cli-v2"
-contains "  and Tailscale"                   "$(cat "$T/log")" "sudo pacman -S --needed --noconfirm tailscale"
+logged() { grep -cE "$1" "$T/log"; }
+check    "installs the AWS CLI"              "$(logged '^sudo .*/pacman -S --needed --noconfirm aws-cli-v2$')" "1"
+check    "  and Tailscale"                   "$(logged '^sudo .*/pacman -S --needed --noconfirm tailscale$')" "1"
 contains "  then signs in"                   "$(cat "$T/log")" "sudo tailscale up"
 contains "done, and nothing left"            "$r" "rc=0"
 check    "  by the check itself"             "$(sed -n '$p' <<<"$r")" "rc=0"
@@ -140,7 +141,11 @@ lacks    "  no install ran"                  "$(cat "$T/log")" "pacman -S"
 contains "  and it fails"                    "$r" "rc=1"
 fresh python3 ssh curl moonlight pacman
 r=$(run 'laptop_tty() { false; }; laptop_fix; echo "rc=$?"')
-contains "no terminal: refuses"              "$r" "run it in a terminal"
+contains "no terminal: refuses"              "$r" "needs a terminal to ask for your password"
+contains "  naming the command"              "$r" "cg check --fix"
+# The key is the exception, and saying so here is the whole point: it needs
+# neither sudo nor a terminal, and it was the one thing --fix used to skip.
+contains "  but says the key is different"   "$r" "cg creds set"
 lacks    "  before any sudo"                 "$(cat "$T/log")" "sudo"
 
 echo "6. an install that fails is said, and the rest still install"
@@ -175,7 +180,7 @@ contains "  with the profile note"           "$r" "not on your PATH"
 contains "Tailscale: its install script"     "$(cat "$T/log")" "curl -fsSL https://tailscale.com/install.sh"
 contains "Moonlight: the package"            "$(cat "$T/log")" "apt-get install -y moonlight-qt"
 contains "python3: the package"              "$(cat "$T/log")" "apt-get install -y python3"
-check    "apt-get update runs once"          "$(grep -c '^sudo apt-get update' "$T/log")" "1"
+check    "apt-get update runs once"          "$(grep -cE '^sudo .*/apt-get update' "$T/log")" "1"
 contains "done"                              "$r" "rc=0"
 
 echo "8. --fix with no package manager: what to get, by hand"

@@ -211,6 +211,11 @@ cg_ask() { # cg_ask <id> <prompt> [default] [choices] -> the answer on stdout
   printf '%s' "${a:-$def}"
 }
 
+# Is there anyone to ask? A terminal, or the app - under CG_JSON a question is
+# an event and the answer arrives on stdin. This is NOT the same question as
+# "is there a terminal", which is what sudo needs: see laptop_tty.
+cg_can_ask() { [[ -t 0 ]] || cg_json; }
+
 cg_ask_secret() { # cg_ask_secret <id> <prompt> - hidden from the screen, never echoed
   local a
   if cg_json; then

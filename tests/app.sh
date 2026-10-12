@@ -91,14 +91,21 @@ contains "  a write waits for everything" "$main" "[...jobs.values()][0]"
 contains "  and a read waits only for a write" "$main" "find(j => !j.readOnly)"
 # config was missing from that set, so the Settings screen was refused at startup
 # while the other reads ran, and stayed empty.
-contains "  config counts as a read"     "$main" "'games', 'config'"
-# `machines` reads describe-* and the Pricing API: free, and it launches nothing,
-# so the picker must not be refused while the other reads are in flight.
-contains "  so does machines"             "$main" "'config', 'machines'"
-# `regions` is one describe-regions call and `sweep` is a pile of free describe-*
-# and Pricing reads. Both launch nothing, and the region picker is refused at
-# startup if they are not here - the same way the Settings screen once was.
-contains "  and so do regions and sweep"  "$main" "'regions', 'sweep']"
+#
+# Derived from the set itself, not typed out here. These used to be substring
+# matches on "'regions', 'sweep']" - they asserted the ORDER and the closing
+# bracket, so adding one name to the end failed two suites while saying nothing
+# about what was actually wrong.
+RO=$(sed -n 's/^const READ_ONLY = new Set(\[\(.*\)\]);$/\1/p' app/main/index.js | tr -d "' ")
+check "  every free read is classified as one" \
+      "$(for n in status watcher library cost check ping games config machines regions sweep creds; do
+           [[ ,$RO, == *",$n,"* ]] || echo "MISSING:$n"; done)" ""
+# And the two that are not: a build and a destroy take locks, so they wait.
+check "  and a build and a destroy are not" \
+      "$(for n in init destroy; do [[ ,$RO, == *",$n,"* ]] && echo "WRONGLY-READ:$n"; done)" ""
+# The access key is the exception inside the exception: reading where it comes
+# from is free, and writing a new one is not something to run beside a build.
+contains "  cg creds set is a write"      "$main" "args[0] === 'creds' && args[1] === 'set'"
 contains "quitting mid-run asks first"   "$main" "before-quit"
 contains "the cost refresh carries its price" "$(tr -s ' ' < app/renderer/index.html)" 'id="refresh-cost"'
 contains "  shown only on the cost screen" "$js" "refresh-cost').hidden = view !== 'cost'"
