@@ -580,6 +580,151 @@ tskey_check() { # tskey_check <token> -> prints ok|rejected|unreachable <detail>
   esac
 }
 
+# tskey_mint <host> - mints a pre-auth key into TSKEY_MINT_KEY.
+#
+# Not printed on stdout: the caller needs the HTTP code and Tailscale's message
+# when it fails, and a command substitution is a subshell, where anything this
+# sets about the failure would be thrown away with it.
+#
+# The box cannot use the API token to join: `tailscale up` takes a node
+# registration key and nothing else. It should not have the API token either -
+# that key travels in EC2 user-data, which is readable from inside the instance
+# and by anyone holding ec2:DescribeInstanceAttribute. An auth key there can
+# register one machine; the API token there could delete every node on the
+# tailnet.
+#
+# So the token stays on the laptop and mints what the box needs. The key is
+# printed on stdout and logged nowhere.
+tskey_mint() {
+  local token=${TAILSCALE_API_KEY:-} host=${1:-gamevps} out code body
+  TSKEY_MINT_CODE="" TSKEY_MINT_ERR="" TSKEY_MINT_KEY=""
+  [[ -n $token ]] || return 1
+  # reusable:true   - the key is kept and checked before each build, so a
+  #                   rebuild uses the same one until it expires
+  # ephemeral:false - an ephemeral node is purged when it goes offline, and this
+  #                   box goes offline every time the watchdog stops it
+  # preauthorized   - nobody is at the box to approve it
+  out=$(curl -sS --max-time 20 -w $'\n%{http_code}' \
+        -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+        -d "{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":false,\"preauthorized\":true,\"tags\":[]}}},\"expirySeconds\":3600,\"description\":\"cg $host\"}" \
+        "$TS_API/tailnet/-/keys" 2>/dev/null) || { TSKEY_MINT_CODE=000; return 1; }
+  code=$(tail -n1 <<<"$out"); body=$(sed '$d' <<<"$out")
+  TSKEY_MINT_CODE=$code
+  case $code in
+    2*) ;;
+    *)  # Tailscale says why in the body - usually that the tailnet's ACLs want
+        # a tag on any key that creates devices.
+        TSKEY_MINT_ERR=$(printf '%s' "$body" | tr '\n' ' ' | sed -E 's/  +/ /g' | cut -c1-300)
+        return 1 ;;
+  esac
+  TSKEY_MINT_KEY=$(printf '%s' "$body" | python3 -I -c '
+import json, sys
+try:    k = json.load(sys.stdin).get("key", "")
+except Exception: k = ""
+if not k: sys.exit(1)
+sys.stdout.write(k)') || { TSKEY_MINT_ERR="the API answered without a key"; return 1; }
+  [[ -n $TSKEY_MINT_KEY ]]
+}
+
+# --- keeping that key alive ---------------------------------------------------
+# A stored key is not a valid key. They expire, they can be revoked from the
+# admin console, and a build that only finds out at boot fails after the
+# instance is already running and billing. With a token in hand this is
+# answerable before anything launches.
+
+# tskey_auth_id <key> - the key's id, which is what the API knows it by.
+# A key reads tskey-auth-<id>-<secret>; the API's "id" field is that middle part.
+tskey_auth_id() {
+  local k=${1:-}
+  [[ -n $k ]] || return 0
+  k=${k#tskey-}
+  # The kind, when there is one: auth, api, client. What follows is the id.
+  case $k in auth-*|api-*|client-*) k=${k#*-} ;; esac
+  printf '%s' "${k%%-*}"
+}
+
+# tskey_auth_check <key> -> ok | expired | gone | unknown
+# unknown means the API could not be asked, which is NOT a reason to throw a
+# key away: a flat network would otherwise delete a perfectly good key and then
+# fail to mint its replacement.
+tskey_auth_check() {
+  local key=${1:-} token=${TAILSCALE_API_KEY:-} id out code body
+  [[ -n $key && -n $token ]] || { echo unknown; return; }
+  id=$(tskey_auth_id "$key")
+  [[ -n $id ]] || { echo unknown; return; }
+  out=$(curl -sS --max-time 20 -w $'\n%{http_code}' \
+        -H "Authorization: Bearer $token" "$TS_API/tailnet/-/keys/$id" 2>/dev/null) \
+    || { echo unknown; return; }
+  code=$(tail -n1 <<<"$out"); body=$(sed '$d' <<<"$out")
+  case $code in
+    404)     echo gone; return ;;
+    401|403) echo unknown; return ;;    # the TOKEN is the problem, not the key
+    2*)      ;;
+    *)       echo unknown; return ;;
+  esac
+  printf '%s' "$body" | python3 -I -c '
+import datetime, json, sys
+try:    d = json.load(sys.stdin)
+except Exception: print("unknown"); sys.exit()
+if d.get("invalid") or d.get("revoked"): print("expired"); sys.exit()
+exp = d.get("expires") or ""
+if not exp: print("ok"); sys.exit()
+try:
+    when = datetime.datetime.fromisoformat(exp.replace("Z", "+00:00"))
+except ValueError:
+    print("unknown"); sys.exit()
+now = datetime.datetime.now(datetime.timezone.utc)
+# An hour of margin: a key that dies during the build is a box that never
+# joins, which costs a rebuild rather than a retry.
+print("expired" if when <= now + datetime.timedelta(hours=1) else "ok")'
+}
+
+tskey_auth_delete() { # tskey_auth_delete <key> - tidy up the dead one
+  local key=${1:-} token=${TAILSCALE_API_KEY:-} id
+  [[ -n $key && -n $token ]] || return 1
+  id=$(tskey_auth_id "$key") || return 1
+  [[ -n $id ]] || return 1
+  curl -sS --max-time 20 -X DELETE -o /dev/null \
+    -H "Authorization: Bearer $token" "$TS_API/tailnet/-/keys/$id" 2>/dev/null
+}
+
+# tskey_auth_ensure <host> - a usable pre-auth key on stdout, or 1 to say "ask".
+#
+# Use what is stored if it is still good; replace it when it is not; mint one
+# when there is none. Everything it decides it says out loud, because "the
+# build asked me for a key again" needs a reason attached.
+tskey_auth_ensure() {
+  local host=${1:-gamevps} stored=${TAILSCALE_AUTH_KEY:-${GAME_TS_AUTHKEY:-}} state fresh
+  if [[ -n $stored ]]; then
+    state=$(tskey_auth_check "$stored")
+    case $state in
+      ok)      log_as ok "the stored Tailscale auth key is still valid"
+               printf '%s' "$stored"; return 0 ;;
+      unknown) # No token, or the API could not be reached. The key may be fine
+               # and there is no way to know; using it is the only option that
+               # can succeed.
+               printf '%s' "$stored"; return 0 ;;
+      expired) log_as warn "the stored Tailscale auth key has expired - replacing it" ;;
+      gone)    log_as warn "the stored Tailscale auth key no longer exists - replacing it" ;;
+    esac
+  fi
+  [[ -n ${TAILSCALE_API_KEY:-} ]] || return 1
+  tskey_mint "$host" || {
+    log_as warn "could not mint an auth key (${TSKEY_MINT_CODE:-no answer})"
+    [[ -n ${TSKEY_MINT_ERR:-} ]] && log "  $TSKEY_MINT_ERR"
+    # Tags are the usual reason, and it is not something cg can guess at.
+    log "  make one yourself: https://login.tailscale.com/admin/settings/keys"
+    return 1
+  }
+  fresh=$TSKEY_MINT_KEY
+  # Only after a replacement exists: deleting first and failing to mint would
+  # leave the laptop with nothing at all.
+  [[ -n $stored ]] && { tskey_auth_delete "$stored" && log "  the old key was deleted"; }
+  cg_env_set TAILSCALE_AUTH_KEY "$fresh" || { log_as fail "could not write .env"; return 1; }
+  log_as ok "minted a Tailscale auth key from your API token, and saved it"
+  printf '%s' "$fresh"
+}
+
 # tskey_facts - state|detail|signed_in|node, one per line as k=v.
 tskey_facts() {
   local token=${TAILSCALE_API_KEY:-} state detail signed node
@@ -593,8 +738,11 @@ except Exception: pass' 2>/dev/null) || node=""
   else
     signed="-"
   fi
-  printf 'state=%s\ndetail=%s\nsigned_in=%s\nnode=%s\n' \
-    "$state" "${detail:-}" "$signed" "${node:-}"
+  # Whether a pre-auth key is sitting in .env, which is what decides whether a
+  # build asks for one. The key itself is never reported.
+  printf 'state=%s\ndetail=%s\nsigned_in=%s\nnode=%s\nauth_stored=%s\n' \
+    "$state" "${detail:-}" "$signed" "${node:-}" \
+    "$([[ -n ${TAILSCALE_AUTH_KEY:-${GAME_TS_AUTHKEY:-}} ]] && echo yes || echo no)"
 }
 
 tskey_json() {
@@ -613,6 +761,10 @@ print(json.dumps({
     "detail":  d.get("detail") or None,
     "signed_in": None if signed in ("-", "", None) else signed == "yes",
     "node":    d.get("node") or None,
+    # The box needs a key of its own to join the tailnet. Either one is stored
+    # in .env, or a working token mints one per build, or the build has to ask.
+    "auth_key_stored": d.get("auth_stored") == "yes",
+    "can_mint": state == "ok",
 }, indent=2))'
 }
 
@@ -633,6 +785,13 @@ tskey_show() {
     rejected)    log_as fail "api token        rejected (${detail:-}) <- https://login.tailscale.com/admin/settings/keys"; return 1 ;;
     unreachable) log_as warn "api token        set, but api.tailscale.com did not answer (${detail:-})" ;;
   esac
+  if [[ -n ${TAILSCALE_AUTH_KEY:-${GAME_TS_AUTHKEY:-}} ]]; then
+    log_as ok   "box auth key     stored in .env"
+  elif [[ ${state:-} == ok ]]; then
+    log_as ok   "box auth key     minted from the token at each build"
+  else
+    log_as warn "box auth key     none - the next build will ask for one"
+  fi
 }
 
 # tskey_set - ask for a token, check it, and only then write it to .env.

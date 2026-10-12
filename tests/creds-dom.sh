@@ -161,10 +161,11 @@ cat > "$T/r/probe.js" <<'PROBE'
     const tsRead = label => {
       out.push(label + ' TS | ' + document.getElementById('tskey-state').textContent.replace(/\s+/g, ' ').trim()
                + ' // ' + document.getElementById('tskey-detail').textContent.replace(/\s+/g, ' ').trim()
-               + ' // ' + document.getElementById('tskey-set').textContent.trim());
+               + ' // ' + document.getElementById('tskey-set').textContent.trim()
+               + ' // ' + document.getElementById('tskey-auth').textContent.replace(/\s+/g, ' ').trim());
     };
     paintTskey({ present: false, valid: null, state: 'absent', detail: null,
-                 signed_in: true, node: 'laptop' });
+                 signed_in: true, node: 'laptop', auth_key_stored: false, can_mint: false });
     tsRead('TSNONE');
     paintTskey({ present: true, valid: false, state: 'rejected', detail: '401',
                  signed_in: true, node: 'laptop' });
@@ -173,8 +174,11 @@ cat > "$T/r/probe.js" <<'PROBE'
                  signed_in: false, node: null });
     tsRead('TSDOWN');
     paintTskey({ present: true, valid: true, state: 'ok', detail: null,
-                 signed_in: true, node: 'laptop' });
+                 signed_in: true, node: 'laptop', auth_key_stored: false, can_mint: true });
     tsRead('TSOK');
+    paintTskey({ present: true, valid: true, state: 'ok', detail: null,
+                 signed_in: true, node: 'laptop', auth_key_stored: true, can_mint: true });
+    tsRead('TSKEPT');
 
     const tsdlg = document.getElementById('tsdlg');
     document.getElementById('tskey-set').click();
@@ -415,6 +419,15 @@ contains "unreachable is not rejected"    "$(row 'TSDOWN TS')" "did not answer"
 lacks    "  and is not called rejected"   "$(row 'TSDOWN TS')" "rejected"
 contains "  signed out is said plainly"   "$(row 'TSDOWN TS')" "not signed in"
 contains "a working token"                "$(row 'TSOK TS')"   "API token works"
+
+echo "4c2. the box's own key, which is not the token"
+# `tailscale up` takes a node registration key and will not take the API token,
+# and the token must not travel in user-data where the auth key has to live. So
+# the card says where the box's key comes from, which is what decides whether a
+# build stops to ask for one.
+contains "no token: the build will ask"  "$(row 'TSNONE TS')"  "the next build will ask for one"
+contains "a token mints it"              "$(row 'TSOK TS')"    "minted from this token at the next build"
+contains "a stored key is checked"       "$(row 'TSKEPT TS')"  "stored, and checked before each build"
 
 echo "4d. the token form, like the key form"
 contains "it opens, as a password field"  "$(row 'TSFORM OPEN')" "true type=password"

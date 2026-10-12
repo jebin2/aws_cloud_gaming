@@ -1273,6 +1273,15 @@ function paintTskey(ts) {
   state.className = 'font-code-md text-code-md mt-space-sm '
     + (ts.signed_in === true ? 'text-on-surface' : 'text-error');
   detail.textContent = token;
+  // The box's own key. It is not the token and cannot be: `tailscale up` takes
+  // a node registration key, and the token has no business in EC2 user-data.
+  // With a token here, nobody has to paste one.
+  $('tskey-auth').textContent =
+      ts.auth_key_stored && ts.can_mint
+        ? "the box's auth key is stored, and checked before each build"
+    : ts.auth_key_stored ? "the box's auth key is stored in .env"
+    : ts.can_mint        ? "the box's auth key is minted from this token at the next build"
+    : 'no auth key for the box - the next build will ask for one';
   btn.textContent = ts.present ? 'Replace API token' : 'Set API token';
   btn.onclick = openTskey;
   // Signing in is root's business - systemctl, then `tailscale up` - which in a

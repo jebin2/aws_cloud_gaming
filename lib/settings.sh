@@ -101,6 +101,24 @@ settings_prompts() {
   : "${GAME_TS_AUTHKEY:=${TAILSCALE_AUTH_KEY:-}}"
   : "${GAME_ALERT_EMAIL:=${EMAIL_ALERTS:-}}"
 
+  # An expired key stored in .env used to be found out at BOOT: the instance is
+  # launched, billing, and never joins the tailnet. With a token it is
+  # answerable here, before anything starts.
+  if [[ -n $GAME_TS_AUTHKEY && -n ${TAILSCALE_API_KEY:-} ]] \
+     && declare -F tskey_auth_ensure >/dev/null; then
+    v=$(TAILSCALE_AUTH_KEY="$GAME_TS_AUTHKEY" tskey_auth_ensure "${GAME_TS_HOST:-gamevps}") \
+      && GAME_TS_AUTHKEY=$v
+  fi
+
+  # The box needs a key of its own - `tailscale up` takes a node registration
+  # key and not the API token, and the API token has no business travelling in
+  # EC2 user-data where an auth key has to live. But the TOKEN can make one, so
+  # with a token set there is nothing to type: keep the stored key while it is
+  # valid, replace it when it expires or is revoked, mint one when there is none.
+  if [[ -z $GAME_TS_AUTHKEY ]] && declare -F tskey_auth_ensure >/dev/null; then
+    v=$(tskey_auth_ensure "${GAME_TS_HOST:-gamevps}") && GAME_TS_AUTHKEY=$v
+  fi
+
   if [[ -z $GAME_TS_AUTHKEY ]]; then
     echo
     echo "A Tailscale pre-auth key is needed to join the box to your tailnet."
