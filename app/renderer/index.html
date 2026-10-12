@@ -880,20 +880,45 @@
   </menu>
 </dialog>
 
-<!-- Asking AWS for GPU quota. The ask is mechanical and free; the appeal after
-     the automatic refusal is a letter to a person, so it is drafted here and
-     sent by you. -->
-<dialog id="quota" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[560px] max-w-[52rem]">
-  <p class="font-code-md text-code-md" id="quota-title">Ask AWS for GPU quota</p>
-  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md" id="quota-note"></p>
-  <pre class="font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[38vh] overflow-auto" id="quota-log"></pre>
-  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
-    <button class="btn" id="quota-cancel">Close</button>
-    <button class="btn" id="quota-copy" hidden>Copy the appeal</button>
-    <button class="btn" id="quota-case" hidden>
+<!-- Asking AWS for GPU quota. One dialog, four states: pick a limit, see what
+     the case would say, create it, then live with the case that exists - which
+     looks the same whether this window made it or found it. -->
+<dialog id="quota" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[600px] max-w-[54rem]">
+  <div class="flex items-baseline justify-between gap-space-md">
+    <p class="font-code-md text-code-md" id="quota-title">Ask AWS for GPU quota</p>
+    <p class="font-code-sm text-code-sm text-outline" id="quota-region"></p>
+  </div>
+
+  <div class="flex items-center gap-space-sm mt-space-md">
+    <label class="font-code-sm text-code-sm text-outline" for="quota-kind">which limit?</label>
+    <select id="quota-kind"
+            class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-md text-code-md text-on-surface">
+      <option value="">pick one…</option>
+      <option value="ondemand">on demand - Running On-Demand G and VT</option>
+      <option value="spot">spot - All G and VT Spot Instance Requests</option>
+    </select>
+  </div>
+
+  <!-- Where the request stands, in AWS's own five states - which mean quite
+       different things, and "denied" least of all what it sounds like. -->
+  <p class="font-code-md text-code-md mt-space-md" id="quota-state"></p>
+  <p class="font-code-sm text-code-sm text-outline mt-0.5" id="quota-explain"></p>
+
+  <div class="flex flex-wrap items-center gap-space-sm mt-space-sm" id="quota-case-row" hidden>
+    <button class="btn" id="quota-case">
       <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the case
     </button>
-    <button class="btn btn-primary" id="quota-go">Ask AWS</button>
+    <button class="btn" id="quota-copy">Copy the appeal</button>
+    <span class="font-code-sm text-code-sm text-outline break-all" id="quota-case-url"></span>
+  </div>
+
+  <p class="font-code-sm text-code-sm text-outline mt-space-md" id="quota-pre-label" hidden></p>
+  <pre class="font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[34vh] overflow-auto" id="quota-log"></pre>
+
+  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+    <button class="btn" id="quota-cancel">Close</button>
+    <button class="btn" id="quota-refresh" hidden>Refresh</button>
+    <button class="btn btn-primary" id="quota-go" disabled>Confirm · create case</button>
   </menu>
 </dialog>
 

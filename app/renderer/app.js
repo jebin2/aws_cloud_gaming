@@ -1418,67 +1418,174 @@ function watchForSignInLink(text) {
 
 // Same shape as the AWS form, for the same reasons: one field, one Save, the
 // answer checked before it is believed, and the failure shown here.
-// Asking AWS for quota. The ask is mechanical and free; what gets it approved
-// is the appeal on the case it opens, which is a letter to a person - so this
-// drafts it, and sending it is yours. The Support API cannot post it anyway
-// without a Business plan.
-let quotaCase = null, quotaAppeal = '';
-function quotaLog(text) { $('quota-log').textContent = text; }
-async function openQuota(kind) {
-  // Which purchase model is short is decided by cg, not guessed here: both are
-  // separate quotas and either can be the one blocking a build.
-  const want = kind || (config || []).find(r => r.key === 'GAME_SPOT');
-  const spot = kind ? kind === 'spot'
-    : (want && (want.value || want.default) !== '0');
-  const which = spot ? 'spot' : 'ondemand';
-  quotaCase = null;
-  quotaAppeal = '';
-  $('quota-title').textContent = `Ask AWS for ${spot ? 'spot' : 'on demand'} GPU quota`;
-  $('quota-note').textContent = 'Free, and for exactly one box - never more. The first answer is '
-    + 'usually an automatic refusal; the appeal on that case is what gets approved, and it is '
-    + 'drafted here from this rig\u2019s own numbers.';
-  quotaLog('');
-  $('quota-copy').hidden = true;
-  $('quota-case').hidden = true;
-  $('quota-go').hidden = false;
-  $('quota-go').disabled = false;
-  $('quota-go').textContent = 'Ask AWS';
-  $('quota-go').onclick = async e => {
-    e.preventDefault();
-    $('quota-go').disabled = true;
-    $('quota-go').textContent = 'Asking\u2026';
-    quotaLog('asking\u2026');
-    const { rc, err } = await runCg(['quota', 'request', which], { wantRc: true });
-    const said = (err || '').trim() || (rc === 0 ? 'asked.' : `cg quota request exited ${rc}`);
-    $('quota-go').hidden = true;
-    // What cg SAID stays on screen. It used to be overwritten by the appeal a
-    // moment later, so a request that had genuinely been submitted looked like
-    // a wall of text to go and do something with by hand.
-    const appeal = rc === 0 ? await runCg(['quota', 'appeal', which], { capture: true }) : '';
-    quotaAppeal = (appeal || '').trim();
-    quotaLog(said + (quotaAppeal
-      ? '\n\n--- the appeal, for when the refusal arrives ---\n\n' + quotaAppeal : ''));
-    $('quota-copy').hidden = !quotaAppeal;
-    if (rc === 0) {
-      $('quota-note').textContent = 'Asked. AWS usually refuses within minutes - reopen the case '
-        + 'with the appeal below, and a human reviews it in two to four days.';
-    }
-    const idMatch = /displayId=(\d+)|case (\d+)/.exec(err || '');
-    quotaCase = idMatch ? (idMatch[1] || idMatch[2]) : null;
-    $('quota-case').hidden = !quotaCase;
-  };
-  $('quota').showModal();
+// Asking AWS for quota, as four states of one dialog.
+//
+// The ask is mechanical and free; what gets it approved is the appeal on the
+// case it opens, which is a letter to a person - so this drafts it and sending
+// it is yours. The Support API could not post it anyway without a Business
+// plan.
+//
+// AWS has five words for where a request stands and they mean quite different
+// things. DENIED in particular is not the end: every quota this account holds
+// was granted on appeal rather than on the first ask.
+const QUOTA_STATE = {
+  PENDING: ['filed, not yet routed',
+            'AWS has it. The case appears within a minute or two - Refresh to look again.'],
+  CASE_OPENED: ['case open',
+            'A case exists. The refusal usually arrives within minutes; reply to it with the '
+          + 'appeal below and a human reviews it, which takes two to four days.'],
+  DENIED: ['refused - this is normal, and not the end',
+            'Every quota this rig has was granted on appeal, not on the first ask. Reply on the '
+          + 'case with the text below: it is the detailed use case they asked for.'],
+  CASE_CLOSED: ['case closed',
+            'Closed without the quota being raised. A closed case cannot be appealed - create a '
+          + 'new request and appeal that one.'],
+  APPROVED: ['granted',
+            'It can take up to an hour to appear as the applied value. Refresh to check.'],
+};
+const QUOTA_LABEL = { ondemand: 'on demand', spot: 'spot' };
+let quotaNow = null, quotaKind = '', quotaAppeal = '', quotaCase = null;
+
+const quotaCaseUrl = id => `https://console.aws.amazon.com/support/home#/case/?displayId=${id}`;
+
+function quotaSay(state, explain, tone) {
+  $('quota-state').textContent = state;
+  $('quota-state').className = 'font-code-md text-code-md mt-space-md '
+    + (tone === 'bad' ? 'text-error' : tone === 'ok' ? 'text-on-surface' : 'text-on-surface-variant');
+  $('quota-explain').textContent = explain || '';
 }
+
+// One read answers everything the dialog shows: the applied value, whether it
+// covers a box, and where the last request stands.
+async function quotaRead() {
+  const out = await runCg(['quota', '--json'], { capture: true });
+  try { quotaNow = JSON.parse(out); } catch { quotaNow = null; }
+  $('quota-region').textContent = quotaNow ? quotaNow.region : '';
+  return quotaNow;
+}
+
+async function quotaRender() {
+  const kind = quotaKind;
+  $('quota-case-row').hidden = true;
+  $('quota-pre-label').hidden = true;
+  $('quota-log').textContent = '';
+  $('quota-refresh').hidden = !kind;
+  $('quota-go').hidden = false;
+  $('quota-go').disabled = true;
+  $('quota-go').textContent = 'Confirm \u00b7 create case';
+  if (!kind) {
+    quotaSay('', 'Pick one to see what it would ask for.');
+    return;
+  }
+  const q = (quotaNow || {})[kind];
+  if (!q) { quotaSay('could not read this quota', 'cg quota says more.', 'bad'); return; }
+  const need = quotaNow.vcpus_needed, type = quotaNow.instance_type;
+
+  // Nothing to ask for. Offering the button here gets a duplicate refused.
+  if (q.enough) {
+    quotaSay(`${q.value} vCPU already covers one ${type}`, 'Nothing to ask for.', 'ok');
+    $('quota-go').hidden = true;
+    return;
+  }
+
+  const r = q.request;
+  if (r && r.status && r.status !== 'APPROVED') {
+    const [head, why] = QUOTA_STATE[r.status] || [r.status.toLowerCase().replace(/_/g, ' '), ''];
+    const when = (r.created || '').slice(0, 10);
+    quotaSay(`\u25cf ${head}${when ? ' \u00b7 asked ' + when : ''}${r.desired ? ' \u00b7 ' + r.desired + ' vCPU' : ''}`,
+             why, r.status === 'DENIED' || r.status === 'CASE_CLOSED' ? 'bad' : '');
+    quotaCase = r.case_id || null;
+    $('quota-case-row').hidden = false;
+    $('quota-case').hidden = !quotaCase;
+    $('quota-case-url').textContent = quotaCase ? quotaCaseUrl(quotaCase) : 'the case id has not appeared yet - Refresh';
+    // A closed case cannot be appealed, so asking again is the only way on.
+    $('quota-go').hidden = r.status !== 'CASE_CLOSED';
+    $('quota-go').disabled = r.status !== 'CASE_CLOSED';
+    if (r.status === 'CASE_CLOSED') $('quota-go').textContent = 'Confirm \u00b7 ask again';
+    const appeal = await runCg(['quota', 'appeal', kind], { capture: true });
+    quotaAppeal = (appeal || '').trim();
+    $('quota-copy').hidden = !quotaAppeal;
+    if (quotaAppeal) {
+      $('quota-pre-label').hidden = false;
+      $('quota-pre-label').textContent = 'Paste this as a reply on that case as an appeal when denied:';
+      $('quota-log').textContent = quotaAppeal;
+    }
+    return;
+  }
+
+  // Nothing asked for yet: say exactly what the case would contain.
+  quotaSay(`You have ${q.value === null ? 'an unknown number of' : q.value} vCPU. One ${type} needs ${need}.`, '');
+  $('quota-pre-label').hidden = false;
+  $('quota-pre-label').textContent = 'This creates a support case containing:';
+  $('quota-log').textContent =
+      `Service:    EC2 Instances\n`
+    + `Region:     ${quotaNow.region}\n`
+    + `Quota:      ${kind === 'spot' ? 'All G and VT Spot Instance Requests' : 'Running On-Demand G and VT instances'} (${q.code})\n`
+    + `New value:  ${need}   (exactly one instance - never more)\n\n`
+    + `Free. AWS usually refuses within minutes - that is step one, and the\n`
+    + `appeal on the case it opens is what gets approved.`;
+  $('quota-go').disabled = false;
+}
+
+async function openQuota(kind) {
+  quotaKind = kind || '';
+  quotaAppeal = ''; quotaCase = null;
+  $('quota-kind').value = quotaKind;
+  $('quota-kind').disabled = false;
+  $('quota-title').textContent = 'Ask AWS for GPU quota';
+  quotaSay('reading\u2026', '');
+  if (!$('quota').open) $('quota').showModal();
+  await quotaRead();
+  await quotaRender();
+}
+
+$('quota-kind').onchange = async () => {
+  quotaKind = $('quota-kind').value;
+  quotaSay('reading\u2026', '');
+  await quotaRender();
+};
+$('quota-refresh').onclick = async e => {
+  e.preventDefault();
+  quotaSay('reading\u2026', '');
+  await quotaRead();
+  await quotaRender();
+};
 $('quota-cancel').onclick = e => { e.preventDefault(); $('quota').close(); };
 $('quota-copy').onclick = async e => {
   e.preventDefault();
   try { await navigator.clipboard.writeText(quotaAppeal); $('quota-copy').textContent = 'Copied'; }
-  catch { $('quota-copy').textContent = 'select it above and copy'; }
+  catch { $('quota-copy').textContent = 'select it below and copy'; }
 };
 $('quota-case').onclick = e => {
   e.preventDefault();
-  if (quotaCase) window.cg.openSignIn(
-    `https://console.aws.amazon.com/support/home#/case/?displayId=${quotaCase}`);
+  if (quotaCase) window.cg.openSignIn(quotaCaseUrl(quotaCase));
+};
+$('quota-go').onclick = async e => {
+  e.preventDefault();
+  if (!quotaKind) return;
+  $('quota-go').disabled = true;
+  $('quota-go').textContent = 'Creating\u2026';
+  $('quota-kind').disabled = true;
+  quotaSay('Creating the case\u2026', 'AWS answers in a few seconds.');
+  $('quota-pre-label').hidden = true;
+  const { rc, err } = await runCg(['quota', 'request', quotaKind], { wantRc: true });
+  $('quota-kind').disabled = false;
+  if (rc !== 0) {
+    quotaSay('the request was not created', (err || '').trim().split('\n')[0]
+      || `cg quota request exited ${rc}`, 'bad');
+    $('quota-log').textContent = (err || '').trim();
+    $('quota-go').disabled = false;
+    $('quota-go').textContent = 'Confirm \u00b7 create case';
+    return;
+  }
+  // Read it back rather than believing the submit: the case id lags the
+  // request by up to a minute, and the status is AWS's to report.
+  await quotaRead();
+  await quotaRender();
+  if (!quotaCase) {
+    $('quota-case-row').hidden = false;
+    $('quota-case-url').textContent = 'the case id has not appeared yet - Refresh in a moment';
+  }
 };
 
 // One secret, typed once and checked before it is kept: the Tailscale API

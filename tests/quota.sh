@@ -144,10 +144,11 @@ contains "  and why cg cannot appeal"  "$doc" "SubscriptionRequiredException"
 app=$(cat app/renderer/app.js)
 contains "the app offers the ask"      "$app" "Ask AWS for GPU quota"
 contains "  and drafts the appeal"     "$app" "'quota', 'appeal'"
-# The appeal used to overwrite what cg had just said, so a request that HAD
-# been submitted read as a wall of text to go and do by hand.
-contains "  keeping what cg said"      "$app" "the appeal, for when the refusal arrives"
-contains "  and only appealing a request that went through" "$app" "rc === 0 ? await runCg(['quota', 'appeal'"
+# The dialog is four states of one screen, and tests/quota-dom.sh drives them.
+# What matters here is that the pieces it needs exist at all.
+contains "  reads the state"           "$app" "runCg(['quota', '--json']"
+contains "  labels the appeal with when to use it" "$app" "as an appeal when denied"
+contains "  and reads back rather than believing the submit" "$app" "await quotaRead();"
 main=$(cat app/main/index.js)
 contains "the case link is allowed"    "$main" "console.aws.amazon.com"
 contains "  and still only https"      "$main" "u.protocol !== 'https:'"

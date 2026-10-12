@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# The quota button, from the click to the command.
+# The quota dialog: pick a limit, see what the case would say, create it, and
+# then live with the case that exists.
 #
-# It opened the dialog, showed the appeal, and filed nothing - because
-# `cg quota request` was not in the main process's read-only list, which makes
-# it a mutating command, and a mutating command is refused outright while any
-# read is in flight. On the screen that offers the button, a read is always in
-# flight. The dialog then overwrote the refusal with the appeal, so the whole
-# thing read as "here is some text, go and do it yourself".
+# Two bugs got here before these assertions did, and both were silent. The ask
+# was classified as a command that must run alone, so it was refused before it
+# reached AWS while the screen behind it was reading - nothing threw, nothing
+# logged, the button simply did nothing. Then the appeal was painted over what
+# cg had said, so a request that HAD been filed read as homework.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 T=$(mktemp -d); pass=0; fail=0
@@ -21,12 +21,8 @@ check()    { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: got '$2' want '$3'"; fail=$((fail+1)); fi; }
 
 echo "1. the scheduler lets the ask through"
-# Both halves in one place, because they have to agree: the renderer decides
-# what counts as a write for its own bookkeeping, the main process decides
-# whether it may run at all.
-# The rule itself, run rather than grepped: the list decides whether a command
-# may start while something else is in flight, and getting it wrong is silent -
-# the ask was refused before it reached AWS, every time.
+# The rule itself, RUN rather than grepped: this list decides whether a command
+# may start while something else is in flight, and getting it wrong is silent.
 sched=$(node -e '
 const src = require("node:fs").readFileSync("app/main/index.js", "utf8");
 const m = src.match(/const READ_ONLY[\s\S]*?const isReadOnly = args =>[\s\S]*?;\n/);
@@ -34,6 +30,7 @@ if (!m) { console.log("NO RULE FOUND"); process.exit(0); }
 eval(m[0].replace(/^const /gm, "var "));
 const want = [
   [["quota", "--json"], true], [["quota", "request", "spot"], true],
+  [["quota", "appeal", "spot"], true],
   [["status", "--json"], true], [["config", "--json"], true],
   [["init"], false], [["destroy"], false], [["open"], false],
   [["creds", "set"], false], [["deps", "install"], false],
@@ -46,9 +43,9 @@ for (const [args, w] of want) {
 console.log("checked");
 ' 2>&1)
 contains "the rule was found"         "$sched" "checked"
-# A quota ask collides with nothing - it is one API call, and it takes none of
-# the locks a build or a destroy takes. Classifying it as mutating made it wait
-# for every read, and a read is always running on the screen with the button.
+# A quota ask collides with nothing: it is one API call and takes none of the
+# locks a build or a destroy takes. Classifying it as mutating made it wait for
+# every read, and a read is always running on the screen with the button.
 lacks    "nothing is misclassified"   "$sched" "WRONG"
 contains "the renderer still counts it as a write" \
          "$(cat app/renderer/app.js)" "cmd[0] === 'quota' && cmd[1] === 'request'"
@@ -64,61 +61,113 @@ cp app/renderer/index.html app/renderer/app.js "$T/r/"
 cp app/renderer/*.css "$T/r/"
 cp -r app/renderer/fonts "$T/r/" 2>/dev/null || true
 
+# cg, as a script: each command answers from a queue, so `quota --json` can say
+# something different after the request than it did before it - which is what
+# the dialog depends on.
 cat > "$T/r/stub.js" <<'STUB'
 window.__errs = [];
 addEventListener('error', e => window.__errs.push(e.message));
+addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
 window.__ran = [];
+window.__answers = {};
 window.cg = {
-  run: (args) => { window.__ran.push(args.join(' '));
-                   window.__lastId = (window.__lastId || 0) + 1;
-                   return Promise.resolve({ ok: true, id: window.__lastId }); },
+  run: (args) => {
+    const line = args.join(' ');
+    window.__ran.push(line);
+    const id = (window.__lastId = (window.__lastId || 0) + 1);
+    const q = window.__answers[line];
+    const reply = Array.isArray(q) ? (q.length > 1 ? q.shift() : q[0]) : q;
+    if (reply !== undefined) {
+      setTimeout(() => {
+        for (const l of String(reply.out || '').split('\n'))
+          if (l) window.__emit(id, { t: 'raw', stream: 'stdout', text: l });
+        for (const l of String(reply.lines || '').split('\n'))
+          if (l) window.__emit(id, { t: 'line', kind: 'info', text: l });
+        window.__emit(id, { t: 'exit', rc: reply.rc === undefined ? 0 : reply.rc });
+      }, 0);
+    }
+    return Promise.resolve({ ok: true, id });
+  },
   answer: () => Promise.resolve(true), cancel: () => Promise.resolve(true),
-  busy: () => Promise.resolve([]), openSignIn: (u) => { window.__opened = u; return Promise.resolve(true); },
+  busy: () => Promise.resolve([]),
+  openSignIn: (u) => { window.__opened = u; return Promise.resolve(true); },
   onEvent(cb) { window.__emit = (id, event) => cb({ id, event }); return () => {}; },
 };
 STUB
 
-cat > "$T/r/probe.js" <<'PROBE'
+APPEAL='Requesting an appeal with detailed use case.\nWORKLOAD\nLow-latency remote desktop...'
+q_json() { # q_json <spot-request-json>
+  cat <<J
+{"region":"ap-south-1","instance_type":"g6.xlarge","vcpus_needed":4,
+ "ondemand":{"code":"L-DB2E81BA","value":4.0,"enough":true,"request":null},
+ "spot":{"code":"L-3819A6DF","value":0.0,"enough":false,"request":$1}}
+J
+}
+probe() { # probe <before-json> <after-json> <probe-body-file>
+  cat > "$T/r/answers.js" <<JS
+window.__answers = {
+  'quota --json': [ {out: \`$1\`}, {out: \`$2\`} ],
+  'quota appeal spot': { out: '$APPEAL' },
+  'quota request spot': { lines: 'asked AWS for 4 vCPU. request req-abc' },
+};
+JS
+  cp "$3" "$T/r/probe.js"
+  python3 -I - "$T/r" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]) / "index.html"
+t = p.read_text()
+if 'stub.js' not in t:
+    t = t.replace('<script src="app.js"',
+                  '<script src="stub.js"></script>\n<script src="answers.js"></script>\n<script src="app.js"', 1)
+    t = t.replace('</body>', '<script src="probe.js"></script>\n</body>', 1)
+    p.write_text(t)
+PY
+  "$BROWSER" --headless --disable-gpu --no-sandbox --window-size=1280,900 \
+    --virtual-time-budget=6000 --dump-dom "file://$T/r/index.html" 2>/dev/null \
+  | python3 -I -c '
+import sys, re, html
+m = re.search(r"<pre id=\"probe-out\">(.*?)</pre>", sys.stdin.read(), re.S)
+print(html.unescape(m.group(1)) if m else "NO PROBE OUTPUT")'
+}
+row() { grep -m1 "^$1 " <<<"$OUT" || true; }
+
+cat > "$T/body.js" <<'PROBE'
 (async () => {
   const out = [];
-  const sleep = () => new Promise(r => setTimeout(r, 0));
+  const sleep = (n = 1) => new Promise(r => setTimeout(r, n));
+  const read = label => {
+    out.push(label + ' STATE | ' + document.getElementById('quota-state').textContent.replace(/\s+/g, ' ').trim());
+    out.push(label + ' WHY | ' + document.getElementById('quota-explain').textContent.replace(/\s+/g, ' ').trim());
+    out.push(label + ' PRE | ' + (document.getElementById('quota-pre-label').hidden ? 'hidden'
+             : document.getElementById('quota-pre-label').textContent.trim()));
+    out.push(label + ' BODY | ' + document.getElementById('quota-log').textContent.replace(/\s+/g, ' ').trim());
+    out.push(label + ' BTN | go=' + document.getElementById('quota-go').hidden
+             + '/' + document.getElementById('quota-go').disabled
+             + ' refresh=' + document.getElementById('quota-refresh').hidden
+             + ' caserow=' + document.getElementById('quota-case-row').hidden);
+  };
   try {
-    paintConfig([{ key: 'GAME_SPOT', kind: 'choice', secret: false, is_set: true,
-                   value: '1', default: 'auto', rule: 'auto,1,0', note: 'model' }]);
-    openQuota('spot');
-    out.push('OPEN | ' + document.getElementById('quota').open
-             + ' | ' + document.getElementById('quota-title').textContent.trim());
-    out.push('BUTTONS | go=' + document.getElementById('quota-go').hidden
-             + ' copy=' + document.getElementById('quota-copy').hidden
-             + ' case=' + document.getElementById('quota-case').hidden);
-    // Nothing has been asked for yet: the dialog says what WILL be asked.
-    const writes = () => window.__ran.filter(c => !c.includes('--json')).join(' ;; ');
-    out.push('BEFORE RAN | ' + writes());
+    await openQuota();
+    for (let i = 0; i < 6; i++) await sleep();
+    read('PICK');
+    out.push('PICK RAN | ' + window.__ran.filter(c => !c.includes('--json') || c.startsWith('quota')).join(' ;; '));
+
+    document.getElementById('quota-kind').value = 'spot';
+    document.getElementById('quota-kind').onchange();
+    for (let i = 0; i < 6; i++) await sleep();
+    read('CHOSEN');
 
     window.__ran = [];
     document.getElementById('quota-go').click();
     await sleep();
-    out.push('ASK RAN | ' + writes());
-    // cg's own lines, as the app collects them.
-    window.__emit(window.__lastId, { t: 'line', kind: 'ok',
-      text: 'asked AWS for 4 vCPU. request req-abc' });
-    window.__emit(window.__lastId, { t: 'line', kind: 'cont',
-      text: '  case 100000000000001 - https://console.aws.amazon.com/support/home#/case/?displayId=100000000000001' });
-    window.__emit(window.__lastId, { t: 'exit', rc: 0 });
-    await sleep(); await sleep();
-    out.push('AFTER RAN | ' + writes());
-    // The appeal is captured on stdout.
-    const appealJob = window.__lastId;
-    window.__emit(appealJob, { t: 'raw', stream: 'stdout', text: 'Requesting an appeal with detailed use case.' });
-    window.__emit(appealJob, { t: 'raw', stream: 'stdout', text: 'WORKLOAD' });
-    window.__emit(appealJob, { t: 'exit', rc: 0 });
-    await sleep(); await sleep();
-    out.push('LOG | ' + document.getElementById('quota-log').textContent.replace(/\s+/g, ' ').trim());
-    out.push('END BUTTONS | copy=' + document.getElementById('quota-copy').hidden
-             + ' case=' + document.getElementById('quota-case').hidden);
+    read('CREATING');
+    for (let i = 0; i < 10; i++) await sleep();
+    read('MADE');
+    out.push('MADE RAN | ' + window.__ran.filter(c => c.startsWith('quota')).join(' ;; '));
+    out.push('MADE URL | ' + document.getElementById('quota-case-url').textContent.trim());
     document.getElementById('quota-case').click();
     out.push('OPENED | ' + window.__opened);
-  } catch (e) { out.push('THREW | ' + e.message); }
+  } catch (e) { out.push('THREW | ' + e.message + ' | ' + (e.stack || '').split('\n')[1]); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
   pre.id = 'probe-out'; pre.textContent = out.join('\n');
@@ -126,45 +175,45 @@ cat > "$T/r/probe.js" <<'PROBE'
 })();
 PROBE
 
-python3 -I - "$T/r" <<'PY'
-import pathlib, sys
-p = pathlib.Path(sys.argv[1]) / "index.html"
-t = p.read_text()
-t = t.replace('<script src="app.js"', '<script src="stub.js"></script>\n<script src="app.js"', 1)
-t = t.replace('</body>', '<script src="probe.js"></script>\n</body>', 1)
-p.write_text(t)
-PY
-
-OUT=$("$BROWSER" --headless --disable-gpu --no-sandbox --window-size=1280,900 \
-      --virtual-time-budget=5000 --dump-dom "file://$T/r/index.html" 2>/dev/null \
-  | python3 -I -c '
-import sys, re, html
-m = re.search(r"<pre id=\"probe-out\">(.*?)</pre>", sys.stdin.read(), re.S)
-print(html.unescape(m.group(1)) if m else "NO PROBE OUTPUT")')
+OUT=$(probe "$(q_json null)" \
+            "$(q_json '{"status":"CASE_OPENED","desired":4.0,"created":"2026-10-12T23:31:11+05:30","case_id":"100000000000001"}')" \
+            "$T/body.js")
 [[ $OUT == *"NO PROBE OUTPUT"* ]] && { echo "  FAIL the page did not render"; echo "quota-dom: $pass passed, $((fail+1)) failed"; exit 1; }
-row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
-echo "2. the dialog, before anything is asked"
-contains "it opens"                   "$(row OPEN)"    "true"
-contains "  naming the model"         "$(row OPEN)"    "spot GPU quota"
-contains "  with only the ask"        "$(row BUTTONS)" "go=false copy=true case=true"
-# Opening the dialog must not file anything: the ask is a button, not a side
-# effect of reading about it.
-check    "and asks for nothing yet"   "$(row 'BEFORE RAN')" "BEFORE RAN | "
+echo "2. opening it asks for nothing"
+contains "it reads the quota"          "$(row 'PICK RAN')"  "quota --json"
+lacks    "  and files nothing"         "$(row 'PICK RAN')"  "quota request"
+contains "it waits for a choice"       "$(row 'PICK WHY')"  "Pick one to see what it would ask for"
+contains "  with the button dead"      "$(row 'PICK BTN')"  "go=false/true"
 
-echo "3. pressing it files the request"
-check    "it runs the request"        "$(row 'ASK RAN')"   "ASK RAN | quota request spot"
-check    "  then drafts the appeal"   "$(row 'AFTER RAN')" "AFTER RAN | quota request spot ;; quota appeal spot"
-contains "what cg said is kept"       "$(row LOG)"         "asked AWS for 4 vCPU. request req-abc"
-contains "  with the case it opened"  "$(row LOG)"         "case 100000000000001"
-# The appeal sits under it, not over it.
-contains "and the appeal is below"    "$(row LOG)"         "the appeal, for when the refusal arrives"
-contains "  with its text"            "$(row LOG)"         "Requesting an appeal"
-contains "copy and the case appear"   "$(row 'END BUTTONS')" "copy=false case=false"
-check    "the case link is that case" "$(row OPENED)" "OPENED | https://console.aws.amazon.com/support/home#/case/?displayId=100000000000001"
+echo "3. choosing one says what the case would contain"
+contains "it says what you have"       "$(row 'CHOSEN STATE')" "You have 0 vCPU. One g6.xlarge needs 4"
+contains "  and what would be created" "$(row 'CHOSEN PRE')"   "This creates a support case containing"
+contains "  the quota, by name"        "$(row 'CHOSEN BODY')"  "All G and VT Spot Instance Requests (L-3819A6DF)"
+contains "  the value, as one box"     "$(row 'CHOSEN BODY')"  "New value: 4 (exactly one instance - never more)"
+contains "  and that a refusal is step one" "$(row 'CHOSEN BODY')" "usually refuses within minutes"
+contains "the button is live now"      "$(row 'CHOSEN BTN')"   "go=false/false"
 
-echo "4. nothing threw"
-check "no painter threw"              "$(grep -c '^THREW' <<<"$OUT")" "0"
+echo "4. creating"
+contains "it says it is working"       "$(row 'CREATING STATE')" "Creating the case"
+check    "  and runs the request"      "$(row 'MADE RAN')"       "MADE RAN | quota request spot ;; quota --json ;; quota appeal spot"
+
+echo "5. and then the case exists"
+contains "the status is AWS's own"     "$(row 'MADE STATE')"  "case open"
+contains "  with the date asked"       "$(row 'MADE STATE')"  "asked 2026-10-12"
+contains "  explained"                 "$(row 'MADE WHY')"    "refusal usually arrives within minutes"
+# The label says WHEN to use it, because the refusal lands minutes after you
+# have closed the window.
+contains "the appeal is labelled"      "$(row 'MADE PRE')"    "as an appeal when denied"
+contains "  and is the appeal"         "$(row 'MADE BODY')"   "Requesting an appeal"
+contains "the case is linked"          "$(row 'MADE URL')"    "displayId=100000000000001"
+check    "  and the link opens it"     "$(row OPENED)"        "OPENED | https://console.aws.amazon.com/support/home#/case/?displayId=100000000000001"
+contains "Refresh is offered"          "$(row 'MADE BTN')"    "refresh=false"
+# Asking again while a case is open is refused by AWS as a duplicate.
+contains "  and Confirm is gone"       "$(row 'MADE BTN')"    "go=true"
+
+echo "6. nothing threw"
+check "no painter threw"               "$(grep -c '^THREW' <<<"$OUT")" "0"
 check "  and the page logged no errors" "$(row ERRS)" "ERRS | "
 
 echo ""
