@@ -29,11 +29,14 @@ report() { # report <stderr text>   - SPOT= picks the purchase model
 
 AWSERR='aws: [ERROR]: An error occurred (%s) when calling the RunInstances operation: %s'
 
-echo "1. the code and AWS's own sentence come first"
+echo "1. what happened, then AWS's own sentence, then the code"
 out=$(report "$(printf "$AWSERR" InsufficientInstanceCapacity \
        'There is no Spot capacity available that matches your request.')")
-check    "first line is the marked failure, with the code" \
-         "$(head -1 <<<"$out")" "!! launch failed: InsufficientInstanceCapacity"
+# The headline is the line the app shows on its own, so it is a sentence
+# rather than an error code handed back to someone who did not ask for one.
+check    "first line is the marked failure, in words" \
+         "$(head -1 <<<"$out")" "!! AWS has no spare g6.xlarge at the spot price in ap-south-2"
+contains "  and the code is still there"   "$out" "error code: InsufficientInstanceCapacity"
 contains "AWS's sentence is kept verbatim" "$out" "no Spot capacity available that matches your request"
 lacks    "the CLI's framing is stripped"   "$out" "An error occurred ("
 
@@ -44,17 +47,24 @@ echo "1b. a retried call has extra framing, and it still comes off"
 # preamble survived into the one line meant to be AWS's own sentence.
 out2=$(report 'aws: [ERROR]: An error occurred (InsufficientInstanceCapacity) when calling the RunInstances operation (reached max retries: 2): Insufficient capacity.')
 check    "the message is just the sentence" \
-         "$(sed -n 2p <<<"$out2" | sed 's/^ *//')" "Insufficient capacity."
+         "$(sed -n 3p <<<"$out2" | sed 's/^ *//')" "AWS said: Insufficient capacity."
 lacks    "no CLI preamble survives"    "$out2" "An error occurred ("
 lacks    "and no retry bookkeeping"    "$out2" "reached max retries"
-contains "the code is still read"      "$out2" "!! launch failed: InsufficientInstanceCapacity"
+# The headline is words; the code is underneath, where it is useful when you
+# are searching for it and invisible when you are not.
+contains "the headline says what happened" "$out2" "!! AWS has no spare"
+contains "  with the code kept below"      "$out2" "error code: InsufficientInstanceCapacity"
 
 echo "2. one cause, not the catalogue"
-contains "names the region and type" "$out" "No spare g6.xlarge SPOT capacity in ap-south-2"
-contains "offers on-demand"          "$out" "GAME_SPOT=0 cg init"
+contains "names the region and type" "$out" "no spare g6.xlarge at the spot price in ap-south-2"
+# The first thing worth knowing: run-instances refusing is the one failure
+# where nothing exists to clean up or pay for.
+contains "says nothing was created"  "$out" "nothing was launched, and nothing is billing"
+contains "offers on-demand"          "$out" "cg config set GAME_SPOT 0"
+contains "  and where that lives in the app" "$out" "Settings > purchase model"
 lacks    "says nothing about PassRole" "$out" "iam:PassRole"
 lacks    "says nothing about the spot quota" "$out" "L-3819A6DF"
-check    "and stays short" "$(( $(wc -l <<<"$out") < 12 ? 1 : 0 ))" "1"
+check    "and stays short" "$(( $(wc -l <<<"$out") < 22 ? 1 : 0 ))" "1"
 
 echo "2b. the same shortage says different things on demand"
 # The advice used to be "GAME_SPOT=0 cg init" whatever had been asked for, so
@@ -62,15 +72,17 @@ echo "2b. the same shortage says different things on demand"
 # demand there is no fuller-priced model to fall back to, and saying so is the
 # whole point of the message.
 od=$(SPOT=0 report "$(printf "$AWSERR" InsufficientInstanceCapacity 'Insufficient capacity.')")
-contains "on demand: says the region is short outright" "$od" "capacity in ap-south-2 at all"
+contains "on demand: says the region is short outright" "$od" "no spare g6.xlarge in ap-south-2"
 contains "  and names the purchase model"   "$od" "ON DEMAND"
-lacks    "  never suggests what is already set" "$od" "GAME_SPOT=0 cg init"
+lacks    "  never suggests what is already set" "$od" "GAME_SPOT 0"
 contains "  offers another GPU pool"        "$od" "cg machines"
-contains "  and another region, with the catch" "$od" "your archive is not in it"
-contains "  and says waiting works"         "$od" "capacity comes back without warning"
+contains "  and another region, with the catch" "$od" "does not"
+contains "  and says waiting works"         "$od" "Capacity returns without warning"
 sp=$(SPOT=1 report "$(printf "$AWSERR" InsufficientInstanceCapacity 'Insufficient capacity.')")
-contains "spot: on demand IS the way out"   "$sp" "GAME_SPOT=0 cg init"
-contains "  and says why it should work"    "$sp" "first claim on the same machines"
+contains "spot: on demand IS the way out"   "$sp" "cg config set GAME_SPOT 0"
+contains "  and says why it should work"    "$sp" "it has first claim"
+# "Nothing pins the AZ any more" was a note to whoever wrote the code.
+lacks    "  without the internal note"      "$sp" "Nothing pins the AZ"
 
 echo "3. each code gets its own explanation"
 out=$(report "$(printf "$AWSERR" MaxSpotInstanceCountExceeded 'Max spot instance count exceeded.')")
@@ -98,14 +110,15 @@ contains "says retrying will not help"  "$out" "no amount of retrying fixes this
 
 echo "5. an unknown code still names itself and falls back to the list"
 out=$(report "$(printf "$AWSERR" SomeBrandNewError 'Something nobody has seen.')")
-contains "the code is still reported"   "$out" "!! launch failed: SomeBrandNewError"
+contains "the headline admits as much" "$out" "!! the instance could not be launched"
+contains "  and the code is reported"   "$out" "error code: SomeBrandNewError"
 contains "AWS's sentence survives"      "$out" "Something nobody has seen"
 contains "admits it is unknown"         "$out" "Not an error this script has been taught" 
 contains "and lists the usual causes"   "$out" "MaxSpotInstanceCountExceeded"
 
 echo "6. a message with no code at all still produces a marked failure"
 out=$(report "Could not connect to the endpoint URL")
-check    "still marked as a failure" "$(head -1 <<<"$out")" "!! launch failed"
+check    "still marked as a failure" "$(head -1 <<<"$out")" "!! the instance could not be launched"
 contains "the text is kept"          "$out" "Could not connect to the endpoint URL"
 contains "falls back to the list"    "$out" "usual causes"
 

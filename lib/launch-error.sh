@@ -33,8 +33,37 @@ launch_error_report() {
   code=$(launch_error_code "$f") || code=""
   msg=$(launch_error_message "$f") || msg=""
 
-  echo "!! launch failed${code:+: $code}"
-  [[ -n $msg ]] && sed 's/^/    /' <<<"$msg"
+  # The headline is what the app shows on its own, so it says what happened in
+  # words rather than repeating AWS's error code at someone who did not ask for
+  # one. The code still appears - underneath, where it belongs when you are
+  # searching for it.
+  local headline
+  case "$code" in
+    InsufficientInstanceCapacity|SpotMaxPriceTooLow)
+      if [[ ${SPOT:-0} == 1 ]]; then
+        headline="AWS has no spare ${TYPE:-instance} at the spot price in ${REGION:-this region}"
+      else
+        headline="AWS has no spare ${TYPE:-instance} in ${REGION:-this region} right now"
+      fi ;;
+    MaxSpotInstanceCountExceeded)
+      headline="your previous spot allocation has not been released yet" ;;
+    VcpuLimitExceeded|InstanceLimitExceeded)
+      headline="your AWS quota is too small for ${TYPE:-this machine} in ${REGION:-this region}" ;;
+    InvalidKeyPair.NotFound)
+      headline="the SSH key pair ${KEY_NAME:-} is missing from ${REGION:-this region}" ;;
+    AccessDenied|AccessDeniedException|UnauthorizedOperation)
+      headline="AWS refused the request: this key is not allowed to launch with a role" ;;
+    OptInRequired|SubscriptionRequiredException|AuthFailure|UnauthorizedAccount|Blocked)
+      headline="AWS refused the account itself" ;;
+    *)
+      headline="the instance could not be launched" ;;
+  esac
+  echo "!! $headline"
+  # Nothing exists to clean up or pay for: run-instances refusing is the one
+  # failure where that is certain, and it is the first thing worth knowing.
+  echo "    nothing was launched, and nothing is billing"
+  [[ -n $msg ]] && sed 's/^/    AWS said: /' <<<"$msg"
+  [[ -n $code ]] && echo "    error code: $code"
   echo ""
   case "$code" in
     MaxSpotInstanceCountExceeded)
@@ -49,20 +78,36 @@ launch_error_report() {
       # Which purchase model was asked for decides what there is to say. Telling
       # someone already on demand to "try on demand" is worse than saying
       # nothing: it reads as a fix, and they have nowhere to go after trying it.
+      # Not your quota, not your setup, and not something retrying harder
+      # fixes: the pool is empty. What matters is which of the four ways out
+      # applies, and they differ by what was asked for.
       if [[ ${SPOT:-0} == 1 ]]; then
-        echo "  No spare ${TYPE:-instance} SPOT capacity in ${REGION:-the region} right now."
-        echo "  Nothing pins the AZ any more, so this is the whole region being short,"
-        echo "  not one zone. On demand has first claim on the same machines:"
-        echo "    GAME_SPOT=0 cg init"
-        echo "  Another GPU is a separate pool, and may have capacity: cg machines"
+        echo "  Spot rents the machines nobody else is paying full price for, and there"
+        echo "  are none of those here at the moment. On demand is the same machine at"
+        echo "  the full price, and it has first claim - so it usually works when this"
+        echo "  does not."
+        echo ""
+        echo "  Pay full price, and build now:"
+        echo "      cg config set GAME_SPOT 0       (Settings > purchase model, in the app)"
+        echo "  Try a different GPU - each shape is its own pool:"
+        echo "      cg machines"
+        echo "  Or see which region has capacity, free and about 90 seconds:"
+        echo "      cg sweep                        (Scan all regions, in the app)"
+        echo ""
+        echo "  Or come back later. Spot capacity returns on its own, often within hours,"
+        echo "  and nothing here needs fixing in the meantime."
       else
-        echo "  No spare ${TYPE:-instance} capacity in ${REGION:-the region} at all - this is"
-        echo "  ON DEMAND, so there is no fuller-priced model left to fall back to."
-        echo "  Nothing pins the AZ, so the whole region is short of this machine."
-        echo "  What is left:"
-        echo "    cg machines          another GPU is a separate pool of hardware"
-        echo "    --region <other>     another region, but your archive is not in it"
-        echo "  Or wait: capacity comes back without warning, usually within hours."
+        echo "  This was an ON DEMAND launch, so there is no fuller-priced option left to"
+        echo "  fall back to - the region is simply out of this machine."
+        echo ""
+        echo "  Try a different GPU - each shape is its own pool:"
+        echo "      cg machines"
+        echo "  Or see which region has capacity, free and about 90 seconds:"
+        echo "      cg sweep                        (Scan all regions, in the app)"
+        echo "      note: your game archive lives in ${REGION:-this region} and does not"
+        echo "      follow you - a box elsewhere re-downloads what it needs."
+        echo ""
+        echo "  Or come back later. Capacity returns without warning, usually within hours."
       fi
       ;;
     VcpuLimitExceeded|InstanceLimitExceeded)
