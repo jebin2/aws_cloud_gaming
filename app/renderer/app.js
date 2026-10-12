@@ -1445,7 +1445,7 @@ const QUOTA_STATE = {
             'It can take up to an hour to appear as the applied value. Refresh to check.'],
 };
 const QUOTA_LABEL = { ondemand: 'on demand', spot: 'spot' };
-let quotaNow = null, quotaKind = '', quotaAppeal = '', quotaCase = null;
+let quotaNow = null, quotaKind = '', quotaAppeal = '', quotaCase = null, quotaWhere = '';
 
 const quotaCaseUrl = id => `https://console.aws.amazon.com/support/home#/case/?displayId=${id}`;
 
@@ -1465,6 +1465,7 @@ function quotaClear() {
 // Reading, and saying so: the controls are dead while it reads, because a
 // second Refresh on top of the first answers the first one's question.
 function quotaBusy(on) {
+  $('quota-where').disabled = on;
   $('quota-kind').disabled = on;
   $('quota-refresh').disabled = on;
   $('quota-go').disabled = on || $('quota-go').disabled;
@@ -1480,8 +1481,10 @@ function quotaSay(state, explain, tone) {
 
 // One read answers everything the dialog shows: the applied value, whether it
 // covers a box, and where the last request stands.
+const quotaCmd = (...rest) => (quotaWhere ? ['--region', quotaWhere, ...rest] : rest);
+
 async function quotaRead() {
-  const out = await runCg(['quota', '--json'], { capture: true });
+  const out = await runCg(quotaCmd('quota', '--json'), { capture: true });
   try { quotaNow = JSON.parse(out); } catch { quotaNow = null; }
   $('quota-region').textContent = quotaNow ? quotaNow.region : '';
   return quotaNow;
@@ -1495,6 +1498,7 @@ async function quotaRender() {
   $('quota-refresh').hidden = !kind;
   $('quota-refresh').disabled = false;
   $('quota-kind').disabled = false;
+  $('quota-where').disabled = false;
   $('quota-go').hidden = false;
   $('quota-go').disabled = true;
   $('quota-go').textContent = 'Confirm \u00b7 create case';
@@ -1527,7 +1531,7 @@ async function quotaRender() {
     $('quota-go').hidden = r.status !== 'CASE_CLOSED';
     $('quota-go').disabled = r.status !== 'CASE_CLOSED';
     if (r.status === 'CASE_CLOSED') $('quota-go').textContent = 'Confirm \u00b7 ask again';
-    const appeal = await runCg(['quota', 'appeal', kind], { capture: true });
+    const appeal = await runCg(quotaCmd('quota', 'appeal', kind), { capture: true });
     quotaAppeal = (appeal || '').trim();
     $('quota-copy').hidden = !quotaAppeal;
     if (quotaAppeal) {
@@ -1552,8 +1556,32 @@ async function quotaRender() {
   $('quota-go').disabled = false;
 }
 
-async function openQuota(kind) {
+function quotaWhereOptions(selected) {
+  const sel = $('quota-where');
+  const cfg = (config || []).find(r => r.key === 'GAME_REGION');
+  const current = (cfg && (cfg.value || cfg.default)) || (machinesNow && machinesNow.region) || '';
+  const seen = new Set();
+  sel.textContent = '';
+  const add = (code, label) => {
+    if (!code || seen.has(code)) return;
+    seen.add(code);
+    const o = document.createElement('option');
+    o.value = code;
+    o.textContent = label || code;
+    sel.append(o);
+  };
+  add(current, current ? `${current} (cg is set to this one)` : '');
+  for (const r of (sweepNow && sweepNow.regions) || []) {
+    if (r.enabled === false) continue;   // no quota to ask for until it is on
+    add(r.region, `${r.region} - ${shortCity(r.city)}`);
+  }
+  sel.value = selected && seen.has(selected) ? selected : current;
+  quotaWhere = sel.value;
+}
+
+async function openQuota(kind, where) {
   quotaKind = kind || '';
+  quotaWhereOptions(where);
   // Cleared BEFORE the dialog is shown, not after the read comes back: what
   // was on it is an answer about the last thing you asked, and showing it for
   // half a second under a new question is worse than showing nothing.
@@ -1571,6 +1599,15 @@ async function openQuota(kind) {
   await quotaRender();
 }
 
+$('quota-where').onchange = async () => {
+  quotaWhere = $('quota-where').value;
+  quotaClear();
+  quotaBusy(true);
+  quotaSay('reading\u2026', '');
+  await quotaRead();
+  quotaBusy(false);
+  await quotaRender();
+};
 $('quota-kind').onchange = async () => {
   quotaKind = $('quota-kind').value;
   quotaClear();
@@ -1607,7 +1644,7 @@ $('quota-go').onclick = async e => {
   $('quota-kind').disabled = true;
   quotaSay('Creating the case\u2026', 'AWS answers in a few seconds.');
   $('quota-pre-label').hidden = true;
-  const { rc, err } = await runCg(['quota', 'request', quotaKind], { wantRc: true });
+  const { rc, err } = await runCg(quotaCmd('quota', 'request', quotaKind), { wantRc: true });
   $('quota-kind').disabled = false;
   if (rc !== 0) {
     quotaSay('the request was not created', (err || '').trim().split('\n')[0]
@@ -2335,6 +2372,8 @@ function priceCell(tr, mount, row, spot, inr, cur) {
   if (inr == null) why = spot ? 'no spot market' : 'no price';
   else if (!row.enabled) why = 'needs opt-in';
   else if (fits === false) why = 'no quota';
+  if (why === 'no quota' && Array.isArray(mount.shortOfQuota)
+      && !mount.shortOfQuota.includes(row.region)) mount.shortOfQuota.push(row.region);
 
   const label = document.createElement('label');
   const usable = !why && !boxNow;
@@ -2406,6 +2445,11 @@ function paintChooser() {
     if (!table) continue;
     table.textContent = '';
     const reasons = new Set();
+    // Collected as the cells are drawn, and reset each pass: priceCell is the
+    // only place that knows a row is enabled and short, and the button under
+    // the table is the only place that can do anything about it.
+    const shortOfQuota = [];
+    mount.shortOfQuota = shortOfQuota;
     if (!rows.length) {
       const td = table.insertRow().insertCell();
       td.colSpan = 8;
@@ -2508,7 +2552,11 @@ function paintChooser() {
           const b = document.createElement('button');
           b.className = 'btn mt-space-xs';
           b.textContent = 'Ask AWS for GPU quota';
-          b.onclick = () => openQuota();
+          // The regions in this table that are enabled and short of quota. One
+          // of them is what the button is about; with several, the first is a
+          // better guess than the configured region, which may not be in the
+          // table at all.
+          b.onclick = () => openQuota(null, shortOfQuota[0]);
           legend.append(b);
         }
         // The other reason with something to do about it - and unlike the

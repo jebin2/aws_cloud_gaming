@@ -106,9 +106,10 @@ J
 probe() { # probe <before-json> <after-json> <probe-body-file>
   cat > "$T/r/answers.js" <<JS
 window.__answers = {
-  'quota --json': [ {out: \`$1\`}, {out: \`$2\`} ],
-  'quota appeal spot': { out: '$APPEAL' },
-  'quota request spot': { lines: 'asked AWS for 4 vCPU. request req-abc' },
+  '--region ap-south-1 quota --json': [ {out: \`$1\`}, {out: \`$2\`} ],
+  '--region ap-southeast-5 quota --json': [ {out: \`$1\`} ],
+  '--region ap-south-1 quota appeal spot': { out: '$APPEAL' },
+  '--region ap-south-1 quota request spot': { lines: 'asked AWS for 4 vCPU. request req-abc' },
 };
 JS
   cp "$3" "$T/r/probe.js"
@@ -147,10 +148,17 @@ cat > "$T/body.js" <<'PROBE'
              + ' caserow=' + document.getElementById('quota-case-row').hidden);
   };
   try {
+    paintConfig([{ key: 'GAME_REGION', kind: 'text', secret: false, is_set: true,
+                   value: 'ap-south-1', default: 'ap-south-2', note: 'region' }]);
+    paintSweep({ cached: true, age_seconds: 60, regions: [
+      { region: 'ap-south-1', city: 'Asia Pacific (Mumbai)', rtt_ms: 22, enabled: true, machines: [] },
+      { region: 'ap-southeast-5', city: 'Asia Pacific (Malaysia)', rtt_ms: 47, enabled: true, machines: [] },
+      { region: 'ap-southeast-3', city: 'Asia Pacific (Jakarta)', rtt_ms: 57, enabled: false, machines: [] },
+    ], too_far: [], unreachable: [] });
     await openQuota();
     for (let i = 0; i < 6; i++) await sleep();
     read('PICK');
-    out.push('PICK RAN | ' + window.__ran.filter(c => !c.includes('--json') || c.startsWith('quota')).join(' ;; '));
+    out.push('PICK RAN | ' + window.__ran.filter(c => c.includes('quota')).join(' ;; '));
 
     document.getElementById('quota-kind').value = 'spot';
     document.getElementById('quota-kind').onchange();
@@ -163,7 +171,7 @@ cat > "$T/body.js" <<'PROBE'
     read('CREATING');
     for (let i = 0; i < 10; i++) await sleep();
     read('MADE');
-    out.push('MADE RAN | ' + window.__ran.filter(c => c.startsWith('quota')).join(' ;; '));
+    out.push('MADE RAN | ' + window.__ran.filter(c => c.includes('quota')).join(' ;; '));
     out.push('MADE URL | ' + document.getElementById('quota-case-url').textContent.trim());
     document.getElementById('quota-case').click();
     out.push('OPENED | ' + window.__opened);
@@ -211,7 +219,7 @@ OUT=$(probe "$(q_json null)" \
 [[ $OUT == *"NO PROBE OUTPUT"* ]] && { echo "  FAIL the page did not render"; echo "quota-dom: $pass passed, $((fail+1)) failed"; exit 1; }
 
 echo "2. opening it asks for nothing"
-contains "it reads the quota"          "$(row 'PICK RAN')"  "quota --json"
+contains "it reads the quota"          "$(row 'PICK RAN')"  "--region ap-south-1 quota --json"
 lacks    "  and files nothing"         "$(row 'PICK RAN')"  "quota request"
 contains "it waits for a choice"       "$(row 'PICK WHY')"  "Pick one to see what it would ask for"
 contains "  with the button dead"      "$(row 'PICK BTN')"  "go=false/true"
@@ -226,7 +234,7 @@ contains "the button is live now"      "$(row 'CHOSEN BTN')"   "go=false/false"
 
 echo "4. creating"
 contains "it says it is working"       "$(row 'CREATING STATE')" "Creating the case"
-check    "  and runs the request"      "$(row 'MADE RAN')"       "MADE RAN | quota request spot ;; quota --json ;; quota appeal spot"
+check    "  and runs the request"      "$(row 'MADE RAN')"       "MADE RAN | --region ap-south-1 quota request spot ;; --region ap-south-1 quota --json ;; --region ap-south-1 quota appeal spot"
 
 echo "5. and then the case exists"
 contains "the status is AWS's own"     "$(row 'MADE STATE')"  "case open"

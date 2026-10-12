@@ -890,6 +890,14 @@
   </div>
 
   <div class="flex items-center gap-space-sm mt-space-md">
+    <!-- Quotas are per region, so the region is part of the question. Enabling
+         a region gives you zero of everything in it. -->
+    <label class="font-code-sm text-code-sm text-outline" for="quota-where">where?</label>
+    <select id="quota-where"
+            class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-md text-code-md text-on-surface"></select>
+  </div>
+
+  <div class="flex items-center gap-space-sm mt-space-sm">
     <label class="font-code-sm text-code-sm text-outline" for="quota-kind">which limit?</label>
     <select id="quota-kind"
             class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-md text-code-md text-on-surface">
