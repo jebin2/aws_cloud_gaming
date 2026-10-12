@@ -56,6 +56,23 @@ check "nothing is loaded from the network" \
       "$(grep -rhoE '(href|src)="https?://|url\(https?://' app/renderer/*.html app/renderer/*.js app/renderer/*.css app/renderer/fonts/fonts.css | wc -l)" "0"
 check "tailwind is built from their config" "$(grep -c 'tailwind.config' app/tailwind.config.js)" "1"
 check "  and the stylesheet is committed" "$([[ -s app/renderer/tailwind.css ]] && echo yes || echo no)" "yes"
+# And is CURRENT. Tailwind only emits rules for classes it finds in the markup,
+# so a class added without rebuilding is a class with no rule: `sticky` sat in
+# index.html for two commits while the header kept scrolling away, because
+# position:sticky was never in the stylesheet. Nothing in the app can tell the
+# difference between that and a typo.
+if [[ -x app/node_modules/.bin/tailwindcss ]]; then
+  css_tmp=$(mktemp -d)
+  ( cd app && ./node_modules/.bin/tailwindcss -i renderer/src.css -o "$css_tmp/tailwind.css" --minify ) >/dev/null 2>&1
+  if cmp -s "$css_tmp/tailwind.css" app/renderer/tailwind.css; then
+    echo "  ok     and up to date with the markup"; pass=$((pass+1))
+  else
+    echo "  FAIL   the stylesheet is stale - run: cd app && npm run build:css"; fail=$((fail+1))
+  fi
+  rm -rf "$css_tmp"
+else
+  echo "  SKIP - tailwindcss is not installed, cannot check the stylesheet is current"
+fi
 check "the fonts are local"              "$([[ -s app/renderer/fonts/fonts.css ]] && echo yes || echo no)" "yes"
 check "  with no CDN left in them"       "$(grep -c 'https://' app/renderer/fonts/fonts.css)" "0"
 contains "the icon font is wired up"     "$(cat app/renderer/src.css)" "Material Symbols Outlined"

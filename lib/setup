@@ -158,12 +158,10 @@ status_facts() {
   if [[ $acct == "NO CREDENTIALS" ]]; then
     if ! command -v aws >/dev/null 2>&1; then
       f error.cause no-cli
-      f error.credentials \
-        "The AWS CLI is not installed, so nothing here could be read - everything below is UNKNOWN, not empty."
+      f error.credentials "The AWS CLI is not installed, so nothing here could be read."
     else
       f error.cause rejected
-      f error.credentials \
-        "AWS rejected these credentials - everything below is UNKNOWN, not empty. Check: aws sts get-caller-identity"
+      f error.credentials "AWS rejected this access key."
     fi
   fi
 
@@ -339,7 +337,7 @@ status() { # status [--json]
   if [[ -n ${F[error.credentials]:-} ]]; then
     echo
     echo "CREDENTIALS"
-    printf '  %s\n' "${F[error.credentials]}"
+    printf '  %s Everything below is unknown, not empty.\n' "${F[error.credentials]}"
     printf '  Your games are in S3 and nothing here can see them right now.\n'
     printf '  %s, then run this again.\n' \
       "$([[ ${F[error.cause]:-} == no-cli ]] && echo 'Install the AWS CLI (cg check --fix)' \

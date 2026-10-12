@@ -300,12 +300,20 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('SIGNIN BUSY | ' + document.getElementById('rundlg-log').textContent.replace(/\s+/g, ' ').trim());
     out.push('SIGNIN BUSYBTN | ' + document.getElementById('tskey-signin-go').disabled);
 
+    paintDeps({ tools: [], package_manager: 'pacman', root: 'pkexec', root_blocked: null,
+                tailscale_signed_in: true });
+    paintTskey({ present: false, valid: null, state: 'absent', detail: null,
+                 signed_in: true, node: 'laptop', auth_key_stored: false, can_mint: false });
+    paintCreds({ cli: false, source: null, key_id: null, account: null, arn: null,
+                 valid: null, error: 'the AWS CLI is not installed' });
     paintStatus(status('no-cli'));
     bannerRead('NOCLI');
     window.__ran = [];
     document.getElementById('banner-fix').click();
     out.push('NOCLI BANNERRAN | ' + window.__ran.join(' ;; '));
 
+    paintCreds({ cli: true, source: 's', key_id: '****1234', account: null, arn: null,
+                 valid: false, error: 'InvalidClientTokenId' });
     paintStatus(status('rejected'));
     bannerRead('BAD');
     window.__ran = [];
@@ -371,19 +379,20 @@ contains "  and where it came from"    "$(row 'OK DETAIL')"   "from ~/.aws/crede
 echo "4. the banner names the right cause"
 check    "it is shown"                 "$(row 'NOCLI BANNER')" "NOCLI BANNER | shown"
 contains "no CLI is not a bad key"     "$(row 'NOCLI TITLE')"  "The AWS CLI is not installed"
-contains "  pointing at the page"      "$(row 'NOCLI BODY')"   "Dependencies page does that"
+contains "  and what that costs"       "$(row 'NOCLI BODY')"   "unknown, not empty"
 lacks    "  and does not say rejected" "$(row 'NOCLI TITLE')"  "rejected"
 contains "  its button goes to the page" "$(row 'NOCLI FIXBTN')" "Open Dependencies"
 check    "  and runs no command"       "$(row 'NOCLI BANNERRAN')" "NOCLI BANNERRAN | "
-contains "a rejected key says so"      "$(row 'BAD TITLE')"    "AWS rejected these credentials"
+contains "a rejected key says so"      "$(row 'BAD TITLE')"    "AWS rejected this access key"
+# One sentence each. This was three: cg's own, then "Your games are in S3;
+# nothing here can see them until this is fixed", then where the button was.
+check    "  in one short line"         "$(row 'BAD BODY')"     "BAD BODY | Everything below is unknown, not empty."
 contains "  its button sets a key"     "$(row 'BAD FIXBTN')"   "Set AWS key"
 # It goes to the card rather than opening a dialog over whatever screen you
 # were on: a key has one place, the same rule the machine chooser follows.
 check    "  and runs no command"       "$(row 'BAD BANNERRAN')" "BAD BANNERRAN | "
 check    "  landing on Settings"       "$(row 'BAD BANNERVIEW')" "BAD BANNERVIEW | settings"
 contains "  with the card flashed"     "$(row 'BAD BANNERFLASH')" "flash-attn"
-# The old text sent people to a Settings screen that had no field for a key.
-contains "and it points at Settings"   "$(row 'BAD BODY')"     "Settings has the same button"
 
 echo "4b. the key is one form, and it says what happened"
 # It used to be two prompts in a row with the failure landing in the log pane

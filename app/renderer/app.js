@@ -268,22 +268,8 @@ function paintStatus(s) {
   // cg could not talk to AWS at all. Every number on every screen is then
   // unknown - which is not the same as zero, and must not be drawn as zero.
   const credErr = s.error && s.error.credentials;
-  $('banner').hidden = !credErr;
+  paintBanner();
   if (credErr) {
-    // A laptop with no AWS CLI used to read "AWS rejected these credentials",
-    // which sends you off to re-create a key that was never the problem. cg
-    // says which of the two it is; the button then does that one thing.
-    const noCli = s.error.cause === 'no-cli';
-    $('banner-title').textContent = noCli
-      ? 'The AWS CLI is not installed' : 'AWS rejected these credentials';
-    $('banner-body').textContent = `${s.error.credentials} Your games are in S3; nothing here can see `
-      + (noCli ? 'them until it is installed - the Dependencies page does that.'
-               : 'them until this is fixed. Settings has the same button.');
-    // Both causes have somewhere to go: a missing CLI is the Dependencies
-    // page's business, a dead key is this one's.
-    $('banner-fix').hidden = false;
-    $('banner-fix-label').textContent = noCli ? 'Open Dependencies' : 'Set AWS key';
-    $('banner-fix').onclick = () => noCli ? goView('deps') : goSetting($('s-creds-card'));
     $('arch-size').textContent = 'unknown';
     $('arch-objects').textContent = '—';
     $('arch-cost').textContent = '—';
@@ -1057,6 +1043,7 @@ let depsNow = null, credsNow = null, tskeyNow = null;
 function paintDeps(d) {
   depsNow = d;
   paintKeys();
+  paintBanner();
   const tools = d.tools || [];
   const missing = tools.filter(x => !x.present);
   const signedOut = d.tailscale_signed_in === false;
@@ -1220,6 +1207,7 @@ $('d-install-all').onclick = () => installDeps([]);
 function paintCreds(c) {
   credsNow = c;
   paintKeys();
+  paintBanner();
   const state = $('creds-state'), detail = $('creds-detail'), btn = $('creds-set');
   btn.hidden = false;
   if (!c.cli) {
@@ -1256,6 +1244,7 @@ function paintCreds(c) {
 function paintTskey(ts) {
   tskeyNow = ts;
   paintKeys();
+  paintBanner();
   const state = $('tskey-state'), detail = $('tskey-detail'), btn = $('tskey-set');
   const canRootNow = Boolean(depsNow && depsNow.root);
   const signed = ts.signed_in === true ? `signed in${ts.node ? ' as ' + ts.node : ''}`
@@ -2452,37 +2441,55 @@ const ALL_READS = [
   [['sweep', '--cached', '--json'], 'sweep'],
 ];
 
-// What is stopping this laptop, in the order it has to be fixed: a tool that is
-// missing, then a key or a sign-in. Returns null when nothing is.
-function notReady() {
-  if (!depsNow || !credsNow || !tskeyNow) return null;    // nothing read yet
-  const missing = (depsNow.tools || []).filter(x => !x.present).map(x => x.label);
+// What is wrong with this laptop, in the order it has to be fixed, and the one
+// button that fixes it. `blocking` means the rest of the reads are pointless
+// until it is dealt with.
+//
+// One sentence each. The old banner ran to three - cg's own sentence, then "Your
+// games are in S3; nothing here can see them until this is fixed", then where
+// the button was - which is a paragraph to say "the key does not work".
+function bannerProblem() {
+  const missing = depsNow ? (depsNow.tools || []).filter(x => !x.present).map(x => x.label) : [];
   if (missing.length) {
-    return { title: `${missing.length === 1 ? 'A tool cg needs is' : 'Tools cg needs are'} missing`,
-             body: `${missing.join(', ')}. Nothing can run until ${missing.length === 1 ? 'it is' : 'they are'} installed.` };
+    return { blocking: true,
+             title: `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not installed`,
+             body: 'Nothing here can run without them.',
+             label: 'Open Dependencies', go: () => goView('deps') };
   }
-  if (!credsNow.cli || credsNow.valid !== true) {
-    return { title: 'AWS has no working key',
-             body: (credsNow.error || 'AWS did not accept the key.')
-                 + ' Everything about the box, the archive and the bill is unknown until it does.' };
+  if (credsNow && !credsNow.cli) {
+    return { blocking: true, title: 'The AWS CLI is not installed',
+             body: 'Everything below is unknown, not empty.',
+             label: 'Open Dependencies', go: () => goView('deps') };
   }
-  if (tskeyNow.signed_in === false) {
-    return { title: 'This laptop is not signed in to Tailscale',
-             body: 'The box joins your tailnet and there is no public SSH port, so nothing can reach it.' };
+  if (credsNow && credsNow.valid !== true) {
+    return { blocking: true, title: 'AWS rejected this access key',
+             body: 'Everything below is unknown, not empty.',
+             label: 'Set AWS key', go: () => goSetting($('s-creds-card')) };
+  }
+  if (tskeyNow && tskeyNow.signed_in === false) {
+    return { blocking: true, title: 'This laptop is not signed in to Tailscale',
+             body: 'The box has no public SSH port, so nothing here can reach it.',
+             label: 'Sign in', go: signInTailscale };
+  }
+  // Not blocking: the token is optional, and everything else works without it.
+  if (tskeyNow && tskeyNow.present && tskeyNow.valid === false) {
+    return { blocking: false, title: 'Tailscale rejected this API token',
+             body: 'Dead nodes will not be pruned and key expiry stays on.',
+             label: 'Set API token', go: () => goSetting($('s-tskey-card')) };
   }
   return null;
 }
 
-// The banner, when the answer is "fix this first". It carries the way there,
-// which is the Dependencies page: it lists the tools AND the two keys, and each
-// key row leads to the one place it is set.
-function paintNotReady(problem) {
-  $('banner').hidden = false;
-  $('banner-title').textContent = problem.title;
-  $('banner-body').textContent = problem.body;
+function paintBanner() {
+  const p = bannerProblem();
+  $('banner').hidden = !p;
+  if (!p) return null;
+  $('banner-title').textContent = p.title;
+  $('banner-body').textContent = p.body;
   $('banner-fix').hidden = false;
-  $('banner-fix-label').textContent = 'Open Dependencies';
-  $('banner-fix').onclick = () => goView('deps');
+  $('banner-fix-label').textContent = p.label;
+  $('banner-fix').onclick = p.go;
+  return p;
 }
 
 // On open: ask what this laptop can do, and only then ask AWS anything.
@@ -2492,11 +2499,9 @@ function paintNotReady(problem) {
 // missing tool - somewhere in the middle of it.
 async function refreshAll() {
   await Promise.all(GATE_READS.map(([args, json]) => runCg(args, { json })));
-  const problem = notReady();
-  if (problem) {
-    paintNotReady(problem);
-    return;
-  }
+  const problem = paintBanner();
+  // A rejected API token is a banner, not a stop: everything else still works.
+  if (problem && problem.blocking) return;
   for (const v of Object.keys(NEEDS)) loaded.add(v);
   // In parallel, because they share nothing and each screen paints when its own
   // answer lands. cg cost is not among them: it bills.

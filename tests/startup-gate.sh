@@ -126,16 +126,18 @@ lacks    "  nor the machines"       "$(row RAN)" "machines --json"
 lacks    "  nor the guards"         "$(row RAN)" "watcher --json"
 lacks    "and never cost"           "$(row RAN)" "cost"
 check    "the banner is up"         "$(row BANNER)" "BANNER | shown"
-contains "  naming the trouble"     "$(row TITLE)"  "Tools cg needs are missing"
-contains "  and which ones"         "$(row BODY)"   "AWS CLI v2, Moonlight"
+# One line, naming them: the old banner spent a sentence saying that some
+# tools were missing and another saying which.
+contains "  naming them"            "$(row TITLE)"  "AWS CLI v2, Moonlight are not installed"
+contains "  and what that means"    "$(row BODY)"   "Nothing here can run without them"
 contains "  with somewhere to go"   "$(row FIX)"    "Open Dependencies"
 check    "  that goes there"        "$(row WENT)"   "WENT | deps"
 
 echo "2. tools are there, the key is not"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_bad, \"creds tailscale --json\": $tskey_in}")
 lacks    "still nothing else is asked" "$(row RAN)" "status --json"
-contains "it says what is wrong"       "$(row TITLE)" "AWS has no working key"
-contains "  quoting cg"                "$(row BODY)"  "the AWS CLI is not installed"
+contains "it says what is wrong"       "$(row TITLE)" "The AWS CLI is not installed"
+contains "  and what that costs"       "$(row BODY)"  "unknown, not empty"
 contains "  and the same way out"      "$(row FIX)"   "Open Dependencies"
 
 echo "3. tools and key are there, the tailnet is not"
@@ -143,6 +145,8 @@ OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" false), \"creds --json\": $cre
 lacks    "still nothing else is asked" "$(row RAN)" "status --json"
 contains "it says so"                  "$(row TITLE)" "not signed in to Tailscale"
 contains "  and why it matters"        "$(row BODY)"  "no public SSH port"
+# The sign-in is a button here, not a page to go to: there is one thing to do.
+contains "  offering the sign-in"      "$(row FIX)"   "Sign in"
 
 echo "4. everything is ready: the rest goes at once"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_in}")
