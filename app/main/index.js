@@ -40,13 +40,18 @@ const isReadOnly = args =>
   // `cg deps` is six command -v checks. `cg deps install` shells out to the
   // package manager as root, so it waits like any other write.
   && !(args[0] === 'deps' && args[1] === 'install')
-  && !(args[0] === 'creds' && args[1] === 'tailscale' && args[2] === 'signin')
-  // Reading a quota and drafting an appeal change nothing. Asking for one
-  // opens a support case, so it waits its turn like any other write - and
-  // being left OUT of this list is why it never ran: a mutating command is
-  // refused outright while any read is in flight, and reads are always in
-  // flight on the screen that offers the button.
-  && !(args[0] === 'quota' && args[1] === 'request');
+  && !(args[0] === 'creds' && args[1] === 'tailscale' && args[2] === 'signin');
+
+// `cg quota request` is deliberately NOT excluded above, and the reason is what
+// this list is for. It is not "does this change anything" - a quota request
+// changes plenty - it is "can this collide with something else cg is doing".
+// Launching, destroying and the library take cg's own locks and must run alone;
+// one API call to Service Quotas touches none of them.
+//
+// Classifying it as mutating made it wait for everything, and on the screen
+// that offers the button something is always being read - so the ask was
+// refused before it reached AWS, every time, and the dialog had nothing to
+// report but the appeal.
 
 const jobs = new Map();          // id -> { id, args, child, readOnly }
 const anyMutating = () => [...jobs.values()].some(j => !j.readOnly);

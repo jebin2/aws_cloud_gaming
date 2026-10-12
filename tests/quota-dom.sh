@@ -24,10 +24,34 @@ echo "1. the scheduler lets the ask through"
 # Both halves in one place, because they have to agree: the renderer decides
 # what counts as a write for its own bookkeeping, the main process decides
 # whether it may run at all.
-main=$(cat app/main/index.js)
-contains "quota is a read"            "$main" "'creds', 'deps', 'quota']"
-contains "  except the request"       "$main" "args[0] === 'quota' && args[1] === 'request'"
-contains "the renderer agrees"        "$(cat app/renderer/app.js)" "cmd[0] === 'quota' && cmd[1] === 'request'"
+# The rule itself, run rather than grepped: the list decides whether a command
+# may start while something else is in flight, and getting it wrong is silent -
+# the ask was refused before it reached AWS, every time.
+sched=$(node -e '
+const src = require("node:fs").readFileSync("app/main/index.js", "utf8");
+const m = src.match(/const READ_ONLY[\s\S]*?const isReadOnly = args =>[\s\S]*?;\n/);
+if (!m) { console.log("NO RULE FOUND"); process.exit(0); }
+eval(m[0].replace(/^const /gm, "var "));
+const want = [
+  [["quota", "--json"], true], [["quota", "request", "spot"], true],
+  [["status", "--json"], true], [["config", "--json"], true],
+  [["init"], false], [["destroy"], false], [["open"], false],
+  [["creds", "set"], false], [["deps", "install"], false],
+  [["creds", "tailscale", "signin"], false], [["library", "forget", "1"], false],
+];
+for (const [args, w] of want) {
+  const got = isReadOnly(args);
+  if (got !== w) console.log("WRONG " + args.join(" ") + " got " + got + " want " + w);
+}
+console.log("checked");
+' 2>&1)
+contains "the rule was found"         "$sched" "checked"
+# A quota ask collides with nothing - it is one API call, and it takes none of
+# the locks a build or a destroy takes. Classifying it as mutating made it wait
+# for every read, and a read is always running on the screen with the button.
+lacks    "nothing is misclassified"   "$sched" "WRONG"
+contains "the renderer still counts it as a write" \
+         "$(cat app/renderer/app.js)" "cmd[0] === 'quota' && cmd[1] === 'request'"
 
 BROWSER=""
 for b in chromium chromium-browser google-chrome-stable google-chrome; do
