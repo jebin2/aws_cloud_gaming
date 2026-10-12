@@ -644,7 +644,7 @@
     </div>
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-gutter-desktop" id="s-groups"></div>
 
-    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop">
+    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop" id="s-creds-card">
       <div class="flex items-start justify-between gap-space-md">
         <div class="min-w-0 flex-1">
           <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">AWS credentials</span>
@@ -700,6 +700,17 @@
            cannot work is worse than no button. -->
       <p class="font-code-sm text-code-sm text-outline pb-space-sm" id="d-root"></p>
       <div class="overflow-x-auto"><table class="chooser" id="d-rows"></table></div>
+    </div>
+
+    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop">
+      <div class="pb-space-md">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Keys and sign-ins</span>
+        <p class="font-code-sm text-code-sm text-outline mt-0.5">
+          Installed tools are not enough: these are the things only you can give cg.
+          Each one is set in Settings, so there is exactly one place it lives.
+        </p>
+      </div>
+      <div id="d-keys"></div>
     </div>
 
     <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop">

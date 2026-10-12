@@ -61,6 +61,12 @@ cat > "$T/r/probe.js" <<'PROBE'
     package_manager: 'pacman', root: 'pkexec', root_blocked: null,
     tailscale_signed_in: true,
   }, extra || {});
+  const keys = label => {
+    out.push(label + ' KEYS | ' + [...document.querySelectorAll('#d-keys .row')]
+      .map(r => r.dataset.key + '=' + r.lastElementChild.firstElementChild.textContent.trim()
+                + (r.querySelector('button') ? '[' + r.querySelector('button').textContent.trim() + ']' : ''))
+      .join(' || '));
+  };
   const read = label => {
     out.push(label + ' READY | ' + g('d-ready'));
     out.push(label + ' PM | ' + g('d-pm'));
@@ -99,6 +105,27 @@ cat > "$T/r/probe.js" <<'PROBE'
     // Installed but signed out: nothing to install, and nothing works.
     paintDeps(payload([], { tailscale_signed_in: false }));
     read('SIGNEDOUT');
+    keys('SIGNEDOUT');
+
+    // The keys: nothing is known yet until each read lands.
+    keys('NOREADS');
+    paintConfig([{ key: 'TAILSCALE_API_KEY', kind: 'text', secret: true, is_set: false,
+                   value: null, default: null, note: 'Tailscale API token.' },
+                 { key: 'GAME_DISK_GB', kind: 'number', secret: false, is_set: true,
+                   value: '80', default: '50', rule: '30', note: 'Root disk.' }]);
+    paintCreds({ cli: true, source: '~/.aws/credentials', key_id: '****1234',
+                 account: null, arn: null, valid: false, error: 'rejected' });
+    paintDeps(payload([], { tailscale_signed_in: true }));
+    keys('READ');
+    window.__ran = [];
+    // Each key's button goes to the ONE place that key is set.
+    document.querySelectorAll('#d-keys button')[0].click();
+    out.push('KEY1 VIEW | ' + (document.querySelector('.nav-item.on') || {}).dataset?.view);
+    out.push('KEY1 FLASH | ' + document.getElementById('s-creds-card').className);
+    document.querySelectorAll('#d-keys button')[1].click();
+    const tokenRow = document.querySelector('#s-groups .row[data-key="TAILSCALE_API_KEY"]');
+    out.push('KEY2 FLASH | ' + (tokenRow ? tokenRow.className : '(no row)'));
+    out.push('KEYS RAN | ' + window.__ran.join(' ;; '));
   } catch (e) { out.push('THREW | ' + e.message); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -161,7 +188,31 @@ contains "it is not called ready"     "$(row 'SIGNEDOUT READY')" "Tailscale is n
 lacks    "  not 'everything is here'" "$(row 'SIGNEDOUT READY')" "everything cg needs"
 contains "  and says what to run"     "$(row 'SIGNEDOUT NOTE')"  "sudo tailscale up"
 
-echo "6. nothing threw"
+echo "6. the keys nobody can install"
+# A tool is installed or it is not; a key is yours, and the page has to say
+# where it stands without ever being a second place to type it.
+contains "the AWS key is listed"      "$(row 'NOREADS KEYS')"  "AWS access key=reading"
+contains "  and the Tailscale token"  "$(row 'NOREADS KEYS')"  "Tailscale API token=reading"
+# "not set" before the read lands is a guess, and a wrong one on a laptop whose
+# key is fine.
+lacks    "  neither guesses"          "$(row 'NOREADS KEYS')"  "not set"
+contains "a rejected key says so"     "$(row 'READ KEYS')"     "AWS access key=****1234 was rejected"
+contains "  with a way to the setting" "$(row 'READ KEYS')"    "rejected[Set in Settings]"
+contains "an unset token says so"     "$(row 'READ KEYS')"     "Tailscale API token=not set"
+contains "  and that it is optional"  "$(row 'READ KEYS')"     "cg goes without"
+contains "a signed-in Tailscale"      "$(row 'READ KEYS')"     "Tailscale sign-in=signed in"
+# Signing in is sudo's business, so there is no button pretending otherwise.
+lacks    "  with no button for it"    "$(row 'READ KEYS')"     "signed in[Set"
+contains "signed out says what to run" "$(row 'SIGNEDOUT KEYS')" "sudo tailscale up"
+
+echo "7. a key is set in exactly one place"
+check    "the AWS key goes to Settings" "$(row 'KEY1 VIEW')"   "KEY1 VIEW | settings"
+contains "  flashing the card"          "$(row 'KEY1 FLASH')"  "flash-attn"
+contains "  and the token its own row"  "$(row 'KEY2 FLASH')"  "flash-attn"
+# Not a cg command: the page points at the setting, it does not set it.
+check    "  running nothing itself"     "$(row 'KEYS RAN')"    "KEYS RAN | "
+
+echo "8. nothing threw"
 check "no painter threw"              "$(grep -c '^THREW' <<<"$OUT")" "0"
 check "  and the page logged no errors" "$(row 'ERRS')"        "ERRS | "
 

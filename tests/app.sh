@@ -262,12 +262,16 @@ lacks    "no picker on the Build screen"  "$html" 'id="b-type"'
 lacks    "  and no table either"          "$html" 'id="b-chooser"'
 contains "Build names the chosen machine" "$html" 'id="b-pick"'
 contains "  and offers a way to change it" "$html" 'id="b-setup"'
-contains "  which goes to Settings"       "$js" "goView('settings');"
+contains "  which goes to Settings"       "$js" "goSetting(\$('s-machine-card'))"
 # Settings is a long screen. Arriving is not enough - the first picker went
-# unnoticed because it was below the fold - so the table is scrolled to and
-# flashed.
-contains "  and flashes the table"        "$js" "card.classList.add('flash-attn')"
-contains "  having scrolled to it"        "$js" "card.scrollIntoView"
+# unnoticed because it was below the fold - so whatever you came for is
+# scrolled to and flashed. Three screens do this now, through one helper.
+contains "  and flashes what you came for" "$js" "el.classList.add('flash-attn')"
+contains "  having scrolled to it"        "$js" "el.scrollIntoView"
+contains "  by one helper, not three"     "$js" "function goSetting(el)"
+# No timer: the animation says when it is over. tests/app.sh asserts elsewhere
+# that nothing in this file runs on setTimeout.
+contains "  ending on its own"            "$js" "animationend"
 contains "  with the animation defined"   "$(cat app/renderer/src.css)" "@keyframes flash-attn"
 check    "  and the card it points at exists"          "$(grep -c 'id="s-machine-card"' app/renderer/index.html)" "1"
 # The summary must sit above the button that spends the money, not below it.

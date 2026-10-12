@@ -282,7 +282,7 @@ function paintStatus(s) {
     // page's business, a dead key is this one's.
     $('banner-fix').hidden = false;
     $('banner-fix-label').textContent = noCli ? 'Open Dependencies' : 'Set AWS key';
-    $('banner-fix').onclick = () => noCli ? goView('deps') : setCreds();
+    $('banner-fix').onclick = () => noCli ? goView('deps') : goSetting($('s-creds-card'));
     $('arch-size').textContent = 'unknown';
     $('arch-objects').textContent = '—';
     $('arch-cost').textContent = '—';
@@ -1052,9 +1052,10 @@ const LABEL = {
 // UNKNOWN everywhere and the reason is six lines down in a preflight report:
 // the AWS CLI is not installed, so nothing can be read, so every screen says
 // nothing. This page says which tool, what it is for, and installs it.
-let depsNow = null;
+let depsNow = null, credsNow = null;
 function paintDeps(d) {
   depsNow = d;
+  paintKeys();
   const tools = d.tools || [];
   const missing = tools.filter(x => !x.present);
   const signedOut = d.tailscale_signed_in === false;
@@ -1124,6 +1125,73 @@ function paintDeps(d) {
     : 'Whatever the package manager says, as it says it.';
 }
 
+// The two things no package manager can install. Each row says where it stands
+// and sends you to the one place it is set - the same rule as the machine
+// chooser, which shows region and instance type here and lets you change them
+// in exactly one place.
+function paintKeys() {
+  const wrap = $('d-keys');
+  if (!wrap) return;
+  const token = (config || []).find(r => r.key === 'TAILSCALE_API_KEY');
+  const c = credsNow;
+  const rows = [
+    { name: 'AWS access key',
+      why: 'every call to AWS; without it nothing can be read',
+      // null until the read lands: "not set" would be a guess, and a wrong one
+      // on a laptop where the key is fine.
+      state: !c ? ['reading…', 'wait']
+        : !c.cli ? ['the AWS CLI is not installed', 'bad']
+        : c.valid ? [`${c.key_id || 'a key'} works`, 'ok']
+        : c.key_id ? [`${c.key_id} was rejected`, 'bad']
+        : ['not set', 'bad'],
+      to: () => goSetting($('s-creds-card')) },
+    { name: 'Tailscale sign-in',
+      why: 'the private network the box joins; there is no public SSH port',
+      state: depsNow && depsNow.tailscale_signed_in === true ? ['signed in', 'ok']
+        : depsNow && depsNow.tailscale_signed_in === false
+          ? ['not signed in - in a terminal:  sudo tailscale up', 'bad']
+          : ['Tailscale is not installed', 'bad'],
+      to: null },
+    { name: 'Tailscale API token',
+      why: 'optional: prunes old nodes and turns off key expiry',
+      state: !token ? ['reading…', 'wait']
+        : token.is_set ? ['set', 'ok'] : ['not set - cg goes without', 'warn'],
+      to: () => goSetting(settingEl('TAILSCALE_API_KEY')) },
+  ];
+  wrap.textContent = '';
+  for (const r of rows) {
+    const row = document.createElement('div');
+    row.className = 'row border-b border-surface-variant/40 items-start';
+    row.dataset.key = r.name;
+    const left = document.createElement('div');
+    left.className = 'min-w-0 flex-1';
+    const n = document.createElement('p');
+    n.className = 'font-code-md text-code-md';
+    n.textContent = r.name;
+    const why = document.createElement('p');
+    why.className = 'font-code-sm text-code-sm text-outline mt-0.5';
+    why.textContent = r.why;
+    left.append(n, why);
+    const right = document.createElement('div');
+    right.className = 'flex items-center gap-space-sm shrink-0';
+    const [text, tone] = r.state;
+    const val = document.createElement('span');
+    val.className = 'font-code-sm text-code-sm text-right max-w-[18rem] break-words '
+      + (tone === 'ok' ? 'text-on-surface-variant' : tone === 'bad' ? 'text-error' : 'text-outline');
+    val.textContent = text;
+    right.append(val);
+    if (r.to) {
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.textContent = 'Set in Settings';
+      b.onclick = r.to;
+      right.append(b);
+    }
+    row.append(left, right);
+    wrap.append(row);
+  }
+}
+
 function installDeps(tools) {
   $('d-log').hidden = false;
   $('d-log').textContent = 'running\u2026';
@@ -1135,6 +1203,8 @@ $('d-install-all').onclick = () => installDeps([]);
 // all. No CLI is not a rejected key, and a rejected key is not an absent one -
 // a new laptop hits the first and used to be told the second.
 function paintCreds(c) {
+  credsNow = c;
+  paintKeys();
   const state = $('creds-state'), detail = $('creds-detail'), btn = $('creds-set');
   btn.hidden = false;
   if (!c.cli) {
@@ -1202,6 +1272,7 @@ const SETTING_GROUPS = [
 
 function paintConfig(rows) {
   config = rows;
+  paintKeys();
   const wrap = $('s-groups');
   wrap.textContent = '';
   const set = rows.filter(r => r.is_set).length;
@@ -1244,6 +1315,7 @@ const CHOSEN_IN_TABLE = new Set(['GAME_REGION', 'GAME_INSTANCE_TYPE', 'GAME_SPOT
 function settingRow(r) {
   const row = document.createElement('div');
   row.className = 'row border-b border-surface-variant/40 items-start';
+  row.dataset.key = r.key;          // so anything can send you to this one row
 
   const left = document.createElement('div');
   left.className = 'min-w-0 flex-1';
@@ -2083,7 +2155,10 @@ const NEEDS = {
               [['machines', '--json'], 'machines'], [['sweep', '--cached', '--json'], 'sweep']],
   library:   [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status']],
   guards:    [[['watcher', '--json'], 'guards']],
-  deps:      [[['deps', '--json'], 'deps']],
+  // creds and config too: the page shows the two keys, and neither is in
+  // `cg deps` - they belong to AWS and to .env.
+  deps:      [[['deps', '--json'], 'deps'], [['creds', '--json'], 'creds'],
+              [['config', '--json'], 'config']],
 };
 const loaded = new Set();
 
@@ -2131,6 +2206,25 @@ const STOP_WARNING = {
          + 'since the last push, and the box may be left running.',
   open: 'This only ends the streaming session on this laptop. The box keeps running.',
 };
+// Settings is a long screen, and arriving on it is not the same as finding the
+// thing you came for: the first instance-type picker went unnoticed entirely
+// because it was below the fold. So anything that sends you to a setting
+// scrolls to it and flashes it, and that is the ONLY way a key is set - one
+// place per thing, the same rule the machine chooser follows.
+function goSetting(el) {
+  goView('settings');
+  if (!el) return;
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  // Restarting a running animation needs the class off, a reflow, then on.
+  el.classList.remove('flash-attn');
+  void el.offsetWidth;
+  // The animation says when it is finished, so nothing here runs on a timer.
+  el.addEventListener('animationend', () => el.classList.remove('flash-attn'), { once: true });
+  el.classList.add('flash-attn');
+}
+// A settings row, by the key cg calls it.
+const settingEl = key => document.querySelector(`#s-groups .row[data-key="${key}"]`);
+
 function goView(v) {
   const link = document.querySelector(`.nav-item[data-view="${v}"]`);
   if (link && view !== v) link.click();
@@ -2252,19 +2346,7 @@ if (sweepBtn) sweepBtn.onclick = () => scanRegions(sweepBtn);
 // Build's "Change setup". Settings is a long screen and the table is at the
 // top of it, so arriving there is not enough - the first instance-type picker
 // went unnoticed for exactly this reason. Scroll to it and flash it.
-$('b-setup').onclick = () => {
-  goView('settings');
-  const card = $('s-machine-card');
-  if (!card) return;
-  card.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  // Restarting a running animation needs the class off, a reflow, then on.
-  card.classList.remove('flash-attn');
-  void card.offsetWidth;
-  // The animation says when it is finished, so nothing here runs on a timer.
-  card.addEventListener('animationend', () => card.classList.remove('flash-attn'),
-                        { once: true });
-  card.classList.add('flash-attn');
-};
+$('b-setup').onclick = () => goSetting($('s-machine-card'));
 
 $('d-guards').onclick = () => goView('guards');
 $('g-settings').onclick = () => goView('settings');

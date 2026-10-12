@@ -109,6 +109,8 @@ cat > "$T/r/probe.js" <<'PROBE'
     window.__ran = [];
     document.getElementById('banner-fix').click();
     out.push('BAD BANNERRAN | ' + window.__ran.join(' ;; '));
+    out.push('BAD BANNERVIEW | ' + (document.querySelector('.nav-item.on') || {}).dataset?.view);
+    out.push('BAD BANNERFLASH | ' + document.getElementById('s-creds-card').className);
   } catch (e) { out.push('THREW | ' + e.message); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -170,7 +172,11 @@ contains "  its button goes to the page" "$(row 'NOCLI FIXBTN')" "Open Dependenc
 check    "  and runs no command"       "$(row 'NOCLI BANNERRAN')" "NOCLI BANNERRAN | "
 contains "a rejected key says so"      "$(row 'BAD TITLE')"    "AWS rejected these credentials"
 contains "  its button sets a key"     "$(row 'BAD FIXBTN')"   "Set AWS key"
-check    "  running cg creds set"      "$(row 'BAD BANNERRAN')" "BAD BANNERRAN | creds set"
+# It goes to the card rather than opening a dialog over whatever screen you
+# were on: a key has one place, the same rule the machine chooser follows.
+check    "  and runs no command"       "$(row 'BAD BANNERRAN')" "BAD BANNERRAN | "
+check    "  landing on Settings"       "$(row 'BAD BANNERVIEW')" "BAD BANNERVIEW | settings"
+contains "  with the card flashed"     "$(row 'BAD BANNERFLASH')" "flash-attn"
 # The old text sent people to a Settings screen that had no field for a key.
 contains "and it points at Settings"   "$(row 'BAD BODY')"     "Settings has the same button"
 
