@@ -214,7 +214,7 @@ cat > "$T/body.js" <<'PROBE'
 PROBE
 
 OUT=$(probe "$(q_json null)" \
-            "$(q_json '{"status":"CASE_OPENED","desired":4.0,"created":"2026-10-12T23:31:11+05:30","case_id":"100000000000001"}')" \
+            "$(q_json '{"status":"CASE_OPENED","desired":4.0,"created":"2026-10-12T23:31:11+05:30","case_id":"100000000000001","last_updated":"2026-10-13T09:00:00+05:30"}')" \
             "$T/body.js")
 [[ $OUT == *"NO PROBE OUTPUT"* ]] && { echo "  FAIL the page did not render"; echo "quota-dom: $pass passed, $((fail+1)) failed"; exit 1; }
 
@@ -240,6 +240,10 @@ echo "5. and then the case exists"
 contains "the status is AWS's own"     "$(row 'MADE STATE')"  "case open"
 contains "  with the date asked"       "$(row 'MADE STATE')"  "asked 2026-10-12"
 contains "  explained"                 "$(row 'MADE WHY')"    "Usually this will get refused"
+# "I replied with the appeal and it still says case open" - it will. Replying
+# is a correspondence on the case; the request only moves when AWS decides.
+contains "  and that replying does not move it" "$(row 'MADE WHY')" "does not change when you reply"
+contains "when AWS last touched it"    "$(row 'MADE STATE')"  "AWS last moved it 2026-10-13"
 # The label says WHEN to use it, because the refusal lands minutes after you
 # have closed the window.
 contains "the appeal is labelled"      "$(row 'MADE PRE')"    "as an appeal when denied"

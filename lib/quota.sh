@@ -29,7 +29,7 @@ quota_value() {
 quota_request_state() {
   aws service-quotas list-requested-service-quota-change-history-by-quota \
     --service-code ec2 --quota-code "$2" --region "$1" \
-    --query 'RequestedQuotas | sort_by(@, &Created) | [-1].[Status,DesiredValue,Created,CaseId]' \
+    --query 'RequestedQuotas | sort_by(@, &Created) | [-1].[Status,DesiredValue,Created,CaseId,LastUpdated]' \
     --output text 2>/dev/null | grep -v '^None' | head -1 || true
   return 0
 }
@@ -84,6 +84,9 @@ for line in sys.stdin.read().splitlines():
             "desired": num(hist[1]) if len(hist) > 1 else None,
             "created": hist[2] if len(hist) > 2 else None,
             "case_id": hist[3] if len(hist) > 3 and hist[3] != "None" else None,
+            # When AWS last touched the REQUEST. A reply on the case is not a
+            # change to it, which is exactly the confusion worth answering.
+            "last_updated": hist[4] if len(hist) > 4 and hist[4] != "None" else None,
         },
     }
 print(json.dumps({"region": os.environ["REGION"], "instance_type": os.environ["TYPE"],

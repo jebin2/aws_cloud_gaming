@@ -1434,7 +1434,9 @@ const QUOTA_STATE = {
             'AWS has it. The case appears within a minute or two - Refresh to look again.'],
   CASE_OPENED: ['case open',
             'A case exists. Usually this will get refused; reply to it with the appeal below '
-          + 'and a human reviews it, which takes two to four days.'],
+          + 'and a human reviews it, which takes two to four days. This line does not change '
+          + 'when you reply - the refusal and your appeal live on the case, and only AWS\u2019s '
+          + 'decision moves the request.'],
   DENIED: ['refused - this is normal, and not the end',
             'Every quota this rig has was granted on appeal, not on the first ask. Reply on the '
           + 'case with the text below: it is the detailed use case they asked for.'],
@@ -1521,7 +1523,9 @@ async function quotaRender() {
   if (r && r.status && r.status !== 'APPROVED') {
     const [head, why] = QUOTA_STATE[r.status] || [r.status.toLowerCase().replace(/_/g, ' '), ''];
     const when = (r.created || '').slice(0, 10);
-    quotaSay(`\u25cf ${head}${when ? ' \u00b7 asked ' + when : ''}${r.desired ? ' \u00b7 ' + r.desired + ' vCPU' : ''}`,
+    const moved = (r.last_updated || '').slice(0, 10);
+    quotaSay(`\u25cf ${head}${when ? ' \u00b7 asked ' + when : ''}${r.desired ? ' \u00b7 ' + r.desired + ' vCPU' : ''}`
+             + (moved && moved !== when ? ` \u00b7 AWS last moved it ${moved}` : ''),
              why, r.status === 'DENIED' || r.status === 'CASE_CLOSED' ? 'bad' : '');
     quotaCase = r.case_id || null;
     $('quota-case-row').hidden = false;
