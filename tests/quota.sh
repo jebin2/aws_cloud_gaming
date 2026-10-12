@@ -92,6 +92,10 @@ contains "it says what it is asking for" "$out" "asking for 4 vCPU of G and VT o
 contains "  for exactly one box"       "$(cat "$T/awslog")" "--desired-value 4"
 contains "  against the right quota"   "$(cat "$T/awslog")" "--quota-code L-DB2E81BA"
 contains "  and reports the request"   "$out" "req-123"
+# The case id is how you find the request again, and the only way to reach the
+# appeal. It was in the answer and thrown away.
+contains "  with the case it opened"   "$out" "case 178899999999999"
+contains "  as a link to it"           "$out" "displayId=178899999999999"
 # The refusal is part of the process, and saying so up front is the difference
 # between "it failed" and "that is step one".
 contains "it warns the first answer is no" "$out" "automatic refusal"
@@ -140,6 +144,10 @@ contains "  and why cg cannot appeal"  "$doc" "SubscriptionRequiredException"
 app=$(cat app/renderer/app.js)
 contains "the app offers the ask"      "$app" "Ask AWS for GPU quota"
 contains "  and drafts the appeal"     "$app" "'quota', 'appeal'"
+# The appeal used to overwrite what cg had just said, so a request that HAD
+# been submitted read as a wall of text to go and do by hand.
+contains "  keeping what cg said"      "$app" "the appeal, for when the refusal arrives"
+contains "  and only appealing a request that went through" "$app" "rc === 0 ? await runCg(['quota', 'appeal'"
 main=$(cat app/main/index.js)
 contains "the case link is allowed"    "$main" "console.aws.amazon.com"
 contains "  and still only https"      "$main" "u.protocol !== 'https:'"

@@ -151,7 +151,10 @@ quota_request() {
     return 1
   }
   id=$(awk '{print $1}' <<<"$out")
-  log_as ok "asked. request $id"
+  local case_id; case_id=$(awk '{print $2}' <<<"$out")
+  [[ $case_id == None ]] && case_id=""
+  log_as ok "asked AWS for $need vCPU. request $id"
+  [[ -n $case_id ]] && log "  case $case_id - https://console.aws.amazon.com/support/home#/case/?displayId=$case_id"
   log "  The first answer is usually an automatic refusal - that is normal, and"
   log "  the appeal on the same case is what gets approved."
   log "  Write it with:  cg quota appeal $kind"

@@ -1448,15 +1448,19 @@ async function openQuota(kind) {
     $('quota-go').textContent = 'Asking\u2026';
     quotaLog('asking\u2026');
     const { rc, err } = await runCg(['quota', 'request', which], { wantRc: true });
-    quotaLog((err || '').trim() || (rc === 0 ? 'asked.' : `cg quota request exited ${rc}`));
+    const said = (err || '').trim() || (rc === 0 ? 'asked.' : `cg quota request exited ${rc}`);
     $('quota-go').hidden = true;
-    // The appeal comes next whatever the answer was: a refusal needs it, and a
-    // request that is still open needs it the moment the refusal arrives.
-    const appeal = await runCg(['quota', 'appeal', which], { capture: true });
+    // What cg SAID stays on screen. It used to be overwritten by the appeal a
+    // moment later, so a request that had genuinely been submitted looked like
+    // a wall of text to go and do something with by hand.
+    const appeal = rc === 0 ? await runCg(['quota', 'appeal', which], { capture: true }) : '';
     quotaAppeal = (appeal || '').trim();
-    if (quotaAppeal) {
-      quotaLog(quotaAppeal);
-      $('quota-copy').hidden = false;
+    quotaLog(said + (quotaAppeal
+      ? '\n\n--- the appeal, for when the refusal arrives ---\n\n' + quotaAppeal : ''));
+    $('quota-copy').hidden = !quotaAppeal;
+    if (rc === 0) {
+      $('quota-note').textContent = 'Asked. AWS usually refuses within minutes - reopen the case '
+        + 'with the appeal below, and a human reviews it in two to four days.';
     }
     const idMatch = /displayId=(\d+)|case (\d+)/.exec(err || '');
     quotaCase = idMatch ? (idMatch[1] || idMatch[2]) : null;
