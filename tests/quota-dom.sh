@@ -167,6 +167,36 @@ cat > "$T/body.js" <<'PROBE'
     out.push('MADE URL | ' + document.getElementById('quota-case-url').textContent.trim());
     document.getElementById('quota-case').click();
     out.push('OPENED | ' + window.__opened);
+
+    // Closing and opening again: what is on the dialog belongs to the last
+    // question, and showing it under a new one - even for half a second - is
+    // an answer to something nobody asked.
+    document.getElementById('quota-cancel').click();
+    openQuota();
+    out.push('REOPEN NOW | pre=' + document.getElementById('quota-pre-label').hidden
+             + ' body=' + JSON.stringify(document.getElementById('quota-log').textContent)
+             + ' caserow=' + document.getElementById('quota-case-row').hidden
+             + ' kind=' + JSON.stringify(document.getElementById('quota-kind').value));
+    out.push('REOPEN BUSY | kind=' + document.getElementById('quota-kind').disabled
+             + ' refresh=' + document.getElementById('quota-refresh').disabled);
+    for (let i = 0; i < 8; i++) await sleep();
+    out.push('REOPEN SETTLED | ' + document.getElementById('quota-explain').textContent.trim()
+             + ' | kindDisabled=' + document.getElementById('quota-kind').disabled);
+
+    // Refresh: the old answer goes immediately, the controls lock while it
+    // reads, and both come back when it lands.
+    document.getElementById('quota-kind').value = 'spot';
+    document.getElementById('quota-kind').onchange();
+    for (let i = 0; i < 8; i++) await sleep();
+    document.getElementById('quota-refresh').click();
+    out.push('REFRESH NOW | state=' + document.getElementById('quota-state').textContent.trim()
+             + ' body=' + JSON.stringify(document.getElementById('quota-log').textContent)
+             + ' refresh=' + document.getElementById('quota-refresh').disabled
+             + '/' + document.getElementById('quota-refresh').textContent.trim());
+    for (let i = 0; i < 10; i++) await sleep();
+    out.push('REFRESH SETTLED | ' + document.getElementById('quota-state').textContent.replace(/\s+/g, ' ').trim()
+             + ' | refresh=' + document.getElementById('quota-refresh').disabled
+             + '/' + document.getElementById('quota-refresh').textContent.trim());
   } catch (e) { out.push('THREW | ' + e.message + ' | ' + (e.stack || '').split('\n')[1]); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -201,7 +231,7 @@ check    "  and runs the request"      "$(row 'MADE RAN')"       "MADE RAN | quo
 echo "5. and then the case exists"
 contains "the status is AWS's own"     "$(row 'MADE STATE')"  "case open"
 contains "  with the date asked"       "$(row 'MADE STATE')"  "asked 2026-10-12"
-contains "  explained"                 "$(row 'MADE WHY')"    "refusal usually arrives within minutes"
+contains "  explained"                 "$(row 'MADE WHY')"    "Usually this will get refused"
 # The label says WHEN to use it, because the refusal lands minutes after you
 # have closed the window.
 contains "the appeal is labelled"      "$(row 'MADE PRE')"    "as an appeal when denied"
@@ -212,7 +242,22 @@ contains "Refresh is offered"          "$(row 'MADE BTN')"    "refresh=false"
 # Asking again while a case is open is refused by AWS as a duplicate.
 contains "  and Confirm is gone"       "$(row 'MADE BTN')"    "go=true"
 
-echo "6. nothing threw"
+echo "6. closing and opening again starts clean"
+check    "the old appeal is gone at once" "$(row 'REOPEN NOW')" "REOPEN NOW | pre=true body=\"\" caserow=true kind=\"\""
+# Locked while it reads: a dropdown you can change mid-read answers the
+# previous question.
+contains "  and the controls are locked" "$(row 'REOPEN BUSY')" "kind=true refresh=true"
+contains "then it asks for a choice"     "$(row 'REOPEN SETTLED')" "Pick one to see what it would ask for"
+contains "  with the controls back"      "$(row 'REOPEN SETTLED')" "kindDisabled=false"
+
+echo "7. Refresh clears, locks, then reflects"
+contains "the old answer goes"         "$(row 'REFRESH NOW')" 'body=""'
+contains "  it says it is reading"     "$(row 'REFRESH NOW')" "reading"
+contains "  and cannot be pressed twice" "$(row 'REFRESH NOW')" "refresh=true/Reading"
+contains "then the state is back"      "$(row 'REFRESH SETTLED')" "case open"
+contains "  and so is the button"      "$(row 'REFRESH SETTLED')" "refresh=false/Refresh"
+
+echo "8. nothing threw"
 check "no painter threw"               "$(grep -c '^THREW' <<<"$OUT")" "0"
 check "  and the page logged no errors" "$(row ERRS)" "ERRS | "
 

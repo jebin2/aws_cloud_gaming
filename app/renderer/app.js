@@ -1432,8 +1432,8 @@ const QUOTA_STATE = {
   PENDING: ['filed, not yet routed',
             'AWS has it. The case appears within a minute or two - Refresh to look again.'],
   CASE_OPENED: ['case open',
-            'A case exists. The refusal usually arrives within minutes; reply to it with the '
-          + 'appeal below and a human reviews it, which takes two to four days.'],
+            'A case exists. Usually this will get refused; reply to it with the appeal below '
+          + 'and a human reviews it, which takes two to four days.'],
   DENIED: ['refused - this is normal, and not the end',
             'Every quota this rig has was granted on appeal, not on the first ask. Reply on the '
           + 'case with the text below: it is the detailed use case they asked for.'],
@@ -1447,6 +1447,28 @@ const QUOTA_LABEL = { ondemand: 'on demand', spot: 'spot' };
 let quotaNow = null, quotaKind = '', quotaAppeal = '', quotaCase = null;
 
 const quotaCaseUrl = id => `https://console.aws.amazon.com/support/home#/case/?displayId=${id}`;
+
+function quotaClear() {
+  $('quota-state').textContent = '';
+  $('quota-explain').textContent = '';
+  $('quota-pre-label').hidden = true;
+  $('quota-pre-label').textContent = '';
+  $('quota-log').textContent = '';
+  $('quota-case-row').hidden = true;
+  $('quota-case-url').textContent = '';
+  $('quota-copy').textContent = 'Copy the appeal';
+  quotaAppeal = '';
+  quotaCase = null;
+}
+
+// Reading, and saying so: the controls are dead while it reads, because a
+// second Refresh on top of the first answers the first one's question.
+function quotaBusy(on) {
+  $('quota-kind').disabled = on;
+  $('quota-refresh').disabled = on;
+  $('quota-go').disabled = on || $('quota-go').disabled;
+  $('quota-refresh').textContent = on ? 'Reading\u2026' : 'Refresh';
+}
 
 function quotaSay(state, explain, tone) {
   $('quota-state').textContent = state;
@@ -1470,6 +1492,8 @@ async function quotaRender() {
   $('quota-pre-label').hidden = true;
   $('quota-log').textContent = '';
   $('quota-refresh').hidden = !kind;
+  $('quota-refresh').disabled = false;
+  $('quota-kind').disabled = false;
   $('quota-go').hidden = false;
   $('quota-go').disabled = true;
   $('quota-go').textContent = 'Confirm \u00b7 create case';
@@ -1529,26 +1553,40 @@ async function quotaRender() {
 
 async function openQuota(kind) {
   quotaKind = kind || '';
-  quotaAppeal = ''; quotaCase = null;
+  // Cleared BEFORE the dialog is shown, not after the read comes back: what
+  // was on it is an answer about the last thing you asked, and showing it for
+  // half a second under a new question is worse than showing nothing.
+  quotaClear();
   $('quota-kind').value = quotaKind;
-  $('quota-kind').disabled = false;
   $('quota-title').textContent = 'Ask AWS for GPU quota';
+  $('quota-go').hidden = false;
+  $('quota-go').disabled = true;
+  $('quota-refresh').hidden = true;
+  quotaBusy(true);
   quotaSay('reading\u2026', '');
   if (!$('quota').open) $('quota').showModal();
   await quotaRead();
+  quotaBusy(false);
   await quotaRender();
 }
 
 $('quota-kind').onchange = async () => {
   quotaKind = $('quota-kind').value;
+  quotaClear();
+  quotaBusy(true);
   quotaSay('reading\u2026', '');
   await quotaRender();
+  quotaBusy(false);
 };
 $('quota-refresh').onclick = async e => {
   e.preventDefault();
+  if ($('quota-refresh').disabled) return;
+  quotaClear();
+  quotaBusy(true);
   quotaSay('reading\u2026', '');
   await quotaRead();
   await quotaRender();
+  quotaBusy(false);
 };
 $('quota-cancel').onclick = e => { e.preventDefault(); $('quota').close(); };
 $('quota-copy').onclick = async e => {
