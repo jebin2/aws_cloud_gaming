@@ -1537,8 +1537,8 @@ const SETTING_GROUPS = [
    ['GAME_WATCHDOG_IDLE_MIN', 'GAME_WATCHDOG_STUCK_MIN', 'GAME_ARCHIVE_EXPIRY_DAYS', 'GAME_BUDGET_INR']],
   ['The stream', 'Passed to Moonlight as flags, so your saved settings stay untouched.',
    ['GAME_RES', 'GAME_FPS', 'GAME_BITRATE_KBPS']],
-  ['Being told', 'Where it reaches you, and the token that keeps the tailnet tidy.',
-   ['GAME_NTFY_URL', 'EMAIL_ALERTS', 'TAILSCALE_API_KEY']],
+  ['Notifications', 'Where cg reaches you.',
+   ['GAME_NTFY_URL', 'EMAIL_ALERTS']],
 ];
 
 function paintConfig(rows) {
@@ -1555,7 +1555,7 @@ function paintConfig(rows) {
   // Anything cg grows that this file has not heard of still appears, rather
   // than vanishing because the app did not know where to put it.
   const known = new Set(groups.flatMap(g => g[2]));
-  const rest = rows.filter(r => !known.has(r.key)).map(r => r.key);
+  const rest = rows.filter(r => !known.has(r.key) && !OWN_CARD.has(r.key)).map(r => r.key);
   if (rest.length) groups.push(['Everything else', 'New settings cg knows about.', rest]);
 
   for (const [title, note, keys] of groups) {
@@ -1577,6 +1577,12 @@ function paintConfig(rows) {
     wrap.append(card);
   }
 }
+
+// Settings that are shown and set on a card of their own, so they are not also
+// a row in the list below it. TAILSCALE_API_KEY lived under "Being told" with
+// the ntfy topic, as "the token that keeps the tailnet tidy" - true, and no
+// help at all when it is the thing that mints the box's key.
+const OWN_CARD = new Set(['TAILSCALE_API_KEY']);
 
 // The three settings the chooser table owns. They are one decision, so they
 // have one control - see chooseMachine.

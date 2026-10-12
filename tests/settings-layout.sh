@@ -75,7 +75,8 @@ cat > "$T/r/probe.js" <<'PROBE'
     for (const r of R) {
       const row = [...document.querySelectorAll('#s-groups .row')]
         .find(el => el.textContent.includes(LABEL[r.key] || r.key));
-      if (!row) { out.push(r.key + ' | MISSING'); continue; }
+      // A setting with a card of its own has no row in the list - see OWN_CARD.
+      if (!row) { out.push(r.key + ' | NOROW'); continue; }
       const card = row.closest('.rounded-lg');
       const right = row.lastElementChild;
       const val = right.querySelector('span');
@@ -135,14 +136,21 @@ for W in 1000 1280; do
   else echo "  FAIL   the label column is $(field EMAIL_ALERTS labelW)px wide"; fail=$((fail+1)); fi
 
   # Alignment is one number: every button in a card ends at the same x.
-  check "  Edit lines up with the row above it" \
-        "$(field EMAIL_ALERTS btnRight)" "$(field TAILSCALE_API_KEY btnRight)"
-  check "    and with the secret row's Replace" \
+  check "  Edit lines up with the secret row's Replace" \
         "$(field EMAIL_ALERTS btnRight)" "$(field GAME_NTFY_URL btnRight | cut -d/ -f2)"
-  check "  a long note does not push a value out" "$(field TAILSCALE_API_KEY valueFits)" "yes"
+  check "  a long note does not push a value out" "$(field GAME_NTFY_URL valueFits)" "yes"
   check "  nor a choice's label"                  "$(field GAME_STEAM_LOGIN valueFits)" "yes"
   check "  and nothing threw"                     "$(sed -n 's/^ERRS | //p' <<<"$GEO")" ""
 done
+
+echo "a setting with its own card has no row here"
+# Two places to set one thing is exactly the drift this app keeps removing:
+# the API token is shown and set on the Tailscale card, which can also say
+# whether Tailscale accepts it.
+GEO=$(geo 1280)
+check "the Tailscale token has no row"  "$(field TAILSCALE_API_KEY card)" ""
+contains "  and it is not filed as unknown" "$GEO" "TAILSCALE_API_KEY | NOROW"
+contains "notifications is its own group"   "$(row GAME_NTFY_URL)" "group=Notifications"
 
 echo "the Steam sign-in is filed with the build settings"
 # Not in "Everything else", which is where a setting the app has never heard of
