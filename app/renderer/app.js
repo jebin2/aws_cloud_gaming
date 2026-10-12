@@ -2083,6 +2083,15 @@ function paintChooser() {
       // Why the table is short. Rows that no quota can launch are left out -
       // picking one would only fail at launch - but a region offering sixteen
       // machines and showing two looks broken without a word about it.
+      // And why it is one region. The scan is remembered per laptop, so a
+      // window that has never run one shows the region .env names and nothing
+      // else - which looks like the other regions have gone missing.
+      if (!swept && rows.length) {
+        const line = document.createElement('div');
+        line.textContent = `This is ${machinesNow ? machinesNow.region : 'one region'} only. `
+          + 'Scan all regions compares every region cg can reach - about 90 seconds, and free.';
+        legend.append(line);
+      }
       const hidden = hiddenByQuota();
       if (hidden) {
         const line = document.createElement('div');

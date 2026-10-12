@@ -415,6 +415,13 @@ contains "the legend says what grey means" "$OUT" "would be refused at launch"
 # before a scan: a sweep shows every region, where "how many are hidden" has no
 # single answer.
 check    "one row before a scan"          "$(row 'NOSWEEP ROWS')" "NOSWEEP ROWS | 1"
+# "Why is Mumbai not showing?" - because the scan is remembered per laptop, and
+# this one has never run it. The table was showing .env's region alone and
+# calling it the whole picture.
+contains "  it says it is one region"     "$(row 'NOSWEEP LEGEND')" "This is ap-south-1 only"
+contains "  and what compares them all"   "$(row 'NOSWEEP LEGEND')" "Scan all regions"
+contains "  with the price of asking"     "$(row 'NOSWEEP LEGEND')" "90 seconds, and free"
+lacks    "  not said after a scan"        "$(row 'LEGEND')" "only. Scan all regions"
 contains "  and the legend says why"      "$(row 'NOSWEEP LEGEND')" "2 more GPU machines are offered here"
 contains "  naming the limit"             "$(row 'NOSWEEP LEGEND')" "bigger than your vCPU quota"
 contains "  with both ways round it"      "$(row 'NOSWEEP LEGEND')" "Ask AWS for more, or pick another region"
