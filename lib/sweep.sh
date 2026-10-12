@@ -509,6 +509,83 @@ print("  * is the region in use. Change it with: cg config set GAME_REGION <regi
 # it opens, and the sweep takes minutes. This is ONE describe-regions call, and
 # it lists only regions already enabled because those are the ones a dropdown
 # can switch to without an opt-in that this app has no business performing.
+# --- turning a region on ------------------------------------------------------
+# Unlike a quota, this needs no case and no person: one call, and AWS works
+# through DISABLED -> ENABLING -> ENABLED over a few minutes. It is an
+# ACCOUNT-level change though - everything on the account can use the region
+# afterwards - and undoing it is slower than doing it, so it is asked about
+# rather than done quietly.
+#
+# The Account API, not describe-regions: describe-regions only lists what is
+# already on, which is exactly the set this is not about.
+region_optin_json() {
+  aws account list-regions --max-results 50 \
+    --query 'sort_by(Regions,&RegionName)[].[RegionName,RegionOptStatus]' \
+    --output text 2>/dev/null \
+  | python3 -I -c '
+import json, sys
+rows = [l.split() for l in sys.stdin if l.strip()]
+out = [{"region": p[0], "status": p[1] if len(p) > 1 else None} for p in rows]
+print(json.dumps({"regions": out,
+                  # What a caller actually wants to know: which ones could be
+                  # turned on, and which are mid-flight.
+                  "disabled": [r["region"] for r in out if r["status"] == "DISABLED"],
+                  "enabling": [r["region"] for r in out if r["status"] == "ENABLING"]},
+                 indent=2))' || printf '{"regions":[],"disabled":[],"enabling":[],"error":"could not read the region list"}\n'
+}
+
+region_optin_status() { # region_optin_status <region> - one word, or nothing
+  aws account list-regions --region-names "$1" \
+    --query 'Regions[0].RegionOptStatus' --output text 2>/dev/null | grep -v '^None$' || true
+  return 0
+}
+
+# region_enable <region> - turn it on, then watch until AWS says it is on.
+region_enable() {
+  local r=${1:?region} st
+  st=$(region_optin_status "$r")
+  case $st in
+    ENABLED|ENABLED_BY_DEFAULT)
+      log_as ok "$r is already enabled"; return 0 ;;
+    ENABLING)
+      log_as warn "$r is already being enabled - that takes a few minutes" ;;
+    "")
+      log_as fail "AWS does not list a region called $r"; return 1 ;;
+    *)
+      say "enabling $r"
+      log "  an account-level change: everything on this account can use the region"
+      log "  afterwards, and turning it back off is slower than turning it on."
+      local out
+      if ! out=$(aws account enable-region --region-name "$r" 2>&1); then
+        log_as fail "AWS refused: $(printf '%s' "$out" | tr '\n' ' ' | sed -E 's/  +/ /g' | cut -c1-300)"
+        # The two that are worth naming, because neither is a retry.
+        case $out in
+          *AccessDenied*|*not\ authorized*)
+            log "  this key needs account:EnableRegion" ;;
+          *Organization*|*organization*)
+            log "  in an AWS Organization only the management account can enable regions" ;;
+        esac
+        return 1
+      fi
+      log_as ok "asked AWS to enable $r" ;;
+  esac
+  # Watched rather than assumed: it is minutes, not seconds, and "asked" is not
+  # the same as "usable".
+  local i
+  for i in 1 2 3 4 5 6; do
+    sleep 10
+    st=$(region_optin_status "$r")
+    case $st in
+      ENABLED|ENABLED_BY_DEFAULT) log_as ok "$r is enabled"; return 0 ;;
+      ENABLING) log "  still enabling ($((i * 10))s)" ;;
+      *) log "  status: ${st:-unknown}" ;;
+    esac
+  done
+  log_as warn "$r is still enabling - this is normal, it can take several minutes"
+  log "  check again with:  cg regions optin"
+  return 0
+}
+
 regions_json() {
   aws ec2 describe-regions \
     --query 'sort_by(Regions,&RegionName)[].[RegionName,OptInStatus]' \

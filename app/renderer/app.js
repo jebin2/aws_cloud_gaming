@@ -36,7 +36,8 @@ const isWrite = cmd => WRITES.has(cmd[0]) || (cmd[0] === 'library' && LIBRARY_WR
   || (cmd[0] === 'creds' && cmd[1] === 'set')
   || (cmd[0] === 'deps' && cmd[1] === 'install')
   || (cmd[0] === 'creds' && cmd[1] === 'tailscale' && cmd[2] === 'signin')
-  || (cmd[0] === 'quota' && cmd[1] === 'request');
+  || (cmd[0] === 'quota' && cmd[1] === 'request')
+  || (cmd[0] === 'regions' && cmd[1] === 'enable');
 const writing = () => [...jobs.values()].some(j => isWrite(j.cmd));
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
@@ -1626,6 +1627,156 @@ $('quota-go').onclick = async e => {
   }
 };
 
+// Turning a region on: one API call, no case, no person - the opposite of a
+// quota. What it needs instead is care, because it is account-wide and undoing
+// it is slower than doing it.
+const OPTIN_STATE = {
+  ENABLING: ['enabling', 'AWS is working on it. A few minutes is normal - Refresh to look again.'],
+  ENABLED: ['enabled', 'The region is usable. Rows for it are pickable now.'],
+  ENABLED_BY_DEFAULT: ['enabled', 'This region never needed enabling.'],
+  DISABLING: ['being disabled', 'AWS is turning it off. Wait for that to finish first.'],
+};
+let optinNow = null, optinPick = '';
+
+function optinClear() {
+  $('optin-state').textContent = '';
+  $('optin-explain').textContent = '';
+  $('optin-log').textContent = '';
+}
+function optinBusy(on) {
+  $('optin-pick').disabled = on;
+  $('optin-refresh').disabled = on;
+  $('optin-refresh').textContent = on ? 'Reading\u2026' : 'Refresh';
+  if (on) $('optin-go').disabled = true;
+}
+function optinSay(state, why, tone) {
+  $('optin-state').textContent = state;
+  $('optin-state').className = 'font-code-md text-code-md mt-space-md '
+    + (tone === 'bad' ? 'text-error' : tone === 'ok' ? 'text-on-surface' : 'text-on-surface-variant');
+  $('optin-explain').textContent = why || '';
+}
+
+async function optinRead() {
+  const out = await runCg(['regions', 'optin', '--json'], { capture: true });
+  try { optinNow = JSON.parse(out); } catch { optinNow = null; }
+  return optinNow;
+}
+
+// The list is every disabled region, but the ones the sweep has measured come
+// first and carry their numbers: "ap-southeast-5 - Malaysia, 48ms, 9/10" is a
+// decision, where a bare region code is a guess.
+function optinOptions() {
+  const sel = $('optin-pick');
+  const seen = new Set();
+  sel.textContent = '';
+  const first = document.createElement('option');
+  first.value = ''; first.textContent = 'pick one\u2026';
+  sel.append(first);
+  const measured = new Map();
+  for (const r of (sweepNow && sweepNow.regions) || []) measured.set(r.region, r);
+  const add = (code, m) => {
+    if (seen.has(code)) return;
+    seen.add(code);
+    const o = document.createElement('option');
+    o.value = code;
+    const best = m && (m.machines || [])[0];
+    o.textContent = m
+      ? `${code} - ${shortCity(m.city)}, ${Math.round(m.rtt_ms)}ms`
+        + (best ? `, ${best.type} at ${best.score}/10` : '')
+      : code;
+    sel.append(o);
+  };
+  for (const code of (optinNow && optinNow.disabled) || []) if (measured.has(code)) add(code, measured.get(code));
+  for (const code of (optinNow && optinNow.disabled) || []) add(code, null);
+  for (const code of (optinNow && optinNow.enabling) || []) add(code, measured.get(code));
+}
+
+function optinRender() {
+  const code = optinPick;
+  $('optin-refresh').hidden = !code;
+  $('optin-go').hidden = false;
+  $('optin-go').disabled = true;
+  $('optin-go').textContent = 'Confirm \u00b7 enable';
+  if (!code) {
+    optinSay('', 'Pick one to see what enabling it means.');
+    return;
+  }
+  const row = ((optinNow && optinNow.regions) || []).find(r => r.region === code);
+  const status = row && row.status;
+  if (status && status !== 'DISABLED') {
+    const [head, why] = OPTIN_STATE[status] || [status.toLowerCase(), ''];
+    optinSay(`\u25cf ${head}`, why, status === 'ENABLED' || status === 'ENABLED_BY_DEFAULT' ? 'ok' : '');
+    $('optin-go').hidden = status !== 'DISABLING';
+    return;
+  }
+  const m = ((sweepNow && sweepNow.regions) || []).find(r => r.region === code);
+  const best = m && (m.machines || [])[0];
+  optinSay(`${code}${m ? ' \u00b7 ' + shortCity(m.city) : ''}`
+    + (m ? ` \u00b7 ${Math.round(m.rtt_ms)}ms` : '')
+    + (best ? ` \u00b7 ${best.type} at ${best.score}/10` : ''), '');
+  $('optin-log').textContent =
+      'This is an account-level change. Everything on this account can use the region\n'
+    + 'afterwards. Nothing is created and nothing is billed by enabling it.\n\n'
+    + 'It takes a few minutes. Turning it back off is slower, and AWS requires the\n'
+    + 'region to be empty first - so this is not a switch to flip and forget.';
+  $('optin-go').disabled = false;
+}
+
+async function openOptin(code) {
+  optinPick = code || '';
+  optinClear();
+  $('optin-refresh').hidden = true;
+  $('optin-go').hidden = false;
+  $('optin-go').disabled = true;
+  optinBusy(true);
+  optinSay('reading\u2026', '');
+  if (!$('optin').open) $('optin').showModal();
+  await optinRead();
+  optinOptions();
+  $('optin-pick').value = optinPick;
+  optinBusy(false);
+  optinRender();
+}
+
+$('optin-pick').onchange = () => {
+  optinPick = $('optin-pick').value;
+  optinClear();
+  optinRender();
+};
+$('optin-cancel').onclick = e => { e.preventDefault(); $('optin').close(); };
+$('optin-refresh').onclick = async e => {
+  e.preventDefault();
+  if ($('optin-refresh').disabled) return;
+  optinClear();
+  optinBusy(true);
+  optinSay('reading\u2026', '');
+  await optinRead();
+  optinBusy(false);
+  optinRender();
+};
+$('optin-go').onclick = async e => {
+  e.preventDefault();
+  if (!optinPick) return;
+  const code = optinPick;
+  $('optin-go').disabled = true;
+  $('optin-go').textContent = 'Enabling\u2026';
+  optinBusy(true);
+  optinSay(`Enabling ${code}\u2026`, 'AWS takes a few minutes. This watches until it is done.');
+  $('optin-log').textContent = '';
+  const { rc, err } = await runCg(['regions', 'enable', code], { wantRc: true });
+  $('optin-log').textContent = (err || '').trim();
+  optinBusy(false);
+  if (rc !== 0) {
+    optinSay('AWS refused', (err || '').trim().split('\n')[0] || `cg regions enable exited ${rc}`, 'bad');
+    $('optin-go').disabled = false;
+    $('optin-go').textContent = 'Confirm \u00b7 enable';
+    return;
+  }
+  // Read it back: "asked" is not "usable", and the status is AWS's to report.
+  await optinRead();
+  optinRender();
+};
+
 // One secret, typed once and checked before it is kept: the Tailscale API
 // token and the box's own auth key are the same dialog with different words.
 // cg still asks its question - that is the protocol, and both commands work in
@@ -2358,6 +2509,15 @@ function paintChooser() {
           b.className = 'btn mt-space-xs';
           b.textContent = 'Ask AWS for GPU quota';
           b.onclick = () => openQuota();
+          legend.append(b);
+        }
+        // The other reason with something to do about it - and unlike the
+        // quota, this one finishes here.
+        if (reasons.has('needs opt-in')) {
+          const b = document.createElement('button');
+          b.className = 'btn mt-space-xs ml-space-xs';
+          b.textContent = 'Enable a region';
+          b.onclick = () => openOptin();
           legend.append(b);
         }
         for (const r of ['no quota', 'needs opt-in', 'no spot market', 'no price']) {

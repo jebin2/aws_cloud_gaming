@@ -1545,6 +1545,8 @@ info (read-only)
   cg regions                 the regions you have enabled, for the app's picker
   cg config [set|get <k>]    what .env decides; set validates and writes, get reveals one
   cg deps [install]          the tools this laptop needs, and what is missing
+  cg regions [optin|enable <r>]
+                             which regions this account may use, and turning one on
   cg quota [request|appeal]  the GPU quota: what you have, how to ask for more, and
                              the appeal text that gets it approved
   cg creds [set [aws|tailscale]]
@@ -1670,8 +1672,25 @@ case "$CMD" in
                appeal)     shift; quota_appeal "${1:-ondemand}" ;;
                *) die "usage: cg quota [status|request [ondemand|spot]|appeal [ondemand|spot]]" ;;
              esac ;;
-  regions)   if (( JSON )); then regions_json; exit 0; fi
-             regions_show | cg_report "🌏" "Regions" ;;
+  regions)   case "${1:-}" in
+               # Every region AWS has and whether this account may use it -
+               # describe-regions only lists the ones already on, which is the
+               # opposite of what this question is about.
+               optin)   shift
+                        if (( JSON )) || [[ ${1:-} == --json ]]; then region_optin_json; exit 0; fi
+                        region_optin_json | python3 -I -c '
+import json, sys
+d = json.load(sys.stdin)
+print("  enabled:", len([r for r in d["regions"] if r["status"] in ("ENABLED", "ENABLED_BY_DEFAULT")]))
+for r in d["regions"]:
+    if r["status"] not in ("ENABLED", "ENABLED_BY_DEFAULT"):
+        print("  %-16s %s" % (r["region"], r["status"].lower()))' ;;
+               enable)  shift; [[ -n ${1:-} ]] || die "usage: cg regions enable <region>"
+                        region_enable "$1" ;;
+               "")      if (( JSON )); then regions_json; exit 0; fi
+                        regions_show | cg_report "🌏" "Regions" ;;
+               *)       die "usage: cg regions [optin|enable <region>]" ;;
+             esac ;;
   notify)    cmd_notify ;;
   log|logs)  cmd_log "$@" ;;
   ssh)       if [[ $# -gt 0 ]]; then box "$@"; else need_node; exec ssh -i "$KEY" \

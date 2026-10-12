@@ -222,7 +222,7 @@ echo "8. cg takes a region argument where it used to swallow it"
 contains "the dispatch recognises a region" "$(cat cg)" 'MREG=$1; shift; else MREG=$REGION'
 contains "and machines_show gets the flag after it" "$(cat cg)" 'machines_show "$MREG" "${1:-}"'
 contains "sweep has its own command"       "$(cat cg)" 'sweep|regions-sweep)'
-contains "and regions does too"            "$(cat cg)" 'regions)   if (( JSON )); then regions_json'
+contains "and regions does too"            "$(cat cg)" 'regions)   case "${1:-}" in'
 
 echo "9. the region setting is shape-checked, because it used to be free text"
 v() { bash -c 'source lib/common.sh >/dev/null 2>&1; source lib/config.sh
@@ -241,9 +241,20 @@ contains "and the registry warns the archive stays behind" \
 echo "10. every call in here is free, and none of them launch anything"
 body=$(cat lib/sweep.sh)
 for verb in run-instances request-spot-instances create-bucket terminate-instances \
-            enable-region modify-instance create-tags start-instances; do
+            modify-instance create-tags start-instances; do
   lacks "sweep never calls $verb" "$body" "$verb"
 done
+# enable-region IS here now, and it is the one call in this file that changes
+# the account. It stays honest by being reachable only on purpose:
+contains "enabling a region is its own command" "$(cat cg)" "enable)  shift"
+contains "  and its own function"          "$body" "region_enable() {"
+contains "  which says what it means first" "$body" "an account-level change"
+contains "  and that undoing it is slower"  "$body" "slower than turning it on"
+# Asked, then watched: "asked AWS" is not "the region works", and the gap is
+# minutes.
+contains "it waits for AWS to finish"      "$body" "still enabling"
+contains "  naming the two refusals worth naming" "$body" "account:EnableRegion"
+contains "  including an Organization"     "$body" "only the management account"
 
 echo "11. the app reads this, and is warned what a move costs"
 js=$(cat app/renderer/app.js); main=$(cat app/main/index.js)
@@ -271,10 +282,15 @@ contains "  and is marked destructive"       "$js" "danger: moving"
 contains "the type is written"               "$js" "'config', 'set', 'GAME_INSTANCE_TYPE'"
 contains "  the model too"                   "$js" "'config', 'set', 'GAME_SPOT'"
 contains "  and the region last of the three" "$js" "if (moving) await runCg(['config', 'set', 'GAME_REGION'"
-# The app must never enable a region: that is an account-level change, and the
-# table marks an unenabled region unpickable precisely so it cannot try.
-lacks "the app never opts a region in"       "$js" "enable-region"
-lacks "  nor the main process"               "$main" "enable-region"
+# The app may now enable a region - it was the one thing the table could say
+# was wrong and do nothing about. What has not changed is where the AWS call
+# lives: the renderer runs cg, and cg talks to AWS.
+lacks "the app never calls AWS itself"       "$js" "enable-region"
+lacks "  nor does the main process"          "$main" "enable-region"
+contains "it asks cg instead"                "$js" "'regions', 'enable'"
+contains "  behind a confirm"                "$js" "Confirm \u00b7 enable"
+contains "  that says it is account-wide"    "$js" "account-level change"
+contains "  and slow to undo"                "$js" "requires the"
 contains "  it says so in the cell"          "$js" "needs opt-in"
 
 echo ""

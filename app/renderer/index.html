@@ -922,6 +922,35 @@
   </menu>
 </dialog>
 
+<!-- Turning a region on. No case and no person, unlike a quota - one call, and
+     AWS works through it over a few minutes. It is account-wide and slow to
+     undo, which is why it is a dialog and not a toggle in a table. -->
+<dialog id="optin" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[600px] max-w-[54rem]">
+  <p class="font-code-md text-code-md">Enable a region</p>
+  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md">
+    A region your account has not opted into. Free, and nothing is created - it only makes the
+    region usable.
+  </p>
+
+  <div class="flex items-center gap-space-sm">
+    <label class="font-code-sm text-code-sm text-outline" for="optin-pick">which region?</label>
+    <select id="optin-pick"
+            class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-md text-code-md text-on-surface">
+      <option value="">pick one…</option>
+    </select>
+  </div>
+
+  <p class="font-code-md text-code-md mt-space-md" id="optin-state"></p>
+  <p class="font-code-sm text-code-sm text-outline mt-0.5" id="optin-explain"></p>
+  <pre class="font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[30vh] overflow-auto mt-space-sm" id="optin-log"></pre>
+
+  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+    <button class="btn" id="optin-cancel">Close</button>
+    <button class="btn" id="optin-refresh" hidden>Refresh</button>
+    <button class="btn btn-primary" id="optin-go" disabled>Confirm · enable</button>
+  </menu>
+</dialog>
+
 <!-- One secret, typed once and checked before it is kept. Used by the
      Tailscale API token and by the box's own auth key - same shape, same
      rules, different words. -->
