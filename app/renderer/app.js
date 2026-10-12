@@ -1284,14 +1284,23 @@ function paintTskey(ts) {
 // `tailscale up` prints a login URL and then WAITS for someone to visit it, so
 // the URL has to reach the person while the command is still running - the one
 // place in this app where output during a run is the point, not a log.
-function signInTailscale() {
+async function signInTailscale() {
   const area = $('tskey-signin'), log = $('tskey-signin-log'), link = $('tskey-link');
   area.hidden = false;
   link.hidden = true;
-  log.textContent = 'starting…';
+  // dataset.fresh: the first line cg sends replaces this, rather than being
+  // appended under it - see the collect handler.
+  log.textContent = 'starting - a password dialog opens first (it can appear '
+    + 'behind this window)';
+  log.dataset.fresh = 'yes';
   $('tskey-signin-go').disabled = true;
-  return runCg(['creds', 'tailscale', 'signin'], { collect: 'tskey-signin-log' })
-    .then(() => { $('tskey-signin-go').disabled = false; });
+  const { rc } = await runCg(['creds', 'tailscale', 'signin'],
+                             { collect: 'tskey-signin-log', wantRc: true });
+  $('tskey-signin-go').disabled = false;
+  if (rc !== 0) {
+    log.textContent += rc === null ? '' : `\n  sign-in did not finish (exit ${rc})\n`;
+    link.hidden = true;
+  }
 }
 $('tskey-signin-go').onclick = signInTailscale;
 
@@ -2238,9 +2247,13 @@ window.cg.onEvent(({ id, event }) => {
   if (job.wantRc && (event.t === 'line' || event.t === 'error') && event.text)
     job.collected += event.text + '\n';
   if (job.collect === 'tskey-signin-log' && event.text) watchForSignInLink(event.text);
-  if (job.collect && (event.t === 'line' || event.t === 'step' || event.t === 'error')) {
+  if (job.collect && (event.t === 'line' || event.t === 'step' || event.t === 'error'
+                      || event.t === 'raw')) {
     const box = $(job.collect);
-    if (box.textContent === 'running…') box.textContent = '';
+    if (box.textContent === 'running…' || box.dataset.fresh === 'yes') {
+      box.textContent = '';
+      delete box.dataset.fresh;
+    }
     box.textContent += (event.t === 'step' ? '\n' + event.text : '  ' + (event.text || '')) + '\n';
   }
   if (event.t === 'exit') {
@@ -2301,8 +2314,11 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc } = {}) {
   return new Promise(async resolve => {
     const res = await window.cg.run(args, env);
     if (!res.ok) {
+      const why = `cg ${res.args.join(' ')} is still running - this has to wait for it`;
       $('job-line').textContent = `busy: cg ${res.args.join(' ')} must finish first`;
-      return resolve();
+      if (collect) $(collect).textContent = why + '\n';
+      if (panel) $(panel).textContent = why;
+      return resolve(wantRc ? { rc: null, err: why } : undefined);
     }
     jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, wantRc,
                       out: [], collected: '', resolve });

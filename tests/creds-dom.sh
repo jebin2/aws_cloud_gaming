@@ -239,6 +239,28 @@ cat > "$T/r/probe.js" <<'PROBE'
     window.__emit(window.__lastId, { t: 'exit', rc: 0 });
     await sleep(); await sleep();
 
+    // What the window looked like when the sign-in did nothing: the panel is
+    // the place that was asked to show the answer, so it is the place that has
+    // to show a refusal, a stderr line nobody wrapped in an event, and an exit.
+    paintTskey({ present: false, valid: null, state: 'absent', detail: null,
+                 signed_in: false, node: null });
+    document.getElementById('tskey-signin-go').click();
+    await sleep();
+    // pkexec with no polkit agent says this on plain stderr - no cg event.
+    window.__emit(window.__lastId, { t: 'raw', stream: 'stderr',
+      text: 'Error executing command as another user: No authentication agent found.' });
+    window.__emit(window.__lastId, { t: 'exit', rc: 127 });
+    await sleep(); await sleep();
+    out.push('SIGNIN DEAD | ' + document.getElementById('tskey-signin-log').textContent.replace(/\s+/g, ' ').trim());
+    out.push('SIGNIN DEADBTN | ' + document.getElementById('tskey-signin-go').disabled);
+
+    // And a run that was refused because something else holds the lock.
+    window.cg.run = () => Promise.resolve({ ok: false, reason: 'busy', args: ['init'] });
+    document.getElementById('tskey-signin-go').click();
+    await sleep(); await sleep();
+    out.push('SIGNIN BUSY | ' + document.getElementById('tskey-signin-log').textContent.replace(/\s+/g, ' ').trim());
+    out.push('SIGNIN BUSYBTN | ' + document.getElementById('tskey-signin-go').disabled);
+
     paintStatus(status('no-cli'));
     bannerRead('NOCLI');
     window.__ran = [];
@@ -383,6 +405,18 @@ check    "no link before one is printed" "$(row 'SIGNIN LINK EARLY')" "SIGNIN LI
 check    "  and one as soon as it is"    "$(row 'SIGNIN LINKNOW')"   "SIGNIN LINKNOW | false"
 contains "what cg said is shown"         "$(row 'SIGNIN LOG')"       "the link appears below"
 check    "the link opens that URL"       "$(row 'SIGNIN OPENED')"    "SIGNIN OPENED | https://login.tailscale.com/a/abc123def456"
+
+echo "4f. a sign-in that goes nowhere says so"
+# "starting…" and then silence is what a dead run looked like: pkexec's own
+# complaint is plain stderr, not a cg event, so the panel never showed it.
+contains "stderr reaches the panel"    "$(row 'SIGNIN DEAD')"    "No authentication agent found"
+contains "  and the exit is named"     "$(row 'SIGNIN DEAD')"    "sign-in did not finish (exit 127)"
+lacks    "  with no stale starting line" "$(row 'SIGNIN DEAD')"  "starting -"
+check    "  and the button comes back" "$(row 'SIGNIN DEADBTN')" "SIGNIN DEADBTN | false"
+# A write is refused outright while anything else runs - it is not queued - and
+# the only sign of that used to be a line in the header.
+contains "a refusal says what holds it" "$(row 'SIGNIN BUSY')"   "cg init is still running"
+check    "  and does not leave it disabled" "$(row 'SIGNIN BUSYBTN')" "SIGNIN BUSYBTN | false"
 
 echo "5. nothing threw"
 check "no painter threw"               "$(grep -c '^THREW' <<<"$OUT")" "0"

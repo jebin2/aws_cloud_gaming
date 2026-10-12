@@ -163,6 +163,36 @@ laptop_install() { # laptop_install <pm> <tool>
 # `tailscale up` prints a login URL and then WAITS for someone to visit it, so
 # every line is relayed as it arrives rather than collected at the end: the URL
 # is the whole point and it is useless after the command returns.
+# Run one command as root and relay every line as it arrives.
+#
+# As it ARRIVES, not at the end: `tailscale up` prints a login URL and then
+# waits for someone to visit it, so a line held in a buffer until the command
+# returns is a line that arrives after it was needed.
+laptop_root_run() { # laptop_root_run <as> <program> [args...]
+  local as=$1 prog=$2; shift 2
+  local unbuf=(); laptop_has stdbuf && unbuf=(stdbuf -oL -eL)
+  local line
+  while IFS= read -r line; do
+    [[ -n ${line//[[:space:]]/} ]] || continue
+    case $line in
+      # polkit's own refusal, and the likeliest way this fails on a fresh
+      # desktop: pkexec is installed and nothing is listening to authenticate.
+      # On its own the message says nothing about what to do.
+      *"authentication agent"*|*"Not authorized"*|*"Error executing command as another user"*)
+        log "$line"
+        log "  no polkit agent is answering on this desktop"
+        log "  start one (Hyprland/Omarchy: systemctl --user start hyprpolkitagent)," ;;
+      *https://login.tailscale.com/*)
+        # On a line of its own, so the app can lift the URL out and offer it.
+        log "sign in here: $(printf '%s' "$line" | grep -oE 'https://login\.tailscale\.com/[^[:space:]]+')" ;;
+      *) log "$line" ;;
+    esac
+  done < <("${unbuf[@]}" "$as" "$prog" "$@" 2>&1)
+}
+
+# The sign-in, from a terminal or from the app. Root is needed twice - to start
+# tailscaled and to run `tailscale up` - and in a window that is polkit's job,
+# the same as installing.
 laptop_tailscale_up() {
   local as; as=$(laptop_root) || {
     log "cannot sign in from here: $(laptop_root_why)"
@@ -172,29 +202,25 @@ laptop_tailscale_up() {
   laptop_has tailscale || { log_as fail "Tailscale is not installed"; return 1; }
   if laptop_has systemctl && ! systemctl is-active --quiet tailscaled 2>/dev/null; then
     log "starting tailscaled"
-    "$as" "$(command -v systemctl)" enable --now tailscaled || {
+    # Relayed like everything else: this is the FIRST thing that asks polkit,
+    # so it is where a missing agent shows up, and its complaint used to go
+    # straight to stderr where no panel was looking.
+    laptop_root_run "$as" "$(command -v systemctl)" enable --now tailscaled
+    if ! systemctl is-active --quiet tailscaled 2>/dev/null; then
       log_as fail "could not start tailscaled"
+      # The whole sign-in from a terminal, not just this half: whoever is
+      # reading this wanted to be signed in, not to start a daemon.
+      log "  from a terminal:  sudo systemctl enable --now tailscaled && sudo tailscale up"
       return 1
-    }
+    fi
   fi
   log "finishing the sign-in needs a browser - the link appears below"
-  local line rc
-  # stdbuf, where it exists: tailscale up writes the URL and then blocks, and a
-  # block-buffered pipe would hold that line until the command ended - which is
-  # after the sign-in it is asking for.
-  local unbuf=(); laptop_has stdbuf && unbuf=(stdbuf -oL -eL)
-  while IFS= read -r line; do
-    case $line in
-      *https://login.tailscale.com/*)
-        # Said on its own line, with nothing else on it, so the app can lift the
-        # URL out and offer it as a link.
-        log "sign in here: $(printf '%s' "$line" | grep -oE 'https://login\.tailscale\.com/[^[:space:]]+')" ;;
-      *) [[ -n ${line//[[:space:]]/} ]] && log "$line" ;;
-    esac
-  done < <("${unbuf[@]}" "$as" "$(command -v tailscale)" up 2>&1)
-  # The pipeline's own status, not the loop's.
+  laptop_root_run "$as" "$(command -v tailscale)" up
+  # Decided by asking tailscale, not by an exit code: the command can print a
+  # link and be cancelled, and it can succeed with nothing to show.
   if laptop_tailscale_down; then
     log_as fail "still not signed in"
+    log "  or sign in from a terminal:  sudo tailscale up"
     return 1
   fi
   log_as ok "signed in"

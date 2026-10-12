@@ -98,11 +98,18 @@ case "$1" in
 esac
 FAKE
 chmod +x "$T/bin/tailscale"
-printf '#!/usr/bin/env bash
+# The daemon is verified by ASKING systemctl afterwards rather than by
+# trusting the exit code of the thing that was meant to start it, so the fake
+# needs a state to be asked about.
+cat > "$T/bin/systemctl" <<'FAKE'
+#!/usr/bin/env bash
 echo "systemctl $*" >> "${TS_LOG:-/dev/null}"
-[[ $1 == is-active ]] && exit 3
+case "$1" in
+  is-active) [[ -e ${TSD_FILE:-/nonexistent} ]] || exit 3 ;;
+  enable)    : > "${TSD_FILE:?}" ;;
+esac
 exit 0
-' > "$T/bin/systemctl"
+FAKE
 chmod +x "$T/bin/systemctl"
 printf '#!/usr/bin/env bash
 echo "pkexec $*" >> "${TS_LOG:-/dev/null}"
@@ -115,6 +122,7 @@ cg_() { # cg_ <args...> - EXTRA passes env through
       CFG="$T/key" AWS_LOG="$T/awslog" KEY_STATE="${KEY_STATE:-ok}" \
       CURL_LOG="$T/curllog" TS_STATE="${TS_STATE:-ok}" \
       TS_LOG="$T/tslog" TS_UP_FILE="$T/tsup" TS_UP_FAILS="${TS_UP_FAILS:-0}" \
+      TSD_FILE="$T/tsd" \
       WAYLAND_DISPLAY="${WAYLAND_DISPLAY_FOR_TEST:-wayland-1}" \
       GAME_REGION=ap-south-1 ${EXTRA:-} bash ./cg "$@" 2>&1 )
 }
@@ -317,7 +325,7 @@ contains "a stray csv still cannot be committed" "$(cat .gitignore)" "*.csv"
 echo "9e. signing in to Tailscale, without a terminal"
 # `sudo tailscale up` was the only answer the app could give, and it is not an
 # answer in a window. Root here is polkit's job, exactly as it is for installs.
-rm -f "$T/tsup" "$T/tslog"
+rm -f "$T/tsup" "$T/tslog" "$T/tsd"
 out=$(EXTRA="CG_JSON=1" cg_ creds tailscale signin)
 rc=$?
 check    "it succeeds"                    "$rc" "0"
@@ -342,6 +350,23 @@ rm -f "$T/bin/pkexec" "$T/tsup"
 out=$(EXTRA="CG_JSON=1 WAYLAND_DISPLAY_FOR_TEST=" cg_ creds tailscale signin)
 contains "no root: it says why"           "$out" "cannot sign in from here"
 contains "  and what to type"             "$out" "sudo tailscale up"
+printf '#!/usr/bin/env bash\necho "pkexec $*" >> "${TS_LOG:-/dev/null}"\nexec "$@"\n' > "$T/bin/pkexec"; chmod +x "$T/bin/pkexec"
+
+# The likeliest way this fails on a fresh desktop: pkexec is installed and
+# nothing is listening to authenticate, which says nothing useful on its own.
+cat > "$T/bin/pkexec" <<'FAKE'
+#!/usr/bin/env bash
+echo "Error executing command as another user: No authentication agent found." >&2
+exit 127
+FAKE
+chmod +x "$T/bin/pkexec"
+rm -f "$T/tsup" "$T/tsd"
+out=$(EXTRA="CG_JSON=1" cg_ creds tailscale signin)
+contains "polkit's refusal is relayed"    "$out" "No authentication agent found"
+contains "  and the daemon is not claimed" "$out" "could not start tailscaled"
+contains "  and explained"                "$out" "no polkit agent is answering"
+contains "  with how to start one"        "$out" "hyprpolkitagent"
+contains "  and the way round it"         "$out" "sudo tailscale up"
 printf '#!/usr/bin/env bash\necho "pkexec $*" >> "${TS_LOG:-/dev/null}"\nexec "$@"\n' > "$T/bin/pkexec"; chmod +x "$T/bin/pkexec"
 
 echo "9f. the one web address the app may open"
