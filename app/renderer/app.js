@@ -2413,7 +2413,7 @@ const NEEDS = {
   // creds and config too: the page shows the two keys, and neither is in
   // `cg deps` - they belong to AWS and to .env.
   deps:      [[['deps', '--json'], 'deps'], [['creds', '--json'], 'creds'],
-              [['creds', 'tailscale', '--json'], 'tskey'], [['config', '--json'], 'config']],
+              [['creds', 'tailscale', '--json'], 'tskey']],
 };
 const loaded = new Set();
 
@@ -2429,6 +2429,18 @@ async function refresh() {
 // On open, every free read goes at once and each screen paints when its own
 // answer lands - they share nothing. cg cost is not among them: it is $0.01 a
 // call, so it waits for its button.
+// Asked FIRST, and alone, because they decide whether anything else is worth
+// asking. Six `command -v` checks, a file read, and two free calls - nothing
+// here needs AWS to work, which is the point: these are the reads that still
+// answer on a laptop where nothing else can.
+const GATE_READS = [
+  [['deps', '--json'], 'deps'],
+  [['creds', '--json'], 'creds'],
+  [['creds', 'tailscale', '--json'], 'tskey'],
+];
+// The rest. Every one of them needs AWS, a tailnet, or both, so on a laptop
+// that is not ready yet they would all come back unknown and the screen would
+// fill with question marks instead of the one thing to do about it.
 const ALL_READS = [
   [['status', '--json'], 'status'],
   [['config', '--json'], 'config'],
@@ -2438,18 +2450,56 @@ const ALL_READS = [
   // The REMEMBERED scan, never a fresh one: a scan takes 90 seconds and an
   // opening window must not wait on it. Rescanning is a button.
   [['sweep', '--cached', '--json'], 'sweep'],
-  // Local and free: aws configure reads a file, and sts get-caller-identity
-  // costs nothing. It is in the opening set because it is the one read that can
-  // explain why every other one came back unknown.
-  [['creds', '--json'], 'creds'],
-  // Six `command -v` checks: nothing is installed by reading this.
-  [['deps', '--json'], 'deps'],
-  // One free call to api.tailscale.com, which is the only thing that can tell
-  // a token that works from one that is merely present.
-  [['creds', 'tailscale', '--json'], 'tskey'],
 ];
-function refreshAll() {
+
+// What is stopping this laptop, in the order it has to be fixed: a tool that is
+// missing, then a key or a sign-in. Returns null when nothing is.
+function notReady() {
+  if (!depsNow || !credsNow || !tskeyNow) return null;    // nothing read yet
+  const missing = (depsNow.tools || []).filter(x => !x.present).map(x => x.label);
+  if (missing.length) {
+    return { title: `${missing.length === 1 ? 'A tool cg needs is' : 'Tools cg needs are'} missing`,
+             body: `${missing.join(', ')}. Nothing can run until ${missing.length === 1 ? 'it is' : 'they are'} installed.` };
+  }
+  if (!credsNow.cli || credsNow.valid !== true) {
+    return { title: 'AWS has no working key',
+             body: (credsNow.error || 'AWS did not accept the key.')
+                 + ' Everything about the box, the archive and the bill is unknown until it does.' };
+  }
+  if (tskeyNow.signed_in === false) {
+    return { title: 'This laptop is not signed in to Tailscale',
+             body: 'The box joins your tailnet and there is no public SSH port, so nothing can reach it.' };
+  }
+  return null;
+}
+
+// The banner, when the answer is "fix this first". It carries the way there,
+// which is the Dependencies page: it lists the tools AND the two keys, and each
+// key row leads to the one place it is set.
+function paintNotReady(problem) {
+  $('banner').hidden = false;
+  $('banner-title').textContent = problem.title;
+  $('banner-body').textContent = problem.body;
+  $('banner-fix').hidden = false;
+  $('banner-fix-label').textContent = 'Open Dependencies';
+  $('banner-fix').onclick = () => goView('deps');
+}
+
+// On open: ask what this laptop can do, and only then ask AWS anything.
+//
+// It used to fire all nine reads at once. On a laptop with no AWS CLI that is
+// six reads that cannot work, a screen of unknowns, and the actual problem - a
+// missing tool - somewhere in the middle of it.
+async function refreshAll() {
+  await Promise.all(GATE_READS.map(([args, json]) => runCg(args, { json })));
+  const problem = notReady();
+  if (problem) {
+    paintNotReady(problem);
+    return;
+  }
   for (const v of Object.keys(NEEDS)) loaded.add(v);
+  // In parallel, because they share nothing and each screen paints when its own
+  // answer lands. cg cost is not among them: it bills.
   return Promise.all(ALL_READS.map(([args, json]) => runCg(args, { json })));
 }
 

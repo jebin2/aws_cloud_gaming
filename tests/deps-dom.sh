@@ -259,8 +259,10 @@ echo "7. a key is set in exactly one place"
 check    "the AWS key goes to Settings" "$(row 'KEY1 VIEW')"   "KEY1 VIEW | settings"
 contains "  flashing the card"          "$(row 'KEY1 FLASH')"  "flash-attn"
 contains "  and the token its own card" "$(row 'KEY2 FLASH')"  "flash-attn"
-# Not a cg command: the page points at the setting, it does not set it.
-check    "  running nothing itself"     "$(row 'KEYS RAN')"    "KEYS RAN | "
+# The page points at the setting; it does not set it. Arriving on Settings
+# loads Settings, which is navigation rather than this row acting.
+lacks    "  setting nothing itself"     "$(row 'KEYS RAN')"    "creds set"
+lacks    "  and installing nothing"     "$(row 'KEYS RAN')"    "deps install"
 
 echo "8. nothing threw"
 check "no painter threw"              "$(grep -c '^THREW' <<<"$OUT")" "0"

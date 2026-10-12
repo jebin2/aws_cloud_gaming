@@ -343,9 +343,11 @@ echo "1. no AWS CLI: the card says so, and offers the install"
 contains "the state names the CLI"      "$(row 'NOCLI STATE')" "the AWS CLI is not installed"
 contains "  and where it is installed" "$(row 'NOCLI DETAIL')" "Dependencies page"
 contains "the button goes there"       "$(row 'NOCLI BTN')"    "Open Dependencies"
-# Not a cg command: switching to the page that CAN install needs no root, while
-# a button here that shelled out to sudo had nowhere to ask for a password.
-check    "  and runs no command"       "$(row 'NOCLI RAN')"    "NOCLI RAN | "
+# Switching to the page that CAN install needs no root, while a button here
+# that shelled out to sudo had nowhere to ask for a password. Arriving loads
+# that page's own reads; nothing it runs changes anything.
+lacks    "  it installs nothing itself" "$(row 'NOCLI RAN')"   "check --fix"
+lacks    "  and sets no key"            "$(row 'NOCLI RAN')"   "creds set"
 # Nothing was rejected: there was nothing to reject it with.
 lacks    "nothing is called rejected"  "$(row 'NOCLI STATE')"  "reject"
 
