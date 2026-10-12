@@ -880,6 +880,23 @@
   </menu>
 </dialog>
 
+<!-- Asking AWS for GPU quota. The ask is mechanical and free; the appeal after
+     the automatic refusal is a letter to a person, so it is drafted here and
+     sent by you. -->
+<dialog id="quota" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[560px] max-w-[52rem]">
+  <p class="font-code-md text-code-md" id="quota-title">Ask AWS for GPU quota</p>
+  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md" id="quota-note"></p>
+  <pre class="font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[38vh] overflow-auto" id="quota-log"></pre>
+  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+    <button class="btn" id="quota-cancel">Close</button>
+    <button class="btn" id="quota-copy" hidden>Copy the appeal</button>
+    <button class="btn" id="quota-case" hidden>
+      <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the case
+    </button>
+    <button class="btn btn-primary" id="quota-go">Ask AWS</button>
+  </menu>
+</dialog>
+
 <!-- One secret, typed once and checked before it is kept. Used by the
      Tailscale API token and by the box's own auth key - same shape, same
      rules, different words. -->

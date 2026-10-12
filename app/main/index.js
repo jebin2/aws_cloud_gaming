@@ -83,11 +83,14 @@ ipcMain.handle('cg:busy', () => [...jobs.values()].map(j => ({ id: j.id, args: j
 // viewer of local files. Tailscale's sign-in is the one exception: it finishes
 // on login.tailscale.com and nothing else can finish it. So exactly that host,
 // over https, checked HERE rather than trusting whatever asked.
-const SIGNIN_HOST = 'login.tailscale.com';
+// Two, and only two: Tailscale's sign-in cannot finish anywhere else, and a
+// quota appeal is a reply on an AWS support case. Both are checked HERE rather
+// than trusting whatever asked.
+const OPENABLE = new Set(['login.tailscale.com', 'console.aws.amazon.com']);
 ipcMain.handle('cg:open-signin', (_e, url) => {
   let u;
   try { u = new URL(String(url)); } catch { return false; }
-  if (u.protocol !== 'https:' || u.hostname !== SIGNIN_HOST) return false;
+  if (u.protocol !== 'https:' || !OPENABLE.has(u.hostname)) return false;
   shell.openExternal(u.toString());
   return true;
 });

@@ -1417,6 +1417,65 @@ function watchForSignInLink(text) {
 
 // Same shape as the AWS form, for the same reasons: one field, one Save, the
 // answer checked before it is believed, and the failure shown here.
+// Asking AWS for quota. The ask is mechanical and free; what gets it approved
+// is the appeal on the case it opens, which is a letter to a person - so this
+// drafts it, and sending it is yours. The Support API cannot post it anyway
+// without a Business plan.
+let quotaCase = null, quotaAppeal = '';
+function quotaLog(text) { $('quota-log').textContent = text; }
+async function openQuota(kind) {
+  // Which purchase model is short is decided by cg, not guessed here: both are
+  // separate quotas and either can be the one blocking a build.
+  const want = kind || (config || []).find(r => r.key === 'GAME_SPOT');
+  const spot = kind ? kind === 'spot'
+    : (want && (want.value || want.default) !== '0');
+  const which = spot ? 'spot' : 'ondemand';
+  quotaCase = null;
+  quotaAppeal = '';
+  $('quota-title').textContent = `Ask AWS for ${spot ? 'spot' : 'on demand'} GPU quota`;
+  $('quota-note').textContent = 'Free, and for exactly one box - never more. The first answer is '
+    + 'usually an automatic refusal; the appeal on that case is what gets approved, and it is '
+    + 'drafted here from this rig\u2019s own numbers.';
+  quotaLog('');
+  $('quota-copy').hidden = true;
+  $('quota-case').hidden = true;
+  $('quota-go').hidden = false;
+  $('quota-go').disabled = false;
+  $('quota-go').textContent = 'Ask AWS';
+  $('quota-go').onclick = async e => {
+    e.preventDefault();
+    $('quota-go').disabled = true;
+    $('quota-go').textContent = 'Asking\u2026';
+    quotaLog('asking\u2026');
+    const { rc, err } = await runCg(['quota', 'request', which], { wantRc: true });
+    quotaLog((err || '').trim() || (rc === 0 ? 'asked.' : `cg quota request exited ${rc}`));
+    $('quota-go').hidden = true;
+    // The appeal comes next whatever the answer was: a refusal needs it, and a
+    // request that is still open needs it the moment the refusal arrives.
+    const appeal = await runCg(['quota', 'appeal', which], { capture: true });
+    quotaAppeal = (appeal || '').trim();
+    if (quotaAppeal) {
+      quotaLog(quotaAppeal);
+      $('quota-copy').hidden = false;
+    }
+    const idMatch = /displayId=(\d+)|case (\d+)/.exec(err || '');
+    quotaCase = idMatch ? (idMatch[1] || idMatch[2]) : null;
+    $('quota-case').hidden = !quotaCase;
+  };
+  $('quota').showModal();
+}
+$('quota-cancel').onclick = e => { e.preventDefault(); $('quota').close(); };
+$('quota-copy').onclick = async e => {
+  e.preventDefault();
+  try { await navigator.clipboard.writeText(quotaAppeal); $('quota-copy').textContent = 'Copied'; }
+  catch { $('quota-copy').textContent = 'select it above and copy'; }
+};
+$('quota-case').onclick = e => {
+  e.preventDefault();
+  if (quotaCase) window.cg.openSignIn(
+    `https://console.aws.amazon.com/support/home#/case/?displayId=${quotaCase}`);
+};
+
 // One secret, typed once and checked before it is kept: the Tailscale API
 // token and the box's own auth key are the same dialog with different words.
 // cg still asks its question - that is the protocol, and both commands work in
@@ -2013,8 +2072,9 @@ function priceCell(tr, mount, row, spot, inr, cur) {
 
 // Said once, under the table, instead of a sentence in every cell.
 const PICK_WHY = {
-  'no quota': 'Your G-instance quota in this region does not cover 4 vCPU for this '
-            + 'purchase model. Ask AWS for it in Service Quotas - it is free and takes a day or two.',
+  'no quota': 'Your G-instance quota in this region does not cover this machine for '
+            + 'this purchase model. Asking is free: the button below does it, and drafts '
+            + 'the appeal that gets it approved.',
   'needs opt-in': 'This region is not enabled on your account. Enabling it is an '
                 + 'account-level change, so this app will not do it for you.',
   'no spot market': 'AWS publishes no spot price for this machine here, so there is '
@@ -2142,6 +2202,14 @@ function paintChooser() {
         const intro = document.createElement('div');
         intro.textContent = 'A price you cannot pick would be refused at launch:';
         legend.append(intro);
+        // The one reason with something to do about it from in here.
+        if (reasons.has('no quota')) {
+          const b = document.createElement('button');
+          b.className = 'btn mt-space-xs';
+          b.textContent = 'Ask AWS for GPU quota';
+          b.onclick = () => openQuota();
+          legend.append(b);
+        }
         for (const r of ['no quota', 'needs opt-in', 'no spot market', 'no price']) {
           if (!reasons.has(r)) continue;
           const line = document.createElement('div');

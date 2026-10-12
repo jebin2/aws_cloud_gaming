@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('cg', {
   answer: (id, text) => ipcRenderer.invoke('cg:answer', { id, text }),
   cancel: id => ipcRenderer.invoke('cg:cancel', id),
   busy: () => ipcRenderer.invoke('cg:busy'),
-  // The ONE web address this app may open. Tailscale's sign-in finishes in a
+  // The only web addresses this app may open. Tailscale's sign-in finishes in a
   // browser and there is no way around that; everything else stays denied.
   // The main process checks the URL again - a renderer is not trusted to.
   openSignIn: url => ipcRenderer.invoke('cg:open-signin', url),

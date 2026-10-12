@@ -64,6 +64,8 @@ source lib/session.sh
 # shellcheck source=lib/machines.sh
 source lib/machines.sh
 source lib/sweep.sh
+# shellcheck source=lib/quota.sh
+source lib/quota.sh
 
 # lib/setup and lib/game are dispatch targets, not commands - see docs/commands.md
 # is not needed, their headers say so.
@@ -1543,6 +1545,8 @@ info (read-only)
   cg regions                 the regions you have enabled, for the app's picker
   cg config [set|get <k>]    what .env decides; set validates and writes, get reveals one
   cg deps [install]          the tools this laptop needs, and what is missing
+  cg quota [request|appeal]  the GPU quota: what you have, how to ask for more, and
+                             the appeal text that gets it approved
   cg creds [set [aws|tailscale]]
                              the two keys only you can give cg: the AWS access key
                              (saved to ~/.aws/credentials) and the Tailscale API
@@ -1656,6 +1660,16 @@ case "$CMD" in
              fi
              if (( JSON )); then sweep_fresh; exit 0; fi
              sweep_show "${1:-}" | cg_report "🌏" "Regions" ;;
+  # Free: reading a quota, its request history, and asking for one all cost
+  # nothing. The ask is for exactly what one box needs and never more.
+  quota)     case "${1:-status}" in
+               status|"")  if (( JSON )); then quota_json; exit 0; fi
+                           quota_show ;;
+               --json)     quota_json ;;
+               request)    shift; quota_request "${1:-ondemand}" ;;
+               appeal)     shift; quota_appeal "${1:-ondemand}" ;;
+               *) die "usage: cg quota [status|request [ondemand|spot]|appeal [ondemand|spot]]" ;;
+             esac ;;
   regions)   if (( JSON )); then regions_json; exit 0; fi
              regions_show | cg_report "🌏" "Regions" ;;
   notify)    cmd_notify ;;
