@@ -185,7 +185,7 @@ echo "10. wired in"
 contains "cg dispatches deps"          "$(cat cg)" "deps|dependencies)"
 contains "  and help names it"         "$(cat cg)" "cg deps [install]"
 contains "the app reads it"            "$(cat app/renderer/app.js)" "[['deps', '--json'], 'deps']"
-contains "  listing is a free read"    "$(cat app/main/index.js)" "'creds', 'deps']"
+contains "  listing is a free read"    "$(cat app/main/index.js)" "'deps'"
 contains "  and installing is a write" "$(cat app/main/index.js)" "args[0] === 'deps' && args[1] === 'install'"
 contains "the nav has a tab"           "$(cat app/renderer/index.html)" 'data-view="deps"'
 

@@ -35,7 +35,8 @@ const isWrite = cmd => WRITES.has(cmd[0]) || (cmd[0] === 'library' && LIBRARY_WR
   // is a read that runs on every refresh, `creds set` writes a credentials file.
   || (cmd[0] === 'creds' && cmd[1] === 'set')
   || (cmd[0] === 'deps' && cmd[1] === 'install')
-  || (cmd[0] === 'creds' && cmd[1] === 'tailscale' && cmd[2] === 'signin');
+  || (cmd[0] === 'creds' && cmd[1] === 'tailscale' && cmd[2] === 'signin')
+  || (cmd[0] === 'quota' && cmd[1] === 'request');
 const writing = () => [...jobs.values()].some(j => isWrite(j.cmd));
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);

@@ -30,7 +30,7 @@ const ENV_ALLOWED = new Set(['GAME_APPS']);
 // `config set` only writes .env locally - it cannot collide with a build. Left
 // out, it counted as a write and was refused while the other reads ran, so the
 // Settings screen stayed empty until someone pressed Refresh.
-const READ_ONLY = new Set(['status', 'watcher', 'library', 'cost', 'check', 'ping', 'games', 'config', 'machines', 'regions', 'sweep', 'creds', 'deps']);
+const READ_ONLY = new Set(['status', 'watcher', 'library', 'cost', 'check', 'ping', 'games', 'config', 'machines', 'regions', 'sweep', 'creds', 'deps', 'quota']);
 const isReadOnly = args =>
   READ_ONLY.has(args[0]) && !['push', 'pull', 'forget', 'clean', 'account'].includes(args[1] || '')
   // `cg creds` reads a local file and makes one free call, so it rides along
@@ -40,7 +40,13 @@ const isReadOnly = args =>
   // `cg deps` is six command -v checks. `cg deps install` shells out to the
   // package manager as root, so it waits like any other write.
   && !(args[0] === 'deps' && args[1] === 'install')
-  && !(args[0] === 'creds' && args[1] === 'tailscale' && args[2] === 'signin');
+  && !(args[0] === 'creds' && args[1] === 'tailscale' && args[2] === 'signin')
+  // Reading a quota and drafting an appeal change nothing. Asking for one
+  // opens a support case, so it waits its turn like any other write - and
+  // being left OUT of this list is why it never ran: a mutating command is
+  // refused outright while any read is in flight, and reads are always in
+  // flight on the screen that offers the button.
+  && !(args[0] === 'quota' && args[1] === 'request');
 
 const jobs = new Map();          // id -> { id, args, child, readOnly }
 const anyMutating = () => [...jobs.values()].some(j => !j.readOnly);
