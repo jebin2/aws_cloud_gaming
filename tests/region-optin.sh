@@ -34,12 +34,23 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$T/bin/sleep"; chmod +x "$T/bin/sleep"
 cat > "$T/bin/aws" <<'FAKE'
 #!/usr/bin/env bash
 echo "aws $*" >> "${AWS_LOG:-/dev/null}"
+# What the real CLI accepts, and nothing else. `aws account list-regions` has no
+# --region-names, and a fake that answered it anyway is why a call that could
+# never work passed every assertion in this file.
+for a in "$@"; do
+  case $a in
+    --*) case $a in
+           --max-results|--query|--output|--region-name|--region-opt-status-contains) ;;
+           *) echo "aws: [ERROR]: Unknown options: $a" >&2; exit 252 ;;
+         esac ;;
+  esac
+done
 case "$*" in
-  *"list-regions"*"--region-names"*)
+  *"get-region-opt-status"*)
     n=$(wc -l < "${TICK:-/dev/null}" 2>/dev/null || echo 0)
     echo "$n" >> "${TICK:?}"
     set -- ${STATUSES-DISABLED}
-    [[ $# -eq 0 ]] && exit 0          # AWS lists no such region
+    [[ $# -eq 0 ]] && exit 0          # AWS knows no such region
     idx=$(( n + 1 )); [[ $idx -gt $# ]] && idx=$#
     eval "printf '%s\n' \"\${$idx}\"" ;;
   *"list-regions"*)
@@ -71,6 +82,11 @@ check    "  disabled ones are listed" "$(python3 -I -c 'import json,sys;print(",
 # describe-regions only lists what is already on, which is the opposite of what
 # this question is about.
 contains "it asks the Account API"    "$(cat "$T/awslog")" "account list-regions"
+# The call for ONE region is its own API. list-regions has no --region-names,
+# and asking for one that way fails as "no such region" - which reads as AWS
+# not having the region at all.
+contains "one region has its own call" "$(cat lib/sweep.sh)" "get-region-opt-status --region-name"
+lacks    "  and not a filter that does not exist" "$(cat lib/sweep.sh)" "list-regions --region-names"
 lacks    "  not describe-regions"     "$(cat "$T/awslog")" "describe-regions"
 out=$(cg_ regions optin)
 contains "the human view counts the enabled ones" "$out" "enabled: 2"

@@ -535,8 +535,12 @@ print(json.dumps({"regions": out,
 }
 
 region_optin_status() { # region_optin_status <region> - one word, or nothing
-  aws account list-regions --region-names "$1" \
-    --query 'Regions[0].RegionOptStatus' --output text 2>/dev/null | grep -v '^None$' || true
+  # get-region-opt-status, not list-regions: list-regions has no --region-names
+  # option at all, so the filtered call failed and every region looked like one
+  # AWS had never heard of. The fake in the test accepted the option I assumed
+  # existed, which is how it passed.
+  aws account get-region-opt-status --region-name "$1" \
+    --query 'RegionOptStatus' --output text 2>/dev/null | grep -v '^None$' || true
   return 0
 }
 
