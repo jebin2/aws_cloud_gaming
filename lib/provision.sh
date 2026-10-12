@@ -151,7 +151,7 @@ else
     aws s3 cp "$HOST_TGZ" "s3://$S3_BUCKET/boot/host.tgz" --region "$BUCKET_REGION" >/dev/null \
       || { echo "could not upload host/ to s3://$S3_BUCKET/boot/host.tgz"; exit 1; }
     HOST_TGZ_URL=$(aws s3 presign "s3://$S3_BUCKET/boot/host.tgz" \
-                     --region "$BUCKET_REGION" --expires-in 7200)
+                     --region "$BUCKET_REGION" --expires-in 7200) || HOST_TGZ_URL=""
     [[ $HOST_TGZ_URL == https://* ]] || { echo "could not presign the host bundle"; exit 1; }
     # Said out loud, because it is money and it is invisible otherwise: every
     # byte the box pulls from a bucket in another region is billed inter-region
@@ -161,9 +161,13 @@ else
       # library" - the size the archive happened to be the day it was written -
       # which on an empty bucket is a bill for games that are not there.
       # One listing, charged as LIST requests: cents per ten thousand objects.
+      # || ARCH_BYTES="": `aws s3 ls` on a prefix with nothing under it exits 1,
+      # and this script runs under `set -euo pipefail` - so measuring an EMPTY
+      # archive killed the build here, silently, between "rendering user-data"
+      # and the first module. The empty case is the one this message exists for.
       ARCH_BYTES=$(aws s3 ls "s3://$S3_BUCKET/steam/steamapps/" --recursive --summarize \
                      --region "$BUCKET_REGION" 2>/dev/null \
-                   | sed -n 's/^[[:space:]]*Total Size:[[:space:]]*//p' | tail -1)
+                   | sed -n 's/^[[:space:]]*Total Size:[[:space:]]*//p' | tail -1) || ARCH_BYTES=""
       [[ $ARCH_BYTES =~ ^[0-9]+$ ]] || ARCH_BYTES=""
       echo "!! the archive is in $BUCKET_REGION but the box is in $REGION"
       if [[ -z $ARCH_BYTES ]]; then

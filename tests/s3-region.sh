@@ -85,6 +85,27 @@ contains "  it measures the archive"  "$prov" 'aws s3 ls "s3://$S3_BUCKET/steam/
 contains "  an empty one owes nothing" "$prov" "nothing is archived there yet"
 contains "  and how to keep it local" "$prov" "clear GAME_S3_BUCKET from .env"
 
+echo "5b. and measuring an EMPTY archive does not kill the build"
+# This is the one that got through: `aws s3 ls` on a prefix with nothing under
+# it exits 1, provision.sh runs under set -euo pipefail, and the assignment
+# took the whole script with it - silently, between "rendering user-data" and
+# the first module. The empty archive is exactly the case the message is for.
+#
+# The real lines, lifted out and run with an aws that fails the way the real
+# one does.
+emptied=$(mktemp -d)
+printf '#!/usr/bin/env bash\nexit 1\n' > "$emptied/aws"; chmod +x "$emptied/aws"
+snippet=$(sed -n '/ARCH_BYTES=\$(aws s3 ls/,/^      \[\[ \$ARCH_BYTES/p' lib/provision.sh)
+out=$(cd "$emptied" && PATH="$emptied:$PATH" S3_BUCKET=b BUCKET_REGION=r bash -c "
+set -euo pipefail
+$snippet
+echo \"survived with ARCH_BYTES=[\$ARCH_BYTES]\"" 2>&1)
+contains "the script survives it"     "$out" "survived with ARCH_BYTES=[]"
+# The same shape one line up: an assignment whose failure is checked on the
+# NEXT line, which under set -e never runs.
+contains "the presign is guarded too" "$prov" '--expires-in 7200) || HOST_TGZ_URL=""'
+contains "  so its check can report"  "$prov" "could not presign the host bundle"
+
 echo "6. the bucket name follows the region, because a bucket is regional"
 # The name was sha256(account-host) with no region in it, so moving GAME_REGION
 # derived the OLD region's bucket, found it, and used it from the new region -
