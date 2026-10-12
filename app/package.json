@@ -65,6 +65,10 @@
         "to": "cg/lib"
       },
       {
+        "from": "../host",
+        "to": "cg/host"
+      },
+      {
         "from": "../lambda",
         "to": "cg/lambda"
       },
