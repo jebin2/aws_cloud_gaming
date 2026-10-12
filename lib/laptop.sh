@@ -169,7 +169,7 @@ laptop_tailscale_up() {
 # default region and an output format, and cg sets the region itself and passes
 # --output on every call. The secret is read without echo.
 laptop_aws_keys() {
-  local region=$1 key_id secret
+  local region=$1 key_id secret who
   log "AWS credentials: paste an access key (IAM > Users > Security credentials > Create access key)"
   key_id=$(cg_ask aws-access-key-id "    access key id: ")
   secret=$(cg_ask_secret aws-secret-access-key "    secret access key: ")
@@ -177,10 +177,28 @@ laptop_aws_keys() {
     log "no key given - nothing saved"
     return 1
   fi
+  # Checked BEFORE it is written. The old order wrote first and checked after,
+  # so one mistyped character replaced a key that worked, and every screen then
+  # reported rejected credentials - about the key you had just destroyed.
+  #
+  # The candidate goes in the environment of this one call, where it beats the
+  # file without touching it. AWS_PROFILE and a session token would both win
+  # over it, so they are unset for the call.
+  # -u before the assignments: env takes its options first, and the other order
+  # makes it look for a program called "-u".
+  if ! who=$(env -u AWS_SESSION_TOKEN -u AWS_PROFILE \
+                 AWS_ACCESS_KEY_ID="$key_id" AWS_SECRET_ACCESS_KEY="$secret" \
+             aws sts get-caller-identity --query Account --output text 2>&1); then
+    log_as fail "AWS rejected that key: $(printf '%s' "$who" | tr '\n' ' ' | sed -E 's/  +/ /g')"
+    log "  nothing was saved - the key you had before is untouched"
+    log "  check the key is Active: IAM > Users > Security credentials"
+    return 1
+  fi
   aws configure set aws_access_key_id "$key_id" \
     && aws configure set aws_secret_access_key "$secret" \
     && aws configure set region "$region" \
-    && log "saved to ~/.aws/credentials, profile ${AWS_PROFILE:-default} - not to .env (.env.example says why)"
+    && log "saved to ~/.aws/credentials, profile ${AWS_PROFILE:-default} - not to .env (.env.example says why)" \
+    && log_as ok "credentials work (account $who)"
 }
 
 # laptop_aws_source - where the working AWS key comes from, in words, for cg
@@ -368,17 +386,10 @@ creds_set() {
   local region=${1:-${REGION:-}}
   laptop_has aws || die "the AWS CLI is not installed - run cg check --fix first"
   cg_can_ask || die "cg creds set has to ask for the key - run it in a terminal, or use the app"
-  laptop_aws_keys "$region" || return 1
-  # Saying "saved" about a key AWS will not take is how a new laptop ends up
-  # looking fixed and reporting UNKNOWN everywhere.
-  local who
-  if ! who=$(aws sts get-caller-identity --query Account --output text 2>&1); then
-    log_as fail "AWS rejected that key: $(printf '%s' "$who" | tr '\n' ' ')"
-    log "  the key is still saved, so a typo can be corrected by running this again"
-    log "  check the key is Active: IAM > Users > Security credentials"
-    return 1
-  fi
-  log_as ok "credentials work (account $who)"
+  # laptop_aws_keys verifies before it writes and says what happened either
+  # way, so there is nothing to add here - and a second sts call would only be
+  # a second chance to disagree with the first.
+  laptop_aws_keys "$region"
 }
 
 # --- the dependency list, as data ---------------------------------------------

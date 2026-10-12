@@ -39,16 +39,20 @@ window.__errs = [];
 window.__ran = [];
 addEventListener('error', e => window.__errs.push(e.message));
 addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
+window.__answers = [];
 window.cg = {
-  run: (args) => { window.__ran.push(args.join(' ')); return Promise.resolve({ ok: true, id: window.__ran.length }); },
-  answer: () => Promise.resolve(true), cancel: () => Promise.resolve(true),
+  run: (args) => { window.__ran.push(args.join(' '));
+                   window.__lastId = (window.__lastId || 0) + 1;
+                   return Promise.resolve({ ok: true, id: window.__lastId }); },
+  answer: (id, v) => { window.__answers.push(v); return Promise.resolve(true); },
+  cancel: () => Promise.resolve(true),
   busy: () => Promise.resolve([]),
-  onEvent() { return () => {}; },
+  onEvent(cb) { window.__emit = (id, event) => cb({ id, event }); return () => {}; },
 };
 STUB
 
 cat > "$T/r/probe.js" <<'PROBE'
-(() => {
+(async () => {
   const out = [];
   const g = id => {
     const el = document.getElementById(id);
@@ -97,6 +101,59 @@ cat > "$T/r/probe.js" <<'PROBE'
                  account: '123456789012', arn: 'arn:aws:iam::123456789012:user/example',
                  valid: true, error: null });
     read('OK');
+
+    // --- the key dialog, driven end to end ------------------------------
+    const dlg = document.getElementById('awskey');
+    const sleep = () => new Promise(r => setTimeout(r, 0));
+    paintCreds({ cli: true, source: 's', key_id: '****1234', account: null, arn: null,
+                 valid: false, error: 'rejected' });
+    document.getElementById('creds-set').click();
+    out.push('FORM OPEN | ' + dlg.open);
+    out.push('FORM FIELDS | id=' + document.getElementById('awskey-id').type
+             + ' secret=' + document.getElementById('awskey-secret').type);
+
+    // Nothing typed: it says so, and runs nothing.
+    window.__ran = [];
+    document.getElementById('awskey-go').click();
+    await sleep();
+    out.push('EMPTY ERR | ' + document.getElementById('awskey-err').textContent.trim());
+    out.push('EMPTY RAN | ' + window.__ran.join(' ;; '));
+    out.push('EMPTY OPEN | ' + dlg.open);
+
+    // A key AWS will not take: the error belongs in the dialog, which stays up.
+    document.getElementById('awskey-id').value = 'AKIABADBADBADBAD9999';
+    document.getElementById('awskey-secret').value = 'bad-secret';
+    window.__ran = []; window.__answers = [];
+    const bad = document.getElementById('awskey-go').click();
+    await sleep();
+    out.push('SUBMIT RAN | ' + window.__ran.join(' ;; '));
+    out.push('SUBMIT BTN | ' + document.getElementById('awskey-go').textContent.trim()
+             + ' disabled=' + document.getElementById('awskey-go').disabled);
+    // cg asks its two questions; the form answers them.
+    window.__emit(window.__lastId, { t: 'ask', id: 'aws-access-key-id', prompt: 'id: ', default: '' });
+    window.__emit(window.__lastId, { t: 'ask', id: 'aws-secret-access-key', prompt: 'secret: ', default: '', secret: 1 });
+    out.push('SUBMIT ANSWERS | ' + window.__answers.join(' ;; '));
+    out.push('SUBMIT MODALS | ' + document.getElementById('ask').open);
+    window.__emit(window.__lastId, { t: 'line', kind: 'info', text: 'AWS credentials: paste an access key (IAM > Users > …)' });
+    window.__emit(window.__lastId, { t: 'line', kind: 'fail', text: 'AWS rejected that key: An error occurred (InvalidClientTokenId) …' });
+    window.__emit(window.__lastId, { t: 'line', kind: 'cont', text: '  nothing was saved - the key you had before is untouched' });
+    window.__emit(window.__lastId, { t: 'exit', rc: 1 });
+    await sleep(); await sleep();
+    out.push('FAIL OPEN | ' + dlg.open);
+    out.push('FAIL ERR | ' + document.getElementById('awskey-err').textContent.replace(/\s+/g, ' ').trim());
+    out.push('FAIL BTN | ' + document.getElementById('awskey-go').textContent.trim()
+             + ' disabled=' + document.getElementById('awskey-go').disabled);
+
+    // And one it takes: the dialog closes.
+    document.getElementById('awskey-id').value = 'AKIAGOODGOODGOOD1234';
+    document.getElementById('awskey-secret').value = 'good-secret';
+    window.__ran = [];
+    document.getElementById('awskey-go').click();
+    await sleep();
+    out.push('OK RAN | ' + window.__ran.join(' ;; ') + ' lastId=' + window.__lastId);
+    window.__emit(window.__lastId, { t: 'exit', rc: 0 });
+    await sleep(); await sleep();
+    out.push('OK OPEN | ' + dlg.open);
 
     paintStatus(status('no-cli'));
     bannerRead('NOCLI');
@@ -152,7 +209,8 @@ contains "the key is named, masked"    "$(row 'BAD STATE')"   "****1234"
 contains "  and called rejected"       "$(row 'BAD STATE')"   "rejected"
 contains "  with AWS's reason"         "$(row 'BAD DETAIL')"  "InvalidClientTokenId"
 contains "the button asks for a key"   "$(row 'BAD BTN')"     "Set access key"
-check    "  by running cg creds set"   "$(row 'BAD RAN')"     "BAD RAN | creds set"
+# The button opens the form; cg runs when the form is submitted.
+check    "  and runs nothing yet"      "$(row 'BAD RAN')"     "BAD RAN | "
 
 echo "3. a key that works"
 contains "it says which key"           "$(row 'OK STATE')"    "****5678"
@@ -179,6 +237,29 @@ check    "  landing on Settings"       "$(row 'BAD BANNERVIEW')" "BAD BANNERVIEW
 contains "  with the card flashed"     "$(row 'BAD BANNERFLASH')" "flash-attn"
 # The old text sent people to a Settings screen that had no field for a key.
 contains "and it points at Settings"   "$(row 'BAD BODY')"     "Settings has the same button"
+
+echo "4b. the key is one form, and it says what happened"
+# It used to be two prompts in a row with the failure landing in the log pane
+# behind them - so a rejected key looked like nothing had happened at all.
+check    "the button opens a form"     "$(row 'FORM OPEN')"    "FORM OPEN | true"
+contains "  with both halves"          "$(row 'FORM FIELDS')"  "id=text secret=password"
+contains "an empty form says so"       "$(row 'EMPTY ERR')"    "Both halves are needed"
+check    "  and runs nothing"          "$(row 'EMPTY RAN')"    "EMPTY RAN | "
+check    "  staying open"              "$(row 'EMPTY OPEN')"   "EMPTY OPEN | true"
+check    "submitting runs cg creds set" "$(row 'SUBMIT RAN')"  "SUBMIT RAN | creds set"
+contains "  the button shows it is working" "$(row 'SUBMIT BTN')" "Checking with AWS"
+contains "  and cannot be pressed twice"    "$(row 'SUBMIT BTN')" "disabled=true"
+# cg still asks its two questions; the form answers them, so no second modal
+# appears on top of the one being looked at.
+check    "the form answers cg's questions" "$(row 'SUBMIT ANSWERS')" "SUBMIT ANSWERS | AKIABADBADBADBAD9999 ;; bad-secret"
+check    "  with no extra prompt"      "$(row 'SUBMIT MODALS')" "SUBMIT MODALS | false"
+check    "a rejected key keeps the form open" "$(row 'FAIL OPEN')" "FAIL OPEN | true"
+contains "  showing AWS's reason there" "$(row 'FAIL ERR')"    "InvalidClientTokenId"
+contains "  and that nothing was saved" "$(row 'FAIL ERR')"    "nothing was saved"
+# The line telling you where to find a key is noise when you are holding one.
+lacks    "  without the how-to line"   "$(row 'FAIL ERR')"     "paste an access key"
+contains "  and the button comes back" "$(row 'FAIL BTN')"     "Save key disabled=false"
+check    "a key that works closes it"  "$(row 'OK OPEN')"      "OK OPEN | false"
 
 echo "5. nothing threw"
 check "no painter threw"               "$(grep -c '^THREW' <<<"$OUT")" "0"

@@ -1235,12 +1235,59 @@ function paintCreds(c) {
 // cg asks for the two halves of the key as events; the dialog answers them, and
 // the secret one renders as a password field. Nothing is typed into the app's
 // own storage - cg writes ~/.aws/credentials.
-function setCreds() {
-  // No view jump: this is two questions in a modal, not a build. It counts as a
-  // write, so every screen - this card and the banner among them - re-reads
-  // when it finishes.
-  return runCg(['creds', 'set']);
+// The AWS key, as one form: both halves, one Save, the answer checked with AWS
+// before anything is written, and the failure shown HERE rather than in a log
+// pane behind the dialog.
+let awsKeyPending = null;
+function awsKeyAnswer(askId) {
+  if (!awsKeyPending) return null;
+  if (askId === 'aws-access-key-id') return awsKeyPending.id;
+  if (askId === 'aws-secret-access-key') return awsKeyPending.secret;
+  return null;
 }
+function openAwsKey() {
+  $('awskey-id').value = '';
+  $('awskey-secret').value = '';
+  $('awskey-err').hidden = true;
+  $('awskey-err').textContent = '';
+  $('awskey-go').disabled = false;
+  $('awskey-go').textContent = 'Save key';
+  $('awskey').showModal();
+  $('awskey-id').focus();
+}
+function awsKeyFail(text) {
+  const box = $('awskey-err');
+  box.hidden = false;
+  box.textContent = text;
+  $('awskey-go').disabled = false;
+  $('awskey-go').textContent = 'Save key';
+  awsKeyPending = null;
+}
+$('awskey-cancel').onclick = e => { e.preventDefault(); awsKeyPending = null; $('awskey').close(); };
+$('awskey-go').onclick = async e => {
+  e.preventDefault();
+  const id = $('awskey-id').value.trim(), secret = $('awskey-secret').value.trim();
+  if (!id || !secret) return awsKeyFail('Both halves are needed: the key id and its secret.');
+  awsKeyPending = { id, secret };
+  $('awskey-err').hidden = true;
+  $('awskey-go').disabled = true;
+  $('awskey-go').textContent = 'Checking with AWS…';
+  const { rc, err } = await runCg(['creds', 'set'], { wantRc: true });
+  awsKeyPending = null;
+  if (rc === 0) {
+    // cg has written it and every screen re-reads, because this counts as a
+    // write - so the card behind this dialog is already right.
+    $('awskey').close();
+    return;
+  }
+  // cg's own words, minus the line that only tells you where to find a key -
+  // you are holding one.
+  awsKeyFail((err || `cg creds set exited ${rc}`).split('\n')
+    .filter(l => l.trim() && !l.startsWith('AWS credentials: paste'))
+    .join('\n').trim() || `cg creds set exited ${rc}`);
+};
+
+function setCreds() { openAwsKey(); }
 
 // "1" means nothing to a person: a choice shows what it chose.
 const CHOICE_LABEL = {
@@ -2065,11 +2112,20 @@ window.cg.onEvent(({ id, event }) => {
         buildFail(`cg ${job.cmd.join(' ')} exited ${event.rc} without saying why - the log above is all there is.`);
     }
   }
-  if (event.t === 'ask') ask(id, event);
+  if (event.t === 'ask') {
+    // The key dialog asked already: cg's two questions are answered from what
+    // is in it, rather than putting two more modals on top of the one the
+    // person is looking at.
+    const pre = awsKeyAnswer(event.id);
+    if (pre !== null) window.cg.answer(id, pre);
+    else ask(id, event);
+  }
   // JSON comes back on stdout as the command's own data; reports arrive as events.
   if (event.t === 'raw' && event.stream === 'stdout' && (job.json || job.capture)) job.out.push(event.text);
   if (event.t === 'report' && job.panel) $(job.panel).textContent = event.text;
   if (event.t === 'error' && event.text) job.err = event.text;
+  if (job.wantRc && (event.t === 'line' || event.t === 'error') && event.text)
+    job.collected += event.text + '\n';
   if (job.collect && (event.t === 'line' || event.t === 'step' || event.t === 'error')) {
     const box = $(job.collect);
     if (box.textContent === 'running…') box.textContent = '';
@@ -2123,18 +2179,20 @@ window.cg.onEvent(({ id, event }) => {
            event.rc === 0 ? 'text-primary' : 'text-error');
       refreshAll();
     }
-    if (job.resolve) job.resolve(job.capture ? job.out.join('\n') : undefined);
+    if (job.resolve) job.resolve(job.wantRc ? { rc: event.rc, err: job.collected || '' }
+                                 : job.capture ? job.out.join('\n') : undefined);
   }
 });
 
-function runCg(args, { panel, age, json, env, collect, capture } = {}) {
+function runCg(args, { panel, age, json, env, collect, capture, wantRc } = {}) {
   return new Promise(async resolve => {
     const res = await window.cg.run(args, env);
     if (!res.ok) {
       $('job-line').textContent = `busy: cg ${res.args.join(' ')} must finish first`;
       return resolve();
     }
-    jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, out: [], resolve });
+    jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, wantRc,
+                      out: [], collected: '', resolve });
     if (isWrite(args)) note(`cg ${args.join(' ')} started`, 'text-primary');
     updateHeader();
     if (panel) $(panel).textContent = 'running…';

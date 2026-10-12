@@ -129,21 +129,34 @@ contains "  and for the secret"           "$out" '"id":"aws-secret-access-key"'
 contains "  marking it secret"            "$out" '"secret":1'
 check    "the id is saved"                "$(sed -n 1p "$T/key")" "AKIANEWKEYNEWKEY5678"
 check    "  and the secret with it"       "$(sed -n 2p "$T/key")" "new-secret-value"
-contains "  then verified against AWS"    "$(cat "$T/awslog")" "get-caller-identity"
+# Verified BEFORE the write, so the order in the log is the contract.
+check    "  verified before it was written" \
+         "$(grep -oE 'get-caller-identity|configure set aws_access_key_id' "$T/awslog" | head -1)" \
+         "get-caller-identity"
 contains "  and confirmed with the account" "$out" "credentials work (account 123456789012)"
 # The event stream is what the app shows in its log pane. A secret that reaches
 # it is a secret on screen and in a copied log.
 lacks    "the secret is never echoed"     "$out" "new-secret-value"
 
-echo "5. a key AWS rejects is reported, not announced as working"
-rm -f "$T/key" "$T/awslog"; KEY_STATE=bad
+echo "5. a key AWS rejects is never written"
+# The old order wrote first and checked after, so one mistyped character
+# replaced a key that worked - and every screen then reported rejected
+# credentials about the key you had just destroyed.
+printf 'AKIAOLDOLDOLDOLD0000\nthe-key-that-works\n' > "$T/key"
+rm -f "$T/awslog"; KEY_STATE=bad
 out=$(printf 'AKIABADBADBADBAD9999\nbad-secret\n' | EXTRA="CG_JSON=1" cg_ creds set)
 rc=$?
 contains "it says AWS refused it"         "$out" "AWS rejected that key"
 contains "  keeping AWS's reason"         "$out" "InvalidClientTokenId"
-contains "  and says a typo can be redone" "$out" "running this again"
+contains "  and says nothing was saved"   "$out" "nothing was saved"
 lacks    "  never claiming it works"      "$out" "credentials work"
 check    "  and it fails"                 "$rc" "1"
+check    "the old key is untouched"       "$(sed -n 1p "$T/key")" "AKIAOLDOLDOLDOLD0000"
+check    "  secret and all"               "$(sed -n 2p "$T/key")" "the-key-that-works"
+lacks    "  and nothing was written"      "$(cat "$T/awslog")" "configure set"
+# The check happens with the candidate in the environment of that one call,
+# where it beats the file without touching it.
+contains "the candidate was checked"      "$(cat "$T/awslog")" "get-caller-identity"
 
 echo "6. an empty answer saves nothing"
 rm -f "$T/key"; KEY_STATE=ok

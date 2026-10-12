@@ -809,6 +809,28 @@
   </form>
 </dialog>
 
+<!-- The AWS access key: one dialog, both halves, and the answer checked before
+     it is believed. It used to be two separate prompts with the failure landing
+     in the log pane behind them. -->
+<dialog id="awskey" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[460px]">
+  <p class="font-code-md text-code-md">AWS access key</p>
+  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md">
+    IAM &gt; Users &gt; Security credentials &gt; Create access key. Saved to ~/.aws/credentials,
+    and checked with AWS before anything is written.
+  </p>
+  <label class="font-code-sm text-code-sm text-outline" for="awskey-id">access key id</label>
+  <input id="awskey-id" autocomplete="off" spellcheck="false" placeholder="AKIA…"
+         class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface mb-space-sm">
+  <label class="font-code-sm text-code-sm text-outline" for="awskey-secret">secret access key</label>
+  <input id="awskey-secret" type="password" autocomplete="off" spellcheck="false"
+         class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
+  <pre class="font-code-sm text-code-sm text-error whitespace-pre-wrap mt-space-sm max-h-[30vh] overflow-auto" id="awskey-err" hidden></pre>
+  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+    <button class="btn" id="awskey-cancel">Cancel</button>
+    <button class="btn btn-primary" id="awskey-go">Save key</button>
+  </menu>
+</dialog>
+
 <script src="app.js"></script>
 </body>
 </html>
