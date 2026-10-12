@@ -1106,7 +1106,7 @@ function settingRow(r) {
   row.className = 'row border-b border-surface-variant/40 items-start';
 
   const left = document.createElement('div');
-  left.className = 'min-w-0';
+  left.className = 'min-w-0 flex-1';
   const name = document.createElement('p');
   name.className = 'font-code-md text-code-md';
   name.textContent = LABEL[r.key] || r.key;
@@ -1118,7 +1118,7 @@ function settingRow(r) {
   const right = document.createElement('div');
   right.className = 'flex items-center gap-space-sm shrink-0';
   const val = document.createElement('span');
-  val.className = 'font-code-md text-code-md '
+  val.className = 'font-code-md text-code-md text-right max-w-[13rem] break-words '
     + (r.is_set ? 'text-on-surface-variant' : 'text-outline');
   val.textContent = settingValue(r);
 
