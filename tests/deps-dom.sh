@@ -78,6 +78,9 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push(label + ' NOTE | ' + g('d-log-note'));
   };
   try {
+    // Before any read has landed. "Not set" here would be a guess, and a wrong
+    // one on a laptop whose key is fine.
+    keys('NOREADS');
     paintDeps(payload(['aws', 'moonlight']));
     read('MISSING');
     window.__ran = [];
@@ -103,12 +106,12 @@ cat > "$T/r/probe.js" <<'PROBE'
     read('NOPM');
 
     // Installed but signed out: nothing to install, and nothing works.
+    paintTskey({ present: true, valid: true, state: 'ok', detail: null,
+                 signed_in: false, node: null });
     paintDeps(payload([], { tailscale_signed_in: false }));
     read('SIGNEDOUT');
     keys('SIGNEDOUT');
 
-    // The keys: nothing is known yet until each read lands.
-    keys('NOREADS');
     paintConfig([{ key: 'TAILSCALE_API_KEY', kind: 'text', secret: true, is_set: false,
                    value: null, default: null, note: 'Tailscale API token.' },
                  { key: 'GAME_DISK_GB', kind: 'number', secret: false, is_set: true,
@@ -200,19 +203,22 @@ echo "6. the keys nobody can install"
 # A tool is installed or it is not; a key is yours, and the page has to say
 # where it stands without ever being a second place to type it.
 contains "the AWS key is listed"      "$(row 'NOREADS KEYS')"  "AWS access key=reading"
-contains "  and the Tailscale token"  "$(row 'NOREADS KEYS')"  "Tailscale API token=reading"
+contains "  and Tailscale"            "$(row 'NOREADS KEYS')"  "Tailscale=reading"
 # "not set" before the read lands is a guess, and a wrong one on a laptop whose
 # key is fine.
 lacks    "  neither guesses"          "$(row 'NOREADS KEYS')"  "not set"
 contains "a rejected key says so"     "$(row 'READ KEYS')"     "AWS access key=****1234 was rejected"
 contains "  with a way to the setting" "$(row 'READ KEYS')"    "rejected[Set in Settings]"
-contains "an unset token says so"     "$(row 'READ KEYS')"     "Tailscale API token=not set"
-contains "  and that it is optional"  "$(row 'READ KEYS')"     "cg goes without"
-contains "a signed-in Tailscale"      "$(row 'READ KEYS')"     "Tailscale sign-in=signed in as laptop"
-contains "a rejected token says so"  "$(row 'BADTOKEN KEYS')" "Tailscale API token=rejected (401)"
-# Signing in is sudo's business, so there is no button pretending otherwise.
-lacks    "  with no button for it"    "$(row 'READ KEYS')"     "signed in[Set"
-contains "signed out says what to run" "$(row 'SIGNEDOUT KEYS')" "sudo tailscale up"
+contains "no token says what is given up" "$(row 'READ KEYS')"  "no API token, cg goes without"
+contains "  beside the sign-in"       "$(row 'READ KEYS')"     "Tailscale=signed in as laptop"
+contains "a rejected token says so"  "$(row 'BADTOKEN KEYS')" "API token rejected (401)"
+# Two rows, two cards in Settings, and no row without somewhere to go: the
+# sign-in used to have a row of its own that said "in a terminal: sudo
+# tailscale up" and had no button at all.
+check    "there are two rows, not three" "$(grep -c 'Tailscale sign-in=' <<<"$(row 'READ KEYS')")" "0"
+contains "  and both lead somewhere"   "$(row 'READ KEYS')"     "[Set in Settings]"
+contains "signed out comes first"      "$(row 'SIGNEDOUT KEYS')" "not signed in"
+contains "  and says what to run"      "$(row 'SIGNEDOUT KEYS')" "sudo tailscale up"
 
 echo "7. a key is set in exactly one place"
 check    "the AWS key goes to Settings" "$(row 'KEY1 VIEW')"   "KEY1 VIEW | settings"

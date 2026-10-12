@@ -1129,6 +1129,9 @@ function paintDeps(d) {
 // and sends you to the one place it is set - the same rule as the machine
 // chooser, which shows region and instance type here and lets you change them
 // in exactly one place.
+const signedAs = () =>
+  (tskeyNow && tskeyNow.node) ? `signed in as ${tskeyNow.node}` : 'signed in';
+
 function paintKeys() {
   const wrap = $('d-keys');
   if (!wrap) return;
@@ -1144,24 +1147,28 @@ function paintKeys() {
         : c.key_id ? [`${c.key_id} was rejected`, 'bad']
         : ['not set', 'bad'],
       to: () => goSetting($('s-creds-card')) },
-    { name: 'Tailscale sign-in',
+    // One row per card in Settings, and no row without somewhere to go. The
+    // sign-in used to have a row of its own here, saying "in a terminal: sudo
+    // tailscale up" with no button - a dead end next to two rows that lead
+    // somewhere, and the Tailscale card says the same thing with the token
+    // beside it.
+    { name: 'Tailscale',
       why: 'the private network the box joins; there is no public SSH port',
-      state: !depsNow ? ['reading…', 'wait']
-        : depsNow.tailscale_signed_in === true
-          ? [(tskeyNow && tskeyNow.node) ? `signed in as ${tskeyNow.node}` : 'signed in', 'ok']
+      // The sign-in comes first when it is missing: a token cannot help a
+      // laptop that is not on the tailnet.
+      state: !depsNow || !tskeyNow ? ['reading…', 'wait']
         : depsNow.tailscale_signed_in === false
           ? ['not signed in - in a terminal:  sudo tailscale up', 'bad']
-          : ['Tailscale is not installed', 'bad'],
-      to: null },
-    { name: 'Tailscale API token',
-      why: 'optional: prunes old nodes and turns off key expiry',
-      // Checked, not merely counted: .env says whether a token is SET, and a
-      // token that is set and refused reads exactly the same there.
-      state: !tskeyNow ? ['reading…', 'wait']
-        : !tskeyNow.present ? ['not set - cg goes without', 'warn']
-        : tskeyNow.valid ? ['works', 'ok']
-        : tskeyNow.valid === false ? [`rejected${tskeyNow.detail ? ' (' + tskeyNow.detail + ')' : ''}`, 'bad']
-        : ['set, but api.tailscale.com did not answer', 'warn'],
+        : depsNow.tailscale_signed_in === null ? ['not installed', 'bad']
+        // Signed in: then the token is what is left to say, and it is CHECKED,
+        // not counted - .env cannot tell a good token from a refused one.
+        : !tskeyNow.present
+          ? [`${signedAs()} · no API token, cg goes without`, 'warn']
+        : tskeyNow.valid
+          ? [`${signedAs()} · API token works`, 'ok']
+        : tskeyNow.valid === false
+          ? [`${signedAs()} · API token rejected${tskeyNow.detail ? ' (' + tskeyNow.detail + ')' : ''}`, 'bad']
+          : [`${signedAs()} · API token set, api.tailscale.com did not answer`, 'warn'],
       to: () => goSetting($('s-tskey-card')) },
   ];
   wrap.textContent = '';
@@ -2580,4 +2587,7 @@ for (const link of document.querySelectorAll('.nav-item')) {
     if (NEEDS[view] && !loaded.has(view)) refresh();
   };
 }
+// Drawn once before anything has been read, so the card has its rows and they
+// say "reading…", rather than being blank until two reads land.
+paintKeys();
 refreshAll();
