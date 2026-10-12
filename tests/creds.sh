@@ -263,6 +263,23 @@ contains "a token must look like one"     "$out" "they start with tskey-"
 contains "and the status says both halves" "$(cg_ creds tailscale)" "api token        works"
 rm -f "$T/repo/.env"
 
+echo "9d. the .csv import is gone, and stays gone"
+# cg used to search $HOME for the access-key .csv the console hands out, offer
+# to import it, and tell you to delete the file afterwards. That made a
+# plaintext key in a home directory a supported way to carry a credential, and
+# a found-file prompt is a surprising thing for a build to do. The key is
+# pasted now, and checked before it is written.
+src=$(cat lib/setup lib/laptop.sh cg)
+lacks "no csv importer"                  "$src" "import_key_csv"
+lacks "  and no env var for one"         "$src" "AWS_KEY_CSV"
+lacks "  nothing hunts for the file"     "$src" "accessKeys"
+lacks "  and nothing asks to import"     "$src" "import-key-csv"
+contains "the failure names the way in"  "$(cat lib/setup)" "Paste a key:  cg creds set"
+lacks "the docs do not offer it either"  "$(cat docs/getting-started.md)" "AWS_KEY_CSV"
+# The .csv is still gitignored: the file is no longer part of any flow, and
+# that is exactly when a stray copy gets committed by accident.
+contains "a stray csv still cannot be committed" "$(cat .gitignore)" "*.csv"
+
 echo "10. it is wired in"
 contains "cg dispatches creds"           "$(cat cg)" "creds|credentials)"
 contains "  and help names it"           "$(cat cg)" "cg creds [set [aws|tailscale]]"

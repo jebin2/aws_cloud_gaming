@@ -48,20 +48,24 @@ zypper - starts the Tailscale sign-in, and asks for an AWS access key if none wo
 
 ### AWS credentials
 
-If `aws configure` has already been run, nothing to do. Otherwise the console hands you an
-access key as a **`.csv` download** rather than something you can paste, so `setup` accepts it
-directly:
+If `aws configure` has already been run, nothing to do. Otherwise paste an access key:
 
-    AWS_KEY_CSV=~/Downloads/CLI_accessKeys.csv cg init
+    cg creds set
 
-With no path given it looks for one in your home directory and offers to import it. It picks
-the first file that actually *parses* rather than the first matching name - the console also
-issues a `*_credentials.csv` containing a sign-in **password** and no access key, and choosing
-by filename would grab that instead.
+It asks for the key id and its secret, checks them against AWS, and only then writes them to
+`~/.aws/credentials`. A key AWS will not take is not saved, so a typo cannot replace a key that
+works. In the app the same thing is a card: **Settings > AWS credentials**, which also says
+which account the key is for - a key that works for the *wrong* account looks healthy
+everywhere else.
 
-**Delete the .csv once imported.** It is a plaintext secret, and anyone who reads it has your
-account. `*.csv` is gitignored here so a stray copy in the repo cannot be committed, but that
-does not help it sitting in `~/Downloads`.
+`cg creds` on its own reports where the key comes from, whether AWS takes it, and the state of
+the Tailscale API token beside it.
+
+**The console hands you the key as a `.csv` download. Delete it once you have pasted the key.**
+It is a plaintext secret, and anyone who reads it has your account. cg used to offer to import
+one it found in your home directory; it no longer does, because that made leaving the file
+lying around a supported way of keeping a credential. `*.csv` is gitignored here so a stray
+copy in the repo cannot be committed, but that does not help it sitting in `~/Downloads`.
 
 ## Configuration
 

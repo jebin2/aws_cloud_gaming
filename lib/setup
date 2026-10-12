@@ -1100,56 +1100,13 @@ if ! laptop_report "$FIX"; then
 fi
 
 # --- aws access ---------------------------------------------------------------
-# The console gives you an access key as a .csv download rather than something
-# you can paste, so accept it directly instead of making people transcribe it.
-import_key_csv() {
-  local csv="$1"
-  python3 - "$csv" <<'PY'
-import csv, sys
-# utf-8-sig: AWS's download carries a BOM, which utf-8 would leave glued to the
-# first header name and break the lookup.
-with open(sys.argv[1], newline="", encoding="utf-8-sig") as f:
-    rows = list(csv.DictReader(f))
-if not rows:
-    sys.exit("empty csv")
-row = {k.strip().lower(): (v or "").strip() for k, v in rows[0].items() if k}
-key = row.get("access key id")
-sec = row.get("secret access key")
-if not key or not sec:
-    sys.exit("csv has no 'Access key ID' / 'Secret access key' columns")
-print(key); print(sec)
-PY
-}
-
+# The .csv the console hands out used to be imported from here: cg searched
+# $HOME for one, offered it, and told you to delete the file afterwards. That is
+# gone. It made a plaintext key in a home directory a supported way to carry a
+# credential - and a found-file prompt is a surprising thing for a build to do.
+# The key is pasted instead: `cg creds set`, or the AWS credentials card in the
+# app, both of which check it with AWS before writing it anywhere.
 if ! aws sts get-caller-identity >/dev/null 2>&1; then
-  CSV="${AWS_KEY_CSV:-}"
-  if [[ -z $CSV ]]; then
-    # Pick the first candidate that actually parses, not the first that matches
-    # the name. The console also hands out a *_credentials.csv containing a
-    # sign-in password and no access key at all - matching on filename alone
-    # would grab that and fail confusingly.
-    while IFS= read -r cand; do
-      [[ -f $cand ]] || continue
-      if import_key_csv "$cand" >/dev/null 2>&1; then CSV="$cand"; break; fi
-    done < <(find "$HOME" -maxdepth 3 \( -iname '*accessKeys*.csv' -o -iname '*credentials*.csv' \) 2>/dev/null)
-  fi
-
-  if [[ -n $CSV && -f $CSV ]]; then
-    log "AWS credentials are not configured, but found: $CSV"
-    if cg_confirm import-key-csv "    import it? [Y/n] " Y; then
-      mapfile -t creds < <(import_key_csv "$CSV") \
-        || die "could not read $CSV - check it is the .csv AWS gave you"
-      [[ ${#creds[@]} -eq 2 ]] || die "unexpected format in $CSV"
-      aws configure set aws_access_key_id     "${creds[0]}"
-      aws configure set aws_secret_access_key "${creds[1]}"
-      aws configure set region "$REGION"
-      aws sts get-caller-identity >/dev/null 2>&1 \
-        || die "those credentials were rejected by AWS. Check the key is active."
-      log "imported; credentials work"
-      log "now delete $CSV - it is a plaintext secret sitting in your home directory"
-    fi
-  fi
-
   # --fix: the access key is the one thing it cannot install, so ask for it.
   # cg_can_ask, not laptop_tty: pasting a key needs someone to ask, not a
   # terminal - `aws configure set` writes a file and uses no sudo. Behind
@@ -1159,8 +1116,8 @@ if ! aws sts get-caller-identity >/dev/null 2>&1; then
   fi
 
   aws sts get-caller-identity >/dev/null 2>&1 || die "AWS credentials are not working.
-       Configure them with:  aws configure
-       Or point at the .csv AWS gave you:  AWS_KEY_CSV=/path/to/CLI_accessKeys.csv cg init"
+       Paste a key:  cg creds set    (checked with AWS before it is saved)
+       Or configure them yourself:  aws configure"
 fi
 
 # The account plan is a separate gate from service quotas, and it is invisible
