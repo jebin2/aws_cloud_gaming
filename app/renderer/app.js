@@ -229,8 +229,8 @@ function ask(id, event) {
 // a SETTING to labels for its values - same idea, different shape, and sharing
 // one name for both silently shadowed the other.
 const ASK_CHOICE_LABEL = {
-  'steam-login:1': '1 - use the archived Steam login (the box comes up signed in)',
-  'steam-login:2': '2 - start fresh; sign in on the box (the archive is left alone)',
+  'session-end:d': 'destroy the box (recommended - the games are mirrored to S3)',
+  'session-end:n': 'leave it running (it keeps billing by the hour)',
 };
 
 const GB = bytes => (bytes / 1073741824).toFixed(1) + ' GB';
@@ -1024,6 +1024,7 @@ function paintGuards(d) {
 const LABEL = {
   GAME_DISK_GB: 'root disk (GB)', GAME_ARCHIVE_EXPIRY_DAYS: 'archive expiry (days)',
   GAME_INSTANCE_TYPE: 'instance type', GAME_REGION: 'region', GAME_SPOT: 'purchase model',
+  GAME_STEAM_LOGIN: 'Steam sign-in',
   GAME_BUDGET_INR: 'monthly budget (₹)', GAME_WATCHDOG_IDLE_MIN: 'cloud watchdog idle (min)',
   GAME_WATCHDOG_STUCK_MIN: 'stuck shutdown forced after (min)',
   GAME_NTFY_URL: 'phone notifications', TAILSCALE_API_KEY: 'Tailscale API token',
@@ -1034,7 +1035,7 @@ const LABEL = {
 // "1" means nothing to a person: a choice shows what it chose.
 const CHOICE_LABEL = {
   GAME_SPOT: { '1': 'spot', '0': 'on demand', auto: 'spot when the quota allows' },
-  GAME_STEAM_LOGIN: { use: 'restore the archived login', fresh: 'sign in on the box' },
+  GAME_STEAM_LOGIN: { use: 'use the archived login', fresh: 'sign in fresh on the box' },
 };
 const choiceLabel = (key, v) => (CHOICE_LABEL[key] || {})[v] || v;
 
@@ -1050,7 +1051,7 @@ function settingValue(r) {
 // order and the groups are the app's; every row, rule and value is cg's.
 const SETTING_GROUPS = [
   ['The box', 'Applies at the next build. A disk cannot be shrunk later.',
-   ['GAME_INSTANCE_TYPE', 'GAME_REGION', 'GAME_SPOT', 'GAME_DISK_GB']],
+   ['GAME_INSTANCE_TYPE', 'GAME_REGION', 'GAME_SPOT', 'GAME_DISK_GB', 'GAME_STEAM_LOGIN']],
   ['The guards', 'What the watchdogs wait for, and what the archive costs you to keep.',
    ['GAME_WATCHDOG_IDLE_MIN', 'GAME_WATCHDOG_STUCK_MIN', 'GAME_ARCHIVE_EXPIRY_DAYS', 'GAME_BUDGET_INR']],
   ['The stream', 'Passed to Moonlight as flags, so your saved settings stay untouched.',

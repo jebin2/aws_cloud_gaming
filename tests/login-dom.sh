@@ -107,17 +107,17 @@ cat > "$T/r/probe.js" <<'PROBE'
   // browser choosing to fire it is the browser's business.
   const closeNow = () => { const d = dlg(); const h = d.onclose; d.close(); if (h) h(); };
   try {
-    ask(7, { t: 'ask', id: 'steam-login',
-             prompt: '  use the archived Steam login? [1]: ',
-             default: '1', choices: '1,2' });
+    ask(7, { t: 'ask', id: 'session-end',
+             prompt: '  [d] destroy (recommended)  [n] leave it running: ',
+             default: 'd', choices: 'd,n' });
     askRead('CHOICE');
     // Dismissing without touching anything must answer the DEFAULT, not empty.
     closeNow();
     out.push('CHOICE ANSWER | ' + answered);
 
     // Picking the other one must answer that.
-    ask(8, { t: 'ask', id: 'steam-login', prompt: 'p', default: '1', choices: '1,2' });
-    [...document.querySelectorAll('#ask-choices input')].find(r => r.value === '2').checked = true;
+    ask(8, { t: 'ask', id: 'session-end', prompt: 'p', default: 'd', choices: 'd,n' });
+    [...document.querySelectorAll('#ask-choices input')].find(r => r.value === 'n').checked = true;
     closeNow();
     out.push('PICK2 ANSWER | ' + answered);
 
@@ -196,19 +196,19 @@ contains "the login is still reported" "$(row 'NONAMES HEAD')" "Steam login arch
 contains "  and the gap is named"      "$(row 'NONAMES ACCTS')" "could not be read"
 lacks    "  not as zero accounts"      "$(row 'NONAMES ACCTS')" "0 accounts"
 
-echo "6. the build-time prompt is a choice, not a text box"
-contains "the question stands alone"   "$(row 'CHOICE PROMPT')" "use the archived Steam login?"
+echo "6. a numbered prompt is a choice, not a text box"
+contains "the question stands alone"   "$(row 'CHOICE PROMPT')" "leave it running"
 check    "the radios are shown"        "$(row 'CHOICE BOX')"   "CHOICE BOX | shown"
 check    "  and the text field is not" "$(row 'CHOICE INPUT')" "CHOICE INPUT | hidden"
-contains "option 1 says what it does"  "$(row 'CHOICE ROWS')" "use the archived Steam login (the box comes up signed in)"
-contains "  and option 2"              "$(row 'CHOICE ROWS')" "start fresh; sign in on the box"
-contains "  with the archive reassurance" "$(row 'CHOICE ROWS')" "archive is left alone"
-contains "the default is preselected"  "$(row 'CHOICE ROWS')" "CHECKED 1 -"
+contains "the first option says what it does" "$(row 'CHOICE ROWS')" "destroy the box"
+contains "  and the second"            "$(row 'CHOICE ROWS')" "leave it running"
+contains "  with the consequence spelled out" "$(row 'CHOICE ROWS')" "keeps billing"
+contains "the default is preselected"  "$(row 'CHOICE ROWS')" "CHECKED d"
 # Dismissing must answer the default, never an empty string: cg reads the reply
 # and an empty one would fall through to its own default anyway, but a build
 # that answers "" to a choice prompt is a thing nobody can debug.
-check "closing answers the default"    "$(row 'CHOICE ANSWER')" "CHOICE ANSWER | 7=1"
-check "picking the other answers it"   "$(row 'PICK2 ANSWER')"  "PICK2 ANSWER | 8=2"
+check "closing answers the default"    "$(row 'CHOICE ANSWER')" "CHOICE ANSWER | 7=d"
+check "picking the other answers it"   "$(row 'PICK2 ANSWER')"  "PICK2 ANSWER | 8=n"
 
 echo "7. a prompt with no choices is still a text field"
 check "the text field is shown" "$(row 'TEXT INPUT')" "TEXT INPUT | shown"
