@@ -129,7 +129,7 @@ contains "  including the sign-in"           "$r" "sign this laptop in to Tailsc
 logged() { grep -cE "$1" "$T/log"; }
 check    "installs the AWS CLI"              "$(logged '^sudo .*/pacman -S --needed --noconfirm aws-cli-v2$')" "1"
 check    "  and Tailscale"                   "$(logged '^sudo .*/pacman -S --needed --noconfirm tailscale$')" "1"
-contains "  then signs in"                   "$(cat "$T/log")" "sudo tailscale up"
+check    "  then signs in"                   "$(logged '^sudo .*/tailscale up$')" "1"
 contains "done, and nothing left"            "$r" "rc=0"
 check    "  by the check itself"             "$(sed -n '$p' <<<"$r")" "rc=0"
 
@@ -195,14 +195,14 @@ fresh python3 ssh curl aws tailscale moonlight
 rm -f "$T/ts-up"
 fake systemctl 'exit 0'
 r=$(run 'laptop_fix; echo "rc=$?"' y)
-contains "signs in"                          "$(cat "$T/log")" "sudo tailscale up"
+check    "signs in"                          "$(grep -cE '^sudo .*/tailscale up$' "$T/log")" "1"
 lacks    "  the daemon already runs"         "$(cat "$T/log")" "enable --now"
 contains "  and is done"                     "$r" "rc=0"
 fresh python3 ssh curl aws tailscale moonlight
 rm -f "$T/ts-up"
 fake systemctl '[[ $1 == is-active ]] && exit 3; exit 0'
 r=$(run 'laptop_fix; echo "rc=$?"' y)
-contains "a stopped daemon is started first" "$(cat "$T/log")" "sudo systemctl enable --now tailscaled"
+check    "a stopped daemon is started first" "$(grep -cE '^sudo .*/systemctl enable --now tailscaled$' "$T/log")" "1"
 
 echo "10. setup: check takes --fix and nothing else"
 mkdir -p "$T/repo"; cp -r lib cg "$T/repo/"

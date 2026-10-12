@@ -156,12 +156,58 @@ laptop_install() { # laptop_install <pm> <tool>
   esac
 }
 
+# The sign-in, from a terminal or from the app. Root is needed twice - to start
+# tailscaled and to run `tailscale up` - and in a window that is polkit's job,
+# the same as installing.
+#
+# `tailscale up` prints a login URL and then WAITS for someone to visit it, so
+# every line is relayed as it arrives rather than collected at the end: the URL
+# is the whole point and it is useless after the command returns.
 laptop_tailscale_up() {
+  local as; as=$(laptop_root) || {
+    log "cannot sign in from here: $(laptop_root_why)"
+    log "  in a terminal:  sudo tailscale up"
+    return 1
+  }
+  laptop_has tailscale || { log_as fail "Tailscale is not installed"; return 1; }
   if laptop_has systemctl && ! systemctl is-active --quiet tailscaled 2>/dev/null; then
-    sudo systemctl enable --now tailscaled || return 1
+    log "starting tailscaled"
+    "$as" "$(command -v systemctl)" enable --now tailscaled || {
+      log_as fail "could not start tailscaled"
+      return 1
+    }
   fi
-  # Prints a login link and waits for it.
-  sudo tailscale up
+  log "finishing the sign-in needs a browser - the link appears below"
+  local line rc
+  # stdbuf, where it exists: tailscale up writes the URL and then blocks, and a
+  # block-buffered pipe would hold that line until the command ended - which is
+  # after the sign-in it is asking for.
+  local unbuf=(); laptop_has stdbuf && unbuf=(stdbuf -oL -eL)
+  while IFS= read -r line; do
+    case $line in
+      *https://login.tailscale.com/*)
+        # Said on its own line, with nothing else on it, so the app can lift the
+        # URL out and offer it as a link.
+        log "sign in here: $(printf '%s' "$line" | grep -oE 'https://login\.tailscale\.com/[^[:space:]]+')" ;;
+      *) [[ -n ${line//[[:space:]]/} ]] && log "$line" ;;
+    esac
+  done < <("${unbuf[@]}" "$as" "$(command -v tailscale)" up 2>&1)
+  # The pipeline's own status, not the loop's.
+  if laptop_tailscale_down; then
+    log_as fail "still not signed in"
+    return 1
+  fi
+  log_as ok "signed in"
+}
+
+# tskey_signin - what `cg creds tailscale signin` runs.
+tskey_signin() {
+  if laptop_has tailscale && ! laptop_tailscale_down; then
+    log_as ok "already signed in"
+    return 0
+  fi
+  say "tailscale sign-in"
+  laptop_tailscale_up
 }
 
 # laptop_aws_keys <region>: an access key, for --fix when no AWS credentials work.

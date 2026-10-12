@@ -40,6 +40,7 @@ window.__ran = [];
 addEventListener('error', e => window.__errs.push(e.message));
 addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
 window.__answers = [];
+window.__opened = [];
 window.cg = {
   run: (args) => { window.__ran.push(args.join(' '));
                    window.__lastId = (window.__lastId || 0) + 1;
@@ -47,6 +48,7 @@ window.cg = {
   answer: (id, v) => { window.__answers.push(v); return Promise.resolve(true); },
   cancel: () => Promise.resolve(true),
   busy: () => Promise.resolve([]),
+  openSignIn: (url) => { window.__opened.push(url); return Promise.resolve(true); },
   onEvent(cb) { window.__emit = (id, event) => cb({ id, event }); return () => {}; },
 };
 STUB
@@ -201,6 +203,42 @@ cat > "$T/r/probe.js" <<'PROBE'
     await sleep(); await sleep();
     out.push('TSOKCLOSE | ' + tsdlg.open);
 
+    // --- the Tailscale sign-in, from the window --------------------------
+    // The button only exists when there is a way to be root: `tailscale up`
+    // needs it, and in a window that means polkit.
+    paintDeps({ tools: [], package_manager: 'pacman', root: null,
+                root_blocked: 'no terminal, and polkit (pkexec) is not installed',
+                tailscale_signed_in: false });
+    paintTskey({ present: false, valid: null, state: 'absent', detail: null,
+                 signed_in: false, node: null });
+    out.push('NOROOT SIGNIN | ' + document.getElementById('tskey-signin-go').hidden);
+    paintDeps({ tools: [], package_manager: 'pacman', root: 'pkexec', root_blocked: null,
+                tailscale_signed_in: false });
+    paintTskey({ present: false, valid: null, state: 'absent', detail: null,
+                 signed_in: false, node: null });
+    out.push('SIGNEDOUT SIGNIN | ' + document.getElementById('tskey-signin-go').hidden);
+    paintTskey({ present: false, valid: null, state: 'absent', detail: null,
+                 signed_in: true, node: 'laptop' });
+    out.push('SIGNEDIN SIGNIN | ' + document.getElementById('tskey-signin-go').hidden);
+
+    paintTskey({ present: false, valid: null, state: 'absent', detail: null,
+                 signed_in: false, node: null });
+    window.__ran = [];
+    document.getElementById('tskey-signin-go').click();
+    await sleep();
+    out.push('SIGNIN RAN | ' + window.__ran.join(' ;; '));
+    out.push('SIGNIN LINK EARLY | ' + document.getElementById('tskey-link').hidden);
+    // cg relays what `tailscale up` printed while it is still waiting.
+    window.__emit(window.__lastId, { t: 'line', kind: 'info', text: 'finishing the sign-in needs a browser - the link appears below' });
+    window.__emit(window.__lastId, { t: 'line', kind: 'info', text: 'sign in here: https://login.tailscale.com/a/abc123def456' });
+    out.push('SIGNIN LINKNOW | ' + document.getElementById('tskey-link').hidden);
+    out.push('SIGNIN LOG | ' + document.getElementById('tskey-signin-log').textContent.replace(/\s+/g, ' ').trim());
+    window.__opened = [];
+    document.getElementById('tskey-link').click();
+    out.push('SIGNIN OPENED | ' + window.__opened.join(' ;; '));
+    window.__emit(window.__lastId, { t: 'exit', rc: 0 });
+    await sleep(); await sleep();
+
     paintStatus(status('no-cli'));
     bannerRead('NOCLI');
     window.__ran = [];
@@ -331,6 +369,20 @@ contains "a refusal stays in the form"    "$(row 'TSFAIL')"      "open=true"
 contains "  with Tailscale's reason"      "$(row 'TSFAIL')"      "rejected that token (401)"
 lacks    "  without the how-to line"      "$(row 'TSFAIL')"      "NOT an auth key"
 check    "a good token closes it"         "$(row 'TSOKCLOSE')"   "TSOKCLOSE | false"
+
+echo "4e. signing in to Tailscale from the window"
+# `sudo tailscale up` is not an answer in a window, and a button that cannot
+# become root is worse than the sentence telling you what to type.
+check    "no way to be root: no button" "$(row 'NOROOT SIGNIN')"    "NOROOT SIGNIN | true"
+check    "signed out, with polkit: a button" "$(row 'SIGNEDOUT SIGNIN')" "SIGNEDOUT SIGNIN | false"
+check    "already signed in: no button" "$(row 'SIGNEDIN SIGNIN')"  "SIGNEDIN SIGNIN | true"
+check    "it runs the sign-in"          "$(row 'SIGNIN RAN')"       "SIGNIN RAN | creds tailscale signin"
+# The URL only exists WHILE the command waits on it, so the link cannot appear
+# before it is printed and must appear the moment it is.
+check    "no link before one is printed" "$(row 'SIGNIN LINK EARLY')" "SIGNIN LINK EARLY | true"
+check    "  and one as soon as it is"    "$(row 'SIGNIN LINKNOW')"   "SIGNIN LINKNOW | false"
+contains "what cg said is shown"         "$(row 'SIGNIN LOG')"       "the link appears below"
+check    "the link opens that URL"       "$(row 'SIGNIN OPENED')"    "SIGNIN OPENED | https://login.tailscale.com/a/abc123def456"
 
 echo "5. nothing threw"
 check "no painter threw"               "$(grep -c '^THREW' <<<"$OUT")" "0"

@@ -111,6 +111,11 @@ cat > "$T/r/probe.js" <<'PROBE'
     paintDeps(payload([], { tailscale_signed_in: false }));
     read('SIGNEDOUT');
     keys('SIGNEDOUT');
+    // No polkit and no terminal: there is no button to point at, so the row
+    // has to hand over the command instead.
+    paintDeps(payload([], { tailscale_signed_in: false, root: null,
+                            root_blocked: 'no terminal, and polkit (pkexec) is not installed' }));
+    keys('NOROOTSIGNIN');
 
     paintConfig([{ key: 'TAILSCALE_API_KEY', kind: 'text', secret: true, is_set: false,
                    value: null, default: null, note: 'Tailscale API token.' },
@@ -218,7 +223,8 @@ contains "a rejected token says so"  "$(row 'BADTOKEN KEYS')" "API token rejecte
 check    "there are two rows, not three" "$(grep -c 'Tailscale sign-in=' <<<"$(row 'READ KEYS')")" "0"
 contains "  and both lead somewhere"   "$(row 'READ KEYS')"     "[Set in Settings]"
 contains "signed out comes first"      "$(row 'SIGNEDOUT KEYS')" "not signed in"
-contains "  and says what to run"      "$(row 'SIGNEDOUT KEYS')" "sudo tailscale up"
+contains "  pointing at the button"    "$(row 'SIGNEDOUT KEYS')" "Settings has a Sign in button"
+contains "  or the command, with no way to be root" "$(row 'NOROOTSIGNIN KEYS')" "sudo tailscale up"
 
 echo "7. a key is set in exactly one place"
 check    "the AWS key goes to Settings" "$(row 'KEY1 VIEW')"   "KEY1 VIEW | settings"

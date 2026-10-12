@@ -34,7 +34,8 @@ const isWrite = cmd => WRITES.has(cmd[0]) || (cmd[0] === 'library' && LIBRARY_WR
   // Same line as isReadOnly() in the main process, for the same reason: `creds`
   // is a read that runs on every refresh, `creds set` writes a credentials file.
   || (cmd[0] === 'creds' && cmd[1] === 'set')
-  || (cmd[0] === 'deps' && cmd[1] === 'install');
+  || (cmd[0] === 'deps' && cmd[1] === 'install')
+  || (cmd[0] === 'creds' && cmd[1] === 'tailscale' && cmd[2] === 'signin');
 const writing = () => [...jobs.values()].some(j => isWrite(j.cmd));
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
@@ -1158,7 +1159,8 @@ function paintKeys() {
       // laptop that is not on the tailnet.
       state: !depsNow || !tskeyNow ? ['reading…', 'wait']
         : depsNow.tailscale_signed_in === false
-          ? ['not signed in - in a terminal:  sudo tailscale up', 'bad']
+          ? [depsNow.root ? 'not signed in - Settings has a Sign in button'
+                          : 'not signed in - in a terminal:  sudo tailscale up', 'bad']
         : depsNow.tailscale_signed_in === null ? ['not installed', 'bad']
         // Signed in: then the token is what is left to say, and it is CHECKED,
         // not counted - .env cannot tell a good token from a refused one.
@@ -1255,8 +1257,10 @@ function paintTskey(ts) {
   tskeyNow = ts;
   paintKeys();
   const state = $('tskey-state'), detail = $('tskey-detail'), btn = $('tskey-set');
+  const canRootNow = Boolean(depsNow && depsNow.root);
   const signed = ts.signed_in === true ? `signed in${ts.node ? ' as ' + ts.node : ''}`
-    : ts.signed_in === false ? 'not signed in - in a terminal:  sudo tailscale up'
+    : ts.signed_in === false
+      ? (canRootNow ? 'not signed in' : 'not signed in - in a terminal:  sudo tailscale up')
     : 'Tailscale is not installed';
   const token =
       !ts.present      ? 'no API token - dead nodes are left in place, key expiry stays on'
@@ -1271,6 +1275,35 @@ function paintTskey(ts) {
   detail.textContent = token;
   btn.textContent = ts.present ? 'Replace API token' : 'Set API token';
   btn.onclick = openTskey;
+  // Signing in is root's business - systemctl, then `tailscale up` - which in a
+  // window means polkit. Where polkit cannot be reached the card says what to
+  // type instead of offering a button that dies inside sudo.
+  $('tskey-signin-go').hidden = ts.signed_in !== false || !canRootNow;
+}
+
+// `tailscale up` prints a login URL and then WAITS for someone to visit it, so
+// the URL has to reach the person while the command is still running - the one
+// place in this app where output during a run is the point, not a log.
+function signInTailscale() {
+  const area = $('tskey-signin'), log = $('tskey-signin-log'), link = $('tskey-link');
+  area.hidden = false;
+  link.hidden = true;
+  log.textContent = 'starting…';
+  $('tskey-signin-go').disabled = true;
+  return runCg(['creds', 'tailscale', 'signin'], { collect: 'tskey-signin-log' })
+    .then(() => { $('tskey-signin-go').disabled = false; });
+}
+$('tskey-signin-go').onclick = signInTailscale;
+
+// The link, lifted out of whatever cg relayed. Only this host, and the main
+// process checks it again before anything opens.
+const SIGNIN_RE = /https:\/\/login\.tailscale\.com\/[^\s]+/;
+function watchForSignInLink(text) {
+  const m = SIGNIN_RE.exec(text || '');
+  if (!m) return;
+  const link = $('tskey-link');
+  link.hidden = false;
+  link.onclick = () => window.cg.openSignIn(m[0]);
 }
 
 // Same shape as the AWS form, for the same reasons: one field, one Save, the
@@ -2204,6 +2237,7 @@ window.cg.onEvent(({ id, event }) => {
   if (event.t === 'error' && event.text) job.err = event.text;
   if (job.wantRc && (event.t === 'line' || event.t === 'error') && event.text)
     job.collected += event.text + '\n';
+  if (job.collect === 'tskey-signin-log' && event.text) watchForSignInLink(event.text);
   if (job.collect && (event.t === 'line' || event.t === 'step' || event.t === 'error')) {
     const box = $(job.collect);
     if (box.textContent === 'running…') box.textContent = '';

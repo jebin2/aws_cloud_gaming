@@ -670,10 +670,24 @@
           </p>
           <p class="font-code-md text-code-md mt-space-sm" id="tskey-state">reading…</p>
           <p class="font-code-sm text-code-sm text-outline mt-0.5" id="tskey-detail"></p>
+          <!-- The sign-in, while it is happening: tailscale up prints a link and
+               waits for someone to visit it, so the link has to be reachable
+               from here. -->
+          <div id="tskey-signin" class="mt-space-sm" hidden>
+            <pre class="font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[20vh] overflow-auto" id="tskey-signin-log"></pre>
+            <button class="btn btn-primary mt-space-sm" id="tskey-link" hidden>
+              <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the sign-in page
+            </button>
+          </div>
         </div>
-        <button id="tskey-set" class="btn shrink-0">
-          <span class="material-symbols-outlined text-[16px]" data-icon="person">&#xe7fd;</span>Set API token
-        </button>
+        <div class="flex flex-col gap-space-xs shrink-0">
+          <button id="tskey-signin-go" class="btn btn-primary" hidden>
+            <span class="material-symbols-outlined text-[16px]" data-icon="bolt">&#xea0b;</span>Sign in
+          </button>
+          <button id="tskey-set" class="btn">
+            <span class="material-symbols-outlined text-[16px]" data-icon="person">&#xe7fd;</span>Set API token
+          </button>
+        </div>
       </div>
     </div>
 

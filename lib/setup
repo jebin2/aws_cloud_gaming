@@ -1063,8 +1063,9 @@ case "${1:-}" in
                             case "${1:-status}" in
                               --json)    tskey_json; exit 0 ;;
                               set)       tskey_set; exit $? ;;
+                              signin|up) tskey_signin; exit $? ;;
                               status|"") tskey_show; exit $? ;;
-                              *) echo "usage: setup creds tailscale [status|set|--json]" >&2; exit 1 ;;
+                              *) echo "usage: setup creds tailscale [status|signin|set|--json]" >&2; exit 1 ;;
                             esac ;;
              set)           shift
                             case "${1:-aws}" in

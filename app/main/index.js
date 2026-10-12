@@ -5,7 +5,7 @@
 // race a build. The renderer gets events and sends answers; it has no node, no
 // filesystem and no AWS.
 const path = require('node:path');
-const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require('electron');
 const { run, answer, interrupt } = require('./runner');
 const { findRepo } = require('./repo');
 
@@ -39,7 +39,8 @@ const isReadOnly = args =>
   && !(args[0] === 'creds' && args[1] === 'set')
   // `cg deps` is six command -v checks. `cg deps install` shells out to the
   // package manager as root, so it waits like any other write.
-  && !(args[0] === 'deps' && args[1] === 'install');
+  && !(args[0] === 'deps' && args[1] === 'install')
+  && !(args[0] === 'creds' && args[1] === 'tailscale' && args[2] === 'signin');
 
 const jobs = new Map();          // id -> { id, args, child, readOnly }
 const anyMutating = () => [...jobs.values()].some(j => !j.readOnly);
@@ -77,6 +78,19 @@ ipcMain.handle('cg:cancel', (_e, id) => {
   return job ? interrupt(job.child) : false;
 });
 ipcMain.handle('cg:busy', () => [...jobs.values()].map(j => ({ id: j.id, args: j.args })));
+
+// The window denies every navigation and every new window on purpose - it is a
+// viewer of local files. Tailscale's sign-in is the one exception: it finishes
+// on login.tailscale.com and nothing else can finish it. So exactly that host,
+// over https, checked HERE rather than trusting whatever asked.
+const SIGNIN_HOST = 'login.tailscale.com';
+ipcMain.handle('cg:open-signin', (_e, url) => {
+  let u;
+  try { u = new URL(String(url)); } catch { return false; }
+  if (u.protocol !== 'https:' || u.hostname !== SIGNIN_HOST) return false;
+  shell.openExternal(u.toString());
+  return true;
+});
 
 function createWindow() {
   win = new BrowserWindow({

@@ -77,11 +77,45 @@ esac
 FAKE
 chmod +x "$T/bin/curl"
 
+# Tailscale itself: TS_UP=no means signed out, and `up` writes the login URL
+# the way the real one does, then "signs in" by flipping TS_UP.
+cat > "$T/bin/tailscale" <<'FAKE'
+#!/usr/bin/env bash
+echo "tailscale $*" >> "${TS_LOG:-/dev/null}"
+case "$1" in
+  status)
+    [[ -e ${TS_UP_FILE:-/nonexistent} ]] || exit 1
+    [[ $2 == --json ]] && echo '{"Self":{"DNSName":"laptop.tailnet.ts.net."}}'
+    exit 0 ;;
+  up)
+    echo "To authenticate, visit:"
+    echo ""
+    echo "        https://login.tailscale.com/a/abc123def456"
+    echo ""
+    [[ ${TS_UP_FAILS:-0} == 1 ]] && exit 1
+    : > "${TS_UP_FILE:?}"
+    exit 0 ;;
+esac
+FAKE
+chmod +x "$T/bin/tailscale"
+printf '#!/usr/bin/env bash
+echo "systemctl $*" >> "${TS_LOG:-/dev/null}"
+[[ $1 == is-active ]] && exit 3
+exit 0
+' > "$T/bin/systemctl"
+chmod +x "$T/bin/systemctl"
+printf '#!/usr/bin/env bash
+echo "pkexec $*" >> "${TS_LOG:-/dev/null}"
+exec "$@"
+' > "$T/bin/pkexec"; chmod +x "$T/bin/pkexec"
+
 cg_() { # cg_ <args...> - EXTRA passes env through
   # shellcheck disable=SC2086
   ( cd "$T/repo" && env -i PATH="$PATH_USE" HOME="$T/home" CG_COLOR=never \
       CFG="$T/key" AWS_LOG="$T/awslog" KEY_STATE="${KEY_STATE:-ok}" \
       CURL_LOG="$T/curllog" TS_STATE="${TS_STATE:-ok}" \
+      TS_LOG="$T/tslog" TS_UP_FILE="$T/tsup" TS_UP_FAILS="${TS_UP_FAILS:-0}" \
+      WAYLAND_DISPLAY="${WAYLAND_DISPLAY_FOR_TEST:-wayland-1}" \
       GAME_REGION=ap-south-1 ${EXTRA:-} bash ./cg "$@" 2>&1 )
 }
 j() { python3 -I -c 'import json,sys
@@ -279,6 +313,47 @@ lacks "the docs do not offer it either"  "$(cat docs/getting-started.md)" "AWS_K
 # The .csv is still gitignored: the file is no longer part of any flow, and
 # that is exactly when a stray copy gets committed by accident.
 contains "a stray csv still cannot be committed" "$(cat .gitignore)" "*.csv"
+
+echo "9e. signing in to Tailscale, without a terminal"
+# `sudo tailscale up` was the only answer the app could give, and it is not an
+# answer in a window. Root here is polkit's job, exactly as it is for installs.
+rm -f "$T/tsup" "$T/tslog"
+out=$(EXTRA="CG_JSON=1" cg_ creds tailscale signin)
+rc=$?
+check    "it succeeds"                    "$rc" "0"
+contains "it starts the daemon first"     "$(cat "$T/tslog")" "systemctl enable --now tailscaled"
+check    "  through polkit, not sudo"     "$(grep -cE '^pkexec .*/tailscale up$' "$T/tslog")" "1"
+check    "  tailscale up ran"             "$(grep -c '^tailscale up' "$T/tslog")" "1"
+# The URL is the whole point and it is useless after the command returns, so it
+# is relayed while the command is still waiting on it.
+contains "the login link is relayed"      "$out" "https://login.tailscale.com/a/abc123def456"
+contains "  on a line of its own"         "$out" "sign in here: https://login.tailscale.com/a/abc123def456"
+contains "  and the end is confirmed"     "$out" "signed in"
+out=$(EXTRA="CG_JSON=1" cg_ creds tailscale signin)
+contains "running it again says so"       "$out" "already signed in"
+# A sign-in that did not take must not be reported as one.
+rm -f "$T/tsup"
+out=$(EXTRA="CG_JSON=1 TS_UP_FAILS=1" cg_ creds tailscale signin); rc=$?
+contains "a failed sign-in says so"       "$out" "still not signed in"
+lacks    "  and never claims success"     "$out" "ok signed in"
+check    "  and fails"                    "$rc" "1"
+# With no polkit and no terminal there is nothing to do but say the command.
+rm -f "$T/bin/pkexec" "$T/tsup"
+out=$(EXTRA="CG_JSON=1 WAYLAND_DISPLAY_FOR_TEST=" cg_ creds tailscale signin)
+contains "no root: it says why"           "$out" "cannot sign in from here"
+contains "  and what to type"             "$out" "sudo tailscale up"
+printf '#!/usr/bin/env bash\necho "pkexec $*" >> "${TS_LOG:-/dev/null}"\nexec "$@"\n' > "$T/bin/pkexec"; chmod +x "$T/bin/pkexec"
+
+echo "9f. the one web address the app may open"
+# The window denies every navigation and every new window; Tailscale's sign-in
+# cannot finish without a browser, so exactly that host is allowed - and the
+# main process checks it rather than trusting the renderer.
+main=$(cat app/main/index.js)
+contains "the host is pinned"             "$main" "login.tailscale.com"
+contains "  https only"                   "$main" "u.protocol !== 'https:'"
+contains "  checked in the main process"  "$main" "ipcMain.handle('cg:open-signin'"
+contains "  and nothing else opens"       "$main" "setWindowOpenHandler(() => ({ action: 'deny' }))"
+contains "the preload exposes just that"  "$(cat app/main/preload.js)" "openSignIn:"
 
 echo "10. it is wired in"
 contains "cg dispatches creds"           "$(cat cg)" "creds|credentials)"
