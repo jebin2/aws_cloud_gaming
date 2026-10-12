@@ -157,11 +157,28 @@ else
     # byte the box pulls from a bucket in another region is billed inter-region
     # egress, and the game archive is the big one.
     if [[ $BUCKET_REGION != "$REGION" ]]; then
+      # Measured, not remembered. This used to quote "INR 1,234 for a 163 GB
+      # library" - the size the archive happened to be the day it was written -
+      # which on an empty bucket is a bill for games that are not there.
+      # One listing, charged as LIST requests: cents per ten thousand objects.
+      ARCH_BYTES=$(aws s3 ls "s3://$S3_BUCKET/steam/steamapps/" --recursive --summarize \
+                     --region "$BUCKET_REGION" 2>/dev/null \
+                   | sed -n 's/^[[:space:]]*Total Size:[[:space:]]*//p' | tail -1)
+      [[ $ARCH_BYTES =~ ^[0-9]+$ ]] || ARCH_BYTES=""
       echo "!! the archive is in $BUCKET_REGION but the box is in $REGION"
-      echo "   the box can read it, but every GB crossing regions is billed at"
-      echo "   \$0.086/GB - about INR 1,234 for a 163 GB library, each pull."
-      echo "   cg library list shows the size. To start fresh in $REGION instead,"
-      echo "   set GAME_S3_BUCKET to a new name and let cg init create it there."
+      if [[ -z $ARCH_BYTES ]]; then
+        echo "   the box can read it, but every GB crossing regions is billed at"
+        echo "   \$0.086/GB. The size could not be read - cg library list shows it."
+      elif (( ARCH_BYTES < 1073741824 )); then
+        echo "   nothing is archived there yet, so nothing is being billed to cross"
+        echo "   regions. Once games are pushed, every GB back is \$0.086/GB."
+      else
+        echo "   the box can read it, but every GB crossing regions is billed at"
+        echo "   \$0.086/GB - about INR $(( ARCH_BYTES * 86 / 1000000000 * 88 / 1000 )) \
+for the $(( ARCH_BYTES / 1073741824 )) GB in it now, each pull."
+      fi
+      echo "   To keep everything in $REGION instead, clear GAME_S3_BUCKET from .env"
+      echo "   and let cg init make one there - the games in $BUCKET_REGION stay put."
     fi
     rm -rf "$HOST_SRC" "$HOST_TGZ"
     # Substituted in python, not sed. A presigned URL is full of `&`, and in a

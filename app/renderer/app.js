@@ -740,7 +740,45 @@ async function forgetGame(g) {
 // null is "could not look", which must never be painted as "none archived" -
 // that would invite someone to rebuild expecting a fresh login prompt and get
 // a box signed in as an account they thought they had deleted.
+// What the build will do about Steam. The machine is half of what a build
+// decides; the other half is whether it comes up already signed in, and as
+// whom - which lives in two places (the archive, and GAME_STEAM_LOGIN) and was
+// visible on neither of the screens where a build is started.
+let loginNow = null;
+function paintBuildLogin() {
+  const line = $('b-login'), note = $('b-login-note');
+  if (!line) return;
+  const choice = (config || []).find(r => r.key === 'GAME_STEAM_LOGIN');
+  const fresh = choice && (choice.value || choice.default) === 'fresh';
+  if (loginNow === null) {
+    line.textContent = 'reading…';
+    note.textContent = '';
+    return;
+  }
+  if (fresh) {
+    line.textContent = 'sign in on the box';
+    note.textContent = loginNow.present
+      ? 'the archived login is kept, and not used - Settings > Steam sign-in'
+      : 'nothing is archived to restore - Settings > Steam sign-in';
+    return;
+  }
+  if (!loginNow.present) {
+    line.textContent = 'sign in on the box';
+    note.textContent = 'no login is archived yet; one is saved when a box shuts down';
+    return;
+  }
+  // Which account, when the archive says: a key that signs in as someone you
+  // did not expect is the thing worth catching before a build, not after it.
+  const who = (loginNow.accounts || []).find(a => a.most_recent) || (loginNow.accounts || [])[0];
+  line.textContent = who ? `signed in as ${who.account || who.steamid}` : 'signed in from the archive';
+  note.textContent = loginNow.accounts === null
+    ? 'restored from the archive - the account names could not be read'
+    : 'restored from the archive, so Steam does not ask';
+}
+
 function paintLogin(l) {
+  loginNow = l === undefined ? null : l;
+  paintBuildLogin();
   const head = $('lib-login-head'), sub = $('lib-login-sub');
   const accts = $('lib-login-accounts'), btn = $('lib-login-forget');
   if (!head) return;
@@ -1544,6 +1582,7 @@ const SETTING_GROUPS = [
 function paintConfig(rows) {
   config = rows;
   paintKeys();
+  paintBuildLogin();
   const wrap = $('s-groups');
   wrap.textContent = '';
   const set = rows.filter(r => r.is_set).length;

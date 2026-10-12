@@ -72,8 +72,18 @@ echo "5. a cross-region archive is said out loud, because it is money"
 contains "the mismatch is reported"   "$prov" 'the archive is in $BUCKET_REGION but the box is in $REGION'
 contains "  marked as a warning"      "$prov" 'echo "!! the archive is in'
 contains "  with the per-GB price"    "$prov" '0.086/GB'
-contains "  and what it costs a pull" "$prov" "INR 1,234"
-contains "  and how to start fresh"   "$prov" "set GAME_S3_BUCKET to a new name"
+# The number is MEASURED. It used to say "INR 1,234 for a 163 GB library" -
+# the size the archive happened to be the day that line was written - which on
+# an empty bucket bills you for games that are not there.
+# Against the CODE, not the comments: the comment above this line quotes the
+# old message on purpose, and a grep over the whole file cannot tell the
+# difference between explaining a bug and still having it.
+code=$(grep -vE '^[[:space:]]*#' lib/provision.sh)
+lacks    "  no remembered size"       "$code" "163 GB"
+lacks    "  nor a remembered price"   "$code" "INR 1,234"
+contains "  it measures the archive"  "$prov" 'aws s3 ls "s3://$S3_BUCKET/steam/steamapps/" --recursive --summarize'
+contains "  an empty one owes nothing" "$prov" "nothing is archived there yet"
+contains "  and how to keep it local" "$prov" "clear GAME_S3_BUCKET from .env"
 
 echo "6. the bucket name follows the region, because a bucket is regional"
 # The name was sha256(account-host) with no region in it, so moving GAME_REGION
