@@ -1543,8 +1543,11 @@ info (read-only)
   cg regions                 the regions you have enabled, for the app's picker
   cg config [set|get <k>]    what .env decides; set validates and writes, get reveals one
   cg deps [install]          the tools this laptop needs, and what is missing
-  cg creds [set]             the AWS access key: where it comes from, whether AWS takes
-                             it, and `set` to paste a new one (saved to ~/.aws/credentials)
+  cg creds [set [aws|tailscale]]
+                             the two keys only you can give cg: the AWS access key
+                             (saved to ~/.aws/credentials) and the Tailscale API
+                             token (saved to .env). Both are checked before they
+                             are written, and `cg creds tailscale` reports that one
   cg notify                  send a test notification to GAME_NTFY_URL
   cg ping [--watch]          latency, and direct vs DERP relay
 
@@ -1584,6 +1587,9 @@ case "$CMD" in
              if (( JSON )); then cg_exec lib/setup deps --json; fi
              cg_exec lib/setup deps "$@" ;;
   creds|credentials)
+             # `cg creds tailscale --json` has its own payload; the bare --json
+             # is the AWS one, which is what the Settings card reads.
+             if (( JSON )) && [[ ${1:-} == tailscale ]]; then cg_exec lib/setup creds tailscale --json; fi
              if (( JSON )); then cg_exec lib/setup creds --json; fi
              cg_exec lib/setup creds "$@" ;;
   # Reports go through cg_report: on a terminal it boxes and colours them, and

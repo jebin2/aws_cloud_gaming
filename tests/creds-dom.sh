@@ -155,6 +155,52 @@ cat > "$T/r/probe.js" <<'PROBE'
     await sleep(); await sleep();
     out.push('OK OPEN | ' + dlg.open);
 
+    // --- the Tailscale card, which fails in two independent ways --------
+    const tsRead = label => {
+      out.push(label + ' TS | ' + document.getElementById('tskey-state').textContent.replace(/\s+/g, ' ').trim()
+               + ' // ' + document.getElementById('tskey-detail').textContent.replace(/\s+/g, ' ').trim()
+               + ' // ' + document.getElementById('tskey-set').textContent.trim());
+    };
+    paintTskey({ present: false, valid: null, state: 'absent', detail: null,
+                 signed_in: true, node: 'laptop' });
+    tsRead('TSNONE');
+    paintTskey({ present: true, valid: false, state: 'rejected', detail: '401',
+                 signed_in: true, node: 'laptop' });
+    tsRead('TSBAD');
+    paintTskey({ present: true, valid: null, state: 'unreachable', detail: '000',
+                 signed_in: false, node: null });
+    tsRead('TSDOWN');
+    paintTskey({ present: true, valid: true, state: 'ok', detail: null,
+                 signed_in: true, node: 'laptop' });
+    tsRead('TSOK');
+
+    const tsdlg = document.getElementById('tsdlg');
+    document.getElementById('tskey-set').click();
+    out.push('TSFORM OPEN | ' + tsdlg.open + ' type=' + document.getElementById('tsdlg-token').type);
+    window.__ran = [];
+    document.getElementById('tsdlg-go').click();
+    await sleep();
+    out.push('TSEMPTY | ' + document.getElementById('tsdlg-err').textContent.trim()
+             + ' ran=' + window.__ran.join(','));
+    document.getElementById('tsdlg-token').value = 'tskey-api-nope';
+    window.__ran = []; window.__answers = [];
+    document.getElementById('tsdlg-go').click();
+    await sleep();
+    out.push('TSSUBMIT RAN | ' + window.__ran.join(' ;; '));
+    window.__emit(window.__lastId, { t: 'ask', id: 'tailscale-api-token', prompt: 't: ', default: '', secret: 1 });
+    out.push('TSSUBMIT ANSWERS | ' + window.__answers.join(' ;; '));
+    window.__emit(window.__lastId, { t: 'line', kind: 'info', text: 'Tailscale API token (NOT an auth key): https://…' });
+    window.__emit(window.__lastId, { t: 'line', kind: 'fail', text: 'Tailscale rejected that token (401) - nothing was saved' });
+    window.__emit(window.__lastId, { t: 'exit', rc: 1 });
+    await sleep(); await sleep();
+    out.push('TSFAIL | open=' + tsdlg.open + ' err=' + document.getElementById('tsdlg-err').textContent.replace(/\s+/g, ' ').trim());
+    document.getElementById('tsdlg-token').value = 'tskey-api-good';
+    document.getElementById('tsdlg-go').click();
+    await sleep();
+    window.__emit(window.__lastId, { t: 'exit', rc: 0 });
+    await sleep(); await sleep();
+    out.push('TSOKCLOSE | ' + tsdlg.open);
+
     paintStatus(status('no-cli'));
     bannerRead('NOCLI');
     window.__ran = [];
@@ -260,6 +306,31 @@ contains "  and that nothing was saved" "$(row 'FAIL ERR')"    "nothing was save
 lacks    "  without the how-to line"   "$(row 'FAIL ERR')"     "paste an access key"
 contains "  and the button comes back" "$(row 'FAIL BTN')"     "Save key disabled=false"
 check    "a key that works closes it"  "$(row 'OK OPEN')"      "OK OPEN | false"
+
+echo "4c. Tailscale is its own card, and fails in two ways"
+# Signed in with no token is normal; a token with no sign-in is useless. They
+# are separate facts and the card shows both.
+contains "no token says what is given up" "$(row 'TSNONE TS')" "no API token"
+contains "  while signed in is fine"      "$(row 'TSNONE TS')" "signed in as laptop"
+contains "  and the button offers to set" "$(row 'TSNONE TS')" "Set API token"
+contains "a rejected token says so"       "$(row 'TSBAD TS')"  "API token rejected (401)"
+contains "  offering to replace it"       "$(row 'TSBAD TS')"  "Replace API token"
+# Unreachable is not rejected: a new token is not the fix for a flat network.
+contains "unreachable is not rejected"    "$(row 'TSDOWN TS')" "did not answer"
+lacks    "  and is not called rejected"   "$(row 'TSDOWN TS')" "rejected"
+contains "  signed out is said plainly"   "$(row 'TSDOWN TS')" "not signed in"
+contains "a working token"                "$(row 'TSOK TS')"   "API token works"
+
+echo "4d. the token form, like the key form"
+contains "it opens, as a password field"  "$(row 'TSFORM OPEN')" "true type=password"
+contains "an empty one says so"           "$(row 'TSEMPTY')"     "Paste the token first"
+contains "  running nothing"              "$(row 'TSEMPTY')"     "ran="
+check    "submitting runs the set"        "$(row 'TSSUBMIT RAN')" "TSSUBMIT RAN | creds set tailscale"
+check    "  answering cg's question"      "$(row 'TSSUBMIT ANSWERS')" "TSSUBMIT ANSWERS | tskey-api-nope"
+contains "a refusal stays in the form"    "$(row 'TSFAIL')"      "open=true"
+contains "  with Tailscale's reason"      "$(row 'TSFAIL')"      "rejected that token (401)"
+lacks    "  without the how-to line"      "$(row 'TSFAIL')"      "NOT an auth key"
+check    "a good token closes it"         "$(row 'TSOKCLOSE')"   "TSOKCLOSE | false"
 
 echo "5. nothing threw"
 check "no painter threw"               "$(grep -c '^THREW' <<<"$OUT")" "0"

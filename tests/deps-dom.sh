@@ -113,6 +113,10 @@ cat > "$T/r/probe.js" <<'PROBE'
                    value: null, default: null, note: 'Tailscale API token.' },
                  { key: 'GAME_DISK_GB', kind: 'number', secret: false, is_set: true,
                    value: '80', default: '50', rule: '30', note: 'Root disk.' }]);
+    // The token's state comes from Tailscale, not from .env: "set" and
+    // "set and refused" look identical in a settings file.
+    paintTskey({ present: false, valid: null, state: 'absent', detail: null,
+                 signed_in: true, node: 'laptop' });
     paintCreds({ cli: true, source: '~/.aws/credentials', key_id: '****1234',
                  account: null, arn: null, valid: false, error: 'rejected' });
     paintDeps(payload([], { tailscale_signed_in: true }));
@@ -123,8 +127,12 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('KEY1 VIEW | ' + (document.querySelector('.nav-item.on') || {}).dataset?.view);
     out.push('KEY1 FLASH | ' + document.getElementById('s-creds-card').className);
     document.querySelectorAll('#d-keys button')[1].click();
-    const tokenRow = document.querySelector('#s-groups .row[data-key="TAILSCALE_API_KEY"]');
-    out.push('KEY2 FLASH | ' + (tokenRow ? tokenRow.className : '(no row)'));
+    out.push('KEY2 FLASH | ' + document.getElementById('s-tskey-card').className);
+
+    // A token that is set and refused: .env cannot tell this from a good one.
+    paintTskey({ present: true, valid: false, state: 'rejected', detail: '401',
+                 signed_in: true, node: 'laptop' });
+    keys('BADTOKEN');
     out.push('KEYS RAN | ' + window.__ran.join(' ;; '));
   } catch (e) { out.push('THREW | ' + e.message); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
@@ -200,7 +208,8 @@ contains "a rejected key says so"     "$(row 'READ KEYS')"     "AWS access key=*
 contains "  with a way to the setting" "$(row 'READ KEYS')"    "rejected[Set in Settings]"
 contains "an unset token says so"     "$(row 'READ KEYS')"     "Tailscale API token=not set"
 contains "  and that it is optional"  "$(row 'READ KEYS')"     "cg goes without"
-contains "a signed-in Tailscale"      "$(row 'READ KEYS')"     "Tailscale sign-in=signed in"
+contains "a signed-in Tailscale"      "$(row 'READ KEYS')"     "Tailscale sign-in=signed in as laptop"
+contains "a rejected token says so"  "$(row 'BADTOKEN KEYS')" "Tailscale API token=rejected (401)"
 # Signing in is sudo's business, so there is no button pretending otherwise.
 lacks    "  with no button for it"    "$(row 'READ KEYS')"     "signed in[Set"
 contains "signed out says what to run" "$(row 'SIGNEDOUT KEYS')" "sudo tailscale up"
@@ -208,7 +217,7 @@ contains "signed out says what to run" "$(row 'SIGNEDOUT KEYS')" "sudo tailscale
 echo "7. a key is set in exactly one place"
 check    "the AWS key goes to Settings" "$(row 'KEY1 VIEW')"   "KEY1 VIEW | settings"
 contains "  flashing the card"          "$(row 'KEY1 FLASH')"  "flash-attn"
-contains "  and the token its own row"  "$(row 'KEY2 FLASH')"  "flash-attn"
+contains "  and the token its own card" "$(row 'KEY2 FLASH')"  "flash-attn"
 # Not a cg command: the page points at the setting, it does not set it.
 check    "  running nothing itself"     "$(row 'KEYS RAN')"    "KEYS RAN | "
 

@@ -62,10 +62,26 @@ esac
 FAKE
 chmod +x "$T/bin/aws"
 
+# The Tailscale API, as a fake curl: TS_STATE picks the HTTP code, and the
+# token it was given is logged so a test can prove WHICH one was checked.
+cat > "$T/bin/curl" <<'FAKE'
+#!/usr/bin/env bash
+for a in "$@"; do
+  case $a in "Authorization: Bearer "*) echo "token ${a#Authorization: Bearer }" >> "${CURL_LOG:-/dev/null}" ;; esac
+done
+case "${TS_STATE:-ok}" in
+  ok)       printf '200' ;;
+  rejected) printf '401' ;;
+  *)        printf '000' ;;
+esac
+FAKE
+chmod +x "$T/bin/curl"
+
 cg_() { # cg_ <args...> - EXTRA passes env through
   # shellcheck disable=SC2086
   ( cd "$T/repo" && env -i PATH="$PATH_USE" HOME="$T/home" CG_COLOR=never \
       CFG="$T/key" AWS_LOG="$T/awslog" KEY_STATE="${KEY_STATE:-ok}" \
+      CURL_LOG="$T/curllog" TS_STATE="${TS_STATE:-ok}" \
       GAME_REGION=ap-south-1 ${EXTRA:-} bash ./cg "$@" 2>&1 )
 }
 j() { python3 -I -c 'import json,sys
@@ -205,10 +221,54 @@ check    "  and no games, rather than none" \
          "$(python3 -I -c 'import json,sys;print(json.dumps(json.load(sys.stdin)["games"]))' <<<"$out")" "null"
 mv "$T/bin/aws.disabled" "$T/bin/aws"
 
+echo "9b. the Tailscale API token"
+# The other key only a person can give cg, and the one thing .env cannot answer:
+# a token that is set and a token that is set and refused look identical there,
+# which is why this asks Tailscale.
+PATH_USE="$T/bin:/nonexistent"
+printf 'TAILSCALE_API_KEY=tskey-api-oldoldold\n' > "$T/repo/.env"
+j=$(cg_ creds tailscale --json)
+check    "a working token is valid"       "$(j valid <<<"$j")" "true"
+check    "  and present"                  "$(j present <<<"$j")" "true"
+j=$(TS_STATE=rejected cg_ creds tailscale --json)
+check    "a refused token is not"         "$(j valid <<<"$j")" "false"
+contains "  with the code"                "$(j detail <<<"$j")" "401"
+# Unreachable is the third answer, and it says nothing about the token: a new
+# token is not the fix for a network that is down.
+j=$(TS_STATE=down cg_ creds tailscale --json)
+check    "unreachable is neither"         "$(j valid <<<"$j")" "null"
+check    "  still present"                "$(j present <<<"$j")" "true"
+printf '\n' > "$T/repo/.env"
+j=$(cg_ creds tailscale --json)
+check    "no token at all"                "$(j present <<<"$j")" "false"
+check    "  and valid says nothing"       "$(j valid <<<"$j")" "null"
+
+echo "9c. setting a token checks it first"
+printf 'TAILSCALE_API_KEY=tskey-api-oldoldold\n' > "$T/repo/.env"
+rm -f "$T/curllog"
+out=$(printf 'tskey-api-newnewnew\n' | EXTRA="CG_JSON=1 TS_STATE=rejected" cg_ creds set tailscale)
+rc=$?
+contains "it asks for the token"          "$out" '"id":"tailscale-api-token"'
+contains "  as a secret"                  "$out" '"secret":1'
+contains "the refusal is reported"        "$out" "Tailscale rejected that token"
+contains "  and nothing was saved"        "$out" "nothing was saved"
+check    "  it fails"                     "$rc" "1"
+check    "the old token is untouched"     "$(grep TAILSCALE "$T/repo/.env")" "TAILSCALE_API_KEY=tskey-api-oldoldold"
+contains "  and the NEW one was checked"  "$(cat "$T/curllog")" "tskey-api-newnewnew"
+out=$(printf 'tskey-api-newnewnew\n' | EXTRA="CG_JSON=1" cg_ creds set tailscale)
+contains "a good token is saved"          "$(grep TAILSCALE "$T/repo/.env")" "TAILSCALE_API_KEY=tskey-api-newnewnew"
+contains "  and confirmed"                "$out" "the token works"
+out=$(printf 'not-a-token\n' | EXTRA="CG_JSON=1" cg_ creds set tailscale)
+contains "a token must look like one"     "$out" "they start with tskey-"
+contains "and the status says both halves" "$(cg_ creds tailscale)" "api token        works"
+rm -f "$T/repo/.env"
+
 echo "10. it is wired in"
 contains "cg dispatches creds"           "$(cat cg)" "creds|credentials)"
-contains "  and help names it"           "$(cat cg)" "cg creds [set]"
+contains "  and help names it"           "$(cat cg)" "cg creds [set [aws|tailscale]]"
 contains "setup has the mode"            "$(cat lib/setup)" "creds)   shift"
+contains "  and the tailscale one"        "$(cat lib/setup)" "tailscale)     shift"
+contains "the app reads the token state"  "$(cat app/renderer/app.js)" "[['creds', 'tailscale', '--json'], 'tskey']"
 
 echo ""
 echo "creds: $pass passed, $fail failed"

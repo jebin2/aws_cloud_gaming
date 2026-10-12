@@ -486,3 +486,114 @@ deps_install() {
   done
   return $rc
 }
+
+# --- the Tailscale API token -------------------------------------------------
+# Not the auth key a box joins with - this is the account token that prunes dead
+# nodes and turns key expiry off. It is optional, cg says so when it is absent,
+# and it is the other half of "the things only you can give cg".
+#
+# One free call checks it, and it has THREE answers, not two: a token the API
+# refuses is not the same as an API nobody could reach.
+TS_API="https://api.tailscale.com/api/v2"
+
+tskey_check() { # tskey_check <token> -> prints ok|rejected|unreachable <detail>
+  local token=$1 code
+  [[ -n $token ]] || { echo "absent"; return; }
+  code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
+         -H "Authorization: Bearer $token" "$TS_API/tailnet/-/devices" 2>/dev/null) || code=000
+  case $code in
+    2*)      echo "ok" ;;
+    401|403) echo "rejected $code" ;;
+    *)       echo "unreachable $code" ;;
+  esac
+}
+
+# tskey_facts - state|detail|signed_in|node, one per line as k=v.
+tskey_facts() {
+  local token=${TAILSCALE_API_KEY:-} state detail signed node
+  read -r state detail <<<"$(tskey_check "$token")"
+  if laptop_has tailscale; then
+    laptop_tailscale_down && signed=no || signed=yes
+    node=$(tailscale status --json 2>/dev/null \
+           | python3 -I -c 'import json,sys
+try:    print(json.load(sys.stdin).get("Self", {}).get("DNSName", "").split(".")[0])
+except Exception: pass' 2>/dev/null) || node=""
+  else
+    signed="-"
+  fi
+  printf 'state=%s\ndetail=%s\nsigned_in=%s\nnode=%s\n' \
+    "$state" "${detail:-}" "$signed" "${node:-}"
+}
+
+tskey_json() {
+  tskey_facts | python3 -I -c '
+import json, sys
+d = dict(l.split("=", 1) for l in sys.stdin.read().splitlines() if "=" in l)
+state = d.get("state", "absent")
+signed = d.get("signed_in")
+print(json.dumps({
+    # present/valid are separate: a token that is set and refused is a
+    # different thing to no token at all, and both differ from "the API could
+    # not be reached", which says nothing about the token.
+    "present": state != "absent",
+    "valid":   True if state == "ok" else (False if state == "rejected" else None),
+    "state":   state,
+    "detail":  d.get("detail") or None,
+    "signed_in": None if signed in ("-", "", None) else signed == "yes",
+    "node":    d.get("node") or None,
+}, indent=2))'
+}
+
+tskey_show() {
+  local state detail signed node
+  while IFS='=' read -r k v; do
+    case $k in state) state=$v ;; detail) detail=$v ;; signed_in) signed=$v ;; node) node=$v ;; esac
+  done < <(tskey_facts)
+  say "tailscale"
+  case ${signed:-} in
+    yes) log_as ok   "signed in        ${node:-yes}" ;;
+    no)  log_as fail "signed in        no  <- sudo tailscale up" ;;
+    *)   log_as fail "tailscale        not installed" ;;
+  esac
+  case ${state:-absent} in
+    ok)          log_as ok   "api token        works" ;;
+    absent)      log_as warn "api token        not set  (optional: prunes old nodes, turns off key expiry)" ;;
+    rejected)    log_as fail "api token        rejected (${detail:-}) <- https://login.tailscale.com/admin/settings/keys"; return 1 ;;
+    unreachable) log_as warn "api token        set, but api.tailscale.com did not answer (${detail:-})" ;;
+  esac
+}
+
+# tskey_set - ask for a token, check it, and only then write it to .env.
+tskey_set() {
+  local token state detail
+  cg_can_ask || die "cg creds set tailscale has to ask for the token - run it in a terminal, or use the app"
+  log "Tailscale API token (NOT an auth key): https://login.tailscale.com/admin/settings/keys"
+  token=$(cg_ask_secret tailscale-api-token "    api token: ")
+  if [[ -z ${token:-} ]]; then
+    log "no token given - nothing saved"
+    return 1
+  fi
+  [[ $token =~ ^tskey-[A-Za-z0-9-]+$ ]] || {
+    log_as fail "that does not look like a Tailscale token - they start with tskey-"
+    return 1
+  }
+  read -r state detail <<<"$(tskey_check "$token")"
+  case $state in
+    ok) ;;
+    rejected)
+      log_as fail "Tailscale rejected that token (${detail:-}) - nothing was saved"
+      log "  make one at https://login.tailscale.com/admin/settings/keys (API access token)"
+      return 1 ;;
+    *)
+      log_as fail "could not reach api.tailscale.com (${detail:-}) - nothing was saved"
+      log "  nothing is wrong with the token as far as this knows; try again when the network is back"
+      return 1 ;;
+  esac
+  # cg_env_set, not config_set: lib/config.sh belongs to `cg`, and this runs
+  # inside lib/setup, which does not have it. The format check above is the
+  # same one config_validate applies, so .env ends up with what it would.
+  cg_env_set TAILSCALE_API_KEY "$token" || { log_as fail "could not write .env"; return 1; }
+  export TAILSCALE_API_KEY="$token"
+  log_as ok "the token works"
+  log "  saved to .env as TAILSCALE_API_KEY"
+}

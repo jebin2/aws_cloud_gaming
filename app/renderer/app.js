@@ -1052,7 +1052,7 @@ const LABEL = {
 // UNKNOWN everywhere and the reason is six lines down in a preflight report:
 // the AWS CLI is not installed, so nothing can be read, so every screen says
 // nothing. This page says which tool, what it is for, and installs it.
-let depsNow = null, credsNow = null;
+let depsNow = null, credsNow = null, tskeyNow = null;
 function paintDeps(d) {
   depsNow = d;
   paintKeys();
@@ -1132,7 +1132,6 @@ function paintDeps(d) {
 function paintKeys() {
   const wrap = $('d-keys');
   if (!wrap) return;
-  const token = (config || []).find(r => r.key === 'TAILSCALE_API_KEY');
   const c = credsNow;
   const rows = [
     { name: 'AWS access key',
@@ -1147,16 +1146,23 @@ function paintKeys() {
       to: () => goSetting($('s-creds-card')) },
     { name: 'Tailscale sign-in',
       why: 'the private network the box joins; there is no public SSH port',
-      state: depsNow && depsNow.tailscale_signed_in === true ? ['signed in', 'ok']
-        : depsNow && depsNow.tailscale_signed_in === false
+      state: !depsNow ? ['reading…', 'wait']
+        : depsNow.tailscale_signed_in === true
+          ? [(tskeyNow && tskeyNow.node) ? `signed in as ${tskeyNow.node}` : 'signed in', 'ok']
+        : depsNow.tailscale_signed_in === false
           ? ['not signed in - in a terminal:  sudo tailscale up', 'bad']
           : ['Tailscale is not installed', 'bad'],
       to: null },
     { name: 'Tailscale API token',
       why: 'optional: prunes old nodes and turns off key expiry',
-      state: !token ? ['reading…', 'wait']
-        : token.is_set ? ['set', 'ok'] : ['not set - cg goes without', 'warn'],
-      to: () => goSetting(settingEl('TAILSCALE_API_KEY')) },
+      // Checked, not merely counted: .env says whether a token is SET, and a
+      // token that is set and refused reads exactly the same there.
+      state: !tskeyNow ? ['reading…', 'wait']
+        : !tskeyNow.present ? ['not set - cg goes without', 'warn']
+        : tskeyNow.valid ? ['works', 'ok']
+        : tskeyNow.valid === false ? [`rejected${tskeyNow.detail ? ' (' + tskeyNow.detail + ')' : ''}`, 'bad']
+        : ['set, but api.tailscale.com did not answer', 'warn'],
+      to: () => goSetting($('s-tskey-card')) },
   ];
   wrap.textContent = '';
   for (const r of rows) {
@@ -1235,6 +1241,71 @@ function paintCreds(c) {
 // cg asks for the two halves of the key as events; the dialog answers them, and
 // the secret one renders as a password field. Nothing is typed into the app's
 // own storage - cg writes ~/.aws/credentials.
+// The Tailscale card. Two facts, and they fail independently: this laptop can
+// be signed in with no API token (normal, and cg says what it gives up), or
+// hold a token while being signed out (nothing works, and no token helps).
+function paintTskey(ts) {
+  tskeyNow = ts;
+  paintKeys();
+  const state = $('tskey-state'), detail = $('tskey-detail'), btn = $('tskey-set');
+  const signed = ts.signed_in === true ? `signed in${ts.node ? ' as ' + ts.node : ''}`
+    : ts.signed_in === false ? 'not signed in - in a terminal:  sudo tailscale up'
+    : 'Tailscale is not installed';
+  const token =
+      !ts.present      ? 'no API token - dead nodes are left in place, key expiry stays on'
+    : ts.valid         ? 'API token works'
+    : ts.valid === false ? `API token rejected${ts.detail ? ' (' + ts.detail + ')' : ''}`
+    // Unreachable says nothing about the token, so it must not be drawn as a
+    // bad one: the fix for a flat network is not a new token.
+    : 'API token set, but api.tailscale.com did not answer';
+  state.textContent = signed;
+  state.className = 'font-code-md text-code-md mt-space-sm '
+    + (ts.signed_in === true ? 'text-on-surface' : 'text-error');
+  detail.textContent = token;
+  btn.textContent = ts.present ? 'Replace API token' : 'Set API token';
+  btn.onclick = openTskey;
+}
+
+// Same shape as the AWS form, for the same reasons: one field, one Save, the
+// answer checked before it is believed, and the failure shown here.
+let tskeyPending = null;
+function tskeyAnswer(askId) {
+  return tskeyPending && askId === 'tailscale-api-token' ? tskeyPending.token : null;
+}
+function openTskey() {
+  $('tsdlg-token').value = '';
+  $('tsdlg-err').hidden = true;
+  $('tsdlg-err').textContent = '';
+  $('tsdlg-go').disabled = false;
+  $('tsdlg-go').textContent = 'Save token';
+  $('tsdlg').showModal();
+  $('tsdlg-token').focus();
+}
+function tskeyFail(text) {
+  const box = $('tsdlg-err');
+  box.hidden = false;
+  box.textContent = text;
+  $('tsdlg-go').disabled = false;
+  $('tsdlg-go').textContent = 'Save token';
+  tskeyPending = null;
+}
+$('tsdlg-cancel').onclick = e => { e.preventDefault(); tskeyPending = null; $('tsdlg').close(); };
+$('tsdlg-go').onclick = async e => {
+  e.preventDefault();
+  const token = $('tsdlg-token').value.trim();
+  if (!token) return tskeyFail('Paste the token first.');
+  tskeyPending = { token };
+  $('tsdlg-err').hidden = true;
+  $('tsdlg-go').disabled = true;
+  $('tsdlg-go').textContent = 'Checking with Tailscale…';
+  const { rc, err } = await runCg(['creds', 'set', 'tailscale'], { wantRc: true });
+  tskeyPending = null;
+  if (rc === 0) { $('tsdlg').close(); return; }
+  tskeyFail((err || `cg creds set tailscale exited ${rc}`).split('\n')
+    .filter(l => l.trim() && !l.startsWith('Tailscale API token (NOT'))
+    .join('\n').trim() || `cg creds set tailscale exited ${rc}`);
+};
+
 // The AWS key, as one form: both halves, one Save, the answer checked with AWS
 // before anything is written, and the failure shown HERE rather than in a log
 // pane behind the dialog.
@@ -2116,7 +2187,7 @@ window.cg.onEvent(({ id, event }) => {
     // The key dialog asked already: cg's two questions are answered from what
     // is in it, rather than putting two more modals on top of the one the
     // person is looking at.
-    const pre = awsKeyAnswer(event.id);
+    const pre = awsKeyAnswer(event.id) ?? tskeyAnswer(event.id);
     if (pre !== null) window.cg.answer(id, pre);
     else ask(id, event);
   }
@@ -2143,7 +2214,8 @@ window.cg.onEvent(({ id, event }) => {
         painted = data;
         const paint = { cost: paintCost, library: paintLibrary, guards: paintGuards,
                         config: paintConfig, status: paintStatus, machines: paintMachines,
-                        sweep: paintSweep, creds: paintCreds, deps: paintDeps }[job.json];
+                        sweep: paintSweep, creds: paintCreds, deps: paintDeps,
+                        tskey: paintTskey }[job.json];
         if (!paint) throw new Error(`no painter for ${job.json}`);
         paint(data);
       } catch (err) {
@@ -2206,7 +2278,8 @@ const NEEDS = {
   // machines too: the instance-type row is a picker, and its options are
   // whatever this region rents - see editSetting.
   settings:  [[['config', '--json'], 'config'], [['machines', '--json'], 'machines'],
-              [['sweep', '--cached', '--json'], 'sweep'], [['creds', '--json'], 'creds']],
+              [['sweep', '--cached', '--json'], 'sweep'], [['creds', '--json'], 'creds'],
+              [['creds', 'tailscale', '--json'], 'tskey']],
   // Build reads status too: if a box is already up there is nothing to build,
   // and its own Refresh must be able to find that out.
   build:     [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status'],
@@ -2216,7 +2289,7 @@ const NEEDS = {
   // creds and config too: the page shows the two keys, and neither is in
   // `cg deps` - they belong to AWS and to .env.
   deps:      [[['deps', '--json'], 'deps'], [['creds', '--json'], 'creds'],
-              [['config', '--json'], 'config']],
+              [['creds', 'tailscale', '--json'], 'tskey'], [['config', '--json'], 'config']],
 };
 const loaded = new Set();
 
@@ -2247,6 +2320,9 @@ const ALL_READS = [
   [['creds', '--json'], 'creds'],
   // Six `command -v` checks: nothing is installed by reading this.
   [['deps', '--json'], 'deps'],
+  // One free call to api.tailscale.com, which is the only thing that can tell
+  // a token that works from one that is merely present.
+  [['creds', 'tailscale', '--json'], 'tskey'],
 ];
 function refreshAll() {
   for (const v of Object.keys(NEEDS)) loaded.add(v);

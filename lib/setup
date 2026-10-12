@@ -1053,11 +1053,26 @@ case "${1:-}" in
   creds)   shift
            # shellcheck source=lib/laptop.sh
            source lib/laptop.sh
+           # Two credentials, one command: the AWS access key and the
+           # Tailscale API token are the two things only a person can give cg,
+           # and `cg creds` is where both are answered for.
            case "${1:-status}" in
              --json)        creds_json; exit 0 ;;
-             status|"")     creds_show; exit $? ;;
-             set)           creds_set "$REGION"; exit $? ;;
-             *) echo "usage: setup creds [status|set|--json]" >&2; exit 1 ;;
+             status|"")     creds_show; rc=$?; echo; tskey_show || rc=$?; exit $rc ;;
+             tailscale)     shift
+                            case "${1:-status}" in
+                              --json)    tskey_json; exit 0 ;;
+                              set)       tskey_set; exit $? ;;
+                              status|"") tskey_show; exit $? ;;
+                              *) echo "usage: setup creds tailscale [status|set|--json]" >&2; exit 1 ;;
+                            esac ;;
+             set)           shift
+                            case "${1:-aws}" in
+                              aws|"")    creds_set "$REGION"; exit $? ;;
+                              tailscale|ts) tskey_set; exit $? ;;
+                              *) echo "usage: setup creds set [aws|tailscale]" >&2; exit 1 ;;
+                            esac ;;
+             *) echo "usage: setup creds [status|set [aws|tailscale]|tailscale|--json]" >&2; exit 1 ;;
            esac ;;
   status)  shift; status "$@"; exit 0 ;;
   cost)    shift; cost "$@"; exit 0 ;;

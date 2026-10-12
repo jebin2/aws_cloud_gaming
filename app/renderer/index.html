@@ -660,6 +660,23 @@
       </div>
     </div>
 
+    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop" id="s-tskey-card">
+      <div class="flex items-start justify-between gap-space-md">
+        <div class="min-w-0 flex-1">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Tailscale</span>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5">
+            The private network the box joins. The API token is optional - it prunes dead nodes
+            and turns off key expiry. Saved to .env, and checked before it is written.
+          </p>
+          <p class="font-code-md text-code-md mt-space-sm" id="tskey-state">reading…</p>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5" id="tskey-detail"></p>
+        </div>
+        <button id="tskey-set" class="btn shrink-0">
+          <span class="material-symbols-outlined text-[16px]" data-icon="person">&#xe7fd;</span>Set API token
+        </button>
+      </div>
+    </div>
+
     <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop">
       <div class="flex items-center justify-between gap-space-md">
         <div>
@@ -828,6 +845,24 @@
   <menu class="flex justify-end gap-space-sm mt-space-md p-0">
     <button class="btn" id="awskey-cancel">Cancel</button>
     <button class="btn btn-primary" id="awskey-go">Save key</button>
+  </menu>
+</dialog>
+
+<!-- The Tailscale API token: one field, checked against api.tailscale.com
+     before it is written to .env. -->
+<dialog id="tsdlg" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[460px]">
+  <p class="font-code-md text-code-md">Tailscale API token</p>
+  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md">
+    An API access token from login.tailscale.com &gt; Settings &gt; Keys - not the auth key a box
+    joins with. Optional: without one, dead nodes are left in place and key expiry stays on.
+  </p>
+  <label class="font-code-sm text-code-sm text-outline" for="tsdlg-token">api token</label>
+  <input id="tsdlg-token" type="password" autocomplete="off" spellcheck="false" placeholder="tskey-api-…"
+         class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
+  <pre class="font-code-sm text-code-sm text-error whitespace-pre-wrap mt-space-sm max-h-[30vh] overflow-auto" id="tsdlg-err" hidden></pre>
+  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+    <button class="btn" id="tsdlg-cancel">Cancel</button>
+    <button class="btn btn-primary" id="tsdlg-go">Save token</button>
   </menu>
 </dialog>
 
