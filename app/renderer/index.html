@@ -683,6 +683,9 @@
           <button id="tskey-set" class="btn">
             <span class="material-symbols-outlined text-[16px]" data-icon="person">&#xe7fd;</span>Set API token
           </button>
+          <!-- The box's own key, for a tailnet that will not let the token make
+               one. Hidden when the token can. -->
+          <button id="tskey-authkey" class="btn" hidden>Set auth key</button>
         </div>
       </div>
     </div>
@@ -869,21 +872,19 @@
   </menu>
 </dialog>
 
-<!-- The Tailscale API token: one field, checked against api.tailscale.com
-     before it is written to .env. -->
-<dialog id="tsdlg" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[460px]">
-  <p class="font-code-md text-code-md">Tailscale API token</p>
-  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md">
-    An API access token from login.tailscale.com &gt; Settings &gt; Keys - not the auth key a box
-    joins with. Optional: without one, dead nodes are left in place and key expiry stays on.
-  </p>
-  <label class="font-code-sm text-code-sm text-outline" for="tsdlg-token">api token</label>
-  <input id="tsdlg-token" type="password" autocomplete="off" spellcheck="false" placeholder="tskey-api-…"
+<!-- One secret, typed once and checked before it is kept. Used by the
+     Tailscale API token and by the box's own auth key - same shape, same
+     rules, different words. -->
+<dialog id="onefield" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[460px] max-w-[40rem]">
+  <p class="font-code-md text-code-md" id="onefield-title">—</p>
+  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md" id="onefield-note"></p>
+  <label class="font-code-sm text-code-sm text-outline" for="onefield-input" id="onefield-label">value</label>
+  <input id="onefield-input" type="password" autocomplete="off" spellcheck="false"
          class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
-  <pre class="font-code-sm text-code-sm text-error whitespace-pre-wrap mt-space-sm max-h-[30vh] overflow-auto" id="tsdlg-err" hidden></pre>
+  <pre class="font-code-sm text-code-sm text-error whitespace-pre-wrap mt-space-sm max-h-[30vh] overflow-auto" id="onefield-err" hidden></pre>
   <menu class="flex justify-end gap-space-sm mt-space-md p-0">
-    <button class="btn" id="tsdlg-cancel">Cancel</button>
-    <button class="btn btn-primary" id="tsdlg-go">Save token</button>
+    <button class="btn" id="onefield-cancel">Cancel</button>
+    <button class="btn btn-primary" id="onefield-go">Save</button>
   </menu>
 </dialog>
 

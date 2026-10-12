@@ -740,6 +740,35 @@ tskey_auth_ensure() {
   printf '%s' "$fresh"
 }
 
+# tskey_auth_set - paste a pre-auth key for the box, for a tailnet whose ACLs
+# will not issue one to the API token (tags), or when there is no token at all.
+# Checked the same way a stored one is before it is kept.
+tskey_auth_set() {
+  local key state
+  cg_can_ask || die "cg creds tailscale authkey has to ask - run it in a terminal, or use the app"
+  log "A pre-auth key for the box: https://login.tailscale.com/admin/settings/keys"
+  log "  Reusable: on  - a rebuild needs a key that has not been spent."
+  log "  Ephemeral: OFF - an ephemeral node is purged when it goes offline, and"
+  log "             this box goes offline every time the watchdog stops it."
+  key=$(cg_ask_secret tailscale-auth-key "    paste auth key: ")
+  [[ -n ${key:-} ]] || { log "no key given - nothing saved"; return 1; }
+  [[ $key =~ ^tskey-[A-Za-z0-9-]+$ ]] || {
+    log_as fail "that does not look like a Tailscale key - they start with tskey-"
+    return 1
+  }
+  # With a token in hand this is answerable now rather than at boot. Without
+  # one, "unknown" is the honest answer and the key is taken at its word.
+  state=$(tskey_auth_check "$key")
+  case $state in
+    expired) log_as fail "that key has expired or been revoked - nothing was saved"; return 1 ;;
+    gone)    log_as fail "Tailscale has no such key - nothing was saved"; return 1 ;;
+  esac
+  cg_env_set TAILSCALE_AUTH_KEY "$key" || { log_as fail "could not write .env"; return 1; }
+  export TAILSCALE_AUTH_KEY="$key"
+  [[ $state == ok ]] && log_as ok "the key works, and is saved" \
+                     || log_as ok "saved (there is no API token to check it with)"
+}
+
 # tskey_facts - state|detail|signed_in|node, one per line as k=v.
 tskey_facts() {
   local token=${TAILSCALE_API_KEY:-} state detail signed node

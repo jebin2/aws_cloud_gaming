@@ -1273,6 +1273,13 @@ function paintTskey(ts) {
     : 'no auth key for the box - the next build will ask for one';
   btn.textContent = ts.present ? 'Replace API token' : 'Set API token';
   btn.onclick = openTskey;
+  // Pasting the box's key is for when the token cannot make one: no token, or
+  // a tailnet whose ACLs will not issue an untagged key. With a working token
+  // there is nothing to type, so there is no button.
+  const authBtn = $('tskey-authkey');
+  authBtn.hidden = ts.can_mint && !ts.auth_key_stored;
+  authBtn.textContent = ts.auth_key_stored ? 'Replace auth key' : 'Set auth key';
+  authBtn.onclick = setAuthKey;
   // Signing in is root's business - systemctl, then `tailscale up` - which in a
   // window means polkit. Where polkit cannot be reached the card says what to
   // type instead of offering a button that dies inside sudo.
@@ -1372,43 +1379,85 @@ function watchForSignInLink(text) {
 
 // Same shape as the AWS form, for the same reasons: one field, one Save, the
 // answer checked before it is believed, and the failure shown here.
-let tskeyPending = null;
-function tskeyAnswer(askId) {
-  return tskeyPending && askId === 'tailscale-api-token' ? tskeyPending.token : null;
+// One secret, typed once and checked before it is kept: the Tailscale API
+// token and the box's own auth key are the same dialog with different words.
+// cg still asks its question - that is the protocol, and both commands work in
+// a terminal unchanged - and this answers it from the field.
+let oneFieldPending = null;
+function oneFieldAnswer(askId) {
+  return oneFieldPending && oneFieldPending.askId === askId ? oneFieldPending.value : null;
 }
-function openTskey() {
-  $('tsdlg-token').value = '';
-  $('tsdlg-err').hidden = true;
-  $('tsdlg-err').textContent = '';
-  $('tsdlg-go').disabled = false;
-  $('tsdlg-go').textContent = 'Save token';
-  $('tsdlg').showModal();
-  $('tsdlg-token').focus();
-}
-function tskeyFail(text) {
-  const box = $('tsdlg-err');
+function oneFieldFail(text, go) {
+  const box = $('onefield-err');
   box.hidden = false;
   box.textContent = text;
-  $('tsdlg-go').disabled = false;
-  $('tsdlg-go').textContent = 'Save token';
-  tskeyPending = null;
+  $('onefield-go').disabled = false;
+  $('onefield-go').textContent = go;
+  oneFieldPending = null;
 }
-$('tsdlg-cancel').onclick = e => { e.preventDefault(); tskeyPending = null; $('tsdlg').close(); };
-$('tsdlg-go').onclick = async e => {
+function openOneField({ title, note, label, placeholder, args, askId, save = 'Save',
+                        working = 'Checking…', strip }) {
+  $('onefield-title').textContent = title;
+  $('onefield-note').textContent = note;
+  $('onefield-label').textContent = label;
+  $('onefield-input').value = '';
+  $('onefield-input').placeholder = placeholder || '';
+  $('onefield-err').hidden = true;
+  $('onefield-err').textContent = '';
+  $('onefield-go').disabled = false;
+  $('onefield-go').textContent = save;
+  $('onefield-go').onclick = async e => {
+    e.preventDefault();
+    const value = $('onefield-input').value.trim();
+    if (!value) return oneFieldFail('Paste it first.', save);
+    oneFieldPending = { askId, value };
+    $('onefield-err').hidden = true;
+    $('onefield-go').disabled = true;
+    $('onefield-go').textContent = working;
+    const { rc, err } = await runCg(args, { wantRc: true });
+    oneFieldPending = null;
+    if (rc === 0) { $('onefield').close(); return; }
+    // cg's own words, minus the lines that only say where to make one - you
+    // are holding one.
+    oneFieldFail((err || `cg ${args.join(' ')} exited ${rc}`).split('\n')
+      .filter(l => l.trim() && !(strip && l.includes(strip)))
+      .join('\n').trim() || `cg ${args.join(' ')} exited ${rc}`, save);
+  };
+  $('onefield').showModal();
+  $('onefield-input').focus();
+}
+$('onefield-cancel').onclick = e => {
   e.preventDefault();
-  const token = $('tsdlg-token').value.trim();
-  if (!token) return tskeyFail('Paste the token first.');
-  tskeyPending = { token };
-  $('tsdlg-err').hidden = true;
-  $('tsdlg-go').disabled = true;
-  $('tsdlg-go').textContent = 'Checking with Tailscale…';
-  const { rc, err } = await runCg(['creds', 'set', 'tailscale'], { wantRc: true });
-  tskeyPending = null;
-  if (rc === 0) { $('tsdlg').close(); return; }
-  tskeyFail((err || `cg creds set tailscale exited ${rc}`).split('\n')
-    .filter(l => l.trim() && !l.startsWith('Tailscale API token (NOT'))
-    .join('\n').trim() || `cg creds set tailscale exited ${rc}`);
+  oneFieldPending = null;
+  $('onefield').close();
 };
+
+function openTskey() {
+  openOneField({
+    title: 'Tailscale API token',
+    note: 'An API access token from login.tailscale.com > Settings > Keys - not the auth key a box '
+        + 'joins with. Optional: without one, dead nodes are left in place and key expiry stays on.',
+    label: 'api token', placeholder: 'tskey-api-…',
+    args: ['creds', 'set', 'tailscale'], askId: 'tailscale-api-token',
+    save: 'Save token', working: 'Checking with Tailscale…',
+    strip: 'Tailscale API token (NOT',
+  });
+}
+
+// The box's own key, pasted. Only needed when the API token cannot make one -
+// a tailnet whose ACLs want tags, or no token at all - so the button appears
+// only then, and the dialog says what kind of key to make.
+function setAuthKey() {
+  openOneField({
+    title: 'Tailscale auth key for the box',
+    note: 'A pre-auth key from login.tailscale.com > Settings > Keys. Reusable on, ephemeral off - '
+        + 'the box goes offline every time the watchdog stops it.',
+    label: 'auth key', placeholder: 'tskey-auth-…',
+    args: ['creds', 'tailscale', 'authkey'], askId: 'tailscale-auth-key',
+    save: 'Save key', working: 'Checking with Tailscale…',
+    strip: 'A pre-auth key for the box',
+  });
+}
 
 // The AWS key, as one form: both halves, one Save, the answer checked with AWS
 // before anything is written, and the failure shown HERE rather than in a log
@@ -2291,7 +2340,7 @@ window.cg.onEvent(({ id, event }) => {
     // The key dialog asked already: cg's two questions are answered from what
     // is in it, rather than putting two more modals on top of the one the
     // person is looking at.
-    const pre = awsKeyAnswer(event.id) ?? tskeyAnswer(event.id);
+    const pre = awsKeyAnswer(event.id) ?? oneFieldAnswer(event.id);
     if (pre !== null) window.cg.answer(id, pre);
     else ask(id, event);
   }
@@ -2426,13 +2475,14 @@ const GATE_READS = [
   [['deps', '--json'], 'deps'],
   [['creds', '--json'], 'creds'],
   [['creds', 'tailscale', '--json'], 'tskey'],
+  // Reads .env and nothing else, and carries the alert address a build needs.
+  [['config', '--json'], 'config'],
 ];
 // The rest. Every one of them needs AWS, a tailnet, or both, so on a laptop
 // that is not ready yet they would all come back unknown and the screen would
 // fill with question marks instead of the one thing to do about it.
 const ALL_READS = [
   [['status', '--json'], 'status'],
-  [['config', '--json'], 'config'],
   [['watcher', '--json'], 'guards'],
   [['library', 'list', '--json'], 'library'],
   [['machines', '--json'], 'machines'],
@@ -2470,6 +2520,17 @@ function bannerProblem() {
     return { blocking: true, title: 'This laptop is not signed in to Tailscale',
              body: 'The box has no public SSH port, so nothing here can reach it.',
              label: 'Sign in', go: signInTailscale };
+  }
+  if (tskeyNow && !tskeyNow.auth_key_stored && !tskeyNow.can_mint) {
+    return { blocking: true, title: 'The box has no Tailscale auth key',
+             body: 'A build cannot join it to your tailnet without one.',
+             label: 'Set auth key', go: setAuthKey };
+  }
+  const email = (config || []).find(r => r.key === 'EMAIL_ALERTS');
+  if (email && !email.is_set) {
+    return { blocking: true, title: 'No address for billing alerts',
+             body: 'A build sets a budget alarm and needs somewhere to send it.',
+             label: 'Set an address', go: () => goSetting(settingEl('EMAIL_ALERTS')) };
   }
   // Not blocking: the token is optional, and everything else works without it.
   if (tskeyNow && tskeyNow.present && tskeyNow.valid === false) {

@@ -119,7 +119,17 @@ settings_prompts() {
     v=$(tskey_auth_ensure "${GAME_TS_HOST:-gamevps}") && GAME_TS_AUTHKEY=$v
   fi
 
+  # In the app, a missing setting is NOT a question to ask here. A build is
+  # fifteen minutes of watching a log, and stopping it halfway with a dialog is
+  # both a surprise and the wrong place to answer: these belong on the screens
+  # that show them, before the build starts, where the readiness check can see
+  # them. So the app gets told what is missing and where to set it, and the
+  # preflight stops before anything is launched.
   if [[ -z $GAME_TS_AUTHKEY ]]; then
+    if cg_json; then
+      die "no Tailscale auth key for the box.
+       Settings > Tailscale has it, and with an API token set cg makes one itself."
+    fi
     echo
     echo "A Tailscale pre-auth key is needed to join the box to your tailnet."
     echo "Generate one at: https://login.tailscale.com/admin/settings/keys"
@@ -131,6 +141,10 @@ settings_prompts() {
     env_set TAILSCALE_AUTH_KEY "$GAME_TS_AUTHKEY"
   fi
   if [[ -z $GAME_ALERT_EMAIL ]]; then
+    if cg_json; then
+      die "no address for billing alerts.
+       Settings > billing alerts to."
+    fi
     GAME_ALERT_EMAIL=$(cg_ask alert-email "  email for billing alerts (comma-separated for several): ")
     [[ -n $GAME_ALERT_EMAIL ]] || die "no email given"
     env_set EMAIL_ALERTS "$GAME_ALERT_EMAIL"

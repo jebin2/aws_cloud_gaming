@@ -180,17 +180,17 @@ cat > "$T/r/probe.js" <<'PROBE'
                  signed_in: true, node: 'laptop', auth_key_stored: true, can_mint: true });
     tsRead('TSKEPT');
 
-    const tsdlg = document.getElementById('tsdlg');
+    const tsdlg = document.getElementById('onefield');
     document.getElementById('tskey-set').click();
-    out.push('TSFORM OPEN | ' + tsdlg.open + ' type=' + document.getElementById('tsdlg-token').type);
+    out.push('TSFORM OPEN | ' + tsdlg.open + ' type=' + document.getElementById('onefield-input').type);
     window.__ran = [];
-    document.getElementById('tsdlg-go').click();
+    document.getElementById('onefield-go').click();
     await sleep();
-    out.push('TSEMPTY | ' + document.getElementById('tsdlg-err').textContent.trim()
+    out.push('TSEMPTY | ' + document.getElementById('onefield-err').textContent.trim()
              + ' ran=' + window.__ran.join(','));
-    document.getElementById('tsdlg-token').value = 'tskey-api-nope';
+    document.getElementById('onefield-input').value = 'tskey-api-nope';
     window.__ran = []; window.__answers = [];
-    document.getElementById('tsdlg-go').click();
+    document.getElementById('onefield-go').click();
     await sleep();
     out.push('TSSUBMIT RAN | ' + window.__ran.join(' ;; '));
     window.__emit(window.__lastId, { t: 'ask', id: 'tailscale-api-token', prompt: 't: ', default: '', secret: 1 });
@@ -199,9 +199,9 @@ cat > "$T/r/probe.js" <<'PROBE'
     window.__emit(window.__lastId, { t: 'line', kind: 'fail', text: 'Tailscale rejected that token (401) - nothing was saved' });
     window.__emit(window.__lastId, { t: 'exit', rc: 1 });
     await sleep(); await sleep();
-    out.push('TSFAIL | open=' + tsdlg.open + ' err=' + document.getElementById('tsdlg-err').textContent.replace(/\s+/g, ' ').trim());
-    document.getElementById('tsdlg-token').value = 'tskey-api-good';
-    document.getElementById('tsdlg-go').click();
+    out.push('TSFAIL | open=' + tsdlg.open + ' err=' + document.getElementById('onefield-err').textContent.replace(/\s+/g, ' ').trim());
+    document.getElementById('onefield-input').value = 'tskey-api-good';
+    document.getElementById('onefield-go').click();
     await sleep();
     window.__emit(window.__lastId, { t: 'exit', rc: 0 });
     await sleep(); await sleep();
@@ -442,7 +442,7 @@ contains "a stored key is checked"       "$(row 'TSKEPT TS')"  "stored, and chec
 
 echo "4d. the token form, like the key form"
 contains "it opens, as a password field"  "$(row 'TSFORM OPEN')" "true type=password"
-contains "an empty one says so"           "$(row 'TSEMPTY')"     "Paste the token first"
+contains "an empty one says so"           "$(row 'TSEMPTY')"     "Paste it first"
 contains "  running nothing"              "$(row 'TSEMPTY')"     "ran="
 check    "submitting runs the set"        "$(row 'TSSUBMIT RAN')" "TSSUBMIT RAN | creds set tailscale"
 check    "  answering cg's question"      "$(row 'TSSUBMIT ANSWERS')" "TSSUBMIT ANSWERS | tskey-api-nope"

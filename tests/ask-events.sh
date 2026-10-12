@@ -86,13 +86,33 @@ check "the session-end prompt asks"  "$(grep -c 'cg_ask session-end' lib/game)" 
 
 echo "7. the settings prompts, driven"
 mkdir -p "$T/repo"; cp -r lib lambda "$T/repo/"
-out=$( cd "$T/repo" && printf '%b' 'tskey-auth-1\nme@example.com\n' \
-  | env -i PATH="$PATH" HOME="$T" CG_JSON=1 CG_COLOR=never REGION=ap-south-2 TS_HOST=gamevps \
-      TAILSCALE_API_KEY= GAME_NTFY_URL= GAME_DISK_GB=50 GAME_ARCHIVE_EXPIRY_DAYS=14 \
-      bash -c 'source lib/common.sh; source lib/cloud-watchdog.sh; source lib/settings.sh; settings_prompts 1' 2>&1 )
-contains "the auth key is asked as a secret" "$out" '"id":"tailscale-auth-key"'
-contains "  and the email as a question"     "$out" '"id":"alert-email"'
+prompts() { # prompts [env...] - settings_prompts with stdin ready to answer
+  # shellcheck disable=SC2086
+  ( cd "$T/repo" && printf '%b' 'tskey-auth-1\nme@example.com\n' \
+    | env -i PATH="$PATH" HOME="$T" CG_COLOR=never REGION=ap-south-2 TS_HOST=gamevps \
+        TAILSCALE_API_KEY= GAME_NTFY_URL= GAME_DISK_GB=50 GAME_ARCHIVE_EXPIRY_DAYS=14 $* \
+        bash -c 'source lib/common.sh; source lib/cloud-watchdog.sh; source lib/settings.sh; settings_prompts 1' 2>&1 )
+}
+# In a terminal, a missing setting is a question.
+out=$(prompts)
 check    "both were saved"                   "$(grep -c '^TAILSCALE_AUTH_KEY=tskey-auth-1$\|^EMAIL_ALERTS=me@example.com$' "$T/repo/.env")" "2"
-lacks    "  the key is never echoed"         "$out" "tskey-auth-1\""
+lacks    "  the key is never echoed"         "$out" "tskey-auth-1"
+
+echo "7b. but never in the middle of a build"
+# A build is fifteen minutes of watching a log, and this used to stop it
+# halfway with a dialog asking for a key - a surprise, and the wrong place to
+# answer. Under CG_JSON the app is driving, and both of these are prerequisites
+# it can see BEFORE the build starts.
+rm -f "$T/repo/.env"
+out=$(prompts CG_JSON=1)
+lacks    "no dialog for the auth key"        "$out" '"id":"tailscale-auth-key"'
+contains "  it says what is missing"         "$out" "no Tailscale auth key"
+contains "  and where to set it"             "$out" "Settings > Tailscale"
+contains "  including that cg can make one"  "$out" "cg makes one itself"
+out=$(prompts CG_JSON=1 TAILSCALE_AUTH_KEY=tskey-auth-1)
+lacks    "no dialog for the email either"    "$out" '"id":"alert-email"'
+contains "  named just as plainly"           "$out" "no address for billing alerts"
+# Nothing has been launched by then: this is the preflight.
+check    "and it fails rather than guessing" "$(grep -c '"t":"error"' <<<"$out")" "1"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

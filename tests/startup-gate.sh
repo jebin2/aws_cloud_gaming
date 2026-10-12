@@ -114,9 +114,13 @@ creds_ok='{"cli":true,"source":"s","key_id":"****1234","account":"123456789012",
 creds_bad='{"cli":false,"source":null,"key_id":null,"account":null,"arn":null,"valid":null,"error":"the AWS CLI is not installed"}'
 tskey_in='{"present":true,"valid":true,"state":"ok","detail":null,"signed_in":true,"node":"laptop","auth_key_stored":true,"can_mint":true}'
 tskey_out='{"present":false,"valid":null,"state":"absent","detail":null,"signed_in":false,"node":null,"auth_key_stored":false,"can_mint":false}'
+# Signed in, no API token, and no key for the box: nothing to mint one with.
+tskey_nokey='{"present":false,"valid":null,"state":"absent","detail":null,"signed_in":true,"node":"laptop","auth_key_stored":false,"can_mint":false}'
+cfg_ok='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":true,"value":"a@b.c","default":null,"note":"n"}]'
+cfg_noemail='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":false,"value":null,"default":null,"note":"n"}]'
 
 echo "1. a tool is missing: nothing else is asked"
-OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_BAD" true), \"creds --json\": $creds_bad, \"creds tailscale --json\": $tskey_in}")
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_BAD" true), \"creds --json\": $creds_bad, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
 contains "the three reads happen"   "$(row RAN)" "deps --json"
 contains "  all three"              "$(row RAN)" "creds tailscale --json"
 # The six that need AWS or a tailnet would every one come back unknown.
@@ -134,24 +138,39 @@ contains "  with somewhere to go"   "$(row FIX)"    "Open Dependencies"
 check    "  that goes there"        "$(row WENT)"   "WENT | deps"
 
 echo "2. tools are there, the key is not"
-OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_bad, \"creds tailscale --json\": $tskey_in}")
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_bad, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
 lacks    "still nothing else is asked" "$(row RAN)" "status --json"
 contains "it says what is wrong"       "$(row TITLE)" "The AWS CLI is not installed"
 contains "  and what that costs"       "$(row BODY)"  "unknown, not empty"
 contains "  and the same way out"      "$(row FIX)"   "Open Dependencies"
 
 echo "3. tools and key are there, the tailnet is not"
-OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" false), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_out}")
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" false), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_out, \"config --json\": $cfg_ok}")
 lacks    "still nothing else is asked" "$(row RAN)" "status --json"
 contains "it says so"                  "$(row TITLE)" "not signed in to Tailscale"
 contains "  and why it matters"        "$(row BODY)"  "no public SSH port"
 # The sign-in is a button here, not a page to go to: there is one thing to do.
 contains "  offering the sign-in"      "$(row FIX)"   "Sign in"
 
+echo "3b. the box has no key to join with"
+# This one used to be a dialog in the MIDDLE of a build: fifteen minutes of
+# log, then "paste auth key". It is a prerequisite, so it is checked with the
+# other prerequisites, before anything launches.
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_nokey, \"config --json\": $cfg_ok}")
+lacks    "nothing else is asked"       "$(row RAN)" "status --json"
+contains "it says what is missing"     "$(row TITLE)" "The box has no Tailscale auth key"
+contains "  and what that stops"       "$(row BODY)"  "cannot join it to your tailnet"
+contains "  offering to take one"      "$(row FIX)"   "Set auth key"
+
+echo "3c. nowhere to send a billing alert"
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_noemail}")
+lacks    "nothing else is asked"       "$(row RAN)" "status --json"
+contains "it says so"                  "$(row TITLE)" "No address for billing alerts"
+contains "  and why a build needs one" "$(row BODY)"  "budget alarm"
+
 echo "4. everything is ready: the rest goes at once"
-OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_in}")
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
 contains "status is asked"          "$(row RAN)" "status --json"
-contains "  the config"             "$(row RAN)" "config --json"
 contains "  the guards"             "$(row RAN)" "watcher --json"
 contains "  the library"            "$(row RAN)" "library list --json"
 contains "  the machines"           "$(row RAN)" "machines --json"
