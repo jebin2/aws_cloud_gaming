@@ -1875,6 +1875,15 @@ function shortCity(city) {
 // One flat list of (region, type) rows, whether the data came from a sweep or
 // from the current region alone. Everything downstream reads only this shape,
 // so the two sources cannot drift apart.
+// How many of this region's machines were left out because no quota can launch
+// them. Only meaningful for the un-swept view, which is one region; a sweep
+// shows every region and the question "how many are hidden" has no one answer.
+function hiddenByQuota() {
+  if (sweepNow && sweepNow.regions && sweepNow.regions.length) return 0;
+  if (!machinesNow || machinesNow.error || !machinesNow.machines) return 0;
+  return machinesNow.machines.filter(m => !m.fits_spot && !m.fits_ondemand).length;
+}
+
 function chooserRows() {
   if (sweepNow && sweepNow.regions && sweepNow.regions.length) {
     const out = [];
@@ -2071,6 +2080,16 @@ function paintChooser() {
     const legend = $(mount.legend);
     if (legend) {
       legend.textContent = '';
+      // Why the table is short. Rows that no quota can launch are left out -
+      // picking one would only fail at launch - but a region offering sixteen
+      // machines and showing two looks broken without a word about it.
+      const hidden = hiddenByQuota();
+      if (hidden) {
+        const line = document.createElement('div');
+        line.textContent = `${hidden} more GPU machine${hidden === 1 ? ' is' : 's are'} offered here, `
+          + 'all bigger than your vCPU quota allows. Ask AWS for more, or pick another region.';
+        legend.append(line);
+      }
       if (reasons.size) {
         const intro = document.createElement('div');
         intro.textContent = 'A price you cannot pick would be refused at launch:';

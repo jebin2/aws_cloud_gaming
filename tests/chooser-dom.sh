@@ -87,7 +87,13 @@ const MACHINES = {
   region: 'ap-south-1', configured: 'g4dn.xlarge', spot: '0', inr_per_usd: 88,
   quota: { ondemand_vcpu: 4, spot_vcpu: 0 }, machines: [
   { type: 'g4dn.xlarge', vcpu: 4, gpu: 'T4', vram_gib: 16, ram_gib: 16, store_gb: 125,
-    inr_hour_spot: 18, inr_hour_ondemand: 51, fits_spot: false, fits_ondemand: true }],
+    inr_hour_spot: 18, inr_hour_ondemand: 51, fits_spot: false, fits_ondemand: true },
+  // Offered here, and far beyond a 4 vCPU quota: the table leaves these out,
+  // because picking one would be refused at launch.
+  { type: 'g5.12xlarge', vcpu: 48, gpu: 'A10G', vram_gib: 96, ram_gib: 192, store_gb: 3800,
+    inr_hour_spot: 200, inr_hour_ondemand: 600, fits_spot: false, fits_ondemand: false },
+  { type: 'g6e.48xlarge', vcpu: 192, gpu: 'L40S', vram_gib: 384, ram_gib: 1536, store_gb: 7600,
+    inr_hour_spot: 800, inr_hour_ondemand: 2400, fits_spot: false, fits_ondemand: false }],
 };
 // The real shape of `cg status --json`, with every identifier replaced. Built
 // from the live command rather than written by hand, because hand-written
@@ -229,6 +235,14 @@ cat > "$T/r/probe.js" <<'PROBE'
            + ` | border=${s.borderTopColor} | shadow=${s.boxShadow}`);
   }
   out.push('DIMROWS | ' + document.querySelectorAll('#s-chooser tr.dim').length);
+  // Before any scan: one region, and only the machines its quota can launch.
+  // This is what a fresh laptop sees, and "why is only one machine showing?"
+  // is the question it used to leave you with.
+  paintSweep({ regions: [] });
+  out.push('NOSWEEP ROWS | ' + document.querySelectorAll('#s-chooser tbody tr').length);
+  out.push('NOSWEEP LEGEND | ' + document.getElementById('s-chooser-legend').innerText
+                          .replace(/\s+/g, ' ').trim());
+  paintSweep(DATA.sweep);
   out.push('LEGEND | ' + document.getElementById('s-chooser-legend').innerText
                           .replace(/\s+/g, ' ').trim());
   // One line per painter, naming a DOM effect only that painter produces.
@@ -394,7 +408,17 @@ lacks    "nothing is left at the browser default" "$OUT" "appearance=auto"
 
 echo "9. a greyed-out price explains itself once, not in every cell"
 # Half a column of repeated "no quota" read as broken rather than deliberate.
+row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 contains "the legend says what grey means" "$OUT" "would be refused at launch"
+# "Why is only one machine showing?" - because the other two need more vCPU
+# than any quota here allows, and the table used to drop them in silence. Only
+# before a scan: a sweep shows every region, where "how many are hidden" has no
+# single answer.
+check    "one row before a scan"          "$(row 'NOSWEEP ROWS')" "NOSWEEP ROWS | 1"
+contains "  and the legend says why"      "$(row 'NOSWEEP LEGEND')" "2 more GPU machines are offered here"
+contains "  naming the limit"             "$(row 'NOSWEEP LEGEND')" "bigger than your vCPU quota"
+contains "  with both ways round it"      "$(row 'NOSWEEP LEGEND')" "Ask AWS for more, or pick another region"
+lacks    "  and not after one"            "$(row 'LEGEND')" "more GPU machines are offered here"
 contains "  and names the quota case"      "$OUT" "no quota - Your G-instance quota"
 contains "  the opt-in case"               "$OUT" "needs opt-in - This region is not enabled"
 contains "  and the missing market"        "$OUT" "no spot market - AWS publishes no spot price"
