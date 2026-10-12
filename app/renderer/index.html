@@ -739,17 +739,6 @@
       <div id="d-keys"></div>
     </div>
 
-    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop">
-      <div class="flex items-center justify-between gap-space-md pb-space-md">
-        <div>
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Install log</span>
-          <p class="font-code-sm text-code-sm text-outline mt-0.5" id="d-log-note">
-            Whatever the package manager says, as it says it.
-          </p>
-        </div>
-      </div>
-      <pre class="font-code-sm text-code-sm whitespace-pre-wrap max-h-[40vh] overflow-auto text-on-surface-variant" id="d-log" hidden></pre>
-    </div>
   </section>
 
   <!-- Logs -->
@@ -857,22 +846,24 @@
   </menu>
 </dialog>
 
-<!-- The sign-in, while it is happening. `tailscale up` prints a link and then
-     WAITS for someone to visit it, so this is a dialog rather than a line on a
-     card: there is something to do, and it is not over until it is done. -->
-<dialog id="tsup" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[520px] max-w-[46rem]">
-  <p class="font-code-md text-code-md">Signing in to Tailscale</p>
-  <p class="font-code-sm text-code-sm mt-0.5 mb-space-md" id="tsup-status">starting…</p>
-  <button class="btn btn-primary mb-space-md" id="tskey-link" hidden>
+<!-- Any command that is a thing happening rather than a state to read: it
+     runs in front of you, it can be cancelled, and it ends one of two ways.
+     Used by the Tailscale sign-in (which prints a link and then WAITS for a
+     browser) and by installing a missing tool (which asks polkit first). -->
+<dialog id="rundlg" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[520px] max-w-[46rem]">
+  <p class="font-code-md text-code-md" id="rundlg-title">Working</p>
+  <p class="font-code-sm text-code-sm mt-0.5 mb-space-md" id="rundlg-status">starting…</p>
+  <button class="btn btn-primary mb-space-md" id="rundlg-link" hidden>
     <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the sign-in page
   </button>
-  <pre class="font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[32vh] overflow-auto" id="tskey-signin-log"></pre>
+  <pre class="font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[32vh] overflow-auto" id="rundlg-log"></pre>
   <menu class="flex justify-end gap-space-sm mt-space-md p-0">
-    <!-- Cancel is not decoration: `tailscale up` waits for the browser, so a
-         dialog you walk away from would leave it waiting for good. -->
-    <button class="btn" id="tsup-cancel">Cancel</button>
-    <button class="btn" id="tsup-retry" hidden>Try again</button>
-    <button class="btn btn-primary" id="tsup-done" hidden>Done</button>
+    <!-- Cancel is not decoration: `tailscale up` waits for a browser and a
+         package manager can sit on a lock, and closing a dialog tells cg
+         nothing. -->
+    <button class="btn" id="rundlg-cancel">Cancel</button>
+    <button class="btn" id="rundlg-retry" hidden>Try again</button>
+    <button class="btn btn-primary" id="rundlg-done" hidden>Done</button>
   </menu>
 </dialog>
 

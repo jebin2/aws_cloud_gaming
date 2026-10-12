@@ -36,16 +36,19 @@ window.__ran = [];
 addEventListener('error', e => window.__errs.push(e.message));
 addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
 window.cg = {
-  run: (args) => { window.__ran.push(args.join(' ')); return Promise.resolve({ ok: true, id: window.__ran.length }); },
+  run: (args) => { window.__ran.push(args.join(' '));
+                   window.__lastId = (window.__lastId || 0) + 1;
+                   return Promise.resolve({ ok: true, id: window.__lastId }); },
   answer: () => Promise.resolve(true), cancel: () => Promise.resolve(true),
   busy: () => Promise.resolve([]),
-  onEvent() { return () => {}; },
+  onEvent(cb) { window.__emit = (id, event) => cb({ id, event }); return () => {}; },
 };
 STUB
 
 cat > "$T/r/probe.js" <<'PROBE'
-(() => {
+(async () => {
   const out = [];
+  const sleep = () => new Promise(r => setTimeout(r, 0));
   const g = id => {
     const el = document.getElementById(id);
     return el ? el.textContent.replace(/\s+/g, ' ').trim() : '(missing)';
@@ -75,7 +78,6 @@ cat > "$T/r/probe.js" <<'PROBE'
       ? 'hidden' : g('d-install-all-label')));
     out.push(label + ' ROWS | ' + [...document.querySelectorAll('#d-rows tr')]
       .map(r => [...r.cells].map(c => c.textContent.trim()).join('/')).join(' || '));
-    out.push(label + ' NOTE | ' + g('d-log-note'));
   };
   try {
     // Before any read has landed. "Not set" here would be a guess, and a wrong
@@ -90,7 +92,25 @@ cat > "$T/r/probe.js" <<'PROBE'
     // The per-row button: the first Install in the table is the AWS CLI's.
     [...document.querySelectorAll('#d-rows button')][0].click();
     out.push('ROW RAN | ' + window.__ran.join(' ;; '));
-    out.push('ROW LOG | ' + (document.getElementById('d-log').hidden ? 'hidden' : 'shown'));
+    await sleep();
+    out.push('ROW DIALOG | ' + document.getElementById('rundlg').open
+             + ' title=' + document.getElementById('rundlg-title').textContent.trim());
+    out.push('ROW STATUS | ' + document.getElementById('rundlg-status').textContent.replace(/\s+/g, ' ').trim());
+    out.push('ROW BUTTONS | cancel=' + document.getElementById('rundlg-cancel').hidden
+             + ' done=' + document.getElementById('rundlg-done').hidden);
+    // What pacman says, as it says it - including its own stderr, which is not
+    // a cg event.
+    window.__emit(window.__lastId, { t: 'line', kind: 'info', text: 'installing AWS CLI v2' });
+    window.__emit(window.__lastId, { t: 'raw', stream: 'stderr', text: 'warning: aws-cli-v2 is up to date' });
+    window.__emit(window.__lastId, { t: 'exit', rc: 0 });
+    await sleep(); await sleep();
+    out.push('ROW DONE | status=' + document.getElementById('rundlg-status').textContent.trim()
+             + ' cancel=' + document.getElementById('rundlg-cancel').hidden
+             + ' done=' + document.getElementById('rundlg-done').hidden
+             + ' label=' + document.getElementById('rundlg-done').textContent.trim());
+    out.push('ROW LOG | ' + document.getElementById('rundlg-log').textContent.replace(/\s+/g, ' ').trim());
+    document.getElementById('rundlg-done').click();
+    out.push('ROW CLOSED | ' + document.getElementById('rundlg').open);
 
     paintDeps(payload([]));
     read('ALLHERE');
@@ -177,7 +197,17 @@ contains "  and what is missing"      "$(row 'MISSING ROWS')"  "AWS CLI v2/aws i
 contains "the button says how many"   "$(row 'MISSING ALL')"   "Install 2 missing"
 check    "  and installs them"        "$(row 'ALL RAN')"       "ALL RAN | deps install"
 check    "a row installs just that one" "$(row 'ROW RAN')"     "ROW RAN | deps install aws"
-check    "  and opens the log"        "$(row 'ROW LOG')"       "ROW LOG | shown"
+# Installing is a thing happening - polkit asks for a password, the package
+# manager takes its time - so it runs in front of you, like the sign-in.
+contains "  in a dialog that names it" "$(row 'ROW DIALOG')"   "true title=Installing aws"
+contains "  warning about the prompt"  "$(row 'ROW STATUS')"   "password"
+contains "  with only Cancel while it runs" "$(row 'ROW BUTTONS')" "cancel=false done=true"
+contains "what it said is shown"       "$(row 'ROW LOG')"      "installing AWS CLI v2"
+contains "  including plain stderr"    "$(row 'ROW LOG')"      "warning: aws-cli-v2 is up to date"
+contains "when it ends it says so"     "$(row 'ROW DONE')"     "status=installed"
+contains "  Cancel goes"               "$(row 'ROW DONE')"     "cancel=true"
+contains "  and Done appears"          "$(row 'ROW DONE')"     "done=false label=Done"
+check    "Done closes it"              "$(row 'ROW CLOSED')"   "ROW CLOSED | false"
 
 echo "2. everything is here"
 contains "it says so"                 "$(row 'ALLHERE READY')" "everything cg needs is here"
@@ -202,7 +232,6 @@ echo "5. installed, but signed out"
 # Every tool present, and the laptop still cannot reach the box.
 contains "it is not called ready"     "$(row 'SIGNEDOUT READY')" "Tailscale is not signed in"
 lacks    "  not 'everything is here'" "$(row 'SIGNEDOUT READY')" "everything cg needs"
-contains "  and says what to run"     "$(row 'SIGNEDOUT NOTE')"  "sudo tailscale up"
 
 echo "6. the keys nobody can install"
 # A tool is installed or it is not; a key is yours, and the page has to say

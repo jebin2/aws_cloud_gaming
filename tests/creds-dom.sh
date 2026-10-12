@@ -230,35 +230,35 @@ cat > "$T/r/probe.js" <<'PROBE'
     window.__ran = [];
     document.getElementById('tskey-signin-go').click();
     await sleep();
-    const tsup = document.getElementById('tsup');
+    const tsup = document.getElementById('rundlg');
     out.push('SIGNIN DIALOG | ' + tsup.open);
-    out.push('SIGNIN STATUS | ' + document.getElementById('tsup-status').textContent.replace(/\s+/g, ' ').trim());
-    out.push('SIGNIN BUTTONS | cancel=' + document.getElementById('tsup-cancel').hidden
-             + ' done=' + document.getElementById('tsup-done').hidden
-             + ' retry=' + document.getElementById('tsup-retry').hidden);
+    out.push('SIGNIN STATUS | ' + document.getElementById('rundlg-status').textContent.replace(/\s+/g, ' ').trim());
+    out.push('SIGNIN BUTTONS | cancel=' + document.getElementById('rundlg-cancel').hidden
+             + ' done=' + document.getElementById('rundlg-done').hidden
+             + ' retry=' + document.getElementById('rundlg-retry').hidden);
     out.push('SIGNIN RAN | ' + window.__ran.join(' ;; '));
-    out.push('SIGNIN LINK EARLY | ' + document.getElementById('tskey-link').hidden);
+    out.push('SIGNIN LINK EARLY | ' + document.getElementById('rundlg-link').hidden);
     // cg relays what `tailscale up` printed while it is still waiting.
     window.__emit(window.__lastId, { t: 'line', kind: 'info', text: 'finishing the sign-in needs a browser - the link appears below' });
     window.__emit(window.__lastId, { t: 'line', kind: 'info', text: 'sign in here: https://login.tailscale.com/a/abc123def456' });
-    out.push('SIGNIN LINKNOW | ' + document.getElementById('tskey-link').hidden);
-    out.push('SIGNIN LOG | ' + document.getElementById('tskey-signin-log').textContent.replace(/\s+/g, ' ').trim());
+    out.push('SIGNIN LINKNOW | ' + document.getElementById('rundlg-link').hidden);
+    out.push('SIGNIN LOG | ' + document.getElementById('rundlg-log').textContent.replace(/\s+/g, ' ').trim());
     window.__opened = [];
-    document.getElementById('tskey-link').click();
+    document.getElementById('rundlg-link').click();
     out.push('SIGNIN OPENED | ' + window.__opened.join(' ;; '));
-    out.push('SIGNIN WAITING | ' + document.getElementById('tsup-status').textContent.replace(/\s+/g, ' ').trim());
+    out.push('SIGNIN WAITING | ' + document.getElementById('rundlg-status').textContent.replace(/\s+/g, ' ').trim());
     // Signed in: the card behind has already been re-read, so the dialog only
     // has to say so and get out of the way.
     paintTskey({ present: false, valid: null, state: 'absent', detail: null,
                  signed_in: true, node: 'laptop' });
     window.__emit(window.__lastId, { t: 'exit', rc: 0 });
     await sleep(); await sleep();
-    out.push('SIGNIN OKSTATUS | ' + document.getElementById('tsup-status').textContent.replace(/\s+/g, ' ').trim());
-    out.push('SIGNIN OKBUTTONS | cancel=' + document.getElementById('tsup-cancel').hidden
-             + ' done=' + document.getElementById('tsup-done').hidden
-             + ' label=' + document.getElementById('tsup-done').textContent.trim()
-             + ' link=' + document.getElementById('tskey-link').hidden);
-    document.getElementById('tsup-done').click();
+    out.push('SIGNIN OKSTATUS | ' + document.getElementById('rundlg-status').textContent.replace(/\s+/g, ' ').trim());
+    out.push('SIGNIN OKBUTTONS | cancel=' + document.getElementById('rundlg-cancel').hidden
+             + ' done=' + document.getElementById('rundlg-done').hidden
+             + ' label=' + document.getElementById('rundlg-done').textContent.trim()
+             + ' link=' + document.getElementById('rundlg-link').hidden);
+    document.getElementById('rundlg-done').click();
     out.push('SIGNIN CLOSED | ' + tsup.open);
 
     // Cancelling has to reach cg: tailscale up is waiting on a browser that is
@@ -269,7 +269,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     window.cg.cancel = id => { window.__cancelled.push(id); return Promise.resolve(true); };
     document.getElementById('tskey-signin-go').click();
     await sleep();
-    document.getElementById('tsup-cancel').click();
+    document.getElementById('rundlg-cancel').click();
     out.push('SIGNIN CANCEL | cancelled=' + window.__cancelled.join(',') + ' open=' + tsup.open);
     window.__emit(window.__lastId, { t: 'exit', rc: 130 });
     await sleep(); await sleep();
@@ -286,18 +286,18 @@ cat > "$T/r/probe.js" <<'PROBE'
       text: 'Error executing command as another user: No authentication agent found.' });
     window.__emit(window.__lastId, { t: 'exit', rc: 127 });
     await sleep(); await sleep();
-    out.push('SIGNIN DEAD | ' + document.getElementById('tskey-signin-log').textContent.replace(/\s+/g, ' ').trim());
-    out.push('SIGNIN DEADSTATUS | ' + document.getElementById('tsup-status').textContent.replace(/\s+/g, ' ').trim());
-    out.push('SIGNIN DEADBUTTONS | cancel=' + document.getElementById('tsup-cancel').hidden
-             + ' retry=' + document.getElementById('tsup-retry').hidden
-             + ' done=' + document.getElementById('tsup-done').textContent.trim());
-    document.getElementById('tsup-done').click();
+    out.push('SIGNIN DEAD | ' + document.getElementById('rundlg-log').textContent.replace(/\s+/g, ' ').trim());
+    out.push('SIGNIN DEADSTATUS | ' + document.getElementById('rundlg-status').textContent.replace(/\s+/g, ' ').trim());
+    out.push('SIGNIN DEADBUTTONS | cancel=' + document.getElementById('rundlg-cancel').hidden
+             + ' retry=' + document.getElementById('rundlg-retry').hidden
+             + ' done=' + document.getElementById('rundlg-done').textContent.trim());
+    document.getElementById('rundlg-done').click();
 
     // And a run that was refused because something else holds the lock.
     window.cg.run = () => Promise.resolve({ ok: false, reason: 'busy', args: ['init'] });
     document.getElementById('tskey-signin-go').click();
     await sleep(); await sleep();
-    out.push('SIGNIN BUSY | ' + document.getElementById('tskey-signin-log').textContent.replace(/\s+/g, ' ').trim());
+    out.push('SIGNIN BUSY | ' + document.getElementById('rundlg-log').textContent.replace(/\s+/g, ' ').trim());
     out.push('SIGNIN BUSYBTN | ' + document.getElementById('tskey-signin-go').disabled);
 
     paintStatus(status('no-cli'));

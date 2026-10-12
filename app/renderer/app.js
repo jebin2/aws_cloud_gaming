@@ -1119,11 +1119,6 @@ function paintDeps(d) {
       }
     }
   }
-  // Installed but signed out: there is nothing to install, and nothing works.
-  const note = $('d-log-note');
-  note.textContent = signedOut
-    ? 'Tailscale is installed but not signed in. In a terminal:  sudo tailscale up'
-    : 'Whatever the package manager says, as it says it.';
 }
 
 // The two things no package manager can install. Each row says where it stands
@@ -1208,9 +1203,14 @@ function paintKeys() {
 }
 
 function installDeps(tools) {
-  $('d-log').hidden = false;
-  $('d-log').textContent = 'running\u2026';
-  return runCg(['deps', 'install', ...tools], { collect: 'd-log', age: 'age-deps' });
+  const what = tools.length === 1 ? tools[0] : 'what is missing';
+  return runInDialog({
+    title: `Installing ${what}`,
+    args: ['deps', 'install', ...tools],
+    starting: 'asking for your password first (the dialog can appear behind this window)',
+    done: 'installed',
+    fail: rc => `the install did not finish (exit ${rc})`,
+  });
 }
 $('d-install-all').onclick = () => installDeps([]);
 
@@ -1296,58 +1296,75 @@ function paintTskey(ts) {
 // The sign-in, as a dialog, because it is a thing that happens rather than a
 // state to read: polkit asks for a password, `tailscale up` prints a link and
 // then WAITS for someone to visit it, and none of that is over until it is.
-let signInJob = null;
-function tsupStatus(text, tone) {
-  const el = $('tsup-status');
+let runDlgJob = null, runDlgRetry = null;
+function runDlgStatus(text, tone) {
+  const el = $('rundlg-status');
   el.textContent = text;
   el.className = 'font-code-sm text-code-sm mt-0.5 mb-space-md '
     + (tone === 'bad' ? 'text-error' : tone === 'ok' ? 'text-on-surface' : 'text-outline');
 }
-async function signInTailscale() {
-  const log = $('tskey-signin-log'), link = $('tskey-link');
+
+// runInDialog({...}) - run a cg command in front of the person.
+//   title    what is happening, in two or three words
+//   args     the cg command
+//   starting the first status line, before cg has said anything
+//   done     the status when it succeeds (a string, or a function for one that
+//            has to be read off the state the run just changed)
+//   fail     the status when it does not, given the exit code
+async function runInDialog({ title, args, starting, done, fail }) {
+  const log = $('rundlg-log'), link = $('rundlg-link');
+  runDlgRetry = () => runInDialog({ title, args, starting, done, fail });
+  $('rundlg-title').textContent = title;
   link.hidden = true;
-  $('tsup-done').hidden = true;
-  $('tsup-retry').hidden = true;
-  $('tsup-cancel').hidden = false;
+  $('rundlg-done').hidden = true;
+  $('rundlg-done').textContent = 'Done';
+  $('rundlg-retry').hidden = true;
+  $('rundlg-cancel').hidden = false;
   log.textContent = '';
   // The first line cg sends replaces the placeholder rather than appending
   // under it - see the collect handler.
   log.dataset.fresh = 'yes';
-  tsupStatus('starting - a password dialog opens first (it can appear behind this window)');
-  if (!$('tsup').open) $('tsup').showModal();
-  const { rc } = await runCg(['creds', 'tailscale', 'signin'],
-                             { collect: 'tskey-signin-log', wantRc: true,
-                               onStart: id => { signInJob = id; } });
-  signInJob = null;
+  runDlgStatus(starting);
+  if (!$('rundlg').open) $('rundlg').showModal();
+  const { rc } = await runCg(args, { collect: 'rundlg-log', wantRc: true,
+                                     onStart: id => { runDlgJob = id; } });
+  runDlgJob = null;
   link.hidden = true;
-  $('tsup-cancel').hidden = true;
+  $('rundlg-cancel').hidden = true;
   if (rc === 0) {
-    // Everything behind this dialog has already re-read: a sign-in is a write.
-    tsupStatus((tskeyNow && tskeyNow.node) ? `signed in as ${tskeyNow.node}` : 'signed in', 'ok');
-    $('tsup-done').hidden = false;
-    $('tsup-done').focus();
-    return;
+    // Everything behind the dialog has already re-read: these are writes.
+    runDlgStatus(typeof done === 'function' ? done() : done, 'ok');
+    $('rundlg-done').hidden = false;
+    $('rundlg-done').focus();
+    return true;
   }
-  tsupStatus(rc === null ? 'could not start - something else is running'
-                         : `sign-in did not finish (exit ${rc})`, 'bad');
-  $('tsup-retry').hidden = false;
-  $('tsup-done').hidden = false;
-  $('tsup-done').textContent = 'Close';
+  runDlgStatus(rc === null ? 'could not start - something else is running'
+                           : (typeof fail === 'function' ? fail(rc) : fail), 'bad');
+  $('rundlg-retry').hidden = false;
+  $('rundlg-done').hidden = false;
+  $('rundlg-done').textContent = 'Close';
+  return false;
 }
-$('tsup-done').onclick = e => {
-  e.preventDefault();
-  $('tsup-done').textContent = 'Done';
-  $('tsup').close();
-};
-$('tsup-retry').onclick = e => { e.preventDefault(); $('tsup-done').textContent = 'Done'; signInTailscale(); };
+$('rundlg-done').onclick = e => { e.preventDefault(); $('rundlg').close(); };
+$('rundlg-retry').onclick = e => { e.preventDefault(); if (runDlgRetry) runDlgRetry(); };
 // Cancelling has to reach cg: `tailscale up` is waiting on a browser that is
-// never going to answer, and closing a dialog does not tell it that.
-$('tsup-cancel').onclick = e => {
+// never going to answer, and a package manager can be sitting on a lock.
+// Closing a dialog does not tell either of them that.
+$('rundlg-cancel').onclick = e => {
   e.preventDefault();
-  if (signInJob !== null) window.cg.cancel(signInJob);
-  signInJob = null;
-  $('tsup').close();
+  if (runDlgJob !== null) window.cg.cancel(runDlgJob);
+  runDlgJob = null;
+  $('rundlg').close();
 };
+function signInTailscale() {
+  return runInDialog({
+    title: 'Signing in to Tailscale',
+    args: ['creds', 'tailscale', 'signin'],
+    starting: 'starting - a password dialog opens first (it can appear behind this window)',
+    done: () => (tskeyNow && tskeyNow.node) ? `signed in as ${tskeyNow.node}` : 'signed in',
+    fail: rc => `sign-in did not finish (exit ${rc})`,
+  });
+}
 $('tskey-signin-go').onclick = signInTailscale;
 
 // The link, lifted out of whatever cg relayed. Only this host, and the main
@@ -1356,12 +1373,12 @@ const SIGNIN_RE = /https:\/\/login\.tailscale\.com\/[^\s]+/;
 function watchForSignInLink(text) {
   const m = SIGNIN_RE.exec(text || '');
   if (!m) return;
-  const link = $('tskey-link');
+  const link = $('rundlg-link');
   link.hidden = false;
   link.onclick = () => window.cg.openSignIn(m[0]);
   // What is being waited for, in words: the command is not stuck, it is
   // waiting for a browser - and that distinction is the whole dialog.
-  tsupStatus('waiting for you to finish in the browser');
+  runDlgStatus('waiting for you to finish in the browser');
 }
 
 // Same shape as the AWS form, for the same reasons: one field, one Save, the
@@ -2295,7 +2312,7 @@ window.cg.onEvent(({ id, event }) => {
   if (event.t === 'error' && event.text) job.err = event.text;
   if (job.wantRc && (event.t === 'line' || event.t === 'error') && event.text)
     job.collected += event.text + '\n';
-  if (job.collect === 'tskey-signin-log' && event.text) watchForSignInLink(event.text);
+  if (job.collect === 'rundlg-log' && event.text) watchForSignInLink(event.text);
   if (job.collect && (event.t === 'line' || event.t === 'step' || event.t === 'error'
                       || event.t === 'raw')) {
     const box = $(job.collect);
