@@ -118,7 +118,18 @@ laptop_pkg_install() { # laptop_pkg_install <pm> <package>
   }
   local pm; pm=$(command -v "$1") || return 1
   case $1 in
-    pacman)  "$as" "$pm" -S --needed --noconfirm "$2" ;;
+    pacman)
+             # -Sy first, once, for the same reason apt-get gets an update: a
+             # machine that has never synced has no database to look in, and
+             # pacman's answer to that is "target not found: <package>" - which
+             # reads as "there is no such package" rather than "I have not
+             # looked". A fresh Omarchy VM is exactly that machine.
+             if [[ -z ${_LAPTOP_PAC_FRESH:-} ]]; then
+               log "refreshing the package database"
+               "$as" "$pm" -Sy --noconfirm || return 1
+               _LAPTOP_PAC_FRESH=1
+             fi
+             "$as" "$pm" -S --needed --noconfirm "$2" ;;
     apt-get) if [[ -z ${_LAPTOP_APT_FRESH:-} ]]; then
                "$as" "$pm" update -qq || return 1
                _LAPTOP_APT_FRESH=1
@@ -552,6 +563,10 @@ deps_install() {
       log_as ok "$(laptop_label "$t") installed"
     else
       log_as fail "could not install $(laptop_label "$t")"
+      # -Sy without -u is a partial upgrade: the database is current and the
+      # installed system is not, so a package can want a library that is newer
+      # than the one here. That is the one failure a refresh cannot fix.
+      [[ $pm == pacman ]] && log "  if it asked for a newer library, this system is behind: sudo pacman -Syu"
       log "  by hand: $(laptop_manual "$t")"
       rc=1
     fi

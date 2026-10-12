@@ -29,7 +29,7 @@ done
 
 fake() { printf '#!/usr/bin/env bash\necho "%s $*" >> "$LOG"\n%s\n' "$1" "${2:-exit 0}" > "$T/bin/$1"
          chmod +x "$T/bin/$1"; }
-fresh() { rm -rf "$T/bin" "$T/log"; mkdir -p "$T/bin"; touch "$T/log"
+fresh() { rm -rf "$T/bin" "$T/log" "$T/pacdb"; mkdir -p "$T/bin"; touch "$T/log"
           fake sudo 'exec "$@"'
           fake pkexec 'exec "$@"'
           # Never faked: see the note above fresh().
@@ -41,6 +41,16 @@ fresh() { rm -rf "$T/bin" "$T/log"; mkdir -p "$T/bin"; touch "$T/log"
               tailscale) fake tailscale 'exit 0' ;;
               tailsignedout) fake tailscale '[[ $1 == status ]] && exit 1; exit 0' ;;
               pacman)    fake pacman 'pkg=${@: -1}
+case "$1" in
+  -Sy) : > "${PACDB:?}"; exit 0 ;;
+esac
+# No database, no packages. This is what a machine that has never synced says,
+# and it reads as "there is no such package" rather than "I have not looked".
+if [[ ! -e ${PACDB:?} ]]; then
+  echo "warning: database file for '"'"'core'"'"' does not exist (use -Sy to download)" >&2
+  echo "error: target not found: $pkg" >&2
+  exit 1
+fi
 case $pkg in
   aws-cli-v2) printf "#!/usr/bin/env bash\necho aws-cli/2.17.0\n" > "$BIN/aws" ;;
   moonlight-qt) printf "#!/usr/bin/env bash\n" > "$BIN/moonlight" ;;
@@ -56,7 +66,7 @@ cg_() { # cg_ <args...> - EXTRA passes env through
   # shellcheck disable=SC2086
   ( cd "$T/repo" && env -i PATH="$T/bin:$T/sys" HOME="$T/home" CG_COLOR=never \
       WAYLAND_DISPLAY=wayland-1 \
-      LOG="$T/log" BIN="$T/bin" GAME_REGION=ap-south-1 ${EXTRA:-} bash ./cg "$@" 2>&1 )
+      LOG="$T/log" BIN="$T/bin" PACDB="$T/pacdb" GAME_REGION=ap-south-1 ${EXTRA:-} bash ./cg "$@" 2>&1 )
 }
 jq_() { python3 -I -c 'import json,sys
 d = json.load(sys.stdin)
@@ -119,6 +129,19 @@ check    "the package manager ran as root" \
 j=$(cg_ deps --json)
 check    "nothing is missing afterwards" "$(python3 -I -c 'import json,sys
 print(len([t for t in json.load(sys.stdin)["tools"] if not t["present"]]))' <<<"$j")" "0"
+
+echo "4b. a machine that has never synced its package database"
+# What a fresh Omarchy VM did: "error: target not found: aws-cli-v2" for a
+# package that is right there in extra. pacman had no database to look in, and
+# said so in a way that reads as "no such package".
+fresh ssh curl tailscale pacman
+out=$(cg_ deps install)
+contains "the database is refreshed"   "$out" "refreshing the package database"
+check    "  before anything is installed" \
+         "$(grep -oE 'pacman -Sy|pacman -S --needed' "$T/log" | head -1)" "pacman -Sy"
+check    "  and only once"             "$(grep -cE '^(sudo|pkexec) .*/pacman -Sy ' "$T/log")" "1"
+contains "then the install works"      "$out" "AWS CLI v2 installed"
+contains "  for both of them"          "$out" "Moonlight installed"
 
 echo "5. one tool at a time"
 fresh ssh curl tailscale pacman
