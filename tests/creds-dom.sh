@@ -226,6 +226,12 @@ cat > "$T/r/probe.js" <<'PROBE'
     window.__ran = [];
     document.getElementById('tskey-signin-go').click();
     await sleep();
+    const tsup = document.getElementById('tsup');
+    out.push('SIGNIN DIALOG | ' + tsup.open);
+    out.push('SIGNIN STATUS | ' + document.getElementById('tsup-status').textContent.replace(/\s+/g, ' ').trim());
+    out.push('SIGNIN BUTTONS | cancel=' + document.getElementById('tsup-cancel').hidden
+             + ' done=' + document.getElementById('tsup-done').hidden
+             + ' retry=' + document.getElementById('tsup-retry').hidden);
     out.push('SIGNIN RAN | ' + window.__ran.join(' ;; '));
     out.push('SIGNIN LINK EARLY | ' + document.getElementById('tskey-link').hidden);
     // cg relays what `tailscale up` printed while it is still waiting.
@@ -236,7 +242,32 @@ cat > "$T/r/probe.js" <<'PROBE'
     window.__opened = [];
     document.getElementById('tskey-link').click();
     out.push('SIGNIN OPENED | ' + window.__opened.join(' ;; '));
+    out.push('SIGNIN WAITING | ' + document.getElementById('tsup-status').textContent.replace(/\s+/g, ' ').trim());
+    // Signed in: the card behind has already been re-read, so the dialog only
+    // has to say so and get out of the way.
+    paintTskey({ present: false, valid: null, state: 'absent', detail: null,
+                 signed_in: true, node: 'laptop' });
     window.__emit(window.__lastId, { t: 'exit', rc: 0 });
+    await sleep(); await sleep();
+    out.push('SIGNIN OKSTATUS | ' + document.getElementById('tsup-status').textContent.replace(/\s+/g, ' ').trim());
+    out.push('SIGNIN OKBUTTONS | cancel=' + document.getElementById('tsup-cancel').hidden
+             + ' done=' + document.getElementById('tsup-done').hidden
+             + ' label=' + document.getElementById('tsup-done').textContent.trim()
+             + ' link=' + document.getElementById('tskey-link').hidden);
+    document.getElementById('tsup-done').click();
+    out.push('SIGNIN CLOSED | ' + tsup.open);
+
+    // Cancelling has to reach cg: tailscale up is waiting on a browser that is
+    // never going to answer.
+    paintTskey({ present: false, valid: null, state: 'absent', detail: null,
+                 signed_in: false, node: null });
+    window.__cancelled = [];
+    window.cg.cancel = id => { window.__cancelled.push(id); return Promise.resolve(true); };
+    document.getElementById('tskey-signin-go').click();
+    await sleep();
+    document.getElementById('tsup-cancel').click();
+    out.push('SIGNIN CANCEL | cancelled=' + window.__cancelled.join(',') + ' open=' + tsup.open);
+    window.__emit(window.__lastId, { t: 'exit', rc: 130 });
     await sleep(); await sleep();
 
     // What the window looked like when the sign-in did nothing: the panel is
@@ -252,7 +283,11 @@ cat > "$T/r/probe.js" <<'PROBE'
     window.__emit(window.__lastId, { t: 'exit', rc: 127 });
     await sleep(); await sleep();
     out.push('SIGNIN DEAD | ' + document.getElementById('tskey-signin-log').textContent.replace(/\s+/g, ' ').trim());
-    out.push('SIGNIN DEADBTN | ' + document.getElementById('tskey-signin-go').disabled);
+    out.push('SIGNIN DEADSTATUS | ' + document.getElementById('tsup-status').textContent.replace(/\s+/g, ' ').trim());
+    out.push('SIGNIN DEADBUTTONS | cancel=' + document.getElementById('tsup-cancel').hidden
+             + ' retry=' + document.getElementById('tsup-retry').hidden
+             + ' done=' + document.getElementById('tsup-done').textContent.trim());
+    document.getElementById('tsup-done').click();
 
     // And a run that was refused because something else holds the lock.
     window.cg.run = () => Promise.resolve({ ok: false, reason: 'busy', args: ['init'] });
@@ -410,13 +445,32 @@ echo "4f. a sign-in that goes nowhere says so"
 # "starting…" and then silence is what a dead run looked like: pkexec's own
 # complaint is plain stderr, not a cg event, so the panel never showed it.
 contains "stderr reaches the panel"    "$(row 'SIGNIN DEAD')"    "No authentication agent found"
-contains "  and the exit is named"     "$(row 'SIGNIN DEAD')"    "sign-in did not finish (exit 127)"
 lacks    "  with no stale starting line" "$(row 'SIGNIN DEAD')"  "starting -"
-check    "  and the button comes back" "$(row 'SIGNIN DEADBTN')" "SIGNIN DEADBTN | false"
+contains "  the status says it failed" "$(row 'SIGNIN DEADSTATUS')" "did not finish (exit 127)"
+contains "  offering another go"        "$(row 'SIGNIN DEADBUTTONS')" "retry=false"
+contains "  and a way out"              "$(row 'SIGNIN DEADBUTTONS')" "done=Close"
 # A write is refused outright while anything else runs - it is not queued - and
 # the only sign of that used to be a line in the header.
 contains "a refusal says what holds it" "$(row 'SIGNIN BUSY')"   "cg init is still running"
-check    "  and does not leave it disabled" "$(row 'SIGNIN BUSYBTN')" "SIGNIN BUSYBTN | false"
+contains "  and the dialog says so too" "$(row 'SIGNIN BUSY')" "cg init is still running"
+
+echo "4g. the sign-in dialog, start to end"
+# `tailscale up` prints a link and then waits for a browser. That is a thing
+# happening, not a state to read, so it is in front of you while it happens.
+check    "the button opens a dialog"   "$(row 'SIGNIN DIALOG')"  "SIGNIN DIALOG | true"
+contains "  saying what comes first"   "$(row 'SIGNIN STATUS')"  "password dialog opens first"
+contains "  warning it can be behind"  "$(row 'SIGNIN STATUS')"  "behind this window"
+contains "only Cancel while it runs"   "$(row 'SIGNIN BUTTONS')" "cancel=false done=true retry=true"
+contains "the wait is explained"       "$(row 'SIGNIN WAITING')" "waiting for you to finish in the browser"
+contains "signed in says who"          "$(row 'SIGNIN OKSTATUS')" "signed in as laptop"
+contains "  Cancel goes away"          "$(row 'SIGNIN OKBUTTONS')" "cancel=true"
+contains "  Done appears"              "$(row 'SIGNIN OKBUTTONS')" "done=false label=Done"
+contains "  and the dead link goes"    "$(row 'SIGNIN OKBUTTONS')" "link=true"
+check    "Done closes it"              "$(row 'SIGNIN CLOSED')"  "SIGNIN CLOSED | false"
+# Closing the dialog does not tell cg anything: the command is still waiting on
+# a browser that is never going to answer.
+contains "Cancel reaches cg"           "$(row 'SIGNIN CANCEL')"  "cancelled="
+contains "  and closes the dialog"     "$(row 'SIGNIN CANCEL')"  "open=false"
 
 echo "5. nothing threw"
 check "no painter threw"               "$(grep -c '^THREW' <<<"$OUT")" "0"

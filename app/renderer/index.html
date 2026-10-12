@@ -670,15 +670,6 @@
           </p>
           <p class="font-code-md text-code-md mt-space-sm" id="tskey-state">reading…</p>
           <p class="font-code-sm text-code-sm text-outline mt-0.5" id="tskey-detail"></p>
-          <!-- The sign-in, while it is happening: tailscale up prints a link and
-               waits for someone to visit it, so the link has to be reachable
-               from here. -->
-          <div id="tskey-signin" class="mt-space-sm" hidden>
-            <pre class="font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[20vh] overflow-auto" id="tskey-signin-log"></pre>
-            <button class="btn btn-primary mt-space-sm" id="tskey-link" hidden>
-              <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the sign-in page
-            </button>
-          </div>
         </div>
         <div class="flex flex-col gap-space-xs shrink-0">
           <button id="tskey-signin-go" class="btn btn-primary" hidden>
@@ -860,6 +851,25 @@
   <menu class="flex justify-end gap-space-sm mt-space-md p-0">
     <button class="btn" id="awskey-cancel">Cancel</button>
     <button class="btn btn-primary" id="awskey-go">Save key</button>
+  </menu>
+</dialog>
+
+<!-- The sign-in, while it is happening. `tailscale up` prints a link and then
+     WAITS for someone to visit it, so this is a dialog rather than a line on a
+     card: there is something to do, and it is not over until it is done. -->
+<dialog id="tsup" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[520px] max-w-[46rem]">
+  <p class="font-code-md text-code-md">Signing in to Tailscale</p>
+  <p class="font-code-sm text-code-sm mt-0.5 mb-space-md" id="tsup-status">starting…</p>
+  <button class="btn btn-primary mb-space-md" id="tskey-link" hidden>
+    <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the sign-in page
+  </button>
+  <pre class="font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[32vh] overflow-auto" id="tskey-signin-log"></pre>
+  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+    <!-- Cancel is not decoration: `tailscale up` waits for the browser, so a
+         dialog you walk away from would leave it waiting for good. -->
+    <button class="btn" id="tsup-cancel">Cancel</button>
+    <button class="btn" id="tsup-retry" hidden>Try again</button>
+    <button class="btn btn-primary" id="tsup-done" hidden>Done</button>
   </menu>
 </dialog>
 

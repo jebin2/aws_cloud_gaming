@@ -1284,24 +1284,61 @@ function paintTskey(ts) {
 // `tailscale up` prints a login URL and then WAITS for someone to visit it, so
 // the URL has to reach the person while the command is still running - the one
 // place in this app where output during a run is the point, not a log.
-async function signInTailscale() {
-  const area = $('tskey-signin'), log = $('tskey-signin-log'), link = $('tskey-link');
-  area.hidden = false;
-  link.hidden = true;
-  // dataset.fresh: the first line cg sends replaces this, rather than being
-  // appended under it - see the collect handler.
-  log.textContent = 'starting - a password dialog opens first (it can appear '
-    + 'behind this window)';
-  log.dataset.fresh = 'yes';
-  $('tskey-signin-go').disabled = true;
-  const { rc } = await runCg(['creds', 'tailscale', 'signin'],
-                             { collect: 'tskey-signin-log', wantRc: true });
-  $('tskey-signin-go').disabled = false;
-  if (rc !== 0) {
-    log.textContent += rc === null ? '' : `\n  sign-in did not finish (exit ${rc})\n`;
-    link.hidden = true;
-  }
+// The sign-in, as a dialog, because it is a thing that happens rather than a
+// state to read: polkit asks for a password, `tailscale up` prints a link and
+// then WAITS for someone to visit it, and none of that is over until it is.
+let signInJob = null;
+function tsupStatus(text, tone) {
+  const el = $('tsup-status');
+  el.textContent = text;
+  el.className = 'font-code-sm text-code-sm mt-0.5 mb-space-md '
+    + (tone === 'bad' ? 'text-error' : tone === 'ok' ? 'text-on-surface' : 'text-outline');
 }
+async function signInTailscale() {
+  const log = $('tskey-signin-log'), link = $('tskey-link');
+  link.hidden = true;
+  $('tsup-done').hidden = true;
+  $('tsup-retry').hidden = true;
+  $('tsup-cancel').hidden = false;
+  log.textContent = '';
+  // The first line cg sends replaces the placeholder rather than appending
+  // under it - see the collect handler.
+  log.dataset.fresh = 'yes';
+  tsupStatus('starting - a password dialog opens first (it can appear behind this window)');
+  if (!$('tsup').open) $('tsup').showModal();
+  const { rc } = await runCg(['creds', 'tailscale', 'signin'],
+                             { collect: 'tskey-signin-log', wantRc: true,
+                               onStart: id => { signInJob = id; } });
+  signInJob = null;
+  link.hidden = true;
+  $('tsup-cancel').hidden = true;
+  if (rc === 0) {
+    // Everything behind this dialog has already re-read: a sign-in is a write.
+    tsupStatus((tskeyNow && tskeyNow.node) ? `signed in as ${tskeyNow.node}` : 'signed in', 'ok');
+    $('tsup-done').hidden = false;
+    $('tsup-done').focus();
+    return;
+  }
+  tsupStatus(rc === null ? 'could not start - something else is running'
+                         : `sign-in did not finish (exit ${rc})`, 'bad');
+  $('tsup-retry').hidden = false;
+  $('tsup-done').hidden = false;
+  $('tsup-done').textContent = 'Close';
+}
+$('tsup-done').onclick = e => {
+  e.preventDefault();
+  $('tsup-done').textContent = 'Done';
+  $('tsup').close();
+};
+$('tsup-retry').onclick = e => { e.preventDefault(); $('tsup-done').textContent = 'Done'; signInTailscale(); };
+// Cancelling has to reach cg: `tailscale up` is waiting on a browser that is
+// never going to answer, and closing a dialog does not tell it that.
+$('tsup-cancel').onclick = e => {
+  e.preventDefault();
+  if (signInJob !== null) window.cg.cancel(signInJob);
+  signInJob = null;
+  $('tsup').close();
+};
 $('tskey-signin-go').onclick = signInTailscale;
 
 // The link, lifted out of whatever cg relayed. Only this host, and the main
@@ -1313,6 +1350,9 @@ function watchForSignInLink(text) {
   const link = $('tskey-link');
   link.hidden = false;
   link.onclick = () => window.cg.openSignIn(m[0]);
+  // What is being waited for, in words: the command is not stuck, it is
+  // waiting for a browser - and that distinction is the whole dialog.
+  tsupStatus('waiting for you to finish in the browser');
 }
 
 // Same shape as the AWS form, for the same reasons: one field, one Save, the
@@ -2310,7 +2350,7 @@ window.cg.onEvent(({ id, event }) => {
   }
 });
 
-function runCg(args, { panel, age, json, env, collect, capture, wantRc } = {}) {
+function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart } = {}) {
   return new Promise(async resolve => {
     const res = await window.cg.run(args, env);
     if (!res.ok) {
@@ -2322,6 +2362,7 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc } = {}) {
     }
     jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, wantRc,
                       out: [], collected: '', resolve });
+    if (onStart) onStart(res.id);
     if (isWrite(args)) note(`cg ${args.join(' ')} started`, 'text-primary');
     updateHeader();
     if (panel) $(panel).textContent = 'running…';
