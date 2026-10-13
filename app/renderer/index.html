@@ -821,6 +821,25 @@
 </main>
 </div>
 
+<!-- What the window is doing while it opens, in words someone who did not write
+     cg can read. The header's job-line - "running: cg machines, cg refresh" -
+     is true and useless to anybody else: it names commands, and it cannot tell
+     "this is loading" apart from "this is broken".
+
+     Driven by a list of steps rather than by the thing it happens to be waiting
+     for, so the long runs that today speak only through job-line - a build, a
+     destroy, an archive push - can be given the same dialog. -->
+<dialog id="stage" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[460px] max-w-[34rem]">
+  <p class="font-headline-md text-headline-md" id="stage-title">Getting your rig ready</p>
+  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md" id="stage-sub"></p>
+  <div class="flex flex-col gap-space-xs font-code-sm text-code-sm" id="stage-steps"></div>
+  <menu class="flex justify-end gap-space-sm mt-space-lg p-0">
+    <!-- Not a Cancel: the reads carry on and the window behind this works
+         already. It closes the dialog, for the rest of this window. -->
+    <button class="btn" id="stage-skip">Skip</button>
+  </menu>
+</dialog>
+
 <dialog id="confirm" class="rounded-lg bg-surface-container-low text-on-surface border border-surface-variant p-space-lg min-w-[460px] max-w-[560px]">
   <form method="dialog">
     <p class="font-headline-md text-headline-md" id="confirm-title"></p>

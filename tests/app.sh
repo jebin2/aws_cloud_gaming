@@ -177,7 +177,13 @@ done
 contains "quitting mid-run asks first"   "$main" "before-quit"
 contains "the cost refresh carries its price" "$(tr -s ' ' < app/renderer/index.html)" 'id="refresh-cost"'
 contains "  shown only on the cost screen" "$js" "refresh-cost').hidden = view !== 'cost'"
-check    "nothing is on a timer"             "$(grep -c 'setInterval\|setTimeout' app/renderer/app.js)" "0"
+# Nothing POLLS: a window that asked AWS something every so often would bill
+# for it without anyone touching the machine, and `cg cost` is $0.01 a call.
+check    "nothing repeats on a timer"        "$(grep -c 'setInterval' app/renderer/app.js)" "0"
+# One timer, and it starts no command: the opening popup waits this long before
+# showing itself, so a laptop that answers instantly never sees it.
+check    "the one timer is the popup's wait" "$(grep -c 'setTimeout' app/renderer/app.js)" "1"
+contains "  and it only shows a dialog"      "$js" 'stageTimer = setTimeout(() => {'
 # Two buttons fetch cost - the Cost tab's Refresh and the dashboard's Fetch -
 # and both say the price. Nothing else may run it.
 check    "  and cost runs only from a button" \
@@ -193,7 +199,7 @@ contains "the dashboard reads status"    "$js" "dashboard: [[['status', '--json'
 contains "the library reads its index"   "$js" "library:   [[['library', 'list', '--json']"
 contains "the guards read the watcher"   "$js" "guards:    [[['watcher', '--json']"
 contains "a screen's reads go together"  "$js" "await Promise.all(need.map("
-contains "every free read fires on open" "$js" "function refreshAll()"
+contains "every free read fires on open" "$js" "async function refreshAll({ narrate = false } = {})"
 contains "  and cost is not one of them" "$js" "it waits for its button"
 contains "  and load when it is opened"  "$js" "if (NEEDS[view] && !loaded.has(view)) refresh()"
 contains "refresh is per screen"         "$js" "const need = NEEDS[view]"
@@ -221,6 +227,58 @@ PY
 contains "  and hidden where it means nothing" "$js" "(!NEEDS[view] && view !== 'cost')" 
 contains "cost reads the same one call"  "$js" "runCg(['cost', '--json']"
 check    "no button is left mid-page"    "$(grep -c 'cost-run' app/renderer/index.html app/renderer/app.js | grep -vc ':0')" "0"
+
+echo "5a. the opening popup"
+# The header's job-line says "running: cg machines, cg refresh". That is cg's
+# vocabulary, and the only thing the window used to say while it opened.
+contains "there is a dialog for it"      "$html" 'id="stage"'
+contains "  with a list of steps"        "$html" 'id="stage-steps"'
+# Skip, not Cancel: the reads carry on and the window behind it already works.
+contains "  and a way out of it"         "$html" 'id="stage-skip"'
+contains "  that keeps it out"           "$js" 'stageSkipped = true'
+# Never a flash: a warm laptop answers everything in well under half a second.
+contains "nothing shows immediately"     "$js" 'const STAGE_SHOW_AFTER_MS'
+contains "  and not at all if it landed" "$js" "if (stageSteps.some(s => s.state === 'doing')) \$('stage').showModal()"
+# One line per read, keyed by the name the read is already filed under.
+contains "every read has a sentence"     "$js" 'const READ_STEP'
+# Inside the table, not anywhere in the file: RUN_NAME carries a `status` of
+# its own, and a count over the whole file passed for the wrong reason.
+steps=$(sed -n '/^const READ_STEP/,/^};/p' <<<"$js")
+for key in deps creds tskey config status guards library machines sweep; do
+  check "  $key has one"                 "$(grep -cE "^  $key: +'" <<<"$steps")" "1"
+done
+# cg's own words belong in the header. This dialog is for the other audience.
+check "no step names a command"          "$(grep -c 'cg ' <<<"$steps")" "0"
+# The verdict comes from the map every other screen already believes.
+contains "a failed read is marked failed" "$js" "readFailures.has(json) ? 'fail' : 'done'"
+# The popup is the window opening. After a build it would be a modal over the
+# screen you are reading.
+contains "only the opening narrates"     "$js" 'refreshAll({ narrate: true })'
+# A blocking problem ends the progress list either way: on the window opening
+# it becomes the ladder, and anywhere else it just goes.
+contains "  and a blocking problem ends it" "$js" 'if (problem && problem.blocking) {'
+
+echo "5a2. the setup ladder"
+# The banner shows the FIRST problem. On a fresh laptop that means four jobs
+# found one at a time, each after finishing the last, so the window opening
+# shows all of them with the button for each.
+contains "the prerequisites are a list"  "$js" 'function prereqs()'
+contains "  the banner takes the first"  "$js" "const unmet = prereqs().find(r => r.ok === false)"
+contains "  the ladder takes them all"   "$js" 'function stageLadder()'
+# Three-valued, because a rung whose read failed is not a rung that is met.
+contains "a rung can be unknown"         "$js" "if (r.ok === null) return { key: r.key, label: r.name, state: 'unknown'"
+# "AWS rejected this key" about a laptop with no CLI to ask with is a lie.
+contains "  and is, with no CLI to ask"  "$js" "ok: !credsNow ? null : credsNow.cli ? credsNow.valid === true : null"
+contains "  which the rung explains"     "$js" 'the one above it comes first'
+# Each rung's words are cg's, through the same problem object the banner shows.
+contains "a rung carries its own button" "$js" "action: { label: r.problem.label, go: r.problem.go }"
+contains "  and closes before it goes"   "$js" 'btn.onclick = () => { stageClose(); s.action.go(); }'
+# The optional token is not a prerequisite: nothing waits for it.
+check "the ladder has six rungs"         "$(sed -n '/^function prereqs()/,/^}/p' <<<"$js" | grep -c "^    { key:")" "6"
+lacks "  and the API token is not one"   "$(sed -n '/^function prereqs()/,/^}/p' <<<"$js")" "API token"
+# Skip silences the progress list; the ladder is the other message entirely.
+contains "skip does not hide the ladder" "$js" 'if (narrate && !stageSkipped) stageOpen('
+contains "  which replaces it on open"   "$js" 'if (!narrate || !stageLadder()) stageClose();'
 
 echo "5b. the build screen, as the design draws it"
 # The archive table, the allocation bar and the machine strip are the parts the

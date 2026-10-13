@@ -3170,48 +3170,70 @@ const ALL_READS = [
   [['sweep', '--cached', '--json'], 'sweep'],
 ];
 
-// What is wrong with this laptop, in the order it has to be fixed, and the one
-// button that fixes it. `blocking` means the rest of the reads are pointless
-// until it is dealt with.
+// What a box needs before it can be built, in the order it has to be met, each
+// with the one button that meets it.
+//
+// This used to be a ladder of `if`s that returned the first problem and nothing
+// else, because the banner only ever shows one. That is right for a problem
+// that turns up mid-session and wrong on a fresh laptop, where it means finding
+// out about four jobs one at a time, each after finishing the last. So the list
+// is a list, with a verdict for every rung: the banner takes the first unmet
+// one, the opening popup shows the whole thing.
+//
+// `ok` is three-valued. true met, false not met, and null NOT KNOWN - the read
+// behind it has not come back, or came back broken, or the rung above it has to
+// be dealt with before this one can be judged at all. A rung whose read failed
+// must never read as met.
 //
 // One sentence each. The old banner ran to three - cg's own sentence, then "Your
 // games are in S3; nothing here can see them until this is fixed", then where
 // the button was - which is a paragraph to say "the key does not work".
-function bannerProblem() {
+function prereqs() {
   const missing = depsNow ? (depsNow.tools || []).filter(x => !x.present).map(x => x.label) : [];
-  if (missing.length) {
-    return { blocking: true,
-             title: `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not installed`,
-             body: 'Nothing here can run without them.',
-             label: 'Open Dependencies', go: () => goView('deps') };
-  }
-  if (credsNow && !credsNow.cli) {
-    return { blocking: true, title: 'The AWS CLI is not installed',
-             body: 'Everything below is unknown, not empty.',
-             label: 'Open Dependencies', go: () => goView('deps') };
-  }
-  if (credsNow && credsNow.valid !== true) {
-    return { blocking: true, title: 'AWS rejected this access key',
-             body: 'Everything below is unknown, not empty.',
-             label: 'Set AWS key', go: () => goSetting($('s-creds-card')) };
-  }
-  if (tskeyNow && tskeyNow.signed_in === false) {
-    return { blocking: true, title: 'This laptop is not signed in to Tailscale',
-             body: 'The box has no public SSH port, so nothing here can reach it.',
-             label: 'Sign in', go: signInTailscale };
-  }
-  if (tskeyNow && !tskeyNow.auth_key_stored && !tskeyNow.can_mint) {
-    return { blocking: true, title: 'The box has no Tailscale auth key',
-             body: 'A build cannot join it to your tailnet without one.',
-             label: 'Set auth key', go: setAuthKey };
-  }
   const email = (config || []).find(r => r.key === 'EMAIL_ALERTS');
-  if (email && !email.is_set) {
-    return { blocking: true, title: 'No address for billing alerts',
-             body: 'A build sets a budget alarm and needs somewhere to send it.',
-             label: 'Set an address', go: () => goSetting(settingEl('EMAIL_ALERTS')) };
-  }
+  return [
+    { key: 'tools', name: 'The tools this rig needs are installed',
+      ok: depsNow ? !missing.length : null,
+      problem: { blocking: true,
+                 title: `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not installed`,
+                 body: 'Nothing here can run without them.',
+                 label: 'Open Dependencies', go: () => goView('deps') } },
+    { key: 'cli', name: 'The AWS CLI is installed',
+      ok: credsNow ? !!credsNow.cli : null,
+      problem: { blocking: true, title: 'The AWS CLI is not installed',
+                 body: 'Everything below is unknown, not empty.',
+                 label: 'Open Dependencies', go: () => goView('deps') } },
+    // Judged only once there is a CLI to ask with: "AWS rejected this key" is a
+    // lie about a laptop that could not ask AWS anything.
+    { key: 'key', name: 'Amazon accepts this access key',
+      ok: !credsNow ? null : credsNow.cli ? credsNow.valid === true : null,
+      problem: { blocking: true, title: 'AWS rejected this access key',
+                 body: 'Everything below is unknown, not empty.',
+                 label: 'Set AWS key', go: () => goSetting($('s-creds-card')) } },
+    { key: 'tailnet', name: 'This laptop is signed in to Tailscale',
+      ok: tskeyNow ? tskeyNow.signed_in !== false : null,
+      problem: { blocking: true, title: 'This laptop is not signed in to Tailscale',
+                 body: 'The box has no public SSH port, so nothing here can reach it.',
+                 label: 'Sign in', go: signInTailscale } },
+    { key: 'authkey', name: 'The box has a key to join your tailnet with',
+      ok: tskeyNow ? !!(tskeyNow.auth_key_stored || tskeyNow.can_mint) : null,
+      problem: { blocking: true, title: 'The box has no Tailscale auth key',
+                 body: 'A build cannot join it to your tailnet without one.',
+                 label: 'Set auth key', go: setAuthKey } },
+    { key: 'email', name: 'Billing alerts have somewhere to go',
+      ok: email ? !!email.is_set : null,
+      problem: { blocking: true, title: 'No address for billing alerts',
+                 body: 'A build sets a budget alarm and needs somewhere to send it.',
+                 label: 'Set an address', go: () => goSetting(settingEl('EMAIL_ALERTS')) } },
+  ];
+}
+
+function bannerProblem() {
+  const unmet = prereqs().find(r => r.ok === false);
+  if (unmet) return unmet.problem;
   // Not blocking: the token is optional, and everything else works without it.
+  // It is not a rung either - nothing waits for it - so it never joins the
+  // ladder, only the banner.
   if (tskeyNow && tskeyNow.present && tskeyNow.valid === false) {
     return { blocking: false, title: 'Tailscale rejected this API token',
              body: 'Dead nodes will not be pruned and key expiry stays on.',
@@ -3232,20 +3254,212 @@ function paintBanner() {
   return p;
 }
 
+// The opening popup: what the window is doing, while it does it.
+//
+// The only thing that used to say so was the header's job-line, which reads
+// "running: cg machines, cg refresh". That is cg's own vocabulary - correct,
+// and no help at all to someone who did not write cg. Worse, it looks the same
+// whether the window is loading or stuck.
+//
+// It is driven by a list of steps and nothing else, so the long runs that
+// currently speak only through job-line can be handed the same dialog later.
+//
+// Three rules:
+//   - never a flash. A warm laptop answers every one of these reads in well
+//     under half a second, and a modal that appears and disappears again is
+//     worse than no modal, so nothing is SHOWN until this long has passed with
+//     work still outstanding. The common case is that it never appears.
+//   - never a trap. The window behind it is already usable; Skip closes it and
+//     keeps it closed.
+//   - no Done to click. Whoever opened it closes it.
+const STAGE_SHOW_AFTER_MS = 400;
+// A marker, not an icon: the icon font is subsetted, and a glyph it does not
+// carry renders as a blank box - see the codepoint check in tests/app.sh.
+const STAGE_MARK = {
+  doing: ['\u2026', 'text-primary animate-pulse'],
+  done:  ['\u2713', 'text-primary'],
+  fail:  ['\u2717', 'text-error'],
+  wait:  ['\u00b7', 'text-outline-variant'],
+  // The ladder's two: something that needs you, and something that could not be
+  // judged - which is not the same as something that is fine.
+  todo:    ['\u2192', 'text-tertiary'],
+  unknown: ['?', 'text-outline'],
+};
+// One line per read, in a person's words. Keyed by the name the read is already
+// filed under, so a read cg grows cannot quietly arrive here without one.
+const READ_STEP = {
+  deps:     'Checking the tools this laptop needs',
+  creds:    'Asking Amazon whether your key works',
+  tskey:    'Checking the private link to the box',
+  config:   'Reading your settings',
+  status:   'Looking for a box that is already running',
+  guards:   'Checking the guards that end the bill',
+  library:  'Reading your game archive',
+  machines: 'Finding what this region rents',
+  sweep:    'Looking up the last region scan',
+};
+const stepsFor = reads => reads.map(([, json]) => ({ key: json, label: READ_STEP[json] || json }));
+
+let stageSteps = [];
+let stageTimer = null;
+let stageSkipped = false;        // said once, honoured for the rest of the window
+
+// `now` is for a popup with nothing to wait for: the ladder is drawn from reads
+// that have already come back, so delaying it would only be a blank screen.
+// A popup that is already up is refilled in place rather than reopened - which
+// is how the opening progress becomes the ladder, if it got that far.
+function stageOpen(title, sub, steps, { now = false, skip = 'Skip' } = {}) {
+  $('stage-title').textContent = title;
+  $('stage-sub').textContent = sub;
+  $('stage-skip').textContent = skip;
+  stageSteps = [];
+  stageAdd(steps);
+  if ($('stage').open) return;
+  if (now) return $('stage').showModal();
+  if (stageTimer !== null) return;
+  stageTimer = setTimeout(() => {
+    stageTimer = null;
+    // Everything landed inside the delay: there is nothing left to report, and
+    // opening now would be the flash this delay exists to prevent.
+    if (stageSteps.some(s => s.state === 'doing')) $('stage').showModal();
+  }, STAGE_SHOW_AFTER_MS);
+}
+
+// Mode two: not what the window is doing, but what needs YOU - all of it, at
+// once, with the button for each. Shown instead of the progress list when the
+// gate reads say a box cannot be built yet.
+//
+// It does not try to tick itself off as you work. Every button here leads to
+// another screen or another dialog, so each one closes this; the banner is
+// what guides the rest, and it is already right for one problem at a time.
+const COUNT_WORD = ['Nothing', 'One thing', 'Two things', 'Three things',
+                    'Four things', 'Five things', 'Six things'];
+function stageLadder() {
+  const rungs = prereqs();
+  const unmet = rungs.filter(r => r.ok === false);
+  if (!unmet.length) return false;
+  const steps = rungs.map((r, i) => {
+    if (r.ok === true) return { key: r.key, label: r.name, state: 'done' };
+    if (r.ok === null) return { key: r.key, label: r.name, state: 'unknown',
+      note: rungs.slice(0, i).some(x => x.ok === false)
+        ? 'not checked yet - the one above it comes first'
+        : 'cg could not check this one' };
+    return { key: r.key, label: r.problem.title, state: 'todo', note: r.problem.body,
+             action: { label: r.problem.label, go: r.problem.go } };
+  });
+  stageOpen(`${COUNT_WORD[unmet.length] || `${unmet.length} things`} to do before this can build a box`,
+            'Each one is a sign-in or a setting, and the window behind this works while you do '
+            + 'them. None of it costs anything.',
+            steps, { now: true, skip: "I'll do it later" });
+  return true;
+}
+
+// More steps for a popup that is already up: the reads come in two batches, and
+// the second batch is only worth listing once the first says it is worth asking.
+function stageAdd(steps) {
+  for (const s of steps)
+    if (!stageSteps.some(x => x.key === s.key)) stageSteps.push({ ...s, state: s.state || 'doing' });
+  paintStage();
+}
+
+function stageStep(key, state) {
+  const s = stageSteps.find(x => x.key === key);
+  if (!s) return;
+  s.state = state;
+  paintStage();
+}
+
+// Closing is the owner's call, not the last step's: between the two batches
+// every step is done and more are coming, which a popup that closed itself on
+// an empty list would read as "finished".
+function stageClose() {
+  if (stageTimer !== null) { clearTimeout(stageTimer); stageTimer = null; }
+  if ($('stage').open) $('stage').close();
+}
+
+function paintStage() {
+  const wrap = $('stage-steps');
+  if (!wrap) return;
+  wrap.textContent = '';
+  for (const s of stageSteps) {
+    const [mark, cls] = STAGE_MARK[s.state] || STAGE_MARK.wait;
+    const row = document.createElement('div');
+    // items-start, because a ladder rung is a line, a reason and a button, and
+    // its marker belongs beside the first of the three.
+    row.className = 'flex gap-space-sm items-start';
+    row.dataset.step = s.key;
+    row.dataset.state = s.state;
+    const m = document.createElement('span');
+    m.className = 'w-6 shrink-0 ' + cls;
+    m.textContent = mark;
+    const body = document.createElement('div');
+    body.className = 'min-w-0';
+    const label = document.createElement('div');
+    label.className = s.state === 'fail' ? 'text-error'
+      : s.state === 'todo' ? 'text-on-surface' : 'text-on-surface-variant';
+    label.textContent = s.label;
+    body.append(label);
+    if (s.note) {
+      const note = document.createElement('div');
+      note.className = 'text-outline';
+      note.textContent = s.note;
+      body.append(note);
+    }
+    if (s.action) {
+      const btn = document.createElement('button');
+      btn.className = 'btn mt-space-xs';
+      btn.textContent = s.action.label;
+      // Closed first: every one of these goes to a screen or a dialog, and a
+      // modal still up in front of it is the thing people click Cancel on.
+      btn.onclick = () => { stageClose(); s.action.go(); };
+      body.append(btn);
+    }
+    row.append(m, body);
+    wrap.append(row);
+  }
+}
+
+$('stage-skip').onclick = () => { stageSkipped = true; stageClose(); };
+
+// A read, and the popup's line for it. Whether it worked is read back from
+// readFailures rather than judged again here: that map is what every other
+// screen in this window already believes about the same read.
+function readStep(args, json, narrate) {
+  const p = runCg(args, { json });
+  return narrate ? p.then(() => stageStep(json, readFailures.has(json) ? 'fail' : 'done')) : p;
+}
+
 // On open: ask what this laptop can do, and only then ask AWS anything.
 //
 // It used to fire all nine reads at once. On a laptop with no AWS CLI that is
 // six reads that cannot work, a screen of unknowns, and the actual problem - a
 // missing tool - somewhere in the middle of it.
-async function refreshAll() {
-  await Promise.all(GATE_READS.map(([args, json]) => runCg(args, { json })));
+//
+// `narrate` is the window opening, which is the one time nobody has asked for
+// anything yet and a popup is welcome. The same function runs after a build or
+// a destroy, where a modal over the screen you are reading would be rude.
+async function refreshAll({ narrate = false } = {}) {
+  if (narrate && !stageSkipped) stageOpen('Getting your rig ready',
+    'Checking what this laptop has and what is already in your Amazon account. '
+    + 'None of it costs anything.', stepsFor(GATE_READS));
+  await Promise.all(GATE_READS.map(([args, json]) => readStep(args, json, narrate)));
   const problem = paintBanner();
   // A rejected API token is a banner, not a stop: everything else still works.
-  if (problem && problem.blocking) return;
+  //
+  // Something needs you. On the window opening, that is the ladder: the whole
+  // list, in order, with the button for each. Any other time - the refresh
+  // after a build, say - the banner has it, and a modal over the screen you
+  // are reading would only be in the way.
+  if (problem && problem.blocking) {
+    if (!narrate || !stageLadder()) stageClose();
+    return;
+  }
   for (const v of Object.keys(NEEDS)) loaded.add(v);
   // In parallel, because they share nothing and each screen paints when its own
   // answer lands. cg cost is not among them: it bills.
-  await Promise.all(ALL_READS.map(([args, json]) => runCg(args, { json })));
+  if (narrate) stageAdd(stepsFor(ALL_READS));
+  await Promise.all(ALL_READS.map(([args, json]) => readStep(args, json, narrate)));
+  stageClose();
   return firstScan();
 }
 
@@ -3530,4 +3744,4 @@ for (const link of document.querySelectorAll('.nav-item')) {
 // say "reading…", rather than being blank until two reads land.
 paintKeys();
 checkAsks();
-refreshAll();
+refreshAll({ narrate: true });

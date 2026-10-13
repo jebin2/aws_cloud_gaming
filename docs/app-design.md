@@ -25,6 +25,36 @@ command is free, and how often it may run.
 The last figures from a paid call are cached in `.cg-cache/` with their age; the app shows the age
 rather than asking again.
 
+## Opening the window
+
+The reads go in two batches - what this laptop has, then what is in the account - and a popup
+(`#stage`) says which is happening, one plain line per read, with no command names in it. The
+header's `job-line` keeps cg's own vocabulary; it is for whoever is working on cg.
+
+| Case | What appears |
+|---|---|
+| warm laptop, everything configured | **nothing**. The popup waits `STAGE_SHOW_AFTER_MS` (400 ms) before showing, and every read lands first |
+| a slow or missing network | the popup, with the step it is waiting on still spinning |
+| a read that answers but cannot be painted | that step marked failed - the one place this shows, since the header's failure line is overwritten by the next read to finish |
+| something needs the person (no key, no tailnet, no alert address) | the **ladder**: every prerequisite with a verdict, and the one button that meets each unmet one |
+
+The prerequisites are one list (`prereqs()`), not a chain of `if`s that returns the first
+problem. Each rung's verdict is three-valued - met, not met, or **not known**, which is what a read
+that failed or a rung that depends on an earlier one gives: "AWS rejected this key" about a laptop
+with no CLI to ask with is a lie. The banner shows the first unmet rung, which is right for a
+problem that turns up mid-session; the ladder shows all of them, which is right for a fresh
+install, where the banner meant finding out about four jobs one at a time. Both read the same
+sentences, so neither can drift. The Tailscale API token is not a rung - nothing waits for it - so
+it stays banner-only.
+
+A rung's button closes the dialog before it navigates, and the ladder does not try to tick itself
+off while you work: after the first click the banner guides the rest.
+
+Rules: it is only shown by the window opening (`refreshAll({ narrate: true })`), never by the
+refresh that follows a build; `Skip` closes it for the rest of the window; nothing in it is ever
+the only way to do anything, because the window behind it already works. Every read it reports on
+is free.
+
 ## Dashboard
 
 | Field | Source | Free | Notes |
