@@ -34,7 +34,10 @@ echo "2. it is a dropdown in Settings"
 cfg=$(cat lib/config.sh); app=$(cat app/renderer/app.js)
 contains "the registry calls it a choice" "$cfg" "GAME_STEAM_LOGIN|choice|use|use,fresh|"
 contains "  with both values"             "$cfg" "use,fresh"
-contains "the settings list names it"     "$app" "GAME_STEAM_LOGIN: 'Steam sign-in'"
+# The name belongs to the registry, not to the window: the app used to keep
+# its own table, so a setting cg grew showed up as a raw GAME_SHOUTING_KEY.
+contains "the registry names it"          "$cfg" "Steam sign-in"
+contains "  and files it with the build settings" "$cfg" "Steam sign-in|The box"
 contains "  and labels what it chose"     "$app" "use: 'use the archived login'"
 contains "  including the other value"    "$app" "fresh: 'sign in fresh on the box'"
 

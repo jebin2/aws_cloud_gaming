@@ -454,8 +454,15 @@ contains "  and cleared"                 "$html" 'id="log-clear"'
 check    "  it keeps a bounded number"   "$(grep -c "log.children.length > 2000" app/renderer/app.js)" "1"
 contains "the watchdog's own log is reachable" "$js" "runCg(['watchdog', 'logs']"
 contains "  and reading it is free"      "$html" "costs nothing to read"
-contains "settings are grouped"          "$js" "const SETTING_GROUPS = ["
-contains "  a new setting still appears" "$js" "New settings cg knows about"
+# Which card a setting belongs on is cg's answer now; this file keeps the
+# ORDER of the cards and the sentence under each heading, which is layout.
+contains "the registry carries the grouping" "$(./cg config --json)" '"group"'
+contains "  and the name to show"            "$(./cg config --json)" '"label"'
+contains "the app keeps only the order"      "$js" "const GROUP_ORDER = ["
+# A setting cg grows appears without touching this file at all - and one with
+# no group is on a card of its own, deliberately absent from the list.
+contains "  grouped by what cg said"     "$js" "byGroup.get(r.group).push(r.key)"
+contains "  including a group it has never heard of" "$js" "!GROUP_ORDER.includes(name)"
 contains "  and the screen says how it saves" "$html" "cg config set"
 lacks    "  not by editing the file"     "$html" "or by editing the file"
 # The archive's destructive actions were unreachable: the orphan line said

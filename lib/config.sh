@@ -10,28 +10,37 @@
 # whitespace, so bash's `read` collapses two in a row and every later column
 # slides one to the left - an empty default silently became the note.
 #   kind   number | text | choice | secret | ntfy | email
+#   label  what a person calls it. The app kept its own table of these, so a
+#          setting cg grew showed up in the window as a raw GAME_SHOUTING_KEY
+#          until someone remembered to add it there too.
+#   group  which card it belongs on, for the same reason. Empty means it has a
+#          card of its own and does not belong in the list at all.
+#   label  what a person calls it. The app used to keep its own table of these,
+#          which meant a setting cg grew appeared in the window as a raw
+#          GAME_SHOUTING_KEY until someone added it there too.
+#   group  which card it belongs on, for the same reason.
 #   rule   number: the minimum. choice: the allowed values, comma separated.
 CONFIG_ROWS() {
   cat <<'ROWS'
-GAME_DISK_GB|number|50|30|Root disk in GB. Cannot be shrunk later; applies to the next build.
-GAME_ARCHIVE_EXPIRY_DAYS|number|14|0|Days with no box before the cloud watchdog deletes the archive. 0 keeps it forever.
-GAME_INSTANCE_TYPE|text|g6.xlarge||The EC2 instance type. Its GPU quota must cover it.
-GAME_REGION|region|ap-south-2||The AWS region everything lives in. Changing it starts over: the archive does not follow.
-GAME_SPOT|choice|auto|auto,1,0|Purchase model: spot, on demand, or spot whenever the quota allows.
-GAME_STEAM_LOGIN|choice|use|use,fresh|Whether a new box restores the archived Steam login, or asks you to sign in.
-GAME_BUDGET_INR|number|5000|100|Monthly budget. It emails you; it stops nothing.
-GAME_WATCHDOG_IDLE_MIN|number|30|10|Minutes of quiet before the cloud watchdog ends the box.
-GAME_WATCHDOG_STUCK_MIN|number|60|40|Minutes before a stuck shutdown is forced. Never inside the push's 30.
-GAME_NTFY_URL|ntfy|||Phone notifications: an ntfy topic or full URL. Empty turns them off.
-TAILSCALE_API_KEY|secret|||Tailscale API token. Prunes old nodes and turns off key expiry. Empty goes without.
-EMAIL_ALERTS|email|||Where budget alerts are sent. Comma separated for several.
-GAME_RES|text|||Moonlight resolution, e.g. 1920x1080. Empty leaves Moonlight's own setting.
-GAME_FPS|number|60|24|Moonlight frame rate.
-GAME_BITRATE_KBPS|number|20000|500|Moonlight bitrate. Lower it to cut streaming egress proportionally.
+GAME_DISK_GB|number|50|30|Root disk in GB. Cannot be shrunk later; applies to the next build.|root disk (GB)|The box
+GAME_ARCHIVE_EXPIRY_DAYS|number|14|0|Days with no box before the cloud watchdog deletes the archive. 0 keeps it forever.|archive expiry (days)|The guards
+GAME_INSTANCE_TYPE|text|g6.xlarge||The EC2 instance type. Its GPU quota must cover it.|instance type|The box
+GAME_REGION|region|ap-south-2||The AWS region everything lives in. Changing it starts over: the archive does not follow.|region|The box
+GAME_SPOT|choice|auto|auto,1,0|Purchase model: spot, on demand, or spot whenever the quota allows.|purchase model|The box
+GAME_STEAM_LOGIN|choice|use|use,fresh|Whether a new box restores the archived Steam login, or asks you to sign in.|Steam sign-in|The box
+GAME_BUDGET_INR|number|5000|100|Monthly budget. It emails you; it stops nothing.|monthly budget (INR)|The guards
+GAME_WATCHDOG_IDLE_MIN|number|30|10|Minutes of quiet before the cloud watchdog ends the box.|cloud watchdog idle (min)|The guards
+GAME_WATCHDOG_STUCK_MIN|number|60|40|Minutes before a stuck shutdown is forced. Never inside the push's 30.|stuck shutdown forced after (min)|The guards
+GAME_NTFY_URL|ntfy|||Phone notifications: an ntfy topic or full URL. Empty turns them off.|phone notifications|Notifications
+TAILSCALE_API_KEY|secret|||Tailscale API token. Prunes old nodes and turns off key expiry. Empty goes without.|Tailscale API token|
+EMAIL_ALERTS|email|||Where budget alerts are sent. Comma separated for several.|billing alerts to|Notifications
+GAME_RES|text|||Moonlight resolution, e.g. 1920x1080. Empty leaves Moonlight's own setting.|stream resolution|The stream
+GAME_FPS|number|60|24|Moonlight frame rate.|stream fps|The stream
+GAME_BITRATE_KBPS|number|20000|500|Moonlight bitrate. Lower it to cut streaming egress proportionally.|stream bitrate (kbps)|The stream
 ROWS
 }
 
-config_field() { # config_field <key> <1-5>
+config_field() { # config_field <key> <1-7>  (5 note, 6 label, 7 group)
   CONFIG_ROWS | awk -F'|' -v k="$1" -v f="$2" '$1 == k { print $f; exit }'
 }
 
@@ -75,11 +84,19 @@ import json, os, sys
 out = []
 for line in sys.stdin:
     if not line.strip(): continue
-    key, kind, default, rule, note = (line.rstrip("\n").split("|") + [""] * 5)[:5]
+    key, kind, default, rule, note, label, group = (line.rstrip("\n").split("|") + [""] * 7)[:7]
     raw = os.environ.get(key)
     secret = kind in ("secret", "ntfy")
     out.append({
         "key": key, "kind": kind, "note": note,
+        # What to call it, and where it belongs. Both used to live in the app.
+        "label": label or key,
+        # Empty: it has a card of its own and does not belong in the list.
+        "group": group or None,
+        "label": label or key,
+        # Empty group: a setting with a card of its own, which the app shows
+        # there instead of in the list.
+        "group": group or None,
         "default": default or None,
         "rule": rule or None,
         "secret": secret,
@@ -124,7 +141,7 @@ config_get() {
 config_show() { # the human view
   local key kind default rule note value
   printf '  %-28s %-12s %s\n' "SETTING" "VALUE" "NOTE"
-  while IFS='|' read -r key kind default rule note; do
+  while IFS='|' read -r key kind default rule note label group; do
     [[ -n $key ]] || continue
     value=${!key-}
     if [[ $kind == secret || $kind == ntfy ]]; then

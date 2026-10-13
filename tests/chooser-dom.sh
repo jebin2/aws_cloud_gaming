@@ -75,13 +75,13 @@ const SWEEP = {
 };
 const CONFIG = [
   { key: 'GAME_REGION', kind: 'region', note: 'region', default: 'ap-south-2',
-    rule: null, secret: false, is_set: true, value: 'ap-south-1', effective: 'ap-south-1' },
+    rule: null, secret: false, is_set: true, value: 'ap-south-1', effective: 'ap-south-1' , label: 'region', group: 'The box' },
   { key: 'GAME_INSTANCE_TYPE', kind: 'text', note: 'type', default: 'g6.xlarge',
-    rule: null, secret: false, is_set: true, value: 'g4dn.xlarge', effective: 'g4dn.xlarge' },
+    rule: null, secret: false, is_set: true, value: 'g4dn.xlarge', effective: 'g4dn.xlarge' , label: 'instance type', group: 'The box' },
   { key: 'GAME_SPOT', kind: 'choice', note: 'model', default: 'auto', rule: 'auto,1,0',
-    secret: false, is_set: true, value: '0', effective: '0' },
+    secret: false, is_set: true, value: '0', effective: '0' , label: 'purchase model', group: 'The box' },
   { key: 'GAME_DISK_GB', kind: 'number', note: 'disk', default: '50', rule: '30',
-    secret: false, is_set: true, value: '50', effective: '50' },
+    secret: false, is_set: true, value: '50', effective: '50' , label: 'root disk (GB)', group: 'The box' },
 ];
 const MACHINES = {
   region: 'ap-south-1', configured: 'g4dn.xlarge', spot: '0', inr_per_usd: 88,

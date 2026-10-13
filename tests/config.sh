@@ -93,6 +93,15 @@ out=$(cg_ config)
 contains "a table of settings"           "$out" "SETTING"
 contains "  values"                      "$out" "GAME_DISK_GB"
 contains "  notes"                       "$out" "Cannot be shrunk later"
+# The note ENDS there. Two columns were added after it and `read` with five
+# names put both of them inside the note - the same column-slide the registry
+# comment warns about, one row later, and the table showed it.
+lacks    "  and nothing after them"      "$out" "applies to the next build.|"
+contains "the registry carries a label"  "$(cg_ config --json)" '"label"'
+contains "  and a group"                 "$(cg_ config --json)" '"group"'
+check    "  a card of its own has no group" \
+         "$(cg_ config --json | python3 -c 'import json,sys
+print([r["group"] for r in json.load(sys.stdin) if r["key"] == "TAILSCALE_API_KEY"][0])')" "None"
 contains "  secrets as set or not"       "$out" "not set"
 lacks    "  and never a secret's value"  "$out" "tskey-api-abc123"
 

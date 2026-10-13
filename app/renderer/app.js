@@ -1004,7 +1004,7 @@ function paintGuards(d) {
     const left = document.createElement('div');
     const n = document.createElement('p');
     n.className = 'font-code-md text-code-md';
-    n.textContent = LABEL[r.key] || r.key;
+    n.textContent = label(r);
     const note = document.createElement('p');
     note.className = 'font-code-sm text-code-sm text-outline mt-0.5';
     note.textContent = r.note;
@@ -1057,16 +1057,10 @@ function paintGuards(d) {
 // Every row comes from `cg config --json`, and every change goes back through
 // `cg config set`, which validates it and writes .env. The app never touches
 // the file, and never sees a secret: it can replace one, not read it.
-const LABEL = {
-  GAME_DISK_GB: 'root disk (GB)', GAME_ARCHIVE_EXPIRY_DAYS: 'archive expiry (days)',
-  GAME_INSTANCE_TYPE: 'instance type', GAME_REGION: 'region', GAME_SPOT: 'purchase model',
-  GAME_STEAM_LOGIN: 'Steam sign-in',
-  GAME_BUDGET_INR: 'monthly budget (₹)', GAME_WATCHDOG_IDLE_MIN: 'cloud watchdog idle (min)',
-  GAME_WATCHDOG_STUCK_MIN: 'stuck shutdown forced after (min)',
-  GAME_NTFY_URL: 'phone notifications', TAILSCALE_API_KEY: 'Tailscale API token',
-  EMAIL_ALERTS: 'billing alerts to', GAME_RES: 'stream resolution',
-  GAME_FPS: 'stream fps', GAME_BITRATE_KBPS: 'stream bitrate (kbps)',
-};
+// A setting's name is cg's to give: `cg config --json` carries `label` and
+// `group`. This file kept its own table of both, so a setting cg grew appeared
+// in the window as a raw GAME_SHOUTING_KEY until someone added it here too.
+const label = r => r.label || r.key;
 
 // --- Dependencies -----------------------------------------------------------
 // The tools cg needs on this laptop. It exists because a new laptop reports
@@ -1963,16 +1957,16 @@ function settingValue(r) {
 // Settings, grouped the way the rig is actually thought about: what the box is,
 // what stops it costing money, how the stream looks, and who gets told. The
 // order and the groups are the app's; every row, rule and value is cg's.
-const SETTING_GROUPS = [
-  ['The box', 'Applies at the next build. A disk cannot be shrunk later.',
-   ['GAME_INSTANCE_TYPE', 'GAME_REGION', 'GAME_SPOT', 'GAME_DISK_GB', 'GAME_STEAM_LOGIN']],
-  ['The guards', 'What the watchdogs wait for, and what the archive costs you to keep.',
-   ['GAME_WATCHDOG_IDLE_MIN', 'GAME_WATCHDOG_STUCK_MIN', 'GAME_ARCHIVE_EXPIRY_DAYS', 'GAME_BUDGET_INR']],
-  ['The stream', 'Passed to Moonlight as flags, so your saved settings stay untouched.',
-   ['GAME_RES', 'GAME_FPS', 'GAME_BITRATE_KBPS']],
-  ['Notifications', 'Where cg reaches you.',
-   ['GAME_NTFY_URL', 'EMAIL_ALERTS']],
-];
+// The cards, in order, and the sentence under each heading. WHICH settings land
+// on which card is cg's answer - every row carries its own `group` - and this
+// is the layout around them.
+const GROUP_NOTE = {
+  'The box': 'Applies at the next build. A disk cannot be shrunk later.',
+  'The guards': 'What the watchdogs wait for, and what the archive costs you to keep.',
+  'The stream': 'Passed to Moonlight as flags, so your saved settings stay untouched.',
+  'Notifications': 'Where cg reaches you.',
+};
+const GROUP_ORDER = ['The box', 'The guards', 'The stream', 'Notifications'];
 
 function paintConfig(rows) {
   config = rows;
@@ -1985,12 +1979,22 @@ function paintConfig(rows) {
   $('s-age').textContent = new Date().toLocaleTimeString();
 
   const seen = new Set();
-  const groups = SETTING_GROUPS.map(([title, note, keys]) => [title, note, keys]);
-  // Anything cg grows that this file has not heard of still appears, rather
-  // than vanishing because the app did not know where to put it.
-  const known = new Set(groups.flatMap(g => g[2]));
-  const rest = rows.filter(r => !known.has(r.key) && !OWN_CARD.has(r.key)).map(r => r.key);
-  if (rest.length) groups.push(['Everything else', 'New settings cg knows about.', rest]);
+  // Built from what cg said. A setting with no group has a card of its own and
+  // is deliberately absent from this list; one in a group this file has never
+  // heard of still gets a card, because cg knowing about it is what matters.
+  const byGroup = new Map();
+  for (const r of rows) {
+    if (!r.group) continue;
+    if (!byGroup.has(r.group)) byGroup.set(r.group, []);
+    byGroup.get(r.group).push(r.key);
+  }
+  const groups = [];
+  for (const name of GROUP_ORDER) {
+    if (byGroup.has(name)) groups.push([name, GROUP_NOTE[name] || '', byGroup.get(name)]);
+  }
+  for (const [name, keys] of byGroup) {
+    if (!GROUP_ORDER.includes(name)) groups.push([name, GROUP_NOTE[name] || '', keys]);
+  }
 
   for (const [title, note, keys] of groups) {
     const present = keys.map(k => rows.find(r => r.key === k)).filter(Boolean);
@@ -2012,12 +2016,6 @@ function paintConfig(rows) {
   }
 }
 
-// Settings that are shown and set on a card of their own, so they are not also
-// a row in the list below it. TAILSCALE_API_KEY lived under "Being told" with
-// the ntfy topic, as "the token that keeps the tailnet tidy" - true, and no
-// help at all when it is the thing that mints the box's key.
-const OWN_CARD = new Set(['TAILSCALE_API_KEY']);
-
 // The three settings the chooser table owns. They are one decision, so they
 // have one control - see chooseMachine.
 const CHOSEN_IN_TABLE = new Set(['GAME_REGION', 'GAME_INSTANCE_TYPE', 'GAME_SPOT']);
@@ -2032,7 +2030,7 @@ function settingRow(r) {
   left.className = 'min-w-0 flex-1';
   const name = document.createElement('p');
   name.className = 'font-code-md text-code-md';
-  name.textContent = LABEL[r.key] || r.key;
+  name.textContent = label(r);
   const note = document.createElement('p');
   note.className = 'font-code-sm text-code-sm text-outline mt-0.5';
   note.textContent = r.note;
@@ -2132,7 +2130,7 @@ function editSetting(r, row) {
   save.onclick = async () => {
     const value = input.value.trim();
     if (r.secret && !value && r.is_set && !(await askConfirm({
-          title: `Clear ${LABEL[r.key] || r.key}?`,
+          title: `Clear ${label(r)}?`,
           body: 'It will be remembered as "go without", and cg check --fix will not ask again.',
           yes: 'Clear', danger: true,
         }))) return;

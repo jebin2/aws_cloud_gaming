@@ -52,19 +52,19 @@ cat > "$T/r/probe.js" <<'PROBE'
 (() => {
   const R = [
     { key:'GAME_INSTANCE_TYPE', kind:'text', value:'g4dn.xlarge', default:'g4dn.xlarge',
-      is_set:true, secret:false, note:'The GPU box.' },
+      is_set:true, secret:false, note:'The GPU box.', label:'instance type', group:'The box' },
     { key:'GAME_DISK_GB', kind:'number', value:'80', default:'50', rule:'30',
-      is_set:true, secret:false, note:'Root disk. Cannot be shrunk later.' },
+      is_set:true, secret:false, note:'Root disk. Cannot be shrunk later.', label:'root disk (GB)', group:'The box' },
     { key:'GAME_STEAM_LOGIN', kind:'choice', value:null, default:'use', rule:'use,fresh',
       is_set:false, secret:false,
-      note:'Whether a new box restores the archived Steam login, or asks you to sign in.' },
+      note:'Whether a new box restores the archived Steam login, or asks you to sign in.', label:'Steam sign-in', group:'The box' },
     { key:'GAME_NTFY_URL', kind:'text', value:null, default:null, is_set:true, secret:true,
-      note:'Phone notifications: an ntfy topic or full URL. Empty turns them off.' },
+      note:'Phone notifications: an ntfy topic or full URL. Empty turns them off.', label:'phone notifications', group:'Notifications' },
     { key:'EMAIL_ALERTS', kind:'text', is_set:true, secret:false, default:null,
       value:'someone@example.com,someone.else.with.a.long.address@example.com',
-      note:'Where budget alerts are sent. Comma separated for several.' },
+      note:'Where budget alerts are sent. Comma separated for several.', label:'billing alerts to', group:'Notifications' },
     { key:'TAILSCALE_API_KEY', kind:'text', value:null, default:null, is_set:false, secret:true,
-      note:'Tailscale API token. Prunes old nodes and turns off key expiry. Empty goes without.' },
+      note:'Tailscale API token. Prunes old nodes and turns off key expiry. Empty goes without.', label:'Tailscale API token', group:null },
   ];
   const out = [];
   const R2 = e => Math.round(e.getBoundingClientRect().right);
@@ -74,7 +74,7 @@ cat > "$T/r/probe.js" <<'PROBE'
       sec.hidden = sec.dataset.view !== 'settings';
     for (const r of R) {
       const row = [...document.querySelectorAll('#s-groups .row')]
-        .find(el => el.textContent.includes(LABEL[r.key] || r.key));
+        .find(el => el.textContent.includes(r.label || r.key));
       // A setting with a card of its own has no row in the list - see OWN_CARD.
       if (!row) { out.push(r.key + ' | NOROW'); continue; }
       const card = row.closest('.rounded-lg');
