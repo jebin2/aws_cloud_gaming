@@ -10,15 +10,11 @@
 # whitespace, so bash's `read` collapses two in a row and every later column
 # slides one to the left - an empty default silently became the note.
 #   kind   number | text | choice | secret | ntfy | email
-#   label  what a person calls it. The app kept its own table of these, so a
-#          setting cg grew showed up in the window as a raw GAME_SHOUTING_KEY
-#          until someone remembered to add it there too.
-#   group  which card it belongs on, for the same reason. Empty means it has a
-#          card of its own and does not belong in the list at all.
 #   label  what a person calls it. The app used to keep its own table of these,
 #          which meant a setting cg grew appeared in the window as a raw
 #          GAME_SHOUTING_KEY until someone added it there too.
-#   group  which card it belongs on, for the same reason.
+#   group  which card it belongs on, for the same reason. Empty means it has a
+#          card of its own and does not belong in the list at all.
 #   rule   number: the minimum. choice: the allowed values, comma separated.
 CONFIG_ROWS() {
   cat <<'ROWS'
@@ -90,9 +86,6 @@ for line in sys.stdin:
     out.append({
         "key": key, "kind": kind, "note": note,
         # What to call it, and where it belongs. Both used to live in the app.
-        "label": label or key,
-        # Empty: it has a card of its own and does not belong in the list.
-        "group": group or None,
         "label": label or key,
         # Empty group: a setting with a card of its own, which the app shows
         # there instead of in the list.

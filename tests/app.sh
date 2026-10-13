@@ -151,6 +151,29 @@ contains "  and a read waits only for a write" "$main" "find(j => !j.readOnly)"
 contains "the verdict travels with the job" "$main" "write: !readOnly"
 contains "  and the renderer uses it"    "$js" "j.write"
 lacks    "  with no list of its own"     "$js" "const WRITES = new Set("
+# The ids cg asks under are cg's. The window answers two of them from a dialog
+# it has already shown - and when an id is renamed in cg, that pre-answer
+# silently stops matching and a modal appears in the middle of a build.
+asks=$(python3 -I -c 'import json,sys
+print(" ".join(json.load(sys.stdin)["asks"]))' <<<"$contract")
+contains "cg lists what it asks for"     "$asks" "aws-access-key-id"
+contains "  including the ones with a dialog" "$asks" "tailscale-auth-key"
+contains "the main process hands the list over" "$main" "ipcMain.handle('cg:asks'"
+contains "  across the bridge"           "$(cat app/main/preload.js)" "cg:asks"
+contains "the window checks its own names against it" "$js" "async function checkAsks()"
+contains "  and says so when they differ" "$js" "cg no longer asks under"
+# Every id the window names must be one cg actually asks under.
+for id in $(python3 -I -c "
+import re, sys
+src = open('app/renderer/app.js').read()
+block = re.search(r'const ASK = \{(.*?)\n\};', src, re.S).group(1)
+print(' '.join(re.findall(r\"'([^']+)'\", block)))"); do
+  contains "  $id is one of cg's"        "$asks" "$id"
+done
+# And each is written down once: a second copy is the drift this removed.
+for id in aws-access-key-id aws-secret-access-key tailscale-api-token tailscale-auth-key; do
+  check  "  $id appears once"            "$(grep -c "'$id'" app/renderer/app.js)" "1"
+done
 contains "quitting mid-run asks first"   "$main" "before-quit"
 contains "the cost refresh carries its price" "$(tr -s ' ' < app/renderer/index.html)" 'id="refresh-cost"'
 contains "  shown only on the cost screen" "$js" "refresh-cost').hidden = view !== 'cost'"
@@ -344,8 +367,14 @@ contains "  what each game costs"         "$js" "money(g.usd_month)"
 contains "  and a total row"              "$html" 'id="lib-foot"'
 contains "  over capacity is not capped at 100%" "$js" '$('"'"'lib-fit-num'"'"').textContent = `${Math.round((gb / cap) * 100)}%`'
 contains "  it says what a running box means" "$js" "this is the last push"
+# A fallback that looks like an answer is worse than no answer: the app used to
+# print 209 GB of box disk and a rupee rate of 88 when cg had told it neither.
+check    "no disk size is guessed"        "$(grep -c '|| 209' app/renderer/app.js)" "0"
+check    "  nor a starting value for one"  "$(grep -c 'selectable_gb: 209' app/renderer/app.js)" "0"
+contains "  it says it does not know"     "$js" "how much a box offers is not known yet"
+check    "no exchange rate is guessed"    "$(grep -c 'inr_per_usd || 88' app/renderer/app.js)" "0"
 contains "cost shows the billing cycle"   "$html" 'id="c-cycle"'
-contains "  the month projected against the budget" "$js" "(m.total_usd / day) * days"
+contains "  the month projected against the budget" "$js" "m.projected_usd"
 contains "  which only emails"            "$js" "emails you and stops nothing"
 contains "  dollars beside rupees"        "$html" "TOTAL ($)"
 contains "  the archive as its own card"  "$html" 'id="c-arch-card"'

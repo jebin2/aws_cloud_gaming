@@ -8,6 +8,7 @@
 #
 # Days with nothing billed are left out and counted at the end: an idle month is
 # mostly empty days, and printing thirty "0.00" rows hides the days that matter.
+import calendar
 import json
 import sys
 
@@ -47,6 +48,33 @@ def aggregate(days):
             t["q"] += float(g["q"])
     out = [{"u": t["u"], "c": "%.10f" % t["c"], "q": "%.6f" % t["q"]} for t in totals.values()]
     json.dump(out, sys.stdout)
+
+
+def project(days, month_total):
+    """Where the month is heading if the rest of it looks like the part that has
+    already happened.
+
+    The window asked of Cost Explorer starts on the 1st and ends tomorrow, so
+    the answer carries one entry per day elapsed, today included - which is the
+    divisor, taken from the data rather than from this machine's clock.
+
+    The window's own first date says which month it is, and therefore how many
+    days it has; the app used to work this out in the renderer, which meant the
+    terminal could not say it at all.
+    """
+    if not days or month_total <= 0:
+        return {"days_elapsed": len(days), "days_in_month": None,
+                "projected_usd": None, "projected_inr": None}
+    elapsed = len(days)
+    try:
+        year, mon = (int(x) for x in str(days[0].get("d", "")).split("-")[:2])
+        in_month = calendar.monthrange(year, mon)[1]
+    except (TypeError, ValueError):
+        return {"days_elapsed": elapsed, "days_in_month": None,
+                "projected_usd": None, "projected_inr": None}
+    usd = month_total / elapsed * in_month
+    return {"days_elapsed": elapsed, "days_in_month": in_month,
+            "projected_usd": round(usd, 4), "projected_inr": round(usd * INR)}
 
 
 def table(days):
@@ -93,6 +121,12 @@ def table(days):
               % (empty, INR))
     else:
         print("  USD, and INR at %d." % INR)
+    pr = project(days, month_total)
+    if pr["projected_usd"] is not None and pr["days_elapsed"] < pr["days_in_month"]:
+        print("  On this pace: %.2f USD / %d INR by the end of the month"
+              " (%d of its %d days so far)."
+              % (pr["projected_usd"], pr["projected_inr"],
+                 pr["days_elapsed"], pr["days_in_month"]))
 
 
 def as_json(days):
@@ -127,6 +161,8 @@ def as_json(days):
         "usage": sorted(({"type": u["type"], "qty": round(u["qty"], 4), "usd": round(u["usd"], 4)}
                          for u in usage.values()), key=lambda x: -x["usd"]),
         "total_usd": month, "total_inr": round(month * INR),
+        # The same arithmetic the window used to do for itself.
+        **project(days, month),
         "hours": {k: round(v, 2) for k, v in hours.items()},
         "usd_per_hour": rates,
         "egress": {"gb_used": round(out_gb, 2), "gb_free": 100.0,

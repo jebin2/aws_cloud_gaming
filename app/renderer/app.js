@@ -229,10 +229,35 @@ function ask(id, event) {
 // Keyed <ask id>:<answer>. Distinct from CHOICE_LABEL further down, which maps
 // a SETTING to labels for its values - same idea, different shape, and sharing
 // one name for both silently shadowed the other.
-const ASK_CHOICE_LABEL = {
-  'session-end:d': 'destroy the box (recommended - the games are mirrored to S3)',
-  'session-end:n': 'leave it running (it keeps billing by the hour)',
+// The ask ids this window knows by name: the ones it answers from a dialog it
+// has already shown, and the one whose answers it spells out below. cg owns
+// these ids; they are written here only to be matched, and checkAsks() holds
+// the two lists against each other at startup so a rename in cg is loud.
+const ASK = {
+  awsId:      'aws-access-key-id',
+  awsSecret:  'aws-secret-access-key',
+  tsToken:    'tailscale-api-token',
+  tsAuthKey:  'tailscale-auth-key',
+  sessionEnd: 'session-end',
 };
+const ASK_CHOICE_LABEL = {
+  [`${ASK.sessionEnd}:d`]: 'destroy the box (recommended - the games are mirrored to S3)',
+  [`${ASK.sessionEnd}:n`]: 'leave it running (it keeps billing by the hour)',
+};
+// Any id the window pre-answers but cg no longer asks under is a modal waiting
+// to appear in the middle of a build - which is exactly what this replaced.
+async function checkAsks() {
+  let asks;
+  try { asks = await window.cg.asks(); } catch { return; }
+  if (!Array.isArray(asks) || !asks.length) return;   // cg could not be asked
+  const gone = Object.values(ASK).filter(id => !asks.includes(id));
+  if (gone.length) {
+    console.error('cg no longer asks under: ' + gone.join(', ')
+                  + ' - a dialog here will not be used to answer it');
+    note(`This app expects cg to ask for ${gone.join(', ')}, and it does not. `
+         + 'The app and cg are different versions.', 'text-error');
+  }
+}
 
 const GB = bytes => (bytes / 1073741824).toFixed(1) + ' GB';
 function uptime(iso) {
@@ -452,10 +477,10 @@ function paintSpend(d) {
     bar.title = `${day.date}: ${INR(day.total * inr)}`;
     spark.append(bar);
   }
-  const now = new Date();
-  const inMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  $('d-projected').textContent = m.total_usd != null
-    ? `projected ${INR((m.total_usd / now.getDate()) * inMonth * inr)} this month`
+  // cg projects the month - it has the billed window and the day count. The
+  // window renders that number; it does not work out one of its own.
+  $('d-projected').textContent = m.projected_inr != null
+    ? `projected ${INR(m.projected_inr)} this month`
     : 'projected —';
 }
 
@@ -483,8 +508,7 @@ function paintCost(d) {
   // The month projected at today's pace, against the budget cg set up. The
   // budget only emails; saying so is the honest part.
   const cap = d.resources && d.resources.budget_usd;
-  const day = now.getDate(), days = last.getDate();
-  const projected = m.total_usd != null ? (m.total_usd / day) * days : null;
+  const projected = m.projected_usd ?? null;
   $('c-cap-wrap').hidden = !cap;
   $('c-cap-chip').hidden = !cap;
   if (cap && projected != null) {
@@ -625,7 +649,10 @@ function paintLibrary(d) {
     return;
   }
   const gb = (d.total_bytes || 0) / 1073741824;
-  const cap = d.selectable_gb || 209;
+  // How much a box offers is cg's number. When the read could not say,
+  // the screen says it could not - a plausible-looking 209 GB is a wrong
+  // answer that reads like a right one.
+  const cap = d.selectable_gb || null;
   const games = d.games || [];
   $('lib-bucket').textContent = d.bucket ? `s3://${d.bucket}` : 'no bucket yet';
   $('lib-total').textContent = `${gb.toFixed(1)} GB`;
@@ -696,6 +723,14 @@ function paintLibrary(d) {
       + `costing ${money(d.orphan_usd_month)} a month and unusable. Nothing indexed is touched.`;
   }
 
+  if (cap == null) {
+    $('lib-fit-num').textContent = '—';
+    $('lib-bar').style.width = '0%';
+    $('lib-fit-chip').hidden = true;
+    $('lib-fit').textContent =
+      `${gb.toFixed(1)} GB archived - how much a box offers is not known yet`;
+    return;
+  }
   const over = gb > cap;
   // The number is the true ratio - 138% says something 100% would hide - while
   // the bar stops at full.
@@ -1865,7 +1900,7 @@ function openTskey() {
     note: 'An API access token from login.tailscale.com > Settings > Keys - not the auth key a box '
         + 'joins with. Optional: without one, dead nodes are left in place and key expiry stays on.',
     label: 'api token', placeholder: 'tskey-api-…',
-    args: ['creds', 'set', 'tailscale'], askId: 'tailscale-api-token',
+    args: ['creds', 'set', 'tailscale'], askId: ASK.tsToken,
     save: 'Save token', working: 'Checking with Tailscale…',
     strip: 'Tailscale API token (NOT',
   });
@@ -1880,7 +1915,7 @@ function setAuthKey() {
     note: 'A pre-auth key from login.tailscale.com > Settings > Keys. Reusable on, ephemeral off - '
         + 'the box goes offline every time the watchdog stops it.',
     label: 'auth key', placeholder: 'tskey-auth-…',
-    args: ['creds', 'tailscale', 'authkey'], askId: 'tailscale-auth-key',
+    args: ['creds', 'tailscale', 'authkey'], askId: ASK.tsAuthKey,
     save: 'Save key', working: 'Checking with Tailscale…',
     strip: 'A pre-auth key for the box',
   });
@@ -1892,8 +1927,8 @@ function setAuthKey() {
 let awsKeyPending = null;
 function awsKeyAnswer(askId) {
   if (!awsKeyPending) return null;
-  if (askId === 'aws-access-key-id') return awsKeyPending.id;
-  if (askId === 'aws-secret-access-key') return awsKeyPending.secret;
+  if (askId === ASK.awsId) return awsKeyPending.id;
+  if (askId === ASK.awsSecret) return awsKeyPending.secret;
   return null;
 }
 function openAwsKey() {
@@ -2149,7 +2184,7 @@ function editSetting(r, row) {
 // --- Build -------------------------------------------------------------------
 // The picker mirrors cg's own arithmetic so the button can be refused early;
 // the box enforces it again at boot, which is where it must be enforced.
-let archive = { games: [], selectable_gb: 209 };
+let archive = { games: [], selectable_gb: null };
 let boxNow = null;   // the box `cg status` last reported, or null
 let sessionNow = null; // a `cg open` streaming from this laptop, per cg status
 let config = [];     // the settings registry, as `cg config --json` last gave it
@@ -2216,17 +2251,22 @@ function selectedGb() {
 }
 
 function paintFit() {
-  const gb = selectedGb(), cap = archive.selectable_gb || 209;
-  const over = gb > cap;
-  $('b-fit').textContent = picked.size
-    ? `${gb.toFixed(1)} GB of ${cap} GB on the box's NVMe`
-    : 'nothing selected - the box builds empty';
+  // The disk a box offers is cg's arithmetic, read with the archive. Until it
+  // has been read the meter says so, and nothing is refused on a guess: the box
+  // enforces the real limit at boot, which is where it must be enforced.
+  const gb = selectedGb(), cap = archive.selectable_gb;
+  const over = cap != null && gb > cap;
+  $('b-fit').textContent = !picked.size
+    ? 'nothing selected - the box builds empty'
+    : cap != null ? `${gb.toFixed(1)} GB of ${cap} GB on the box's NVMe`
+    : `${gb.toFixed(1)} GB selected - the box's free disk is not known yet`;
   $('b-fit').className = 'font-code-sm text-code-sm ' + (over ? 'text-error' : 'text-on-surface-variant');
-  const pct = Math.min(100, (gb / cap) * 100);
-  $('b-fit-pct').textContent = over ? `over by ${(gb - cap).toFixed(1)} GB` : `${Math.round(pct)}%`;
+  const pct = cap != null ? Math.min(100, (gb / cap) * 100) : 0;
+  $('b-fit-pct').textContent = over ? `over by ${(gb - cap).toFixed(1)} GB`
+    : cap != null ? `${Math.round(pct)}%` : '—';
   $('b-fit-pct').className = 'font-code-sm text-code-sm ' + (over ? 'text-error' : 'text-primary');
-  $('b-buffer').textContent = over
-    ? 'it will not fit - deselect something'
+  $('b-buffer').textContent = cap == null ? ''
+    : over ? 'it will not fit - deselect something'
     : `${(cap - gb).toFixed(1)} GB buffer remaining`;
   $('b-bar').style.width = pct + '%';
   $('b-bar').className = 'h-full ' + (over ? 'bg-error' : 'bg-primary');
@@ -2340,8 +2380,10 @@ function chooserRows() {
         .map(m => ({
           region: machinesNow.region, city: '', rtt: null, enabled: true,
           type: m.type, gpu: m.gpu, vram: m.vram_gib, score: null,
-          spot: m.inr_hour_spot, spotMax: m.usd_hour_spot_max != null
-            ? Math.round(m.usd_hour_spot_max * (machinesNow.inr_per_usd || 88)) : null,
+          // No rate from cg, no rupee figure. The app holds no exchange rate.
+          spot: m.inr_hour_spot,
+          spotMax: m.usd_hour_spot_max != null && machinesNow.inr_per_usd
+            ? Math.round(m.usd_hour_spot_max * machinesNow.inr_per_usd) : null,
           od: m.inr_hour_ondemand,
           fitsSpot: m.fits_spot, fitsOd: m.fits_ondemand,
         })),
@@ -3396,4 +3438,5 @@ for (const link of document.querySelectorAll('.nav-item')) {
 // Drawn once before anything has been read, so the card has its rows and they
 // say "reading…", rather than being blank until two reads land.
 paintKeys();
+checkAsks();
 refreshAll();

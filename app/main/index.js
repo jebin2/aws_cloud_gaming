@@ -106,6 +106,11 @@ ipcMain.handle('cg:cancel', (_e, id) => {
   return job ? interrupt(job.child) : false;
 });
 ipcMain.handle('cg:busy', () => [...jobs.values()].map(j => ({ id: j.id, args: j.args })));
+// The ids cg may ask under, as cg itself lists them. The window pre-answers a
+// couple of them from a dialog it has already shown - and when an id is renamed
+// in cg, that pre-answer silently stops matching and a modal appears in the
+// middle of a build. So the list is handed over and checked against.
+ipcMain.handle('cg:asks', () => CONTRACT.asks || []);
 
 // The window denies every navigation and every new window on purpose - it is a
 // viewer of local files. Tailscale's sign-in is the one exception: it finishes

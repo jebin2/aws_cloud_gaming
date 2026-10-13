@@ -251,6 +251,21 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('PAINTED | config | ' + document.getElementById('s-count').textContent.trim());
   out.push('PAINTED | guards | ' + document.getElementById('guard-cards').children.length);
   out.push('PAINTED | library | ' + document.getElementById('b-fit').textContent.trim());
+  // The same payload with the box's disk left out, which is what a failed or
+  // older read gives. Nothing here may invent a number: the app used to fill in
+  // 209 GB, which reads exactly like an answer.
+  const noCap = { ...DATA.library, selectable_gb: null,
+                  games: [{ appid: '1', name: 'A game', bytes: 53687091200,
+                            usd_month: 1.25, pushed: '2026-10-01T00:00:00Z' }],
+                  total_bytes: 53687091200 };
+  paintLibrary(noCap);
+  out.push('NOCAP | lib | ' + document.getElementById('lib-fit').textContent.trim());
+  out.push('NOCAP | libnum | ' + document.getElementById('lib-fit-num').textContent.trim());
+  document.querySelector('#b-games input[type=checkbox]').click();
+  out.push('NOCAP | fit | ' + document.getElementById('b-fit').textContent.trim());
+  out.push('NOCAP | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
+  out.push('NOCAP | build | ' + (document.getElementById('b-build').disabled ? 'OFF' : 'on'));
+  paintLibrary(DATA.library);
   if (window.__errs.length) out.push('ERRORS: ' + window.__errs.join(' | '));
   out.push('BPICK | ' + document.getElementById('b-pick').textContent.trim());
   out.push('BNOTE | ' + document.getElementById('b-type-note').textContent.trim());
@@ -326,6 +341,15 @@ contains "  and the build chip"            "$OUT" "PAINTED | status/chip | g4dn.
 contains "paintConfig counted the settings" "$OUT" "PAINTED | config | 4 of 4 set"
 contains "paintGuards drew a card"          "$OUT" "PAINTED | guards | 1"
 contains "paintLibrary sized the disk"      "$OUT" "PAINTED | library | "
+
+echo "1b. a disk size cg did not give is not guessed"
+contains "the library says it cannot tell" "$OUT" "NOCAP | lib | 50.0 GB archived - how much a box offers is not known yet"
+contains "  and shows no percentage"       "$OUT" "NOCAP | libnum | —"
+contains "the picker counts what is picked" "$OUT" "NOCAP | fit | 50.0 GB selected - the box's free disk is not known yet"
+contains "  with no fraction of an unknown" "$OUT" "NOCAP | pct | —"
+# The box checks the real limit at boot. Refusing the build here on a number
+# nobody has would be guessing in the other direction.
+contains "  and Build is still allowed"    "$OUT" "NOCAP | build | on"
 
 echo "2. the table lives on Settings, and only there"
 contains "the Settings screen has it"  "$OUT" "TABLE s-chooser"

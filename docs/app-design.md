@@ -50,7 +50,7 @@ rather than asking again.
 |---|---|---|---|
 | Machine strip: vCPU, RAM, GPU, VRAM | `cg status --json` → `spec` | yes | one `describe-instance-types` call, shared with the quota check - nothing about the type is written into the app |
 | Archived games: appid, name, size, archived date | `cg library list` | yes | the real archive today holds **one** game (Diablo IV, 160.2 GB) |
-| "160 GB selected of 209 GB available" | `cg library list` footer (229 GB disk, 209 GB selectable) | yes | the arithmetic that refuses an over-large selection lives in `lib/choose-games.py` and must stay there |
+| "160 GB selected of 209 GB available" | `cg library list` footer (229 GB disk, 209 GB selectable) | yes | the arithmetic that refuses an over-large selection lives in `lib/choose-games.py` and must stay there. With no `selectable_gb` in the answer the app says the disk is not known - it never fills in a plausible 209 |
 | Build progress steps | the `cg init` event stream: `step`, `step_end` | - | the six steps in the mockup are the real ones: provision, tailnet, driver, restore, desktop, pair |
 | Confirmations (destroy, image, clean) | `ask` events, answered on stdin | - | render the prompt, send back one line. Typed words (`DESTROY-ALL`) must be typed by the person |
 | Live restore line ("28 of 160 GB, ~10 min left") | `line` events with `source: box` | - | already emitted during the build |
@@ -65,6 +65,7 @@ rather than asking again.
 | This month, credits left, today | `cg cost` | **$0.01** | one call fills the whole screen |
 | Daily table (date, hours, compute, S3, disk, egress, API, other, total, INR) | `cg cost --daily` | same call | days with nothing billed are hidden and counted, as the CLI does |
 | "What still bills with no box" | `cg cost` resources block | same call | the archive, its monthly cost and its countdown |
+| Projected month end, and the budget bar | `cg cost --json` → `month.projected_usd` / `projected_inr` | same call | cg divides the month-to-date by the days the answer covers; the app renders the number and works out no dates of its own |
 | Streaming allowance (29.3 of 100 GB, hours left) | `cg cost` egress lines | same call | |
 | Refresh button | `cg cost --daily` | **$0.01** | label it with the price, always |
 
@@ -136,3 +137,16 @@ fonts and icons are vendored, so nothing is fetched at runtime.
 - **Every button that spends money says so**, in the label: `$0.01`, or "spends money".
 - **One job at a time**, and quitting mid-job asks, because killing `cg destroy` during its final
   upload is how games are lost.
+
+## What the app may not know
+
+`cg --contract` publishes the few facts the window would otherwise have to copy: which commands must
+run alone (cg takes the locks), which ask ids cg may ask under, and the event-format version. Each
+one was written down in the app as well, and each disagreed with cg at least once - silently, since
+a command that is never started looks exactly like one that returned nothing, and a pre-answer that
+no longer matches its id just puts a modal in the middle of a build. The app reads the contract at
+startup, assumes the worst if it cannot, and names the ids it knows in one table (`ASK`) that is
+checked against cg's list.
+
+Prices, disk sizes, exchange rates and projections are cg's too. Where an answer is missing the
+screen says it is not known; it never fills in a number that reads like an answer.

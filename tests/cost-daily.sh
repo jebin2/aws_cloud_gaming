@@ -86,6 +86,25 @@ check "  and what is left of the free 100 GB" "$(jq_ egress.gb_left)" "90.6"
 check "usage types, dearest first"    "$(jq_ usage.0.type)" '"BoxUsage:g6.xlarge"'
 check "a broken answer is an empty object" "$(IN="$T/bad.json" daily --json)" "{}"
 
+echo "4d. where the month is heading"
+# The window used to divide the month-to-date by this laptop's date and multiply
+# by this laptop's month length. cg has both numbers - the answer carries one
+# entry per day of the window, and the window starts on the 1st - so it says it,
+# and the terminal can print it too.
+#   3.76 over 3 days of a 30-day month
+check "projected to month end"        "$(jq_ projected_usd)" "37.6"
+check "  in rupees"                   "$(jq_ projected_inr)" "3309"
+check "  the days it divided by"      "$(jq_ days_elapsed)" "3"
+check "  and the month it is in"      "$(jq_ days_in_month)" "30"
+# The divisor is the answer's own day count, not today's date: a month-old
+# fixture must project the same way in any month it is read in.
+contains "the table says it as well"  "$(IN="$T/ce.json" daily)" \
+         "On this pace: 37.60 USD / 3309 INR by the end of the month (3 of its 30 days so far)."
+r=$(IN="$T/empty.json" daily --json)
+check "nothing billed projects to nothing" \
+      "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["projected_inr"])' <<<"$r")" "None"
+check "  and the table stays quiet"   "$(IN="$T/empty.json" daily | grep -c 'On this pace')" "0"
+
 echo "4c. the prices come with the answer"
 # The desktop app must never hold a price. cg publishes the table it uses, and
 # works out the standby burn itself, so a screen only renders what it is given.
@@ -128,6 +147,9 @@ check "cg cost --json is one object"  "$(grep -c 'exec lib/setup cost --json' cg
 check "the prices live in one file"   "$(grep -c 'CG_S3_USD_GB_MONTH=' lib/rates.sh)" "1"
 check "  and nowhere else in cg"      "$(grep -c '0\.0912\|0\.1093' lib/setup cg lib/game | grep -vc ':0')" "0"
 check "  built from the same call"    "$(grep -c 'cost-daily.py --json' lib/setup)" "1"
+check "the app does no date arithmetic of its own" \
+      "$(grep -c 'getMonth() + 1, 0).getDate()' app/renderer/app.js)" "0"
+check "  it renders cg's projection"  "$(grep -c 'm.projected_inr != null' app/renderer/app.js)" "1"
 # The archive is the only thing still billing with no box, so cg cost says when it goes.
 check "cost shows the archive countdown"  "$(sed -n '/^cost() {/,/^}/p' lib/setup | grep -c 'game archive    %s')" "1"
 
