@@ -52,7 +52,10 @@ window.cg = {
         window.__emit(id, { t: 'exit', rc: 0 });
       }, 0);
     }
-    return Promise.resolve({ ok: true, id });
+    // main answers with cg's own verdict; these are the ones cg lists.
+    const write = ['init', 'destroy', 'open'].includes(args[0])
+      || (args[0] === 'library' && args[1] !== 'list');
+    return Promise.resolve({ ok: true, id, write });
   },
   answer: () => Promise.resolve(true), cancel: () => Promise.resolve(true),
   busy: () => Promise.resolve([]), openSignIn: () => Promise.resolve(true),
@@ -418,6 +421,30 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
 contains "the step says it failed"   "$(row STEPS)" "status=fail"
 lacks    "  and not that it is done" "$(row STEPS)" "status=done"
 contains "  the rest are fine"       "$(row STEPS)" "machines=done"
+
+echo "4f. a ten-minute upload is not called a refresh"
+# `library` was written twice in the name table and the second won, so
+# `cg library push` - minutes of uploading your games to S3 - was called a
+# refresh: in the header, in the activity list, and on the button that
+# abandons it.
+ENGINE="window.__after = async () => {
+  startRun(['library', 'push']);
+  await new Promise(r => setTimeout(r, 5));
+  document.querySelector('.nav-item[data-view=\\"dashboard\\"]').click();
+  return 'activity=' + document.getElementById('d-activity').innerText.replace(/\\s+/g, ' ').trim()
+       + ' | stop=' + document.getElementById('cancel-label').textContent.trim()
+       + ' | goto=' + document.getElementById('goto-label').textContent.trim();
+};"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+              \"library list --json\": {\"games\": [], \"bucket\": \"b\", \"total_bytes\": 0}}")
+contains "the activity list says what it is" "$(row AFTER)" "the mirror to S3 started"
+lacks    "  and not which command"           "$(row AFTER)" "cg library push started"
+# The button that would abandon it, which is the worst place to be vague.
+contains "Stop names the archive change"     "$(row AFTER)" "stop=Stop archive change"
+lacks    "  not a refresh"                   "$(row AFTER)" "stop=Stop refresh"
+contains "and the pointer names it in full"  "$(row AFTER)" "goto=the mirror to S3 is running"
+check    "nothing threw"                     "$(row ERRS)" "ERRS | "
+ENGINE=""
 
 echo "5. nothing threw"
 check "the page logged no errors"   "$(row ERRS)" "ERRS | "

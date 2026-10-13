@@ -242,16 +242,48 @@ contains "  that keeps it out"           "$js" 'stageSkipped = true'
 # Never a flash: a warm laptop answers everything in well under half a second.
 contains "nothing shows immediately"     "$js" 'const STAGE_SHOW_AFTER_MS'
 contains "  and not at all if it landed" "$js" "if (stageSteps.some(s => s.state === 'doing')) \$('stage').showModal()"
-# One line per read, keyed by the name the read is already filed under.
-contains "every read has a sentence"     "$js" 'const READ_STEP'
-# Inside the table, not anywhere in the file: RUN_NAME carries a `status` of
-# its own, and a count over the whole file passed for the wrong reason.
-steps=$(sed -n '/^const READ_STEP/,/^};/p' <<<"$js")
-for key in deps creds tskey config status guards library machines sweep; do
-  check "  $key has one"                 "$(grep -cE "^  $key: +'" <<<"$steps")" "1"
+# One table of these words, keyed by the command. There were two, and that is
+# how `library` came to mean both "read an index" and "upload for ten minutes".
+contains "every command has its words"   "$js" 'const CG_WORDS'
+words=$(sed -n '/^const CG_WORDS/,/^};/p' <<<"$js")
+for cmd in deps creds "creds tailscale" config status watcher "library list" machines sweep; do
+  check "  $cmd has a step"              "$(grep -cE "^  '?$cmd'?: +\{ step:" <<<"$words")" "1"
 done
-# cg's own words belong in the header. This dialog is for the other audience.
-check "no step names a command"          "$(grep -c 'cg ' <<<"$steps")" "0"
+# A noun, so it can be the subject of a sentence: "the build is still running".
+for cmd in init destroy open "library push" "library pull" "library clean" \
+           "library forget" "library account" "creds set" "creds tailscale signin" \
+           "deps install"; do
+  check "  $cmd has a name"              "$(grep -cE "^  '?$cmd'?: +\{ name:" <<<"$words")" "1"
+done
+# Every command cg says runs alone ends up on a Stop button, so each one needs a
+# name a person recognises. cg publishes the list; this checks against it.
+check "nothing that runs alone is unnamed" "$(./cg --contract | python3 -I -c '
+import json, re, sys
+src = open("app/renderer/app.js").read()
+table = src.split("const CG_WORDS = {", 1)[1].split(chr(10) + "};", 1)[0]
+named = set()
+for line in table.splitlines():
+    m = re.match(r" +(.+?): +\{", line)
+    if m:
+        named.add(m.group(1).strip().strip(chr(39)))
+missing = [" ".join(p) for p in json.load(sys.stdin)["runs_alone"]
+           if " ".join(p) not in named]
+print(len(missing), *missing)')" "0"
+# cg's own words belong in the header. The popup is for the other audience.
+check "no step names a command"          "$(grep -o "step: '[^']*'" <<<"$words" | grep -c 'cg ')" "0"
+
+echo "5a1. a command is more than its first word"
+# `library` was in RUN_NAME twice: `library list` reads an index and `library
+# push` spends ten minutes uploading your games, and the second key won. So a
+# mirror to S3 was called a refresh - in the header, and on the button that
+# abandons it.
+check "no key is written twice"          "$(sed -n '/^const RUN_NAME/,/^};/p' <<<"$js" | grep -oE "[a-z ]+:" | sort | uniq -d | wc -l)" "0"
+check "  nor in the words"               "$(grep -oE "^  [a-z' ]+:" <<<"$words" | tr -d "'" | sort | uniq -d | wc -l)" "0"
+contains "an upload is not a refresh"    "$js" "'library push': 'archive change'"
+contains "  while the index read is"     "$js" "'library list': 'refresh'"
+# Longest match first, or `library push` is just `library` again.
+contains "the longest name wins"         "$js" 'for (let n = Math.min(3, words.length); n > 0; n--)'
+contains "  and a flag is not a name"    "$js" "cmd.filter(a => !a.startsWith('-'))"
 # The verdict comes from the map every other screen already believes.
 contains "a failed read is marked failed" "$js" "readFailures.has(json) ? 'fail' : 'done'"
 # The popup is the window opening. After a build it would be a modal over the
@@ -511,7 +543,9 @@ check    "  which is the only paid button" \
          "$(grep -c "runCg(\['cost', '--json'\]" app/renderer/app.js)" "2"
 contains "  and it carries the price"    "$html" 'id="d-cost-price"'
 contains "activity is this window's own" "$js" "function note(text, tone)"
-contains "  recording what cg ran"       "$js" 'note(`cg ${args.join('"'"' '"'"')} started`'
+# What happened, not which command did it: "cg library push started" named a
+# command, and the one it named was wrong - see the duplicate key below.
+contains "  recording what happened"     "$js" 'note(`${cgName(args)} started`'
 # Guards: one card per layer cg reports, never a layer the app invented.
 contains "guards come from the watcher"  "$js" "for (const g of d.guards || [])"
 contains "  tier badges"                 "$js" 'tier ${g.layer}'

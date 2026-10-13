@@ -52,7 +52,26 @@ it stays banner-only.
 A rung's button closes the dialog before it navigates, and the ladder does not try to tick itself
 off while you work: after the first click the banner guides the rest.
 
-Rules: it is only shown by the window opening (`refreshAll({ narrate: true })`), never by the
+## What a command is called
+
+One table, `CG_WORDS`, keyed by as many words of the command as it takes to tell two apart, with
+`step` (the sentence the opening popup shows) and `name` (a noun, so it can be the subject of a
+sentence: "the build is still running"). Those words appear in three places - the popup, the
+dashboard's activity list, and the refusal when something else holds the lock - and three tables
+of the same facts is how `library` came to mean both "read an index" and "upload for ten minutes".
+
+That was a real bug: `RUN_NAME` had `library` twice, the second won, and `cg library push` was
+called a **refresh** - in the header, in the activity list, and on the Stop button that would
+abandon it. A test now asserts no key is written twice in either table, and that every command
+`cg --contract` says runs alone has a name here: those are exactly the ones whose name ends up on
+a Stop button.
+
+The long runs are not given this dialog. `cg init`, `cg destroy`, `cg open` and the archive
+changes all go through `startRun`, which opens the Build screen with a progress strip, a step log,
+a failure panel and a footnote saying what the money is doing. A modal in front of that would be a
+downgrade.
+
+Rules: the opening popup is only shown by the window opening (`refreshAll({ narrate: true })`), never by the
 refresh that follows a build; `Skip` closes it for the rest of the window; nothing in it is ever
 the only way to do anything, because the window behind it already works. Every read it reports on
 is free.

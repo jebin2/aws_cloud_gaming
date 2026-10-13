@@ -475,8 +475,11 @@ contains "  offering another go"        "$(row 'SIGNIN DEADBUTTONS')" "retry=fal
 contains "  and a way out"              "$(row 'SIGNIN DEADBUTTONS')" "done=Close"
 # A write is refused outright while anything else runs - it is not queued - and
 # the only sign of that used to be a line in the header.
-contains "a refusal says what holds it" "$(row 'SIGNIN BUSY')"   "cg init is still running"
-contains "  and the dialog says so too" "$(row 'SIGNIN BUSY')" "cg init is still running"
+# Named, not spelled: "cg init" is the command, "the build" is the thing that
+# is keeping you waiting - see CG_WORDS.
+contains "a refusal says what holds it" "$(row 'SIGNIN BUSY')"   "the build is still running"
+contains "  and the dialog says so too" "$(row 'SIGNIN BUSY')" "the build is still running"
+lacks    "  without spelling the command" "$(row 'SIGNIN BUSY')" "cg init is still"
 
 echo "4g. the sign-in dialog, start to end"
 # `tailscale up` prints a link and then waits for a browser. That is a thing

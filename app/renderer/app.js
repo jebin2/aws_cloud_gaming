@@ -12,11 +12,74 @@ const jobs = new Map();          // id -> { cmd, view, json, panel, collect, age
 let view = 'dashboard';
 
 // What a run is called, so a button can say what it stops rather than "Stop".
-const RUN_NAME = {
-  init: 'build', destroy: 'destroy', open: 'session', check: 'check', library: 'archive change',
-  status: 'refresh', watcher: 'refresh', library: 'refresh', cost: 'cost fetch',
+// A command is more than its first word. `cg library list` reads an index;
+// `cg library push` spends ten minutes uploading your games - and this table
+// used to be keyed on `library` alone, TWICE, so the second one won and a
+// mirror to S3 was called a refresh: "running: cg refresh" in the header and
+// "Stop refresh" on the button that would abandon it.
+//
+// Longest match first, and flags are not part of the name.
+const byCommand = (table, cmd) => {
+  const words = cmd.filter(a => !a.startsWith('-'));
+  for (let n = Math.min(3, words.length); n > 0; n--) {
+    const hit = table[words.slice(0, n).join(' ')];
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
 };
-const runName = cmd => RUN_NAME[cmd[0]] || cmd[0];
+
+// The header groups runs rather than listing them: `cg status` and `cg watcher`
+// are two commands and one refresh to whoever clicked it.
+const RUN_NAME = {
+  init: 'build', destroy: 'destroy', open: 'session', check: 'check',
+  status: 'refresh', watcher: 'refresh', 'library list': 'refresh',
+  cost: 'cost fetch',
+  'library push': 'archive change', 'library pull': 'archive change',
+  'library clean': 'archive change', 'library forget': 'archive change',
+  'library account': 'account change',
+};
+const runName = cmd => byCommand(RUN_NAME, cmd) || cmd[0];
+
+// What each command IS, in a person's words. One table, because these words are
+// said in three places - the opening popup, the dashboard's activity list, and
+// the refusal when something else holds the lock - and three tables of the same
+// facts is how `library` came to mean two things.
+//
+//   step  what the opening popup says while it runs. Only the reads it narrates
+//         need one.
+//   name  what it is called, as a NOUN, so it can be the subject of a sentence:
+//         "the build is still running", "the mirror to S3 finished".
+const CG_WORDS = {
+  deps:              { step: 'Checking the tools this laptop needs',      name: 'the tool check' },
+  creds:             { step: 'Asking Amazon whether your key works',      name: 'the key check' },
+  'creds tailscale': { step: 'Checking the private link to the box',      name: 'the Tailscale check' },
+  config:            { step: 'Reading your settings',                     name: 'the settings read' },
+  status:            { step: 'Looking for a box that is already running', name: 'the box check' },
+  watcher:           { step: 'Checking the guards that end the bill',     name: 'the guard check' },
+  'library list':    { step: 'Reading your game archive',                 name: 'the archive read' },
+  machines:          { step: 'Finding what this region rents',            name: 'the machine list' },
+  sweep:             { step: 'Looking up the last region scan',           name: 'the region scan' },
+  cost:              { name: 'the bill fetch' },
+  check:             { name: 'the laptop check' },
+  // Everything cg says runs alone - see `cg --contract`, and the test that
+  // holds this list to it. These are the ones whose name ends up on a Stop
+  // button, so none of them may read as something cheap.
+  init:                      { name: 'the build' },
+  destroy:                   { name: 'the destroy' },
+  open:                      { name: 'the stream' },
+  'library push':            { name: 'the mirror to S3' },
+  'library pull':            { name: 'the fetch from S3' },
+  'library forget':          { name: 'forgetting a game' },
+  'library clean':           { name: 'the delete from S3' },
+  'library account':         { name: 'the Steam account change' },
+  'creds set':               { name: 'saving the AWS key' },
+  'creds tailscale signin':  { name: 'the Tailscale sign-in' },
+  'deps install':            { name: 'installing the tools' },
+};
+const cgWords = cmd => byCommand(CG_WORDS, cmd) || {};
+// Falls back to the command itself: a name nobody wrote down is better said in
+// cg's words than guessed at.
+const cgName = cmd => cgWords(cmd).name || `cg ${cmd.filter(a => !a.startsWith('-')).join(' ')}`;
 // Runs long enough to be worth going back to.
 const WATCHABLE = new Set(['init', 'destroy', 'open']);
 const LONG_LIBRARY = new Set(['push', 'pull', 'clean']);
@@ -66,7 +129,9 @@ function updateHeader() {
   const elsewhere = [...jobs.values()].find(j => watchable(j.cmd) && j.view !== view);
   $('goto').hidden = !elsewhere;
   if (elsewhere) {
-    $('goto-label').textContent = `${runName(elsewhere.cmd)} running - show it`;
+    // Named in full here, not grouped: this points at one run, and what it is
+    // decides whether you want to go and watch it.
+    $('goto-label').textContent = `${cgName(elsewhere.cmd)} is running - show it`;
     $('goto').dataset.view = elsewhere.view;
   }
 
@@ -3082,7 +3147,7 @@ window.cg.onEvent(({ id, event }) => {
     // A build, a destroy or a session changes what every free screen shows -
     // the box, the archive, the guards - so read them again once it is over.
     if (job.write) {
-      note(`cg ${job.cmd.join(' ')} ${event.rc === 0 ? 'finished' : `failed (exit ${event.rc})`}`,
+      note(`${cgName(job.cmd)} ${event.rc === 0 ? 'finished' : `stopped (exit ${event.rc})`}`,
            event.rc === 0 ? 'text-primary' : 'text-error');
       refreshAll();
     }
@@ -3095,8 +3160,8 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart 
   return new Promise(async resolve => {
     const res = await window.cg.run(args, env);
     if (!res.ok) {
-      const why = `cg ${res.args.join(' ')} is still running - this has to wait for it`;
-      $('job-line').textContent = `busy: cg ${res.args.join(' ')} must finish first`;
+      const why = `${cgName(res.args)} is still running - this has to wait for it`;
+      $('job-line').textContent = `busy: ${cgName(res.args)} must finish first`;
       if (collect) $(collect).textContent = why + '\n';
       if (panel) $(panel).textContent = why;
       return resolve(wantRc ? { rc: null, err: why } : undefined);
@@ -3106,7 +3171,7 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart 
                       write: !!res.write,
                       out: [], collected: '', resolve });
     if (onStart) onStart(res.id);
-    if (res.write) note(`cg ${args.join(' ')} started`, 'text-primary');
+    if (res.write) note(`${cgName(args)} started`, 'text-primary');
     updateHeader();
     if (panel) $(panel).textContent = 'running…';
   });
@@ -3312,20 +3377,10 @@ const STAGE_MARK = {
   todo:    ['\u2192', 'text-tertiary'],
   unknown: ['?', 'text-outline'],
 };
-// One line per read, in a person's words. Keyed by the name the read is already
-// filed under, so a read cg grows cannot quietly arrive here without one.
-const READ_STEP = {
-  deps:     'Checking the tools this laptop needs',
-  creds:    'Asking Amazon whether your key works',
-  tskey:    'Checking the private link to the box',
-  config:   'Reading your settings',
-  status:   'Looking for a box that is already running',
-  guards:   'Checking the guards that end the bill',
-  library:  'Reading your game archive',
-  machines: 'Finding what this region rents',
-  sweep:    'Looking up the last region scan',
-};
-const stepsFor = reads => reads.map(([, json]) => ({ key: json, label: READ_STEP[json] || json }));
+// Each read's line comes from CG_WORDS, keyed by the command rather than by the
+// name the answer is filed under - one table of these words, not two.
+const stepsFor = reads =>
+  reads.map(([args, json]) => ({ key: json, label: cgWords(args).step || cgName(args) }));
 
 let stageSteps = [];
 let stageTimer = null;
