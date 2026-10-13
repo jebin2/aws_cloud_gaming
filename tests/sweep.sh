@@ -260,7 +260,10 @@ echo "11. the app reads this, and is warned what a move costs"
 js=$(cat app/renderer/app.js); main=$(cat app/main/index.js)
 # Membership, not the end of the list: this was "'sweep']" and broke when a
 # name was added after it.
-contains "the sweep is a free read"       "$(sed -n 's/^const READ_ONLY.*$/&/p' app/main/index.js)" "'sweep'"
+# A scan reads. cg's runs-alone list is where that is said now, and sweep is
+# not in it.
+contains "the sweep is a free read"       "$(./cg --contract)" '"runs_alone"'
+lacks    "  not one that runs alone"      "$(./cg --contract | tr -d ' \n')" '["sweep"]' 
 # --cached, never a scan, on the path an opening window takes: a scan is 90
 # seconds and no screen may wait on one.
 contains "the app reads the remembered scan" "$js" "[['sweep', '--cached', '--json'], 'sweep']"

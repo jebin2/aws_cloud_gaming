@@ -185,8 +185,11 @@ echo "10. wired in"
 contains "cg dispatches deps"          "$(cat cg)" "deps|dependencies)"
 contains "  and help names it"         "$(cat cg)" "cg deps [install]"
 contains "the app reads it"            "$(cat app/renderer/app.js)" "[['deps', '--json'], 'deps']"
-contains "  listing is a free read"    "$(cat app/main/index.js)" "'deps'"
-contains "  and installing is a write" "$(cat app/main/index.js)" "args[0] === 'deps' && args[1] === 'install'"
+# cg says which commands run alone, and listing is not one of them.
+alone=$(./cg --contract | python3 -I -c 'import json,sys
+print(" ".join(" ".join(p) for p in json.load(sys.stdin)["runs_alone"]))')
+contains "  installing runs alone"    "$alone" "deps install"
+lacks    "  and listing does not"     "$alone" "deps --json"
 contains "the nav has a tab"           "$(cat app/renderer/index.html)" 'data-view="deps"'
 
 echo ""

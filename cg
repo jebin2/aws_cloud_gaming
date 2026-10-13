@@ -20,6 +20,35 @@ while [[ ${1:-} == -* ]]; do
     -h|--help) set -- help; break ;;
     # An app driving cg needs to know what it is driving: the commit it runs,
     # and the event contract that goes with it.
+    # Which commands cannot run beside anything else, and the questions cg can
+    # ask. Both were written down in the app instead - the scheduling list
+    # twice, in two processes, which disagreed three times before anyone
+    # noticed, because a command that is never started looks exactly like one
+    # that returned nothing.
+    #
+    # It is cg that takes the locks, so it is cg that knows. The rule is about
+    # COLLISION, not about change: `cg quota request` opens a support case and
+    # still collides with nothing.
+    --contract) cat <<'JSON'
+{
+  "events": 1,
+  "runs_alone": [
+    ["init"], ["destroy"], ["open"],
+    ["library", "push"], ["library", "pull"], ["library", "forget"],
+    ["library", "clean"], ["library", "account"],
+    ["creds", "set"],
+    ["creds", "tailscale", "signin"],
+    ["deps", "install"]
+  ],
+  "asks": [
+    "aws-access-key-id", "aws-secret-access-key",
+    "tailscale-api-token", "tailscale-auth-key",
+    "alert-email", "session-end", "fix-go-ahead", "steam-login",
+    "clean-orphans", "delete-volume", "destroy-all", "forget-game", "forget-login"
+  ]
+}
+JSON
+                exit 0 ;;
     --version) printf 'cg %s\nevents %s\n' \
                  "$(git -C "$(dirname "$0")" describe --always --dirty 2>/dev/null || echo unknown)" \
                  "1"; exit 0 ;;

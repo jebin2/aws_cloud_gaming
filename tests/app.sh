@@ -123,26 +123,34 @@ echo "4. the promises the app makes about cost and safety"
 contains "cg is run with CG_JSON=1"      "$(cat app/main/runner.js)" "CG_JSON: '1'"
 # Reads are independent, so they run together; anything that changes something
 # runs alone, because cg takes its own locks.
-contains "reads may run together"        "$main" "const READ_ONLY = new Set("
-contains "  a write waits for everything" "$main" "[...jobs.values()][0]"
+# Which commands must run alone is cg's to say: it takes the locks. The app
+# used to write the list down - twice, in two processes - and the two disagreed
+# three times, each time silently, because a command that is never started
+# looks exactly like one that returned nothing.
+contract=$(./cg --contract)
+check "the contract is valid JSON" \
+      "$(python3 -I -c 'import json,sys;json.load(sys.stdin);print("yes")' <<<"$contract")" "yes"
+alone=$(python3 -I -c 'import json,sys
+print(" ".join(" ".join(p) for p in json.load(sys.stdin)["runs_alone"]))' <<<"$contract")
+contains "a build runs alone"            "$alone" "init"
+contains "  a destroy too"               "$alone" "destroy"
+contains "  the library writes"          "$alone" "library push"
+contains "  setting a key"               "$alone" "creds set"
+contains "  and installing a tool"       "$alone" "deps install"
+# Naming the free ones here would be the same duplication in a third place, so
+# this asserts only that they are NOT in the alone list.
+for free in status watcher machines sweep regions quota; do
+  lacks "  $free is not in it"           "$alone" "$free"
+done
+contains "the main process reads it"     "$main" "cg --contract"
+contains "  assuming the worst if it cannot" "$main" "every command will run alone"
+contains "  and skipping the flags first" "$main" "FLAG_TAKES_VALUE"
+contains "a write waits for everything"  "$main" "[...jobs.values()][0]"
 contains "  and a read waits only for a write" "$main" "find(j => !j.readOnly)"
-# config was missing from that set, so the Settings screen was refused at startup
-# while the other reads ran, and stayed empty.
-#
-# Derived from the set itself, not typed out here. These used to be substring
-# matches on "'regions', 'sweep']" - they asserted the ORDER and the closing
-# bracket, so adding one name to the end failed two suites while saying nothing
-# about what was actually wrong.
-RO=$(sed -n 's/^const READ_ONLY = new Set(\[\(.*\)\]);$/\1/p' app/main/index.js | tr -d "' ")
-check "  every free read is classified as one" \
-      "$(for n in status watcher library cost check ping games config machines regions sweep creds; do
-           [[ ,$RO, == *",$n,"* ]] || echo "MISSING:$n"; done)" ""
-# And the two that are not: a build and a destroy take locks, so they wait.
-check "  and a build and a destroy are not" \
-      "$(for n in init destroy; do [[ ,$RO, == *",$n,"* ]] && echo "WRONGLY-READ:$n"; done)" ""
-# The access key is the exception inside the exception: reading where it comes
-# from is free, and writing a new one is not something to run beside a build.
-contains "  cg creds set is a write"      "$main" "args[0] === 'creds' && args[1] === 'set'"
+# The renderer is TOLD the verdict rather than working it out again.
+contains "the verdict travels with the job" "$main" "write: !readOnly"
+contains "  and the renderer uses it"    "$js" "j.write"
+lacks    "  with no list of its own"     "$js" "const WRITES = new Set("
 contains "quitting mid-run asks first"   "$main" "before-quit"
 contains "the cost refresh carries its price" "$(tr -s ' ' < app/renderer/index.html)" 'id="refresh-cost"'
 contains "  shown only on the cost screen" "$js" "refresh-cost').hidden = view !== 'cost'"
@@ -169,7 +177,7 @@ contains "refresh is per screen"         "$js" "const need = NEEDS[view]"
 contains "stop belongs to the screen that started the run" "$js" "j.view === view"
 # A tab's button answers for that tab: only a build or destroy, which cg runs
 # alone, disables anything elsewhere.
-contains "only a write blocks a read"    "$js" "const WRITES = new Set(['init', 'destroy', 'open'])"
+contains "only a write blocks a read"    "$js" "jobs.size > 0"
 contains "  refresh waits for a write only" "$js" 'refresh'"'"').disabled = busy'
 contains "  writes wait for everything"  "$js" '$(b).disabled = jobs.size > 0'
 # Single quotes: a needle in double quotes runs $(...) as a command, which made
@@ -365,7 +373,7 @@ contains "  with the command on the log" "$js" "'cg ' + args.join(' ')"
 contains "  and a footer about the money" "$js" "billing stops when the box is gone"
 contains "destroy runs through it"       "$js" "startRun(['destroy'])"
 contains "  and so does play"            "$js" "startRun(['open'])"
-contains "every long run paints the steps" "$js" "if (isWrite(job.cmd)) {"
+contains "every long run paints the steps" "$js" "if (job.write) {"
 contains "  and the free reads follow it" "$js" "refreshAll();"
 
 echo "5f. the app holds no prices"
@@ -455,9 +463,11 @@ lacks    "  not by editing the file"     "$html" "or by editing the file"
 contains "orphans can be cleaned"        "$js" "startRun(['library', 'clean'])"
 contains "  a game can be forgotten"     "$js" "startRun(['library', 'forget'"
 contains "  both warn first"             "$js" "cg will ask you to type FORGET"
-contains "  and both count as writes"    "$js" "const LIBRARY_WRITES = new Set("
-check    "  the same line the main process draws" \
-         "$(grep -c "'push', 'pull', 'forget', 'clean', 'account'" app/main/index.js app/renderer/app.js | grep -vc ':0')" "2"
+# The line that used to be drawn in both processes - and drifted - is drawn by
+# cg now, once, and the app is told the verdict with the job.
+contains "  and both count as writes"    "$(./cg --contract | tr -d ' \n')" '["library","forget"]'
+contains "  cleaning too"                "$(./cg --contract | tr -d ' \n')" '["library","clean"]'
+lacks    "  with no copy in the renderer" "$js" "'push', 'pull', 'forget', 'clean', 'account'"
 
 echo "5i. packaging keeps the scripts outside the package"
 # A cg bundled into the .asar would be a second, stale engine. The app finds

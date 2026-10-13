@@ -23,18 +23,24 @@ check()    { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
 echo "1. the scheduler lets the ask through"
 # The rule itself, RUN rather than grepped: this list decides whether a command
 # may start while something else is in flight, and getting it wrong is silent.
+# The rule itself, run rather than grepped - and it now comes from cg, which
+# is the only thing that knows which commands take locks. The app applies it;
+# getting that wrong is silent, and did it three times.
 sched=$(node -e '
+const { execFileSync } = require("node:child_process");
 const src = require("node:fs").readFileSync("app/main/index.js", "utf8");
-const m = src.match(/const READ_ONLY[\s\S]*?\(verb\(raw\)\);\n/);
+const m = src.match(/const FLAG_TAKES_VALUE[\s\S]*?const isReadOnly = raw => !runsAlone\(raw\);/);
 if (!m) { console.log("NO RULE FOUND"); process.exit(0); }
+var CONTRACT = JSON.parse(execFileSync("./cg", ["--contract"], { encoding: "utf8" }));
 eval(m[0].replace(/^const /gm, "var "));
 const want = [
   [["quota", "--json"], true], [["quota", "request", "spot"], true],
   [["quota", "appeal", "spot"], true],
   [["status", "--json"], true], [["config", "--json"], true],
-  // Flags come BEFORE the command, so a classifier that reads args[0] sees
-  // "--region" and calls a read a mutation - which is refused while any read
-  // is in flight, silently, and the dialog shows nothing at all.
+  [["regions", "enable", "ap-southeast-5"], true],
+  // Flags come BEFORE the command, so a matcher that reads argv[0] sees
+  // "--region" and calls a read a mutation - refused while any read is in
+  // flight, silently, and the dialog shows nothing at all.
   [["--region", "ap-south-1", "quota", "--json"], true],
   [["--region", "ap-south-1", "quota", "request", "spot"], true],
   [["--json", "status"], true],
@@ -51,14 +57,11 @@ for (const [args, w] of want) {
 console.log("checked");
 ' 2>&1)
 contains "the rule was found"         "$sched" "checked"
-# A quota ask collides with nothing: it is one API call and takes none of the
-# locks a build or a destroy takes. Classifying it as mutating made it wait for
-# every read, and a read is always running on the screen with the button.
 lacks    "nothing is misclassified"   "$sched" "WRONG"
-contains "the renderer still counts it as a write" \
-         "$(cat app/renderer/app.js)" "cmd[0] === 'quota' && cmd[1] === 'request'"
-# Both sides skip the flags, and both must agree about what is left.
-contains "  and skips the flags too"   "$(cat app/renderer/app.js)" "const bare = args =>"
+# One list, published by the thing that takes the locks.
+contains "cg publishes it"            "$(./cg --contract)" '"runs_alone"'
+lacks    "  and the renderer keeps none" "$(cat app/renderer/app.js)" "const WRITES = new Set("
+contains "  it is told instead"       "$(cat app/renderer/app.js)" "write: !!res.write"
 
 BROWSER=""
 for b in chromium chromium-browser google-chrome-stable google-chrome; do

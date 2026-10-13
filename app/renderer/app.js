@@ -19,38 +19,20 @@ const RUN_NAME = {
 const runName = cmd => RUN_NAME[cmd[0]] || cmd[0];
 // Runs long enough to be worth going back to.
 const WATCHABLE = new Set(['init', 'destroy', 'open']);
-const watchable = cmd => WATCHABLE.has(cmd[0]) || (cmd[0] === 'library' && LIBRARY_WRITES.has(cmd[1]));
+const LONG_LIBRARY = new Set(['push', 'pull', 'clean']);
+const watchable = cmd => WATCHABLE.has(cmd[0]) || (cmd[0] === 'library' && LONG_LIBRARY.has(cmd[1]));
 const jobsHere = () => [...jobs.values()].filter(j => j.view === view);
 
 // A screen's button answers for that screen. The one real dependency is that a
 // build or a destroy runs alone - cg refuses anything else while one is in
 // flight - so those disable the rest. Reads never block each other.
-const WRITES = new Set(['init', 'destroy', 'open']);
-// `library` is both: `list` is a free read that runs on every refresh, while
-// `clean` and `forget` delete from S3 for good. The main process draws the same
-// line in isReadOnly(); these two must not drift apart.
-const LIBRARY_WRITES = new Set(['push', 'pull', 'forget', 'clean', 'account']);
-// Flags come before the command - `cg --region X quota request spot` - so they
-// are skipped before anything is decided. The main process does the same, and
-// the two must agree.
-const FLAG_TAKES_VALUE = new Set(['--region', '--host']);
-const bare = args => {
-  const rest = [...args];
-  while (rest.length && rest[0].startsWith('-')) {
-    const flag = rest.shift();
-    if (FLAG_TAKES_VALUE.has(flag)) rest.shift();
-  }
-  return rest;
-};
-const isWrite = raw => ((cmd) => WRITES.has(cmd[0]) || (cmd[0] === 'library' && LIBRARY_WRITES.has(cmd[1]))
-  // Same line as isReadOnly() in the main process, for the same reason: `creds`
-  // is a read that runs on every refresh, `creds set` writes a credentials file.
-  || (cmd[0] === 'creds' && cmd[1] === 'set')
-  || (cmd[0] === 'deps' && cmd[1] === 'install')
-  || (cmd[0] === 'creds' && cmd[1] === 'tailscale' && cmd[2] === 'signin')
-  || (cmd[0] === 'quota' && cmd[1] === 'request')
-  || (cmd[0] === 'regions' && cmd[1] === 'enable'))(bare(raw));
-const writing = () => [...jobs.values()].some(j => isWrite(j.cmd));
+//
+// WHICH commands those are is not written down here any more. It used to be,
+// in two places - this file and the main process - and the two disagreed three
+// times, silently, because a command that is never started looks exactly like
+// one that returned nothing. cg publishes the rule (cg --contract), the main
+// process applies it, and the answer comes back with the job as job.write.
+const writing = () => [...jobs.values()].some(j => j.write);
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
 
@@ -2909,7 +2891,7 @@ window.cg.onEvent(({ id, event }) => {
   const job = jobs.get(id);
   if (!job) return;
   logLine(event);
-  if (isWrite(job.cmd)) {
+  if (job.write) {
     if (event.t === 'step') buildStep(event.text);
     if (event.t === 'step_end') buildStepEnd(event);
     if (event.t === 'line' || (event.t === 'raw' && event.stream === 'stdout')) buildLine(event);
@@ -2975,7 +2957,7 @@ window.cg.onEvent(({ id, event }) => {
     jobs.delete(id);
     updateHeader();
     // A FAILED read used to be silent: note() and the follow-up refresh are
-    // behind isWrite, so a read that could not run at all left the screen empty
+    // behind job.write, so a read that could not run at all left the screen empty
     // and the header busy with nothing anywhere saying why - which is exactly
     // what a packaged app pointed at the wrong directory looked like. This runs
     // AFTER updateHeader because updateHeader rewrites the same line.
@@ -2995,7 +2977,7 @@ window.cg.onEvent(({ id, event }) => {
     }
     // A build, a destroy or a session changes what every free screen shows -
     // the box, the archive, the guards - so read them again once it is over.
-    if (isWrite(job.cmd)) {
+    if (job.write) {
       note(`cg ${job.cmd.join(' ')} ${event.rc === 0 ? 'finished' : `failed (exit ${event.rc})`}`,
            event.rc === 0 ? 'text-primary' : 'text-error');
       refreshAll();
@@ -3016,9 +2998,11 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart 
       return resolve(wantRc ? { rc: null, err: why } : undefined);
     }
     jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, wantRc,
+                      // cg's verdict, not a second guess at it.
+                      write: !!res.write,
                       out: [], collected: '', resolve });
     if (onStart) onStart(res.id);
-    if (isWrite(args)) note(`cg ${args.join(' ')} started`, 'text-primary');
+    if (res.write) note(`cg ${args.join(' ')} started`, 'text-primary');
     updateHeader();
     if (panel) $(panel).textContent = 'running…';
   });

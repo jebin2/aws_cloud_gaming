@@ -25,17 +25,31 @@ const ENV_ALLOWED = new Set(['GAME_APPS']);
 
 // Reading AWS is independent work: status, the watcher and the archive index do
 // not touch each other, so they run together. Anything that CHANGES something
-// runs alone - cg takes its own locks, and a destroy must never race a build.
-// `config` belongs here too: reading the registry touches nothing, and even
-// `config set` only writes .env locally - it cannot collide with a build. Left
-// out, it counted as a write and was refused while the other reads ran, so the
-// Settings screen stayed empty until someone pressed Refresh.
-const READ_ONLY = new Set(['status', 'watcher', 'library', 'cost', 'check', 'ping', 'games', 'config', 'machines', 'regions', 'sweep', 'creds', 'deps', 'quota']);
-// `cg --region ap-south-1 quota --json` is a quota read, not a command called
-// "--region". cg takes its flags before the command, so the classifiers have to
-// skip them - and getting this wrong is the silent kind: the command is treated
-// as mutating, refused while any read is in flight, and the dialog that asked
-// for it shows nothing at all.
+// Which commands must run alone is cg's to say, not this file's. It was
+// written down here AND in the renderer, and the two disagreed three times -
+// each time silently, because a command that is never started looks exactly
+// like one that returned nothing.
+//
+// Read once at startup. If cg cannot be asked, nothing is assumed to be safe:
+// everything runs alone, which is slow and correct rather than fast and wrong.
+const DEFAULT_CONTRACT = { runs_alone: null, asks: [] };
+let CONTRACT = DEFAULT_CONTRACT;
+function loadContract() {
+  try {
+    const out = require('node:child_process')
+      .execFileSync('./cg', ['--contract'], { cwd: REPO, timeout: 10000, encoding: 'utf8' });
+    const c = JSON.parse(out);
+    if (!Array.isArray(c.runs_alone)) throw new Error('no runs_alone');
+    CONTRACT = c;
+  } catch (err) {
+    console.error('cg --contract could not be read: ' + (err && err.message)
+                  + ' - every command will run alone');
+  }
+}
+
+// cg takes its flags BEFORE the command - `cg --region X quota --json` - so
+// they are skipped before anything is matched. --region and --host take a
+// value with them.
 const FLAG_TAKES_VALUE = new Set(['--region', '--host']);
 const verb = args => {
   const rest = [...args];
@@ -45,27 +59,13 @@ const verb = args => {
   }
   return rest;
 };
-const isReadOnly = raw => ((args) =>
-  READ_ONLY.has(args[0]) && !['push', 'pull', 'forget', 'clean', 'account'].includes(args[1] || '')
-  // `cg creds` reads a local file and makes one free call, so it rides along
-  // with the other opening reads. `cg creds set` asks for a secret and
-  // rewrites ~/.aws/credentials, so it waits its turn like any other write.
-  && !(args[0] === 'creds' && args[1] === 'set')
-  // `cg deps` is six command -v checks. `cg deps install` shells out to the
-  // package manager as root, so it waits like any other write.
-  && !(args[0] === 'deps' && args[1] === 'install')
-  && !(args[0] === 'creds' && args[1] === 'tailscale' && args[2] === 'signin'))(verb(raw));
-
-// `cg quota request` is deliberately NOT excluded above, and the reason is what
-// this list is for. It is not "does this change anything" - a quota request
-// changes plenty - it is "can this collide with something else cg is doing".
-// Launching, destroying and the library take cg's own locks and must run alone;
-// one API call to Service Quotas touches none of them.
-//
-// Classifying it as mutating made it wait for everything, and on the screen
-// that offers the button something is always being read - so the ask was
-// refused before it reached AWS, every time, and the dialog had nothing to
-// report but the appeal.
+// A command runs alone when cg lists a prefix of it.
+const runsAlone = raw => {
+  const cmd = verb(raw);
+  if (!CONTRACT.runs_alone) return true;          // could not ask: assume the worst
+  return CONTRACT.runs_alone.some(p => p.every((w, i) => cmd[i] === w));
+};
+const isReadOnly = raw => !runsAlone(raw);
 
 const jobs = new Map();          // id -> { id, args, child, readOnly }
 const anyMutating = () => [...jobs.values()].some(j => !j.readOnly);
@@ -90,7 +90,10 @@ function startJob(args, env = {}) {
     },
   });
   jobs.set(id, { id, args, child, readOnly });
-  return { ok: true, id };
+  // The renderer needs to know whether this was a write - for its note and its
+  // re-read - and asking it to work that out again is how the two lists came
+  // to disagree. It is told.
+  return { ok: true, id, write: !readOnly };
 }
 
 ipcMain.handle('cg:run', (_e, { args, env }) => startJob(args, env || {}));
@@ -146,7 +149,7 @@ function createWindow() {
 // Electron's default menu offers nothing here except ways to confuse.
 Menu.setApplicationMenu(null);
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => { loadContract(); createWindow(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 
