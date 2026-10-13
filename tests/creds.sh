@@ -57,6 +57,11 @@ case "$*" in
            esac ;;
       bad) echo "An error occurred (InvalidClientTokenId) when calling the GetCallerIdentity operation: The security token included in the request is invalid." >&2
            exit 254 ;;
+      # What the CLI says with no network. Two lines, like the real thing.
+      offline) echo "Could not connect to the endpoint URL: \"https://sts.ap-south-2.amazonaws.com/\"" >&2
+               exit 255 ;;
+      nokey)   echo "Unable to locate credentials. You can configure credentials by running \"aws configure\"." >&2
+               exit 253 ;;
     esac ;;
 esac
 FAKE
@@ -175,6 +180,35 @@ contains "  saying where it came from"    "$(j source <<<"$out")" "credentials"
 out=$(cg_ creds)
 contains "the human view confirms"        "$out" "accepted         yes"
 lacks    "  and still hides the secret"   "$out" "secret-should-never-be-printed"
+
+echo "3b. a key that could not be checked at all"
+# The window used to say "AWS rejected this access key" to a laptop with no
+# network, which is a lie about a call that never arrived - and it sent people
+# to replace a key that was fine. Only cg can tell these apart: the app sees
+# one error string.
+KEY_STATE=offline
+out=$(cg_ creds --json)
+check    "not valid, because it is unusable" "$(j valid <<<"$out")" "false"
+check    "  but nothing rejected it"         "$(j reason <<<"$out")" '"unreachable"'
+contains "  and the CLI's words are kept"    "$(j error <<<"$out")" "Could not connect to the endpoint"
+
+echo "3c. no key on the laptop at all"
+# Also not a rejection: there is nothing here to reject. It is the state a
+# fresh laptop is in, and it takes a different sentence and a different button.
+KEY_STATE=nokey
+out=$(cg_ creds --json)
+check    "not valid"                      "$(j valid <<<"$out")" "false"
+check    "  and the reason is no key"     "$(j reason <<<"$out")" '"no-key"'
+
+echo "3d. the reason for the other three states"
+KEY_STATE=bad
+check    "a refused key says rejected"    "$(j reason <<<"$(cg_ creds --json)")" '"rejected"'
+KEY_STATE=ok
+check    "a working key has no reason"    "$(j reason <<<"$(cg_ creds --json)")" "null"
+mv "$T/bin/aws" "$T/bin/aws.disabled"
+check    "no CLI is its own reason"       "$(j reason <<<"$(cg_ creds --json)")" '"no-cli"'
+mv "$T/bin/aws.disabled" "$T/bin/aws"
+KEY_STATE=ok
 
 echo "4. setting a key"
 # CG_JSON=1 is how the app runs cg: questions become events, answers arrive on

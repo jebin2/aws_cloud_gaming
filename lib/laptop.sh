@@ -424,11 +424,47 @@ creds_facts() {
 
 creds_json() {
   creds_facts | python3 -I -c '
-import json, sys
+import json, re, sys
 d = dict(l.split("=", 1) for l in sys.stdin.read().splitlines() if "=" in l)
+err = d.get("error") or None
 # valid is a THIRD state short of true/false everywhere else in this app: with
 # no CLI nothing was asked, so nothing was rejected either.
-valid = None if d.get("cli") == "no" else (not d.get("error"))
+valid = None if d.get("cli") == "no" else (not err)
+
+# WHY it is not valid, because the answers are not interchangeable and only cg
+# can tell them apart - the app sees one error string. A laptop with no network
+# was told "AWS rejected this access key", which is a lie about a call that
+# never arrived, and sent people to replace a key that was fine.
+#
+# Matched on the words the CLI itself uses. Anything unrecognised is a rejection: that
+# is what the overwhelming majority of these are, and treating a refusal as a
+# network blip would have someone waiting for it to clear.
+UNREACHABLE = (
+    "could not connect to the endpoint",
+    "connect timeout",
+    "endpointconnectionerror",
+    "connecttimeouterror",
+    "read timeout",
+    "name or service not known",
+    "temporary failure in name resolution",
+    "network is unreachable",
+    "nodename nor servname",
+    "failed to establish a new connection",
+    "max retries exceeded",
+    "ssl",
+)
+low = (err or "").lower()
+if not d.get("cli") == "yes":
+    reason = "no-cli"
+elif not err:
+    reason = None
+elif "unable to locate credentials" in low or "you must specify a region" in low:
+    # Nothing was rejected: there is nothing here to reject.
+    reason = "no-key"
+elif any(s in low for s in UNREACHABLE):
+    reason = "unreachable"
+else:
+    reason = "rejected"
 print(json.dumps({
     "cli":     d.get("cli") == "yes",
     "source":  d.get("source") or None,
@@ -436,7 +472,9 @@ print(json.dumps({
     "account": d.get("account") or None,
     "arn":     d.get("arn") or None,
     "valid":   valid,
-    "error":   d.get("error") or None,
+    # no-cli | no-key | unreachable | rejected, or null when the key works.
+    "reason":  reason,
+    "error":   err,
 }, indent=2))'
 }
 

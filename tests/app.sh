@@ -182,8 +182,11 @@ contains "  shown only on the cost screen" "$js" "refresh-cost').hidden = view !
 check    "nothing repeats on a timer"        "$(grep -c 'setInterval' app/renderer/app.js)" "0"
 # One timer, and it starts no command: the opening popup waits this long before
 # showing itself, so a laptop that answers instantly never sees it.
-check    "the one timer is the popup's wait" "$(grep -c 'setTimeout' app/renderer/app.js)" "1"
-contains "  and it only shows a dialog"      "$js" 'stageTimer = setTimeout(() => {'
+check    "the only timers are the popup's" "$(grep -c 'setTimeout' app/renderer/app.js)" "2"
+contains "  one shows the dialog"            "$js" 'stageTimer = setTimeout(() => {'
+contains "  one says a read is slow"         "$js" 'stageSlowTimer = setTimeout(stageSlow, STAGE_SLOW_AFTER_MS)'
+# Neither gives up on anything: cg is still waiting and so is the window.
+contains "  and nothing is abandoned"        "$js" 'this only stops the popup looking like it has hung'
 # Two buttons fetch cost - the Cost tab's Refresh and the dashboard's Fetch -
 # and both say the price. Nothing else may run it.
 check    "  and cost runs only from a button" \
@@ -279,6 +282,23 @@ lacks "  and the API token is not one"   "$(sed -n '/^function prereqs()/,/^}/p'
 # Skip silences the progress list; the ladder is the other message entirely.
 contains "skip does not hide the ladder" "$js" 'if (narrate && !stageSkipped) stageOpen('
 contains "  which replaces it on open"   "$js" 'if (!narrate || !stageLadder()) stageClose();'
+
+echo "5a3. no engine, and a read that never comes back"
+# Without cg every read fails identically - a spawn error each - and six broken
+# reads is not what happened. Only main can see it: the renderer has no
+# filesystem, so it asks.
+contains "main says whether cg is there"  "$main" 'function engineFacts()'
+contains "  over the bridge"              "$(cat app/main/preload.js)" 'cg:engine'
+contains "  and re-reads the contract"    "$main" 'if (found && !CONTRACT.runs_alone) loadContract();'
+contains "the window asks before reading" "$js" 'if (await engineReady()) await refreshAll({ narrate: true });'
+contains "  and says the one true thing"  "$js" "stageOpen('This app cannot find cg'"
+contains "  naming where it looked"       "$js" 'Looked for it at ${e.cg}'
+# A main process too old to answer, or a test stub, is taken at its word.
+contains "  an unanswered ask carries on" "$js" 'try { e = await window.cg.engine(); } catch { return true; }'
+# The key's sentence is cg's answer, not a guess at an error string.
+contains "why a key failed comes from cg" "$js" "switch (credsNow && credsNow.reason)"
+contains "  unreachable is not rejected"  "$js" 'Nothing was rejected - the call never arrived'
+contains "  and an old cg still works"    "$js" "title: 'AWS rejected this access key'"
 
 echo "5b. the build screen, as the design draws it"
 # The archive table, the allocation bar and the machine strip are the parts the

@@ -56,6 +56,10 @@ window.cg = {
   },
   answer: () => Promise.resolve(true), cancel: () => Promise.resolve(true),
   busy: () => Promise.resolve([]), openSignIn: () => Promise.resolve(true),
+  // main is the only place that knows whether there is a cg to talk to.
+  engine: () => Promise.resolve(window.__engine === undefined
+    ? { repo: '/home/u/cloud_gaming', cg: '/home/u/cloud_gaming/cg', found: true, contract: true }
+    : window.__engine),
   onEvent(cb) { window.__emit = (id, event) => cb({ id, event }); return () => {}; },
 };
 STUB
@@ -63,6 +67,7 @@ STUB
 probe() { # probe <json answers object literal>
   cat > "$T/r/answers.js" <<JS
 window.__answers = $1;
+${ENGINE:-}
 JS
   cat > "$T/r/probe.js" <<'PROBE'
 (async () => {
@@ -92,6 +97,11 @@ JS
   out.push('STEPBTNS | ' + [...document.querySelectorAll('#stage-steps [data-step] button')]
              .map(b => b.closest('[data-step]').dataset.step + '=' + b.textContent.trim()).join(','));
   out.push('SKIPLABEL | ' + document.getElementById('stage-skip').textContent.trim());
+  out.push('GO | ' + (document.getElementById('stage-go').hidden ? 'hidden'
+              : document.getElementById('stage-go').textContent.trim()));
+  // Whatever this case wants to try on the dialog as the window left it - see
+  // the ENGINE snippets below.
+  out.push('AFTER | ' + (window.__after ? await window.__after() : 'none'));
   // A rung's button, taken as a person would: the modal must be out of the way
   // of whatever it leads to, and it must actually lead there.
   const rung = [...document.querySelectorAll('#stage-steps [data-step] button')].pop();
@@ -154,8 +164,45 @@ tskey_in='{"present":true,"valid":true,"state":"ok","detail":null,"signed_in":tr
 tskey_out='{"present":false,"valid":null,"state":"absent","detail":null,"signed_in":false,"node":null,"auth_key_stored":false,"can_mint":false}'
 # Signed in, no API token, and no key for the box: nothing to mint one with.
 tskey_nokey='{"present":false,"valid":null,"state":"absent","detail":null,"signed_in":true,"node":"laptop","auth_key_stored":false,"can_mint":false}'
+# The three ways a key can fail, as cg now reports them: nothing was rejected
+# in the first two, and the window must not say it was.
+creds_offline='{"cli":true,"source":"s","key_id":"****1234","account":null,"arn":null,"valid":false,
+                "reason":"unreachable","error":"Could not connect to the endpoint URL: \"https://sts.ap-south-2.amazonaws.com/\""}'
+creds_nokey='{"cli":true,"source":null,"key_id":null,"account":null,"arn":null,"valid":false,
+              "reason":"no-key","error":"Unable to locate credentials."}'
+creds_rejected='{"cli":true,"source":"s","key_id":"****1234","account":null,"arn":null,"valid":false,
+                 "reason":"rejected","error":"An error occurred (InvalidClientTokenId)"}'
 cfg_ok='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":true,"value":"a@b.c","default":null,"note":"n"}]'
 cfg_noemail='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":false,"value":null,"default":null,"note":"n"}]'
+
+echo "0. there is no cg at all"
+# Without an engine every read fails the same way - a spawn error each - and six
+# broken reads is not what happened. One thing did, and only main can see it:
+# the renderer has no filesystem.
+ENGINE="window.__engine = { repo: '/opt/nope', cg: '/opt/nope/cg', found: false, contract: false };
+// Installed while the window was open, and Try again pressed: nothing here
+// needs restarting.
+window.__after = async () => {
+  window.__engine = { repo: '/opt/nope', cg: '/opt/nope/cg', found: true, contract: true };
+  document.getElementById('stage-go').click();
+  await new Promise(r => setTimeout(r, 20));
+  return 'stage=' + (document.getElementById('stage').open ? 'open' : 'closed')
+       + ' ran=' + window.__ran.join(' ');
+};"
+OUT=$(probe "{}")
+check    "nothing is asked at all"   "$(row RAN)" "RAN | "
+check    "the popup says so"         "$(row STAGE)" "STAGE | open"
+contains "  naming the one problem"  "$(row STAGETITLE)" "This app cannot find cg"
+contains "  and what cg is"          "$(row STAGESUB)" "this window is a face on it"
+contains "  where it looked"         "$(row STEPTEXT)" "/opt/nope/cg"
+contains "  and how to fix it"       "$(row STEPTEXT)" "CG_REPO"
+contains "  with something to run"   "$(row STEPTEXT)" "git clone"
+contains "and there is one thing to do" "$(row GO)" "Try again"
+# Installed while the window sat there: Try again starts it, with no restart.
+contains "  which starts the reads"   "$(row AFTER)" "deps --json"
+contains "  and gets out of the way"  "$(row AFTER)" "stage=closed"
+check    "nothing threw"             "$(row ERRS)" "ERRS | "
+ENGINE=""
 
 echo "1. a tool is missing: nothing else is asked"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_BAD" true), \"creds --json\": $creds_bad, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
@@ -248,6 +295,32 @@ contains "  in cg's words"            "$(row STEPTEXT)" "budget alarm"
 contains "a rung gets out of its own way" "$(row RUNGWENT)" "email stage=closed"
 contains "  and lands on the settings"    "$(row RUNGWENT)" "view=settings"
 check    "nothing threw"              "$(row ERRS)" "ERRS | "
+
+echo "3e. the laptop could not reach AWS, which is not the key's fault"
+# It used to say "AWS rejected this access key" to a laptop with no network -
+# a lie about a call that never arrived, and it sent people to replace a key
+# that was fine. cg says which it was; this only reads it.
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_offline,
+              \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
+contains "it says the call never arrived" "$(row TITLE)" "could not reach AWS"
+lacks    "  and blames nothing"           "$(row TITLE)" "rejected"
+contains "  saying the key may be fine"   "$(row BODY)"  "The key may be fine"
+# Nothing to retype: the one thing that helps is doing it again.
+contains "  offering another go"          "$(row FIX)"   "Try again"
+contains "  on the ladder too"            "$(row STEPTEXT)" "could not reach AWS"
+
+echo "3f. there is no key at all, which is not a rejection either"
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_nokey,
+              \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
+contains "it says there is none"          "$(row TITLE)" "no AWS access key on this laptop"
+lacks    "  not that one was refused"     "$(row TITLE)" "rejected"
+contains "  and offers to take one"       "$(row FIX)"   "Set AWS key"
+
+echo "3g. a key AWS actually refused still says so"
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_rejected,
+              \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
+contains "the old sentence, where it is true" "$(row TITLE)" "AWS rejected this access key"
+contains "  and the old button"               "$(row FIX)"   "Set AWS key"
 
 echo "4. everything is ready: the rest goes at once"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")

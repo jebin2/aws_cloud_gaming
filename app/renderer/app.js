@@ -3188,6 +3188,30 @@ const ALL_READS = [
 // One sentence each. The old banner ran to three - cg's own sentence, then "Your
 // games are in S3; nothing here can see them until this is fixed", then where
 // the button was - which is a paragraph to say "the key does not work".
+// What is wrong with the key, which is cg's answer and not a guess from an
+// error string: a laptop with no network was told "AWS rejected this access
+// key", which is a lie about a call that never arrived, and sent people to
+// replace a key that was fine. See creds_json in lib/laptop.sh.
+//
+// An older cg sends no reason at all, and a rejection is what this said before
+// and what nearly all of them are, so that is where it falls back to.
+function keyProblem() {
+  switch (credsNow && credsNow.reason) {
+    case 'unreachable':
+      return { title: 'This laptop could not reach AWS',
+               body: 'Nothing was rejected - the call never arrived. The key may be fine.',
+               label: 'Try again', go: retryReads };
+    case 'no-key':
+      return { title: 'There is no AWS access key on this laptop',
+               body: 'Everything below is unknown, not empty.',
+               label: 'Set AWS key', go: () => goSetting($('s-creds-card')) };
+    default:
+      return { title: 'AWS rejected this access key',
+               body: 'Everything below is unknown, not empty.',
+               label: 'Set AWS key', go: () => goSetting($('s-creds-card')) };
+  }
+}
+
 function prereqs() {
   const missing = depsNow ? (depsNow.tools || []).filter(x => !x.present).map(x => x.label) : [];
   const email = (config || []).find(r => r.key === 'EMAIL_ALERTS');
@@ -3207,9 +3231,7 @@ function prereqs() {
     // lie about a laptop that could not ask AWS anything.
     { key: 'key', name: 'Amazon accepts this access key',
       ok: !credsNow ? null : credsNow.cli ? credsNow.valid === true : null,
-      problem: { blocking: true, title: 'AWS rejected this access key',
-                 body: 'Everything below is unknown, not empty.',
-                 label: 'Set AWS key', go: () => goSetting($('s-creds-card')) } },
+      problem: { blocking: true, ...keyProblem() } },
     { key: 'tailnet', name: 'This laptop is signed in to Tailscale',
       ok: tskeyNow ? tskeyNow.signed_in !== false : null,
       problem: { blocking: true, title: 'This laptop is not signed in to Tailscale',
@@ -3273,6 +3295,11 @@ function paintBanner() {
 //     keeps it closed.
 //   - no Done to click. Whoever opened it closes it.
 const STAGE_SHOW_AFTER_MS = 400;
+// And this long before saying a read is taking longer than it should. cg does
+// not time its own AWS calls out quickly, so a laptop whose network went half
+// way through a read sits there with no error to show - the read never fails,
+// it just never comes back.
+const STAGE_SLOW_AFTER_MS = 10000;
 // A marker, not an icon: the icon font is subsetted, and a glyph it does not
 // carry renders as a blank box - see the codepoint check in tests/app.sh.
 const STAGE_MARK = {
@@ -3302,16 +3329,22 @@ const stepsFor = reads => reads.map(([, json]) => ({ key: json, label: READ_STEP
 
 let stageSteps = [];
 let stageTimer = null;
+let stageSlowTimer = null;
 let stageSkipped = false;        // said once, honoured for the rest of the window
 
 // `now` is for a popup with nothing to wait for: the ladder is drawn from reads
 // that have already come back, so delaying it would only be a blank screen.
 // A popup that is already up is refilled in place rather than reopened - which
 // is how the opening progress becomes the ladder, if it got that far.
-function stageOpen(title, sub, steps, { now = false, skip = 'Skip' } = {}) {
+function stageOpen(title, sub, steps, { now = false, skip = 'Skip', go = null } = {}) {
   $('stage-title').textContent = title;
   $('stage-sub').textContent = sub;
   $('stage-skip').textContent = skip;
+  $('stage-go').hidden = !go;
+  if (go) {
+    $('stage-go').textContent = go.label;
+    $('stage-go').onclick = go.fn;
+  }
   stageSteps = [];
   stageAdd(steps);
   if ($('stage').open) return;
@@ -3323,6 +3356,60 @@ function stageOpen(title, sub, steps, { now = false, skip = 'Skip' } = {}) {
     // opening now would be the flash this delay exists to prevent.
     if (stageSteps.some(s => s.state === 'doing')) $('stage').showModal();
   }, STAGE_SHOW_AFTER_MS);
+  if (stageSlowTimer === null) stageSlowTimer = setTimeout(stageSlow, STAGE_SLOW_AFTER_MS);
+}
+
+// Ten seconds in, with something still outstanding: say so, and offer the one
+// thing that helps. Nothing here gives up on a read - cg is still waiting, and
+// so is the window - this only stops the popup looking like it has hung.
+function stageSlow() {
+  stageSlowTimer = null;
+  const stuck = stageSteps.filter(s => s.state === 'doing');
+  if (!stuck.length || !$('stage').open) return;
+  for (const s of stuck) s.note = 'taking longer than usual - the network, or AWS, is slow';
+  paintStage();
+  $('stage-go').hidden = false;
+  $('stage-go').textContent = 'Try again';
+  $('stage-go').onclick = retryReads;
+}
+
+// The reads are free, and a laptop that could not reach AWS a minute ago may be
+// able to now. Starting them again is the whole fix, and it is also what the
+// key rung offers when AWS could not be reached at all.
+function retryReads() {
+  stageClose();
+  return refreshAll({ narrate: true });
+}
+
+// Mode three: there is no engine. Every read fails identically without one - a
+// spawn error each - and six broken reads is not what happened. One thing did.
+function stageStopped(e) {
+  stageOpen('This app cannot find cg',
+    'cg is the engine; this window is a face on it. Nothing here can run until '
+    + 'there is a cg to run.',
+    [{ key: 'looked', label: `Looked for it at ${e.cg}`, state: 'fail' },
+     { key: 'fix', label: 'Install it, or point CG_REPO at a checkout', state: 'wait',
+       note: 'git clone https://github.com/jebin2/aws_cloud_gaming ~/cloud_gaming' }],
+    { now: true, skip: 'Close', go: { label: 'Try again', fn: engineRetry } });
+}
+
+// Asked again, and started properly if it is there now. The dialog stays up if
+// it is not: there is nothing behind it that can work.
+async function engineRetry() {
+  if (!(await engineReady())) return;
+  stageClose();
+  return refreshAll({ narrate: true });
+}
+
+// True when there is something to talk to. A main process too old to answer -
+// or a test stub - says nothing, and is taken at its word: carry on, and let
+// the reads report whatever they find.
+async function engineReady() {
+  let e;
+  try { e = await window.cg.engine(); } catch { return true; }
+  if (!e || e.found) return true;
+  stageStopped(e);
+  return false;
 }
 
 // Mode two: not what the window is doing, but what needs YOU - all of it, at
@@ -3374,6 +3461,8 @@ function stageStep(key, state) {
 // an empty list would read as "finished".
 function stageClose() {
   if (stageTimer !== null) { clearTimeout(stageTimer); stageTimer = null; }
+  if (stageSlowTimer !== null) { clearTimeout(stageSlowTimer); stageSlowTimer = null; }
+  $('stage-go').hidden = true;
   if ($('stage').open) $('stage').close();
 }
 
@@ -3744,4 +3833,9 @@ for (const link of document.querySelectorAll('.nav-item')) {
 // say "reading…", rather than being blank until two reads land.
 paintKeys();
 checkAsks();
-refreshAll({ narrate: true });
+// Is there an engine? Then what does it say. In that order: without cg the
+// reads cannot even be started, and nine spawn errors describe one problem
+// badly.
+(async () => {
+  if (await engineReady()) await refreshAll({ narrate: true });
+})();

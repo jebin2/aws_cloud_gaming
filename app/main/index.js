@@ -112,6 +112,24 @@ ipcMain.handle('cg:busy', () => [...jobs.values()].map(j => ({ id: j.id, args: j
 // middle of a build. So the list is handed over and checked against.
 ipcMain.handle('cg:asks', () => CONTRACT.asks || []);
 
+// Whether there is a cg here at all, and where this looked.
+//
+// Without it every command fails identically - a spawn error per read - and the
+// window had no way to say the one true thing: that the engine is missing, not
+// that six separate reads went wrong. main is the only place that knows, since
+// the renderer has no filesystem.
+//
+// Re-reads the contract when there is a cg but no contract, so that a window
+// started before cg was installed can be told to try again. Local, and free.
+function engineFacts() {
+  const cg = path.join(REPO, 'cg');
+  let found = false;
+  try { found = require('node:fs').statSync(cg).isFile(); } catch { /* not there */ }
+  if (found && !CONTRACT.runs_alone) loadContract();
+  return { repo: REPO, cg, found, contract: !!CONTRACT.runs_alone };
+}
+ipcMain.handle('cg:engine', () => engineFacts());
+
 // The window denies every navigation and every new window on purpose - it is a
 // viewer of local files. Tailscale's sign-in is the one exception: it finishes
 // on login.tailscale.com and nothing else can finish it. So exactly that host,
