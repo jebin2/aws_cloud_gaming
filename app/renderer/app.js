@@ -1729,6 +1729,13 @@ async function optinRead() {
 // The list is every disabled region, but the ones the sweep has measured come
 // first and carry their numbers: "ap-southeast-5 - Malaysia, 48ms, 9/10" is a
 // decision, where a bare region code is a guess.
+//
+// The regions already ON are listed too, in their own group. They were left out
+// at first - there is nothing to enable - and that made the dialog unable to
+// answer the question people actually bring to it: I enabled Malaysia, the
+// table still will not let me pick it, did the enable work? Nothing to enable
+// looked exactly like nothing happened. Selecting one now says it is on, and
+// what is really in the way.
 function optinOptions() {
   const sel = $('optin-pick');
   const seen = new Set();
@@ -1738,7 +1745,13 @@ function optinOptions() {
   sel.append(first);
   const measured = new Map();
   for (const r of (sweepNow && sweepNow.regions) || []) measured.set(r.region, r);
-  const add = (code, m) => {
+  const group = label => {
+    const g = document.createElement('optgroup');
+    g.label = label;
+    sel.append(g);
+    return g;
+  };
+  const add = (into, code, m) => {
     if (seen.has(code)) return;
     seen.add(code);
     const o = document.createElement('option');
@@ -1748,11 +1761,40 @@ function optinOptions() {
       ? `${code} - ${shortCity(m.city)}, ${Math.round(m.rtt_ms)}ms`
         + (best ? `, ${best.type} at ${best.score}/10` : '')
       : code;
-    sel.append(o);
+    into.append(o);
   };
-  for (const code of (optinNow && optinNow.disabled) || []) if (measured.has(code)) add(code, measured.get(code));
-  for (const code of (optinNow && optinNow.disabled) || []) add(code, null);
-  for (const code of (optinNow && optinNow.enabling) || []) add(code, measured.get(code));
+  const off = group('not enabled yet');
+  for (const code of (optinNow && optinNow.disabled) || []) if (measured.has(code)) add(off, code, measured.get(code));
+  for (const code of (optinNow && optinNow.disabled) || []) add(off, code, null);
+  for (const code of (optinNow && optinNow.enabling) || []) add(off, code, measured.get(code));
+  // Only the measured ones: every account has a dozen enabled by default, and
+  // listing all of them would bury the one you came to check.
+  const on = group('already enabled');
+  for (const r of (optinNow && optinNow.regions) || [])
+    if (ON_ALREADY.has(r.status) && measured.has(r.region)) add(on, r.region, measured.get(r.region));
+  if (!off.children.length) off.remove();
+  if (!on.children.length) on.remove();
+}
+const ON_ALREADY = new Set(['ENABLED', 'ENABLED_BY_DEFAULT']);
+
+// Why an enabled region is still greyed in the table, said from the sweep. The
+// quota is the usual answer: a region you have just enabled starts at 0 vCPU of
+// G instances, and the opt-in does not carry any across from another region.
+function optinBlocker(code) {
+  const m = ((sweepNow && sweepNow.regions) || []).find(r => r.region === code);
+  if (!m) return 'No scan of this region yet, so there is nothing to say about it.\n'
+                + 'Scan the regions on Settings and it will carry its numbers.';
+  const ms = (m.machines || []);
+  const fits = ms.filter(x => x.fits_spot || x.fits_ondemand);
+  if (fits.length) return `${code} is on, and ${fits.length} machine`
+    + `${fits.length > 1 ? 's here are' : ' here is'} already pickable in the table.`;
+  if (!ms.length) return `${code} is on, but AWS offers none of the machines this rig uses here.`;
+  const q = m.quota || {};
+  return `${code} is on. What stops it being picked is GPU quota, not the opt-in:\n`
+    + `  on demand  ${q.ondemand_vcpu ?? '?'} vCPU\n`
+    + `  spot       ${q.spot_vcpu ?? '?'} vCPU\n`
+    + 'A region starts at 0 and the opt-in carries nothing across, so this needs\n'
+    + 'its own request - "Ask AWS for GPU quota" on Settings, which is free.';
 }
 
 function optinRender() {
@@ -1769,8 +1811,11 @@ function optinRender() {
   const status = row && row.status;
   if (status && status !== 'DISABLED') {
     const [head, why] = OPTIN_STATE[status] || [status.toLowerCase(), ''];
-    optinSay(`\u25cf ${head}`, why, status === 'ENABLED' || status === 'ENABLED_BY_DEFAULT' ? 'ok' : '');
+    optinSay(`\u25cf ${head}`, why, ON_ALREADY.has(status) ? 'ok' : '');
     $('optin-go').hidden = status !== 'DISABLING';
+    // On, and still not pickable: the opt-in is not what is in the way. Say
+    // what is, because the next step is a different button.
+    if (ON_ALREADY.has(status)) $('optin-log').textContent = optinBlocker(code);
     return;
   }
   const m = ((sweepNow && sweepNow.regions) || []).find(r => r.region === code);

@@ -155,6 +155,124 @@ contains "  and runs cg to enable"    "$js" "'regions', 'enable'"
 # guess, "Malaysia, 48ms, 9/10" is a decision.
 contains "  with latency and capacity" "$js" "at \${best.score}/10"
 
+echo "9. a region that is already on, in the dialog that enables them"
+# "I enabled Malaysia and the table still will not let me pick it" was asked
+# three times. The dialog listed only DISABLED regions, so the one you had just
+# enabled was absent - and nothing to enable looks exactly like nothing
+# happened. The real blocker was quota, which no screen said.
+BROWSER=""
+for b in chromium chromium-browser google-chrome-stable google-chrome; do
+  command -v "$b" >/dev/null && { BROWSER=$b; break; }
+done
+if [[ -z $BROWSER ]]; then
+  echo "  (no chromium - skipped)"
+else
+  R=$T/r; mkdir -p "$R"
+  cp app/renderer/index.html app/renderer/app.js "$R/"
+  cp app/renderer/*.css "$R/"; cp -r app/renderer/fonts "$R/" 2>/dev/null || true
+  cat > "$R/stub.js" <<'STUB'
+window.__errs = [];
+addEventListener('error', e => window.__errs.push(e.message));
+addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
+// Only `cg regions optin --json` is asked for here, and this is cg's answer:
+// Malaysia ENABLED, Jakarta DISABLED, Mumbai on by default.
+window.cg = {
+  run: args => {
+    const id = 1;
+    if (args.join(' ') === 'regions optin --json') setTimeout(() => {
+      window.__emit(id, { t: 'raw', stream: 'stdout', text: JSON.stringify({
+        regions: [
+          { region: 'ap-south-1', status: 'ENABLED_BY_DEFAULT' },
+          { region: 'ap-southeast-5', status: 'ENABLED' },
+          { region: 'ap-southeast-3', status: 'DISABLED' },
+          { region: 'me-south-1', status: 'DISABLED' },
+        ],
+        disabled: ['ap-southeast-3', 'me-south-1'], enabling: [],
+      }) });
+      window.__emit(id, { t: 'exit', rc: 0 });
+    }, 0);
+    return Promise.resolve({ ok: true, id });
+  },
+  answer: () => Promise.resolve(true), cancel: () => Promise.resolve(true),
+  busy: () => Promise.resolve([]), asks: () => Promise.resolve([]),
+  onEvent(cb) { window.__emit = (id, event) => cb({ id, event }); return () => {}; },
+};
+STUB
+  # The sweep as it really comes back for Malaysia: measured, enabled, one
+  # machine offered, and both G quotas at zero.
+  cat > "$R/probe.js" <<'PROBE'
+(async () => {
+  const out = [];
+  const sleep = (n = 20) => new Promise(r => setTimeout(r, n));
+  try {
+    paintSweep({ cached: true, age_seconds: 30, too_far: [], unreachable: [], regions: [
+      { region: 'ap-southeast-5', city: 'Asia Pacific (Malaysia)', rtt_ms: 48.2,
+        enabled: true, optin: 'opted-in', quota: { ondemand_vcpu: 0, spot_vcpu: 0 },
+        machines: [{ type: 'g6.xlarge', score: 9, gpu: 'L4', offered: true,
+                     fits_spot: false, fits_ondemand: false }] },
+      { region: 'ap-southeast-3', city: 'Asia Pacific (Jakarta)', rtt_ms: 57.7,
+        enabled: false, machines: [{ type: 'g5.xlarge', score: 1, gpu: 'A10G',
+                                     fits_spot: false, fits_ondemand: false }] },
+    ] });
+    await openOptin();
+    for (let i = 0; i < 8; i++) await sleep();
+    const sel = document.getElementById('optin-pick');
+    out.push('GROUPS | ' + [...sel.querySelectorAll('optgroup')].map(g => g.label).join(' / '));
+    for (const g of sel.querySelectorAll('optgroup'))
+      out.push('IN ' + g.label.toUpperCase() + ' | '
+               + [...g.children].map(o => o.textContent.trim()).join(' ;; '));
+    sel.value = 'ap-southeast-5';
+    sel.onchange();
+    for (let i = 0; i < 6; i++) await sleep();
+    out.push('ON STATE | ' + document.getElementById('optin-state').textContent.trim());
+    out.push('ON BODY | ' + document.getElementById('optin-log').textContent.replace(/\s+/g, ' ').trim());
+    out.push('ON BTN | go=' + document.getElementById('optin-go').hidden
+             + '/' + document.getElementById('optin-go').disabled);
+    sel.value = 'ap-southeast-3';
+    sel.onchange();
+    for (let i = 0; i < 6; i++) await sleep();
+    out.push('OFF STATE | ' + document.getElementById('optin-state').textContent.trim());
+    out.push('OFF BTN | go=' + document.getElementById('optin-go').hidden
+             + '/' + document.getElementById('optin-go').disabled);
+  } catch (e) { out.push('THREW | ' + e.message); }
+  out.push('ERRS | ' + window.__errs.join(' ;; '));
+  const pre = document.createElement('pre');
+  pre.id = 'probe-out'; pre.textContent = out.join('\n');
+  document.body.append(pre);
+})();
+PROBE
+  python3 -I - "$R" <<'WIRE'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]) / "index.html"
+t = p.read_text()
+t = t.replace('<script src="app.js"', '<script src="stub.js"></script>\n<script src="app.js"', 1)
+t = t.replace('</body>', '<script src="probe.js"></script>\n</body>', 1)
+p.write_text(t)
+WIRE
+  OUT=$("$BROWSER" --headless --disable-gpu --no-sandbox --window-size=1280,900 \
+          --virtual-time-budget=6000 --dump-dom "file://$R/index.html" 2>/dev/null \
+        | python3 -I -c '
+import sys, re, html
+m = re.search(r"<pre id=\"probe-out\">(.*?)</pre>", sys.stdin.read(), re.S)
+print(html.unescape(m.group(1)) if m else "NO PROBE OUTPUT")')
+  lacks    "nothing threw"                  "$OUT" "THREW"
+  check    "  and no uncaught error"        "$(sed -n 's/^ERRS | //p' <<<"$OUT")" ""
+  contains "the list is in two groups"      "$OUT" "GROUPS | not enabled yet / already enabled"
+  contains "  the measured candidate first" "$OUT" "IN NOT ENABLED YET | ap-southeast-3 - Jakarta, 58ms, g5.xlarge at 1/10"
+  contains "  and the bare ones after"      "$OUT" "me-south-1"
+  # The one people go looking for, which used to be absent entirely.
+  contains "an enabled region is listed"    "$OUT" "IN ALREADY ENABLED | ap-southeast-5 - Malaysia, 48ms, g6.xlarge at 9/10"
+  # Enabled by default and never scanned: listing a dozen of those would bury it.
+  lacks    "  but not every default one"    "$OUT" "ap-south-1 -"
+  contains "picking it says it is on"       "$OUT" "ON STATE | ● enabled"
+  contains "  and names the real blocker"   "$OUT" "What stops it being picked is GPU quota, not the opt-in"
+  contains "  with both quotas"             "$OUT" "on demand 0 vCPU spot 0 vCPU"
+  contains "  and where to ask"             "$OUT" "Ask AWS for GPU quota"
+  check    "  with nothing to confirm"      "$(sed -n 's/^ON BTN | //p' <<<"$OUT")" "go=true/true"
+  contains "a disabled one still enables"   "$OUT" "OFF STATE | ap-southeast-3 · Jakarta · 58ms"
+  check    "  and Confirm is live"          "$(sed -n 's/^OFF BTN | //p' <<<"$OUT")" "go=false/false"
+fi
+
 echo ""
 echo "region-optin: $pass passed, $fail failed"
 (( fail == 0 ))
