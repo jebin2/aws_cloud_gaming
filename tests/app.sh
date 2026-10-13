@@ -236,8 +236,18 @@ check    "  and it is still not a timer" "$(grep -c 'setInterval' app/renderer/a
 # small label, with the actual AWS error somewhere in a 200-line auto-scrolling
 # log that had already moved past it. cg marks the headline as `fail`; the panel
 # keeps that and everything under it until the next step.
-contains "a failure gets its own panel"    "$html" 'id="b-error"'
-contains "  hidden until something fails"  "$html" 'class="hidden font-code-sm'
+contains "a failure gets its own panel"    "$html" 'id="b-fail"'
+contains "  hidden until something fails"  "$html" '<div class="hidden" id="b-fail">'
+# The headline above the fold, cg's full text behind a disclosure, and the two
+# or three things worth doing as buttons - because "cg config set GAME_SPOT 0"
+# is a command to type at someone who is looking at a window.
+contains "  with a headline"               "$html" 'id="b-fail-head"'
+contains "  what it means"                 "$html" 'id="b-fail-why"'
+contains "  what to do about it"           "$html" 'id="b-fail-acts"'
+contains "  and cg's own words kept"       "$html" "what cg said"
+contains "the actions are keyed by the AWS code" "$js" "const FAIL_ACTS = {"
+contains "  spot capacity offers on demand"      "$js" "Build on demand instead"
+contains "  a quota failure offers the ask"      "$js" "Ask AWS for GPU quota"
 # It lives in the strip, taking the BAR's place: a bar frozen at 35% says
 # nothing, and in the right-hand panel the reason sat under a 200-line
 # auto-scrolling log that had already moved past it.

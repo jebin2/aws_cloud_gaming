@@ -2778,6 +2778,68 @@ let buildFailures = [];
 // the next step belongs to it - which is how the panel gets the whole report
 // rather than just its title.
 let buildFailing = false;
+// What to DO about a failure, keyed by the AWS error code cg prints. The code
+// is the stable part: the prose around it is written for a terminal, where the
+// answer is a command to type, and in here a command to type is a worse button.
+//
+// Nothing is invented: every action here is one cg already offers somewhere
+// else, reached from the moment it is relevant.
+const FAIL_ACTS = {
+  InsufficientInstanceCapacity: (spot) => spot ? [
+    ['Build on demand instead', async () => {
+      await runCg(['config', 'set', 'GAME_SPOT', '0']);
+      goView('build');
+    }],
+    ['Scan all regions', () => { goView('settings'); const b = $('s-sweep'); if (b) b.click(); }],
+    ['Pick another machine', () => goSetting($('s-machine-card'))],
+  ] : [
+    ['Pick another machine', () => goSetting($('s-machine-card'))],
+    ['Scan all regions', () => { goView('settings'); const b = $('s-sweep'); if (b) b.click(); }],
+  ],
+  SpotMaxPriceTooLow: (spot) => FAIL_ACTS.InsufficientInstanceCapacity(spot),
+  MaxSpotInstanceCountExceeded: () => [
+    ['Try the build again', () => $('b-build').click()],
+  ],
+  VcpuLimitExceeded: () => [['Ask AWS for GPU quota', () => openQuota()]],
+  InstanceLimitExceeded: () => [['Ask AWS for GPU quota', () => openQuota()]],
+  'InvalidKeyPair.NotFound': () => [
+    ['Run the preflight fix', () => runCg(['check', '--fix'])],
+  ],
+  OptInRequired: () => [['Open Dependencies', () => goView('deps')]],
+  AuthFailure: () => [['Set AWS key', () => goSetting($('s-creds-card'))]],
+  UnauthorizedOperation: () => [['Set AWS key', () => goSetting($('s-creds-card'))]],
+};
+
+// cg's own words, read back: the marked line is the headline, and the two
+// lines under it are the facts worth keeping above the fold.
+function failSummary(text) {
+  const lines = text.split('\n');
+  const head = (lines.find(l => l.trim() && !l.startsWith(' ')) || '').trim();
+  const code = (/error code:\s*([A-Za-z0-9.]+)/.exec(text) || [])[1] || '';
+  const said = (/AWS said:\s*(.+)/.exec(text) || [])[1] || '';
+  const safe = /nothing was launched/.test(text);
+  return { head, code, said, safe };
+}
+
+function buildFailActions(code) {
+  const acts = $('b-fail-acts');
+  acts.textContent = '';
+  const spot = (() => {
+    const r = (config || []).find(x => x.key === 'GAME_SPOT');
+    const v = r && (r.value || r.default);
+    return v !== '0';
+  })();
+  const make = FAIL_ACTS[code];
+  if (!make) return;
+  for (const [label, go] of make(spot)) {
+    const b = document.createElement('button');
+    b.className = 'btn';
+    b.textContent = label;
+    b.onclick = go;
+    acts.append(b);
+  }
+}
+
 function buildFail(text) {
   if (!text) return;
   const line = text.replace(/\s+$/, '');
@@ -2794,8 +2856,18 @@ function buildFail(text) {
   title.textContent = `${RUN_TITLE[runKind] || RUN_TITLE.init} stopped`;
   title.classList.add('text-error');
   title.classList.remove('text-outline');
-  $('b-error').textContent = buildFailures.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-  $('b-error').classList.remove('hidden');
+  const whole = buildFailures.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  $('b-error').textContent = whole;
+  // The headline above the fold, the detail behind a disclosure, and the two or
+  // three things worth doing as buttons - because "cg config set GAME_SPOT 0"
+  // is a command to type at someone who is looking at a window.
+  const { head, code, said, safe } = failSummary(whole);
+  $('b-fail-head').textContent = head || 'the build stopped';
+  $('b-fail-why').textContent = [safe ? 'Nothing was launched, and nothing is billing.' : '',
+                                 said ? `AWS said: ${said}` : '',
+                                 code ? `(${code})` : ''].filter(Boolean).join('  ');
+  buildFailActions(code);
+  $('b-fail').classList.remove('hidden');
   // The failure takes the bar's place. A bar frozen at 35% beside the reason it
   // froze is two things saying the same moment, and the useful one is smaller.
   $('b-strip').hidden = false;
@@ -2806,6 +2878,10 @@ function buildFail(text) {
 function buildFailClear() {
   buildFailures = [];
   buildFailing = false;
+  $('b-fail').classList.add('hidden');
+  $('b-fail-head').textContent = '';
+  $('b-fail-why').textContent = '';
+  $('b-fail-acts').textContent = '';
   $('b-error').textContent = '';
   $('b-error').classList.add('hidden');
   $('b-bar-track').hidden = false;

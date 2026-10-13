@@ -239,7 +239,18 @@
            a bar that has stopped moving says nothing, and the log holds 200
            auto-scrolling lines, so the one line that explains the failure had
            already gone by the time anyone looked. -->
-      <div class="hidden font-code-sm text-code-sm text-on-surface whitespace-pre-wrap" id="b-error"></div>
+      <!-- A failure, as something to act on. cg's own text is kept underneath -
+           it is the record, and it says more than any button can - but the two
+           or three things actually worth doing about it are buttons. -->
+      <div class="hidden" id="b-fail">
+        <p class="font-code-md text-code-md text-error" id="b-fail-head"></p>
+        <p class="font-code-sm text-code-sm text-on-surface-variant mt-0.5" id="b-fail-why"></p>
+        <div class="flex flex-wrap items-center gap-space-sm mt-space-sm" id="b-fail-acts"></div>
+        <details class="mt-space-sm">
+          <summary class="font-code-sm text-code-sm text-outline cursor-pointer">what cg said</summary>
+          <div class="font-code-sm text-code-sm text-on-surface whitespace-pre-wrap mt-space-xs" id="b-error"></div>
+        </details>
+      </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop">
