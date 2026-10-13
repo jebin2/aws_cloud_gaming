@@ -3385,16 +3385,27 @@ const stepsFor = reads =>
 let stageSteps = [];
 let stageTimer = null;
 let stageSlowTimer = null;
-let stageSkipped = false;        // said once, honoured for the rest of the window
+// Set by the way out of either popup that has one. It stops the progress panel
+// coming back afterwards: having just dismissed one of these, nobody wants the
+// next one a second later.
+let stageSkipped = false;
 
+// `modal` is the difference between asking and reporting, and it decides
+// everything else about the popup. A modal one puts a backdrop over the window,
+// so the window is NOT usable behind it and it has to carry its own way out -
+// that is right for the two that need something from you. The progress panel
+// needs nothing: it reports, it closes itself, and a Skip button on it only
+// existed to undo the backdrop it should never have had.
+//
 // `now` is for a popup with nothing to wait for: the ladder is drawn from reads
 // that have already come back, so delaying it would only be a blank screen.
-// A popup that is already up is refilled in place rather than reopened - which
-// is how the opening progress becomes the ladder, if it got that far.
-function stageOpen(title, sub, steps, { now = false, skip = 'Skip', go = null } = {}) {
+// `skip` is the label on that way out, and no label means no button.
+function stageOpen(title, sub, steps, { now = false, modal = true, skip = null, go = null } = {}) {
+  const dlg = $('stage');
   $('stage-title').textContent = title;
   $('stage-sub').textContent = sub;
-  $('stage-skip').textContent = skip;
+  $('stage-skip').hidden = !skip;
+  if (skip) $('stage-skip').textContent = skip;
   $('stage-go').hidden = !go;
   if (go) {
     $('stage-go').textContent = go.label;
@@ -3402,17 +3413,25 @@ function stageOpen(title, sub, steps, { now = false, skip = 'Skip', go = null } 
   }
   stageSteps = [];
   stageAdd(steps);
-  if ($('stage').open) return;
-  if (now) return $('stage').showModal();
+  dlg.classList.toggle('stage-toast', !modal);
+  // Modality cannot be changed on a dialog that is already open - showModal()
+  // throws on one - so a progress panel that is becoming the ladder is closed
+  // and opened again. Everything else is refilled in place.
+  if (dlg.open && dlg.dataset.modal !== String(modal)) dlg.close();
+  dlg.dataset.modal = String(modal);
+  if (dlg.open) return;
+  if (now) return stageShow(modal);
   if (stageTimer !== null) return;
   stageTimer = setTimeout(() => {
     stageTimer = null;
     // Everything landed inside the delay: there is nothing left to report, and
     // opening now would be the flash this delay exists to prevent.
-    if (stageSteps.some(s => s.state === 'doing')) $('stage').showModal();
+    if (stageSteps.some(s => s.state === 'doing')) stageShow(modal);
   }, STAGE_SHOW_AFTER_MS);
   if (stageSlowTimer === null) stageSlowTimer = setTimeout(stageSlow, STAGE_SLOW_AFTER_MS);
 }
+
+const stageShow = modal => modal ? $('stage').showModal() : $('stage').show();
 
 // Ten seconds in, with something still outstanding: say so, and offer the one
 // thing that helps. Nothing here gives up on a read - cg is still waiting, and
@@ -3445,7 +3464,8 @@ function stageStopped(e) {
     [{ key: 'looked', label: `Looked for it at ${e.cg}`, state: 'fail' },
      { key: 'fix', label: 'Install it, or point CG_REPO at a checkout', state: 'wait',
        note: 'git clone https://github.com/jebin2/aws_cloud_gaming ~/cloud_gaming' }],
-    { now: true, skip: 'Close', go: { label: 'Try again', fn: engineRetry } });
+    { now: true, modal: true, skip: 'Close',
+      go: { label: 'Try again', fn: engineRetry } });
 }
 
 // Asked again, and started properly if it is there now. The dialog stays up if
@@ -3492,7 +3512,7 @@ function stageLadder() {
   stageOpen(`${COUNT_WORD[unmet.length] || `${unmet.length} things`} to do before this can build a box`,
             'Each one is a sign-in or a setting, and the window behind this works while you do '
             + 'them. None of it costs anything.',
-            steps, { now: true, skip: "I'll do it later" });
+            steps, { now: true, modal: true, skip: "I'll do it later" });
   return true;
 }
 
@@ -3518,6 +3538,7 @@ function stageClose() {
   if (stageTimer !== null) { clearTimeout(stageTimer); stageTimer = null; }
   if (stageSlowTimer !== null) { clearTimeout(stageSlowTimer); stageSlowTimer = null; }
   $('stage-go').hidden = true;
+  $('stage-skip').hidden = true;
   if ($('stage').open) $('stage').close();
 }
 
@@ -3585,7 +3606,7 @@ function readStep(args, json, narrate) {
 async function refreshAll({ narrate = false } = {}) {
   if (narrate && !stageSkipped) stageOpen('Getting your rig ready',
     'Checking what this laptop has and what is already in your Amazon account. '
-    + 'None of it costs anything.', stepsFor(GATE_READS));
+    + 'None of it costs anything.', stepsFor(GATE_READS), { modal: false });
   await Promise.all(GATE_READS.map(([args, json]) => readStep(args, json, narrate)));
   const problem = paintBanner();
   // A rejected API token is a banner, not a stop: everything else still works.

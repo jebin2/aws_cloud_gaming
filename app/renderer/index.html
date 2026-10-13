@@ -834,9 +834,10 @@
   <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md" id="stage-sub"></p>
   <div class="flex flex-col gap-space-xs font-code-sm text-code-sm" id="stage-steps"></div>
   <menu class="flex justify-end gap-space-sm mt-space-lg p-0">
-    <!-- Not a Cancel: the reads carry on and the window behind this works
-         already. It closes the dialog, for the rest of this window. -->
-    <button class="btn" id="stage-skip">Skip</button>
+    <!-- Only the two that ask for something get one of these, and only because
+         they are modal: a backdrop over the window needs a way out from under
+         it. The progress panel is not modal and has nothing to dismiss. -->
+    <button class="btn" id="stage-skip" hidden></button>
     <!-- The one thing to do about what this dialog is reporting, when there is
          one: try the reads again, which is the whole answer to a laptop whose
          network was down a minute ago. -->

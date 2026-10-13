@@ -236,12 +236,25 @@ echo "5a. the opening popup"
 # vocabulary, and the only thing the window used to say while it opened.
 contains "there is a dialog for it"      "$html" 'id="stage"'
 contains "  with a list of steps"        "$html" 'id="stage-steps"'
-# Skip, not Cancel: the reads carry on and the window behind it already works.
-contains "  and a way out of it"         "$html" 'id="stage-skip"'
-contains "  that keeps it out"           "$js" 'stageSkipped = true'
+# The progress panel reports; it does not ask. So it is not modal, the window
+# behind it stays usable, and it has nothing to dismiss - the Skip button it
+# carried existed only to undo a backdrop it should never have had.
+contains "the progress panel is not modal" "$js" "stepsFor(GATE_READS), { modal: false })"
+contains "  so show, not showModal"       "$js" "modal ? \$('stage').showModal() : \$('stage').show()"
+# A non-modal dialog is laid out where it sits in the document, which is the top
+# of the page, so where it goes is the stylesheet's problem.
+contains "  and it is put in a corner"    "$(cat app/renderer/src.css)" '.stage-toast'
+# The two that DO ask keep their backdrop, and therefore their way out.
+contains "the ladder is modal"            "$js" "modal: true, skip: \"I'll do it later\""
+contains "  and so is the missing engine" "$js" "modal: true, skip: 'Close'"
+contains "  which can be dismissed"       "$html" 'id="stage-skip"'
+contains "  and stays dismissed"          "$js" 'stageSkipped = true'
+# showModal() throws on a dialog that is already open, so a progress panel
+# becoming the ladder is closed and opened again rather than refilled.
+contains "modality cannot change in place" "$js" "if (dlg.open && dlg.dataset.modal !== String(modal)) dlg.close();"
 # Never a flash: a warm laptop answers everything in well under half a second.
 contains "nothing shows immediately"     "$js" 'const STAGE_SHOW_AFTER_MS'
-contains "  and not at all if it landed" "$js" "if (stageSteps.some(s => s.state === 'doing')) \$('stage').showModal()"
+contains "  and not at all if it landed" "$js" "if (stageSteps.some(s => s.state === 'doing')) stageShow(modal)"
 # One table of these words, keyed by the command. There were two, and that is
 # how `library` came to mean both "read an index" and "upload for ten minutes".
 contains "every command has its words"   "$js" 'const CG_WORDS'

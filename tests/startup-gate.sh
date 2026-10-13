@@ -46,11 +46,12 @@ window.cg = {
     const id = (window.__lastId = (window.__lastId || 0) + 1);
     const reply = window.__answers[line];
     if (reply !== undefined) {
-      // Answer on a later turn, the way a real run does.
+      // Answer on a later turn, the way a real run does - or slowly, for a case
+      // that needs the window caught mid-read.
       setTimeout(() => {
         window.__emit(id, { t: 'raw', stream: 'stdout', text: JSON.stringify(reply) });
         window.__emit(id, { t: 'exit', rc: 0 });
-      }, 0);
+      }, (window.__slow || []).includes(line) ? 600 : 0);
     }
     // main answers with cg's own verdict; these are the ones cg lists.
     const write = ['init', 'destroy', 'open'].includes(args[0])
@@ -87,10 +88,13 @@ JS
   for (let i = 0; i < 30; i++) await new Promise(r => setTimeout(r, 2));
   // Past the opening popup's delay, so both of its answers can be seen: a
   // laptop whose reads all landed inside the delay must never have shown it.
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, 700));
   out.push('RAN | ' + window.__ran.join(' ;; '));
   const stage = document.getElementById('stage');
   out.push('STAGE | ' + (stage.open ? 'open' : 'closed'));
+  // A backdrop over the window is the whole reason a popup needs a way out
+  // from under it, so which popups have one is the thing to assert.
+  out.push('MODAL | ' + (stage.matches(':modal') ? 'yes' : 'no'));
   out.push('STAGETITLE | ' + document.getElementById('stage-title').textContent.trim());
   out.push('STAGESUB | ' + document.getElementById('stage-sub').textContent.replace(/\s+/g, ' ').trim());
   out.push('STEPS | ' + [...document.querySelectorAll('#stage-steps [data-step]')]
@@ -99,7 +103,8 @@ JS
              .replace(/\s+/g, ' ').trim());
   out.push('STEPBTNS | ' + [...document.querySelectorAll('#stage-steps [data-step] button')]
              .map(b => b.closest('[data-step]').dataset.step + '=' + b.textContent.trim()).join(','));
-  out.push('SKIPLABEL | ' + document.getElementById('stage-skip').textContent.trim());
+  out.push('SKIPLABEL | ' + (document.getElementById('stage-skip').hidden ? 'none'
+           : document.getElementById('stage-skip').textContent.trim()));
   out.push('GO | ' + (document.getElementById('stage-go').hidden ? 'hidden'
               : document.getElementById('stage-go').textContent.trim()));
   // Whatever this case wants to try on the dialog as the window left it - see
@@ -117,8 +122,10 @@ JS
   } else {
     out.push('RUNGWENT | none');
   }
-  if (stage.open) document.getElementById('stage-skip').click();
-  out.push('AFTERSKIP | ' + (stage.open ? 'open' : 'closed'));
+  const skip = document.getElementById('stage-skip');
+  if (stage.open && !skip.hidden) skip.click();
+  out.push('AFTERSKIP | ' + (skip.hidden ? 'no way out needed'
+           : stage.open ? 'open' : 'closed'));
   out.push('BANNER | ' + (document.getElementById('banner').hidden ? 'hidden' : 'shown'));
   out.push('TITLE | ' + document.getElementById('banner-title').textContent.trim());
   out.push('BODY | ' + document.getElementById('banner-body').textContent.replace(/\s+/g, ' ').trim());
@@ -200,6 +207,8 @@ contains "  and what cg is"          "$(row STAGESUB)" "this window is a face on
 contains "  where it looked"         "$(row STEPTEXT)" "/opt/nope/cg"
 contains "  and how to fix it"       "$(row STEPTEXT)" "CG_REPO"
 contains "  with something to run"   "$(row STEPTEXT)" "git clone"
+check    "  it is modal"              "$(row MODAL)" "MODAL | yes"
+contains "  with a way out from under it" "$(row SKIPLABEL)" "Close"
 contains "and there is one thing to do" "$(row GO)" "Try again"
 # Installed while the window sat there: Try again starts it, with no restart.
 contains "  which starts the reads"   "$(row AFTER)" "deps --json"
@@ -237,6 +246,7 @@ contains "  saying why"             "$(row STEPTEXT)" "the one above it comes fi
 # What is already true is ticked, not left blank: the list is the whole job.
 contains "  and what is already done" "$(row STEPS)" "tailnet=done"
 contains "each rung carries its button" "$(row STEPBTNS)" "tools=Open Dependencies"
+check    "  it is modal, because it asks" "$(row MODAL)" "MODAL | yes"
 contains "  and the way out is patient" "$(row SKIPLABEL)" "I'll do it later"
 # Clicking a rung must get the modal out of the way of the screen it opens.
 contains "its button closes the modal" "$(row RUNGWENT)" "stage=closed"
@@ -325,6 +335,21 @@ OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $cred
 contains "the old sentence, where it is true" "$(row TITLE)" "AWS rejected this access key"
 contains "  and the old button"               "$(row FIX)"   "Set AWS key"
 
+echo "3h. the progress panel becoming the ladder"
+# One read is slow, so the panel is on screen - not modal - when the gate
+# finishes and the ladder has to take its place. A dialog cannot change its
+# modality while it is open: showModal() throws on one that already is, which
+# would have left the ladder as a corner panel with no backdrop, or nothing at
+# all and an exception in the console.
+ENGINE="window.__slow = ['config --json'];"
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" false), \"creds --json\": $creds_ok,
+              \"creds tailscale --json\": $tskey_out, \"config --json\": $cfg_noemail}")
+contains "the ladder arrived"          "$(row STAGETITLE)" "to do before this can build a box"
+check    "  and it is modal"           "$(row MODAL)" "MODAL | yes"
+contains "  with its way out"          "$(row SKIPLABEL)" "I'll do it later"
+check    "  and nothing threw"         "$(row ERRS)" "ERRS | "
+ENGINE=""
+
 echo "4. everything is ready: the rest goes at once"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
 contains "status is asked"          "$(row RAN)" "status --json"
@@ -405,7 +430,12 @@ contains "  the rest ticked off"      "$(row STEPS)" "status=done"
 contains "  in words, not commands"  "$(row STEPTEXT)" "Reading your game archive"
 lacks    "  naming no commands"      "$(row STEPTEXT)" "cg "
 # Skip, not Cancel: the reads carry on, the window behind this one works.
-check    "  and Skip closes it"      "$(row AFTERSKIP)" "AFTERSKIP | closed"
+# It reports; it does not ask. So it is not modal: the window behind it stays
+# usable, and there is nothing to dismiss - the Skip button it used to carry
+# only existed to undo a backdrop it should never have had.
+check    "  it is not modal"         "$(row MODAL)" "MODAL | no"
+check    "  so it has no way out"    "$(row SKIPLABEL)" "SKIPLABEL | none"
+check    "  and needs none"          "$(row AFTERSKIP)" "AFTERSKIP | no way out needed"
 
 echo "4e. a read that cannot be painted is a failure, not a tick"
 # It answered, so the step is not "still going"; the painter threw, so it is not

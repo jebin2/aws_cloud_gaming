@@ -71,6 +71,14 @@ changes all go through `startRun`, which opens the Build screen with a progress 
 a failure panel and a footnote saying what the money is doing. A modal in front of that would be a
 downgrade.
 
+Modality is the line between the three. The progress panel **reports**, so it is opened with
+`show()`: no backdrop, the window stays live, and there is nothing to dismiss - it closes itself.
+It carried a Skip button for a while, which existed only to undo a backdrop it should never have
+had. The ladder and "cannot find cg" **ask**, so they are modal and each keeps its own way out
+from under that backdrop. A dialog cannot change modality while open (`showModal()` throws on
+one that is), so a progress panel becoming the ladder is closed and reopened; a non-modal dialog
+is also laid out where it sits in the document, which is why `.stage-toast` puts it in a corner.
+
 Rules: the opening popup is only shown by the window opening (`refreshAll({ narrate: true })`), never by the
 refresh that follows a build; `Skip` closes it for the rest of the window; nothing in it is ever
 the only way to do anything, because the window behind it already works. Every read it reports on
