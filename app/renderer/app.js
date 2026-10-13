@@ -2348,6 +2348,9 @@ function paintFit() {
 // when asked. With no scan yet there is still a table: the current region's
 // machines, from `cg machines`, with a line saying what a scan would add.
 let sweepNow = null;
+// A scan in flight. The table shows one region until it lands, and saying why
+// is the difference between "still working" and "the other regions are gone".
+let sweeping = false;
 let sweepAnswered = false;
 function paintSweep(d) { sweepNow = d; sweepAnswered = true; paintChooser(); }
 
@@ -2587,8 +2590,9 @@ function paintChooser() {
     // What the table cannot show on its own: how old it is, and what is missing.
     const parts = [];
     if (boxNow) parts.push('a box is running - destroy it before changing the machine');
-    else if (!swept && rows.length) parts.push('showing this region only - Scan all regions '
-      + 'compares every region AWS has, measures latency and reads spot capacity (free)');
+    else if (sweeping) parts.push('scanning all regions - about 90 seconds');
+    else if (!swept && rows.length) parts.push('showing this region only - a scan compares '
+      + 'every region AWS has, measures latency and reads spot capacity (free)');
     if (swept) {
       parts.push("capacity is AWS's spot placement score: 1 means a launch will almost "
         + 'certainly be refused, whatever the price says');
@@ -2613,11 +2617,26 @@ function paintChooser() {
       // And why it is one region. The scan is remembered per laptop, so a
       // window that has never run one shows the region .env names and nothing
       // else - which looks like the other regions have gone missing.
-      if (!swept && rows.length) {
+      // A scan in flight says so here as well as on its button: the button is
+      // at the top of a long screen, and the question is asked at the table.
+      if (sweeping && rows.length) {
+        const line = document.createElement('div');
+        line.textContent = 'scanning every region now - about 90 seconds. This is '
+          + `${machinesNow ? machinesNow.region : 'one region'} until it lands.`;
+        legend.append(line);
+      } else if (!swept && rows.length) {
         const line = document.createElement('div');
         line.textContent = `This is ${machinesNow ? machinesNow.region : 'one region'} only. `
-          + 'Scan all regions compares every region cg can reach - about 90 seconds, and free.';
+          + 'A scan compares every region cg can reach - about 90 seconds, and free.';
         legend.append(line);
+        // The button, here, rather than the name of a button elsewhere: this
+        // line is where the question gets asked, and the answer was two
+        // scrolls away at the top of the screen.
+        const b = document.createElement('button');
+        b.className = 'btn mt-space-xs';
+        b.textContent = 'Scan all regions';
+        b.onclick = () => scanRegions($('s-sweep'));
+        legend.append(b);
       }
       const hidden = hiddenByQuota();
       if (hidden) {
@@ -3226,7 +3245,27 @@ async function refreshAll() {
   for (const v of Object.keys(NEEDS)) loaded.add(v);
   // In parallel, because they share nothing and each screen paints when its own
   // answer lands. cg cost is not among them: it bills.
-  return Promise.all(ALL_READS.map(([args, json]) => runCg(args, { json })));
+  await Promise.all(ALL_READS.map(([args, json]) => runCg(args, { json })));
+  return firstScan();
+}
+
+// A laptop that has never scanned shows one region - the one .env names - and
+// that reads as "where did the other regions go". The scan that fills the table
+// is free, so it is started once, by itself, after the first set of reads. It
+// is NOT awaited by anything: the window is usable throughout, and the table
+// says what it is waiting for.
+//
+// Once only, and never when a scan is already remembered, however old: a
+// remembered scan is what the button is for.
+let scanOffered = false;
+async function firstScan() {
+  if (scanOffered || sweeping) return;
+  if (sweepNow && (sweepNow.regions || []).length) return;
+  // Something is running: a scan can wait, and cg would refuse to start one
+  // underneath a build anyway.
+  if (jobs.size) return;
+  scanOffered = true;
+  return scanRegions($('s-sweep'));
 }
 
 $('refresh').onclick = refresh;
@@ -3364,15 +3403,22 @@ async function chooseMachine(row, spot) {
                      runCg(['status', '--json'], { json: 'status' })]);
 }
 
-// Scanning every region is free but takes about 90 seconds, so it is a button
-// and never something a screen does on its own.
+// Scanning every region takes about 90 seconds, so nothing waits on it: the
+// window opens on the remembered scan and this runs in the background, either
+// from the button or - once, on a laptop that has never scanned - by itself.
+// Every call it makes is free.
 async function scanRegions(btn) {
-  const was = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'scanning all regions…';
-  await runCg(['sweep', '--json'], { json: 'sweep' });
-  btn.disabled = false;
-  btn.textContent = was;
+  const was = btn && btn.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = 'scanning all regions…'; }
+  sweeping = true;
+  paintChooser();                 // the table says what it is waiting for
+  try {
+    await runCg(['sweep', '--json'], { json: 'sweep' });
+  } finally {
+    sweeping = false;
+    if (btn) { btn.disabled = false; btn.textContent = was; }
+    paintChooser();
+  }
 }
 const sweepBtn = $('s-sweep');
 if (sweepBtn) sweepBtn.onclick = () => scanRegions(sweepBtn);

@@ -67,9 +67,10 @@ JS
   cat > "$T/r/probe.js" <<'PROBE'
 (async () => {
   const out = [];
-  // Long enough for the gate's three reads to answer and for anything they
-  // unlock to be asked for.
-  for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0));
+  // Long enough for the gate's three reads to answer, for anything they unlock
+  // to be asked for, and for what THOSE answers set off - the first scan is
+  // started only once every gated read has come back.
+  for (let i = 0; i < 30; i++) await new Promise(r => setTimeout(r, 2));
   out.push('RAN | ' + window.__ran.join(' ;; '));
   out.push('BANNER | ' + (document.getElementById('banner').hidden ? 'hidden' : 'shown'));
   out.push('TITLE | ' + document.getElementById('banner-title').textContent.trim());
@@ -79,6 +80,10 @@ JS
   window.__ran = [];
   if (!document.getElementById('banner-fix').hidden) document.getElementById('banner-fix').click();
   out.push('WENT | ' + (document.querySelector('.nav-item.on') || {}).dataset?.view);
+  out.push('LEGEND | ' + document.getElementById('s-chooser-legend').innerText
+                          .replace(/\s+/g, ' ').trim());
+  out.push('SCANBTN | ' + (document.getElementById('s-sweep')
+             ? document.getElementById('s-sweep').textContent.trim() : 'absent'));
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
   pre.id = 'probe-out'; pre.textContent = out.join('\n');
@@ -178,6 +183,45 @@ contains "  the machines"           "$(row RAN)" "machines --json"
 contains "  and the cached sweep"   "$(row RAN)" "sweep --cached --json"
 lacks    "cost is never automatic"  "$(row RAN)" "cost"
 check    "no banner"                "$(row BANNER)" "BANNER | hidden"
+
+echo "4b. a laptop that has never scanned scans itself, once"
+# One region in the table - the one .env names - reads as "where did the other
+# regions go", and the answer was a button somewhere else on the screen. The
+# scan is free, so a window with no remembered scan starts one itself. It is
+# never awaited: nothing on screen waits for it.
+#
+# No answer is given for `sweep --json` here, so it stays in flight and the
+# table can be caught saying what it is waiting for.
+READY="\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok,
+       \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok,
+       \"status --json\": {\"box\": null, \"session\": null},
+       \"watcher --json\": {\"guards\": []},
+       \"library list --json\": {\"games\": [], \"bucket\": \"b\", \"total_bytes\": 0},
+       \"machines --json\": {\"region\": \"ap-south-2\", \"inr_per_usd\": 88, \"machines\":
+         [{\"type\": \"g6.xlarge\", \"gpu\": \"L4\", \"vram_gib\": 22.4,
+           \"fits_spot\": true, \"fits_ondemand\": true,
+           \"inr_hour_spot\": 16, \"inr_hour_ondemand\": 85}]}"
+EMPTY_SWEEP='{"cached": false, "regions": [], "too_far": [], "unreachable": []}'
+FULL_SWEEP='{"cached": true, "age_seconds": 90, "too_far": [], "unreachable": [],
+             "regions": [{"region": "ap-south-2", "city": "Asia Pacific (Hyderabad)",
+                          "rtt_ms": 19, "enabled": true, "machines": []}]}'
+OUT=$(probe "{$READY, \"sweep --cached --json\": $EMPTY_SWEEP}")
+contains "the remembered scan is read first" "$(row RAN)" "sweep --cached --json"
+contains "  and a real scan follows it"      "$(row RAN)" "sweep --json"
+# Said by the table, not only by the button: the button is at the top of a long
+# screen and the question is asked at the table.
+contains "the table says what it waits for" "$(row LEGEND)" "scanning every region now - about 90 seconds"
+contains "  and which region it has"        "$(row LEGEND)" "This is ap-south-2 until it lands"
+contains "  while the button agrees"        "$(row SCANBTN)" "scanning all regions"
+check    "and nothing threw"                "$(row ERRS)" "ERRS | "
+
+echo "4c. a laptop that HAS scanned is left alone"
+# However old. A remembered scan is what Rescan is for, and scanning on every
+# open would be 90 seconds of work nobody asked for.
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP}")
+contains "the remembered scan is read" "$(row RAN)" "sweep --cached --json"
+lacks    "  and nothing rescans"       "$(row RAN)" ";; sweep --json"
+contains "  the button is idle"        "$(row SCANBTN)" "Scan all regions"
 
 echo "5. nothing threw"
 check "the page logged no errors"   "$(row ERRS)" "ERRS | "

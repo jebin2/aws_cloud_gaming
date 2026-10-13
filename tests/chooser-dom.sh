@@ -242,6 +242,8 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('NOSWEEP ROWS | ' + document.querySelectorAll('#s-chooser tbody tr').length);
   out.push('NOSWEEP LEGEND | ' + document.getElementById('s-chooser-legend').innerText
                           .replace(/\s+/g, ' ').trim());
+  out.push('NOSWEEP BTN | ' + [...document.querySelectorAll('#s-chooser-legend button')]
+             .filter(b => b.textContent.trim() === 'Scan all regions').length);
   paintSweep(DATA.sweep);
   out.push('LEGEND | ' + document.getElementById('s-chooser-legend').innerText
                           .replace(/\s+/g, ' ').trim());
@@ -444,6 +446,9 @@ check    "one row before a scan"          "$(row 'NOSWEEP ROWS')" "NOSWEEP ROWS 
 # calling it the whole picture.
 contains "  it says it is one region"     "$(row 'NOSWEEP LEGEND')" "This is ap-south-1 only"
 contains "  and what compares them all"   "$(row 'NOSWEEP LEGEND')" "Scan all regions"
+# The button is IN that line, not named by it: the real one is at the top of a
+# long screen, which is where "how do I see the others" went unanswered.
+contains "  as a button in the line"      "$(row 'NOSWEEP BTN')" "NOSWEEP BTN | 1"
 contains "  with the price of asking"     "$(row 'NOSWEEP LEGEND')" "90 seconds, and free"
 lacks    "  not said after a scan"        "$(row 'LEGEND')" "only. Scan all regions"
 contains "  and the legend says why"      "$(row 'NOSWEEP LEGEND')" "2 more GPU machines are offered here"
