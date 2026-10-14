@@ -3433,24 +3433,45 @@ function stageOpen(title, sub, steps, { now = false, modal = true, skip = null, 
 
 const stageShow = modal => modal ? $('stage').showModal() : $('stage').show();
 
-// Ten seconds in, with something still outstanding: say so, and offer the one
-// thing that helps. Nothing here gives up on a read - cg is still waiting, and
-// so is the window - this only stops the popup looking like it has hung.
+// Ten seconds in, with something still outstanding: say so, and nothing else.
+// Slow is not broken - cg is still waiting and so is the window - so there is
+// no button here. One would have to either abandon a read that is about to
+// answer or pretend to do something, and a read that genuinely cannot finish
+// ends as a failure, which is where the buttons are.
 function stageSlow() {
   stageSlowTimer = null;
   const stuck = stageSteps.filter(s => s.state === 'doing');
   if (!stuck.length || !$('stage').open) return;
   for (const s of stuck) s.note = 'taking longer than usual - the network, or AWS, is slow';
   paintStage();
-  $('stage-go').hidden = false;
-  $('stage-go').textContent = 'Try again';
-  $('stage-go').onclick = retryReads;
+}
+
+// Something came back broken, or could not be painted. THIS is worth a button:
+// the screens behind are showing unknowns and there is a decision to make.
+// Shown even if every read was quick enough that the panel never appeared -
+// a failed read used to be a line in the header and nothing else.
+function stageFailed() {
+  const bad = stageSteps.filter(s => s.state === 'fail');
+  if (!bad.length) return false;
+  stageOpen('Some of this could not be read',
+    bad.length === stageSteps.length
+      ? 'None of it came back. The screens show what is unknown, which is not the same as empty.'
+      : 'The rest came back. Whatever is missing shows as unknown rather than empty.',
+    stageSteps, { now: true, modal: false, skip: 'Close',
+                  go: { label: 'Try again', fn: retryReads } });
+  return true;
 }
 
 // The reads are free, and a laptop that could not reach AWS a minute ago may be
-// able to now. Starting them again is the whole fix, and it is also what the
-// key rung offers when AWS could not be reached at all.
-function retryReads() {
+// able to now.
+//
+// Cancelling first, which is the part that matters: reads do not block each
+// other, so starting a second set leaves the stuck ones exactly where they
+// were - in `jobs`, where a job in flight is what disables Build, Play and
+// Destroy. That made Try again look like a way out of a wedged window while
+// being the one thing that could not get you out of it.
+async function retryReads() {
+  for (const [id, job] of [...jobs]) if (!job.write) await window.cg.cancel(id);
   stageClose();
   return refreshAll({ narrate: true });
 }
@@ -3624,7 +3645,9 @@ async function refreshAll({ narrate = false } = {}) {
   // answer lands. cg cost is not among them: it bills.
   if (narrate) stageAdd(stepsFor(ALL_READS));
   await Promise.all(ALL_READS.map(([args, json]) => readStep(args, json, narrate)));
-  stageClose();
+  // Closing over a failure is how a failed read came to be invisible: the
+  // header line that reported it is rewritten by the next read to finish.
+  if (!narrate || !stageFailed()) stageClose();
   return firstScan();
 }
 

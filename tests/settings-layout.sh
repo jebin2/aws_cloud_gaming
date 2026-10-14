@@ -112,8 +112,14 @@ PY
 # Two widths, because the cards are a 1-column grid under xl and a 2-column one
 # at or above it - and the narrow card is where an overflow shows first.
 geo() { # geo <width>
+  # Written to a file and then catted, rather than piped straight into python:
+  # chromium's main process exits as soon as the DOM is dumped, but a child of
+  # it keeps the write end of a pipe open for another 10-25 SECONDS, and
+  # sys.stdin.read() waits for EOF. That idle wait, once per page load, was the
+  # whole cost of this suite - minutes of it, at 0.5s of actual work per load.
   "$BROWSER" --headless --disable-gpu --no-sandbox --window-size="$1,900" \
-    --virtual-time-budget=5000 --dump-dom "file://$T/r/index.html" 2>/dev/null \
+    --virtual-time-budget=5000 --dump-dom "file://$T/r/index.html" > "$T/dom.html" 2>/dev/null
+  cat "$T/dom.html" \
   | python3 -I -c '
 import sys, re, html
 m = re.search(r"<pre id=\"geo\">(.*?)</pre>", sys.stdin.read(), re.S)

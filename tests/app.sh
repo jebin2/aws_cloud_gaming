@@ -185,8 +185,18 @@ check    "nothing repeats on a timer"        "$(grep -c 'setInterval' app/render
 check    "the only timers are the popup's" "$(grep -c 'setTimeout' app/renderer/app.js)" "2"
 contains "  one shows the dialog"            "$js" 'stageTimer = setTimeout(() => {'
 contains "  one says a read is slow"         "$js" 'stageSlowTimer = setTimeout(stageSlow, STAGE_SLOW_AFTER_MS)'
-# Neither gives up on anything: cg is still waiting and so is the window.
-contains "  and nothing is abandoned"        "$js" 'this only stops the popup looking like it has hung'
+# Slow is not broken: the slow one says so and offers nothing, because a button
+# would have to abandon a read that is about to answer, or pretend to act.
+contains "  and slow offers nothing"         "$js" 'no button here'
+# The buttons live on the failure instead, where there is a decision to make.
+contains "a failure is what gets buttons"    "$js" 'function stageFailed()'
+contains "  Try again"                       "$js" "go: { label: 'Try again', fn: retryReads }"
+contains "  and a way to leave it"           "$js" "skip: 'Close'"
+# Reads do not block each other, so a second set leaves the stuck ones in
+# `jobs` - and a job in flight is what disables Build, Play and Destroy.
+contains "Try again cancels first"           "$js" 'if (!job.write) await window.cg.cancel(id)'
+# Closing over a failure is how a failed read came to be invisible.
+contains "  and a failure keeps it open"     "$js" 'if (!narrate || !stageFailed()) stageClose();'
 # Two buttons fetch cost - the Cost tab's Refresh and the dashboard's Fetch -
 # and both say the price. Nothing else may run it.
 check    "  and cost runs only from a button" \

@@ -34,7 +34,8 @@ header's `job-line` keeps cg's own vocabulary; it is for whoever is working on c
 | Case | What appears |
 |---|---|
 | warm laptop, everything configured | **nothing**. The popup waits `STAGE_SHOW_AFTER_MS` (400 ms) before showing, and every read lands first |
-| a slow or missing network | the popup, with the step it is waiting on still spinning; after 10 s that step says so and a **Try again** appears. Nothing is abandoned - cg is still waiting too |
+| a slow network | the panel, with the step it is waiting on still spinning; after 10 s that step says it is taking longer than usual, and offers **nothing**. Slow is not broken: a button would have to abandon a read that is about to answer, or pretend to act |
+| a read that failed | the panel stays up instead of closing over it, with **Try again** and **Close**. Try again *cancels* the in-flight reads before starting them again - reads do not block each other, so a second set would leave the stuck ones in `jobs`, and a job in flight is what disables Build, Play and Destroy |
 | no `cg` at all | one dialog saying exactly that, naming the path it looked at, with Try again. Only the main process can see this (`cg:engine`); the renderer has no filesystem. Without it every read fails identically and six spawn errors describe one problem badly |
 | AWS unreachable | `cg creds --json` now says **why** a key is not valid - `reason` is `no-cli`, `no-key`, `unreachable` or `rejected`. The window used to tell an offline laptop "AWS rejected this access key", which is a lie about a call that never arrived, and sent people to replace a key that was fine. An older cg sends no `reason` and still gets the old sentence |
 | a read that answers but cannot be painted | that step marked failed - the one place this shows, since the header's failure line is overwritten by the next read to finish |

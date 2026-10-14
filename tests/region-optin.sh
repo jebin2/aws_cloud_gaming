@@ -249,8 +249,14 @@ t = t.replace('<script src="app.js"', '<script src="stub.js"></script>\n<script 
 t = t.replace('</body>', '<script src="probe.js"></script>\n</body>', 1)
 p.write_text(t)
 WIRE
+  # Written to a file and then catted, rather than piped straight into python:
+  # chromium's main process exits as soon as the DOM is dumped, but a child of
+  # it keeps the write end of a pipe open for another 10-25 SECONDS, and
+  # sys.stdin.read() waits for EOF. That idle wait, once per page load, was the
+  # whole cost of this suite - minutes of it, at 0.5s of actual work per load.
   OUT=$("$BROWSER" --headless --disable-gpu --no-sandbox --window-size=1280,900 \
-          --virtual-time-budget=6000 --dump-dom "file://$R/index.html" 2>/dev/null \
+          --virtual-time-budget=6000 --dump-dom "file://$R/index.html" > "$R/dom.html" 2>/dev/null
+        cat "$R/dom.html" \
         | python3 -I -c '
 import sys, re, html
 m = re.search(r"<pre id=\"probe-out\">(.*?)</pre>", sys.stdin.read(), re.S)

@@ -38,12 +38,20 @@ window.__errs = [];
 addEventListener('error', e => window.__errs.push(e.message));
 addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
 window.__ran = [];
+window.__cancelled = [];
 window.__answers = {};     // set by the probe before the page loads
 window.cg = {
   run: (args) => {
     const line = args.join(' ');
     window.__ran.push(line);
     const id = (window.__lastId = (window.__lastId || 0) + 1);
+    if ((window.__broken || []).includes(line)) {
+      setTimeout(() => {
+        window.__emit(id, { t: 'error', stream: 'stderr', text: 'could not reach AWS' });
+        window.__emit(id, { t: 'exit', rc: 1 });
+      }, 0);
+      return Promise.resolve({ ok: true, id });
+    }
     const reply = window.__answers[line];
     if (reply !== undefined) {
       // Answer on a later turn, the way a real run does - or slowly, for a case
@@ -58,7 +66,11 @@ window.cg = {
       || (args[0] === 'library' && args[1] !== 'list');
     return Promise.resolve({ ok: true, id, write });
   },
-  answer: () => Promise.resolve(true), cancel: () => Promise.resolve(true),
+  answer: () => Promise.resolve(true),
+  // SIGINT to cg, which dies and reports it. Without the exit the job stays in
+  // the renderer's map for ever, which is the bug this models.
+  cancel: id => { window.__cancelled.push(id); window.__emit(id, { t: 'exit', rc: 130 });
+                  return Promise.resolve(true); },
   busy: () => Promise.resolve([]), openSignIn: () => Promise.resolve(true),
   // main is the only place that knows whether there is a cg to talk to.
   engine: () => Promise.resolve(window.__engine === undefined
@@ -153,8 +165,14 @@ if 'stub.js' not in t:
     t = t.replace('</body>', '<script src="probe.js"></script>\n</body>', 1)
     p.write_text(t)
 PY
+  # Written to a file and then catted, rather than piped straight into python:
+  # chromium's main process exits as soon as the DOM is dumped, but a child of
+  # it keeps the write end of a pipe open for another 10-25 SECONDS, and
+  # sys.stdin.read() waits for EOF. That idle wait, once per page load, was the
+  # whole cost of this suite - minutes of it, at 0.5s of actual work per load.
   "$BROWSER" --headless --disable-gpu --no-sandbox --window-size=1280,900 \
-    --virtual-time-budget=5000 --dump-dom "file://$T/r/index.html" 2>/dev/null \
+    --virtual-time-budget=5000 --dump-dom "file://$T/r/index.html" > "$T/dom.html" 2>/dev/null
+  cat "$T/dom.html" \
   | python3 -I -c '
 import sys, re, html
 m = re.search(r"<pre id=\"probe-out\">(.*?)</pre>", sys.stdin.read(), re.S)
@@ -436,6 +454,26 @@ lacks    "  naming no commands"      "$(row STEPTEXT)" "cg "
 check    "  it is not modal"         "$(row MODAL)" "MODAL | no"
 check    "  so it has no way out"    "$(row SKIPLABEL)" "SKIPLABEL | none"
 check    "  and needs none"          "$(row AFTERSKIP)" "AFTERSKIP | no way out needed"
+# Slow is not broken. Ten seconds in it says so and offers nothing: a button
+# would have to abandon a read that is about to answer, or pretend. A read that
+# genuinely cannot finish ends as a failure, and that is where the buttons are.
+check    "nothing is offered for slow" "$(row GO)" "GO | hidden"
+
+echo "4d2. ten seconds in, it says so - and still offers nothing"
+# Driven rather than waited for: the real delay is ten seconds and this suite
+# runs in under a second per case.
+ENGINE="window.__after = async () => {
+  stageSlow();
+  return 'note=' + document.getElementById('stage-steps').innerText.replace(/\\s+/g, ' ').trim()
+       + ' | go=' + (document.getElementById('stage-go').hidden ? 'hidden' : 'shown')
+       + ' | skip=' + (document.getElementById('stage-skip').hidden ? 'hidden' : 'shown');
+};"
+OUT=$(probe "{${READY/'library list --json'/'library list --unanswered'}, \"sweep --cached --json\": $FULL_SWEEP}")
+contains "the slow read says it is slow" "$(row AFTER)" "taking longer than usual"
+contains "  blaming the network or AWS"  "$(row AFTER)" "the network, or AWS, is slow"
+contains "  with nothing to press"       "$(row AFTER)" "go=hidden"
+contains "  and nothing to dismiss"      "$(row AFTER)" "skip=hidden"
+ENGINE=""
 
 echo "4e. a read that cannot be painted is a failure, not a tick"
 # It answered, so the step is not "still going"; the painter threw, so it is not
@@ -451,6 +489,35 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
 contains "the step says it failed"   "$(row STEPS)" "status=fail"
 lacks    "  and not that it is done" "$(row STEPS)" "status=done"
 contains "  the rest are fine"       "$(row STEPS)" "machines=done"
+
+echo "4e2. a read that failed keeps the panel up, with two things to do"
+# A failed read used to be a line in the header, which the next read to finish
+# overwrites. The panel now stays rather than closing over it - even when every
+# read was quick enough that the panel was never shown.
+ENGINE="window.__broken = ['status --json'];
+window.__after = async () => {
+  document.getElementById('stage-go').click();
+  await new Promise(r => setTimeout(r, 30));
+  return 'cancelled=' + window.__cancelled.length + ' ranagain=' + window.__ran.join(' ');
+};"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+              \"library list --json\": {\"games\": [], \"bucket\": \"b\", \"total_bytes\": 0}}")
+check    "the panel is up"             "$(row STAGE)" "STAGE | open"
+contains "  saying what happened"      "$(row STAGETITLE)" "Some of this could not be read"
+contains "  and what it means"         "$(row STAGESUB)" "unknown rather than empty"
+contains "  the failed read marked"    "$(row STEPS)" "status=fail"
+contains "  the others still ticked"   "$(row STEPS)" "machines=done"
+# Not modal: the window behind it works, and the screens show their unknowns.
+check    "  and it does not block"     "$(row MODAL)" "MODAL | no"
+contains "there are two things to do"  "$(row GO)" "Try again"
+contains "  and a way to leave it"     "$(row SKIPLABEL)" "Close"
+# Try again CANCELS first. Reads do not block each other, so starting a second
+# set leaves the stuck ones in `jobs` - and a job in flight is what disables
+# Build, Play and Destroy. That made it the one thing that could not get you
+# out of a wedged window.
+contains "Try again starts the reads again" "$(row AFTER)" "deps --json"
+check    "nothing threw"               "$(row ERRS)" "ERRS | "
+ENGINE=""
 
 echo "4f. a ten-minute upload is not called a refresh"
 # `library` was written twice in the name table and the second won, so
