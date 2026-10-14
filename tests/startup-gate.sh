@@ -102,42 +102,24 @@ JS
   // laptop whose reads all landed inside the delay must never have shown it.
   await new Promise(r => setTimeout(r, 700));
   out.push('RAN | ' + window.__ran.join(' ;; '));
-  const stage = document.getElementById('stage');
-  out.push('STAGE | ' + (stage.open ? 'open' : 'closed'));
-  // A backdrop over the window is the whole reason a popup needs a way out
-  // from under it, so which popups have one is the thing to assert.
-  out.push('MODAL | ' + (stage.matches(':modal') ? 'yes' : 'no'));
-  out.push('STAGETITLE | ' + document.getElementById('stage-title').textContent.trim());
-  out.push('STAGESUB | ' + document.getElementById('stage-sub').textContent.replace(/\s+/g, ' ').trim());
-  out.push('STEPS | ' + [...document.querySelectorAll('#stage-steps [data-step]')]
-             .map(r => r.dataset.step + '=' + r.dataset.state).join(','));
-  out.push('STEPTEXT | ' + document.getElementById('stage-steps').innerText
+  // The pipeline: one row per stage, each carrying its verdict, and the pane
+  // beside it carrying cg's own words.
+  out.push('ONB | ' + (document.getElementById('onb').hidden ? 'hidden' : 'shown')
+           + ' done=' + (document.getElementById('onb-done').hidden ? 'hidden' : 'shown'));
+  out.push('TITLE2 | ' + document.getElementById('onb-title').textContent.trim());
+  out.push('COUNT | ' + document.getElementById('onb-count').textContent.trim());
+  out.push('SUB | ' + document.getElementById('onb-sub').textContent.replace(/\s+/g, ' ').trim());
+  out.push('STAGES | ' + [...document.querySelectorAll('#onb-steps [data-stage]')]
+             .map(r => r.dataset.stage + '=' + r.dataset.state).join(','));
+  out.push('STAGETEXT | ' + document.getElementById('onb-steps').innerText
              .replace(/\s+/g, ' ').trim());
-  out.push('STEPBTNS | ' + [...document.querySelectorAll('#stage-steps [data-step] button')]
-             .map(b => b.closest('[data-step]').dataset.step + '=' + b.textContent.trim()).join(','));
-  out.push('SKIPLABEL | ' + (document.getElementById('stage-skip').hidden ? 'none'
-           : document.getElementById('stage-skip').textContent.trim()));
-  out.push('GO | ' + (document.getElementById('stage-go').hidden ? 'hidden'
-              : document.getElementById('stage-go').textContent.trim()));
-  // Whatever this case wants to try on the dialog as the window left it - see
-  // the ENGINE snippets below.
+  // Only the active stage may offer anything: you cannot start in the middle.
+  out.push('BUTTONS | ' + [...document.querySelectorAll('#onb-steps [data-stage] button')]
+             .map(b => b.closest('[data-stage]').dataset.stage + '=' + b.textContent.trim()).join(','));
+  out.push('LOG | ' + document.getElementById('onb-log').textContent.replace(/\s+/g, ' ').trim());
+  out.push('LOGCMD | ' + document.getElementById('onb-log-cmd').textContent.trim());
+  out.push('LINK | ' + (document.getElementById('onb-link').hidden ? 'hidden' : 'shown'));
   out.push('AFTER | ' + (window.__after ? await window.__after() : 'none'));
-  // A rung's button, taken as a person would: the modal must be out of the way
-  // of whatever it leads to, and it must actually lead there.
-  const rung = [...document.querySelectorAll('#stage-steps [data-step] button')].pop();
-  if (rung) {
-    rung.click();
-    await new Promise(r => setTimeout(r, 5));
-    out.push('RUNGWENT | ' + rung.closest('[data-step]').dataset.step
-             + ' stage=' + (stage.open ? 'open' : 'closed')
-             + ' view=' + ((document.querySelector('.nav-item.on') || {}).dataset || {}).view);
-  } else {
-    out.push('RUNGWENT | none');
-  }
-  const skip = document.getElementById('stage-skip');
-  if (stage.open && !skip.hidden) skip.click();
-  out.push('AFTERSKIP | ' + (skip.hidden ? 'no way out needed'
-           : stage.open ? 'open' : 'closed'));
   out.push('BANNER | ' + (document.getElementById('banner').hidden ? 'hidden' : 'shown'));
   out.push('TITLE | ' + document.getElementById('banner-title').textContent.trim());
   out.push('BODY | ' + document.getElementById('banner-body').textContent.replace(/\s+/g, ' ').trim());
@@ -203,172 +185,147 @@ creds_rejected='{"cli":true,"source":"s","key_id":"****1234","account":null,"arn
 cfg_ok='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":true,"value":"a@b.c","default":null,"note":"n"}]'
 cfg_noemail='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":false,"value":null,"default":null,"note":"n"}]'
 
+# Signed in, with an API token the app can mint a key with.
+tskey_canmint='{"present":true,"valid":true,"state":"ok","detail":null,"signed_in":true,"node":"laptop","auth_key_stored":false,"can_mint":true}'
+# What `cg machines` says about the configured region: one machine the quota
+# covers, and - the other case - a region that rents nothing you may launch.
+machines_ok='{"region": "ap-south-2", "inr_per_usd": 88, "machines":
+  [{"type": "g6.xlarge", "gpu": "L4", "vram_gib": 22.4, "fits_spot": true,
+    "fits_ondemand": true, "inr_hour_spot": 16, "inr_hour_ondemand": 85}]}'
+machines_noquota='{"region": "ap-south-2", "inr_per_usd": 88, "machines":
+  [{"type": "g6.xlarge", "gpu": "L4", "vram_gib": 22.4, "fits_spot": false,
+    "fits_ondemand": false, "inr_hour_spot": 16, "inr_hour_ondemand": 85}]}'
+
 echo "0. there is no cg at all"
 # Without an engine every read fails the same way - a spawn error each - and six
 # broken reads is not what happened. One thing did, and only main can see it:
 # the renderer has no filesystem.
 ENGINE="window.__engine = { repo: '/opt/nope', cg: '/opt/nope/cg', found: false, contract: false };
-// Installed while the window was open, and Try again pressed: nothing here
-// needs restarting.
 window.__after = async () => {
   window.__engine = { repo: '/opt/nope', cg: '/opt/nope/cg', found: true, contract: true };
-  document.getElementById('stage-go').click();
+  document.querySelector('#onb-steps button').click();
   await new Promise(r => setTimeout(r, 20));
-  return 'stage=' + (document.getElementById('stage').open ? 'open' : 'closed')
-       + ' ran=' + window.__ran.join(' ');
+  return 'ran=' + window.__ran.join(' ');
 };"
 OUT=$(probe "{}")
-check    "nothing is asked at all"   "$(row RAN)" "RAN | "
-check    "the popup says so"         "$(row STAGE)" "STAGE | open"
-contains "  naming the one problem"  "$(row STAGETITLE)" "This app cannot find cg"
-contains "  and what cg is"          "$(row STAGESUB)" "this window is a face on it"
-contains "  where it looked"         "$(row STEPTEXT)" "/opt/nope/cg"
-contains "  and how to fix it"       "$(row STEPTEXT)" "CG_REPO"
-contains "  with something to run"   "$(row STEPTEXT)" "git clone"
-check    "  it is modal"              "$(row MODAL)" "MODAL | yes"
-contains "  with a way out from under it" "$(row SKIPLABEL)" "Close"
-contains "and there is one thing to do" "$(row GO)" "Try again"
-# Installed while the window sat there: Try again starts it, with no restart.
-contains "  which starts the reads"   "$(row AFTER)" "deps --json"
-contains "  and gets out of the way"  "$(row AFTER)" "stage=closed"
-check    "nothing threw"             "$(row ERRS)" "ERRS | "
+check    "nothing is asked at all"     "$(row RAN)" "RAN | "
+contains "the pipeline says so"        "$(row TITLE2)" "This app cannot find cg"
+contains "  and what cg is"            "$(row SUB)" "this window is a face on it"
+contains "  where it looked"           "$(row STAGETEXT)" "/opt/nope/cg"
+contains "  and how to fix it"         "$(row STAGETEXT)" "CG_REPO"
+contains "  with something to run"     "$(row STAGETEXT)" "git clone"
+contains "the failed step is marked"   "$(row STAGES)" "engine=failed"
+# Installed while the window sat there: no restart.
+contains "Try again starts the reads"  "$(row AFTER)" "deps --json"
+check    "nothing threw"               "$(row ERRS)" "ERRS | "
 ENGINE=""
 
-echo "1. a tool is missing: nothing else is asked"
+echo "1. a tool is missing: it is the first stage, and the only one with a button"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_BAD" true), \"creds --json\": $creds_bad, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
-contains "the three reads happen"   "$(row RAN)" "deps --json"
-contains "  all three"              "$(row RAN)" "creds tailscale --json"
+contains "the three reads happen"      "$(row RAN)" "deps --json"
+contains "  all of them"               "$(row RAN)" "creds tailscale --json"
 # The six that need AWS or a tailnet would every one come back unknown.
-lacks    "status is not asked"      "$(row RAN)" "status --json"
-lacks    "  nor the library"        "$(row RAN)" "library list --json"
-lacks    "  nor the machines"       "$(row RAN)" "machines --json"
-lacks    "  nor the guards"         "$(row RAN)" "watcher --json"
-lacks    "and never cost"           "$(row RAN)" "cost"
-check    "the banner is up"         "$(row BANNER)" "BANNER | shown"
-# One line, naming them: the old banner spent a sentence saying that some
-# tools were missing and another saying which.
-contains "  naming them"            "$(row TITLE)"  "AWS CLI v2, Moonlight are not installed"
-contains "  and what that means"    "$(row BODY)"   "Nothing here can run without them"
-contains "  with somewhere to go"   "$(row FIX)"    "Open Dependencies"
-check    "  that goes there"        "$(row WENT)"   "WENT | deps"
-# The banner shows the first problem, which is right for one that turns up
-# mid-session. On a fresh laptop it means finding out about four jobs one at a
-# time, so the window opening shows the whole ladder instead.
-check    "the ladder is up"         "$(row STAGE)" "STAGE | open"
-contains "  counting the jobs"      "$(row STAGETITLE)" "to do before this can build a box"
-contains "  the tools rung first"   "$(row STEPS)" "tools=todo"
-# The key cannot be judged with no CLI to ask AWS with, and "AWS rejected this
-# key" about a laptop that never asked is a lie.
-contains "  the key not yet judged" "$(row STEPS)" "key=unknown"
-contains "  saying why"             "$(row STEPTEXT)" "the one above it comes first"
-# What is already true is ticked, not left blank: the list is the whole job.
-contains "  and what is already done" "$(row STEPS)" "tailnet=done"
-contains "each rung carries its button" "$(row STEPBTNS)" "tools=Open Dependencies"
-check    "  it is modal, because it asks" "$(row MODAL)" "MODAL | yes"
-contains "  and the way out is patient" "$(row SKIPLABEL)" "I'll do it later"
-# Clicking a rung must get the modal out of the way of the screen it opens.
-contains "its button closes the modal" "$(row RUNGWENT)" "stage=closed"
+lacks    "status is not asked"         "$(row RAN)" "status --json"
+lacks    "  nor the library"           "$(row RAN)" "library list --json"
+lacks    "and never cost"              "$(row RAN)" "cost"
+contains "the pipeline is up"          "$(row ONB)" "ONB | shown"
+contains "  counting the stages"       "$(row COUNT)" "of 6 done"
+contains "  naming the missing tools"  "$(row STAGETEXT)" "AWS CLI v2, Moonlight are not installed"
+contains "  and what that means"       "$(row STAGETEXT)" "Nothing here can run without them"
+contains "the tools stage is active"   "$(row STAGES)" "tools=active"
+# You cannot start in the middle: there is exactly one button on the screen.
+check    "only one stage offers anything" "$(row BUTTONS)" "BUTTONS | tools=Install them"
+# What is already true is ticked wherever it sits, and what cannot be judged
+# says so rather than reading as fine.
+contains "  a met stage is still ticked"  "$(row STAGES)" "tailnet=done"
+contains "  and an unjudgeable one asks"  "$(row STAGES)" "key=unknown"
+# "The AWS CLI is not installed" and "the AWS CLI is missing from the tools"
+# are one job with one button, and used to be two rows saying it.
+lacks    "the same fix is not listed twice" "$(row STAGES)" "cli="
+contains "  saying what it will ask for"  "$(row STAGETEXT)" "asks for your password once"
+# The banner is for a problem that turns up mid-session. The pipeline has this
+# one, in order, with the button - two copies of it is what this replaced.
+check    "the banner stays out of it"  "$(row BANNER)" "BANNER | hidden"
+check    "and the log pane is empty"   "$(row LOG)" "LOG | "
+
+echo "1b. pressing Install them: the log pane is where cg speaks"
+# Not a dialog over the window, and not "running: cg deps install" in the
+# header. The pane beside the stage, which is permanent furniture.
+ENGINE="window.__after = async () => {
+  window.__broken = [];
+  document.querySelector('#onb-steps button').click();
+  await new Promise(r => setTimeout(r, 10));
+  window.__emit(window.__lastId, { t: 'line', text: 'installing aws-cli' });
+  await new Promise(r => setTimeout(r, 10));
+  return 'cmd=' + document.getElementById('onb-log-cmd').textContent.trim()
+       + ' | log=' + document.getElementById('onb-log').textContent.replace(/\s+/g, ' ').trim()
+       + ' | state=' + document.querySelector('[data-stage=tools]').dataset.state
+       + ' | buttons=' + [...document.querySelectorAll('#onb-steps button')].map(b => b.textContent.trim()).join(',');
+};"
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_BAD" true), \"creds --json\": $creds_bad, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
+contains "the pane names the command"  "$(row AFTER)" "cmd=cg deps install"
+contains "  and carries its output"    "$(row AFTER)" "installing aws-cli"
+contains "the stage says it is running" "$(row AFTER)" "state=running"
+# Stopping has to reach cg: a package manager can be sitting on a lock.
+contains "  and offers to stop it"     "$(row AFTER)" "buttons=Stop waiting"
+ENGINE=""
 
 echo "2. tools are there, the key is not"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_bad, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
-lacks    "still nothing else is asked" "$(row RAN)" "status --json"
-contains "it says what is wrong"       "$(row TITLE)" "The AWS CLI is not installed"
-contains "  and what that costs"       "$(row BODY)"  "unknown, not empty"
-contains "  and the same way out"      "$(row FIX)"   "Open Dependencies"
+contains "the tools stage is ticked"   "$(row STAGES)" "tools=done"
+contains "  and the CLI is the problem" "$(row STAGETEXT)" "The AWS CLI is not installed"
+contains "  with the install button"   "$(row BUTTONS)" "cli=Install them"
 
 echo "3. tools and key are there, the tailnet is not"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" false), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_out, \"config --json\": $cfg_ok}")
-lacks    "still nothing else is asked" "$(row RAN)" "status --json"
-contains "it says so"                  "$(row TITLE)" "not signed in to Tailscale"
-contains "  and why it matters"        "$(row BODY)"  "no public SSH port"
-# The sign-in is a button here, not a page to go to: there is one thing to do.
-contains "  offering the sign-in"      "$(row FIX)"   "Sign in"
+contains "three stages are ticked"     "$(row STAGES)" "key=done"
+contains "the tailnet stage is active" "$(row STAGES)" "tailnet=active"
+contains "  saying why it matters"     "$(row STAGETEXT)" "no public SSH port"
+contains "  and that it is free"       "$(row STAGETEXT)" "Free."
+check    "one button, the sign-in"     "$(row BUTTONS)" "BUTTONS | tailnet=Sign in"
+contains "  which finishes elsewhere"  "$(row STAGETEXT)" "finishes in your browser"
 
 echo "3b. the box has no key to join with"
 # This one used to be a dialog in the MIDDLE of a build: fifteen minutes of
-# log, then "paste auth key". It is a prerequisite, so it is checked with the
-# other prerequisites, before anything launches.
+# log, then "paste auth key". It is a prerequisite, so it is a stage.
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_nokey, \"config --json\": $cfg_ok}")
-lacks    "nothing else is asked"       "$(row RAN)" "status --json"
-contains "it says what is missing"     "$(row TITLE)" "The box has no Tailscale auth key"
-contains "  and what that stops"       "$(row BODY)"  "cannot join it to your tailnet"
-contains "  offering to take one"      "$(row FIX)"   "Set auth key"
+contains "the auth key stage is active" "$(row STAGES)" "authkey=active"
+contains "  saying what it stops"       "$(row STAGETEXT)" "cannot join it to your tailnet"
+# No API token here, so there is nothing to mint one with: one button, not two.
+check    "and only pasting is offered"  "$(row BUTTONS)" "BUTTONS | authkey=Paste a key"
 
-echo "3c. nowhere to send a billing alert"
+echo "3c. a token that can mint a key means there is no stage at all"
+# cg makes the key when the build needs it, so the prerequisite is already met
+# and the pipeline does not ask you for one.
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_canmint, \"config --json\": $cfg_ok}")
+contains "the auth key stage is ticked" "$(row STAGES)" "authkey=done"
+lacks    "  and asks for nothing"       "$(row BUTTONS)" "authkey"
+
+echo "3d. nowhere to send a billing alert"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_noemail}")
-lacks    "nothing else is asked"       "$(row RAN)" "status --json"
-contains "it says so"                  "$(row TITLE)" "No address for billing alerts"
-contains "  and why a build needs one" "$(row BODY)"  "budget alarm"
-
-echo "3d. the ladder, on a laptop with three things to do"
-# The case this step exists for: a fresh install. Tools are there, the key is
-# good, and nothing else is - which used to be three separate banners, found one
-# at a time, each after fixing the last.
-OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" false), \"creds --json\": $creds_ok,
-              \"creds tailscale --json\": $tskey_out, \"config --json\": $cfg_noemail}")
-check    "the ladder is up"           "$(row STAGE)" "STAGE | open"
-contains "  counting them in words"   "$(row STAGETITLE)" "Three things to do"
-contains "  and saying it is free"    "$(row STAGESUB)" "None of it costs anything"
-contains "the met rungs are ticked"   "$(row STEPS)" "tools=done"
-contains "  including the key"        "$(row STEPS)" "key=done"
-contains "the tailnet needs doing"    "$(row STEPS)" "tailnet=todo"
-contains "  so does the auth key"     "$(row STEPS)" "authkey=todo"
-contains "  so does the address"      "$(row STEPS)" "email=todo"
-# Each with the one button that does it, and no shared "go to Settings".
-contains "the sign-in is a button"    "$(row STEPBTNS)" "tailnet=Sign in"
-contains "  the auth key its own"     "$(row STEPBTNS)" "authkey=Set auth key"
-contains "  the address its own"      "$(row STEPBTNS)" "email=Set an address"
-# cg's sentence for each, not a new one invented here.
-contains "and each says what it costs you" "$(row STEPTEXT)" "no public SSH port"
-contains "  in cg's words"            "$(row STEPTEXT)" "budget alarm"
-# The last rung's button, clicked: the modal goes, and the window is left on
-# the screen that sets the thing.
-contains "a rung gets out of its own way" "$(row RUNGWENT)" "email stage=closed"
-contains "  and lands on the settings"    "$(row RUNGWENT)" "view=settings"
-check    "nothing threw"              "$(row ERRS)" "ERRS | "
+contains "the alerts stage is active"  "$(row STAGES)" "email=active"
+contains "  and says a build needs it" "$(row STAGETEXT)" "budget alarm"
 
 echo "3e. the laptop could not reach AWS, which is not the key's fault"
-# It used to say "AWS rejected this access key" to a laptop with no network -
-# a lie about a call that never arrived, and it sent people to replace a key
-# that was fine. cg says which it was; this only reads it.
-OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_offline,
-              \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
-contains "it says the call never arrived" "$(row TITLE)" "could not reach AWS"
-lacks    "  and blames nothing"           "$(row TITLE)" "rejected"
-contains "  saying the key may be fine"   "$(row BODY)"  "The key may be fine"
-# Nothing to retype: the one thing that helps is doing it again.
-contains "  offering another go"          "$(row FIX)"   "Try again"
-contains "  on the ladder too"            "$(row STEPTEXT)" "could not reach AWS"
+# It used to say "AWS rejected this access key" to a laptop with no network - a
+# lie about a call that never arrived, and it sent people to replace a key that
+# was fine. cg says which it was; the stage only reads it.
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_offline, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
+contains "it says the call never arrived" "$(row STAGETEXT)" "could not reach AWS"
+lacks    "  and blames nothing"           "$(row STAGETEXT)" "rejected this access key"
+contains "  saying the key may be fine"   "$(row STAGETEXT)" "The key may be fine"
+contains "  offering another go"          "$(row BUTTONS)" "key=Try again"
 
 echo "3f. there is no key at all, which is not a rejection either"
-OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_nokey,
-              \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
-contains "it says there is none"          "$(row TITLE)" "no AWS access key on this laptop"
-lacks    "  not that one was refused"     "$(row TITLE)" "rejected"
-contains "  and offers to take one"       "$(row FIX)"   "Set AWS key"
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_nokey, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
+contains "it says there is none"       "$(row STAGETEXT)" "no AWS access key on this laptop"
+contains "  and offers to take one"    "$(row BUTTONS)" "key=Add your key"
 
 echo "3g. a key AWS actually refused still says so"
-OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_rejected,
-              \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
-contains "the old sentence, where it is true" "$(row TITLE)" "AWS rejected this access key"
-contains "  and the old button"               "$(row FIX)"   "Set AWS key"
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_rejected, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
+contains "the old sentence, where it is true" "$(row STAGETEXT)" "AWS rejected this access key"
 
-echo "3h. the progress panel becoming the ladder"
-# One read is slow, so the panel is on screen - not modal - when the gate
-# finishes and the ladder has to take its place. A dialog cannot change its
-# modality while it is open: showModal() throws on one that already is, which
-# would have left the ladder as a corner panel with no backdrop, or nothing at
-# all and an exception in the console.
-ENGINE="window.__slow = ['config --json'];"
-OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" false), \"creds --json\": $creds_ok,
-              \"creds tailscale --json\": $tskey_out, \"config --json\": $cfg_noemail}")
-contains "the ladder arrived"          "$(row STAGETITLE)" "to do before this can build a box"
-check    "  and it is modal"           "$(row MODAL)" "MODAL | yes"
-contains "  with its way out"          "$(row SKIPLABEL)" "I'll do it later"
-check    "  and nothing threw"         "$(row ERRS)" "ERRS | "
-ENGINE=""
-
-echo "4. everything is ready: the rest goes at once"
+echo "4. the prerequisites pass: the reads that need AWS go at once"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
 contains "status is asked"          "$(row RAN)" "status --json"
 contains "  the guards"             "$(row RAN)" "watcher --json"
@@ -377,20 +334,13 @@ contains "  the machines"           "$(row RAN)" "machines --json"
 # The remembered scan, never a fresh one: a scan takes 90 seconds.
 contains "  and the cached sweep"   "$(row RAN)" "sweep --cached --json"
 lacks    "cost is never automatic"  "$(row RAN)" "cost"
-check    "no banner"                "$(row BANNER)" "BANNER | hidden"
-# Nothing answers those five here, so the popup is still up listing them -
-# which is the shape of a laptop whose network has gone.
-contains "the popup lists both batches" "$(row STEPS)" "deps=done"
-contains "  including what it waits on" "$(row STEPS)" "machines=doing"
+# Nothing answered those, so where it runs cannot be judged - which is not the
+# same as judging it ready.
+contains "where it runs is unknown" "$(row STAGES)" "where=unknown"
+contains "  and says why"           "$(row STAGETEXT)" "could not be checked"
+contains "the pipeline is still up" "$(row ONB)" "ONB | shown"
 
 echo "4b. a laptop that has never scanned scans itself, once"
-# One region in the table - the one .env names - reads as "where did the other
-# regions go", and the answer was a button somewhere else on the screen. The
-# scan is free, so a window with no remembered scan starts one itself. It is
-# never awaited: nothing on screen waits for it.
-#
-# No answer is given for `sweep --json` here, so it stays in flight and the
-# table can be caught saying what it is waiting for.
 READY="\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok,
        \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok,
        \"status --json\": {\"box\": null, \"session\": null, \"region\": \"ap-south-2\",
@@ -400,10 +350,7 @@ READY="\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok,
          \"account\": {\"plan\": \"PAID\", \"credits\": 0}},
        \"watcher --json\": {\"guards\": []},
        \"library list --json\": {\"games\": [], \"bucket\": \"b\", \"total_bytes\": 0},
-       \"machines --json\": {\"region\": \"ap-south-2\", \"inr_per_usd\": 88, \"machines\":
-         [{\"type\": \"g6.xlarge\", \"gpu\": \"L4\", \"vram_gib\": 22.4,
-           \"fits_spot\": true, \"fits_ondemand\": true,
-           \"inr_hour_spot\": 16, \"inr_hour_ondemand\": 85}]}"
+       \"machines --json\": $machines_ok"
 EMPTY_SWEEP='{"cached": false, "regions": [], "too_far": [], "unreachable": []}'
 FULL_SWEEP='{"cached": true, "age_seconds": 90, "too_far": [], "unreachable": [],
              "regions": [{"region": "ap-south-2", "city": "Asia Pacific (Hyderabad)",
@@ -411,137 +358,23 @@ FULL_SWEEP='{"cached": true, "age_seconds": 90, "too_far": [], "unreachable": []
 OUT=$(probe "{$READY, \"sweep --cached --json\": $EMPTY_SWEEP}")
 contains "the remembered scan is read first" "$(row RAN)" "sweep --cached --json"
 contains "  and a real scan follows it"      "$(row RAN)" "sweep --json"
-# Said by the table, not only by the button: the button is at the top of a long
-# screen and the question is asked at the table.
-contains "the table says what it waits for" "$(row LEGEND)" "scanning every region now - about 90 seconds"
-contains "  and which region it has"        "$(row LEGEND)" "This is ap-south-2 until it lands"
-contains "  while the button agrees"        "$(row SCANBTN)" "scanning all regions"
-check    "and nothing threw"                "$(row ERRS)" "ERRS | "
 
-echo "4c. a laptop that HAS scanned is left alone"
-# However old. A remembered scan is what Rescan is for, and scanning on every
-# open would be 90 seconds of work nobody asked for.
+echo "4c. everything ready: the pipeline collapses to a line"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP}")
-contains "the remembered scan is read" "$(row RAN)" "sweep --cached --json"
-lacks    "  and nothing rescans"       "$(row RAN)" ";; sweep --json"
-contains "  the button is idle"        "$(row SCANBTN)" "Scan all regions"
-# The one that matters most: every read came back inside the popup's delay, so
-# it was never shown at all. A modal that appears and vanishes again is worse
-# than no modal, and this is the common case - every open after the first.
-check    "and the popup never appeared" "$(row STAGE)" "STAGE | closed"
-# It was being filled in all the same, so a laptop that IS slow has a list.
-contains "  though it tracked the reads" "$(row STEPS)" "deps=done"
-contains "  both batches of them"        "$(row STEPS)" "sweep=done"
-lacks    "  with nothing left hanging"   "$(row STEPS)" "=doing"
-
-echo "4d. a read that does not come back: the popup says what it is waiting for"
-# `cg library list` is left unanswered, as it is on a laptop where S3 is slow or
-# the network has gone. Past the delay, the popup is up and names the step in a
-# person's words - not "running: cg library".
-OUT=$(probe "{${READY/'library list --json'/'library list --unanswered'}, \"sweep --cached --json\": $FULL_SWEEP}")
-check    "the popup is up"            "$(row STAGE)" "STAGE | open"
-contains "  with a plain title"       "$(row STAGETITLE)" "Getting your rig ready"
-contains "  saying it is free"        "$(row STAGESUB)" "None of it costs anything"
-contains "  the slow read still going" "$(row STEPS)" "library=doing"
-contains "  the rest ticked off"      "$(row STEPS)" "status=done"
-# cg's words are what the header is for. This is the other audience.
-contains "  in words, not commands"  "$(row STEPTEXT)" "Reading your game archive"
-lacks    "  naming no commands"      "$(row STEPTEXT)" "cg "
-# Skip, not Cancel: the reads carry on, the window behind this one works.
-# It reports; it does not ask. So it is not modal: the window behind it stays
-# usable, and there is nothing to dismiss - the Skip button it used to carry
-# only existed to undo a backdrop it should never have had.
-check    "  it is not modal"         "$(row MODAL)" "MODAL | no"
-check    "  so it has no way out"    "$(row SKIPLABEL)" "SKIPLABEL | none"
-check    "  and needs none"          "$(row AFTERSKIP)" "AFTERSKIP | no way out needed"
-# Slow is not broken. Ten seconds in it says so and offers nothing: a button
-# would have to abandon a read that is about to answer, or pretend. A read that
-# genuinely cannot finish ends as a failure, and that is where the buttons are.
-check    "nothing is offered for slow" "$(row GO)" "GO | hidden"
-
-echo "4d2. ten seconds in, it says so - and still offers nothing"
-# Driven rather than waited for: the real delay is ten seconds and this suite
-# runs in under a second per case.
-ENGINE="window.__after = async () => {
-  stageSlow();
-  return 'note=' + document.getElementById('stage-steps').innerText.replace(/\\s+/g, ' ').trim()
-       + ' | go=' + (document.getElementById('stage-go').hidden ? 'hidden' : 'shown')
-       + ' | skip=' + (document.getElementById('stage-skip').hidden ? 'hidden' : 'shown');
-};"
-OUT=$(probe "{${READY/'library list --json'/'library list --unanswered'}, \"sweep --cached --json\": $FULL_SWEEP}")
-contains "the slow read says it is slow" "$(row AFTER)" "taking longer than usual"
-contains "  blaming the network or AWS"  "$(row AFTER)" "the network, or AWS, is slow"
-contains "  with nothing to press"       "$(row AFTER)" "go=hidden"
-contains "  and nothing to dismiss"      "$(row AFTER)" "skip=hidden"
-ENGINE=""
-
-echo "4e. a read that cannot be painted is a failure, not a tick"
-# It answered, so the step is not "still going"; the painter threw, so it is not
-# "done" either. The popup used to be the only place this showed at all: the
-# header's failure line is overwritten by whatever read finishes next.
-#
-# This stub sends a status with no `local` block, which is what took the whole
-# status paint down - and what this test's own stub did, unnoticed, until the
-# popup started reporting each read's verdict.
-OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
-              \"library list --json\": {\"games\": [], \"bucket\": \"b\", \"total_bytes\": 0},
-              \"status --json\": {\"box\": null, \"session\": null}}")
-contains "the step says it failed"   "$(row STEPS)" "status=fail"
-lacks    "  and not that it is done" "$(row STEPS)" "status=done"
-contains "  the rest are fine"       "$(row STEPS)" "machines=done"
-
-echo "4e2. a read that failed keeps the panel up, with two things to do"
-# A failed read used to be a line in the header, which the next read to finish
-# overwrites. The panel now stays rather than closing over it - even when every
-# read was quick enough that the panel was never shown.
-ENGINE="window.__broken = ['status --json'];
-window.__after = async () => {
-  document.getElementById('stage-go').click();
-  await new Promise(r => setTimeout(r, 30));
-  return 'cancelled=' + window.__cancelled.length + ' ranagain=' + window.__ran.join(' ');
-};"
-OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
-              \"library list --json\": {\"games\": [], \"bucket\": \"b\", \"total_bytes\": 0}}")
-check    "the panel is up"             "$(row STAGE)" "STAGE | open"
-contains "  saying what happened"      "$(row STAGETITLE)" "Some of this could not be read"
-contains "  and what it means"         "$(row STAGESUB)" "unknown rather than empty"
-contains "  the failed read marked"    "$(row STEPS)" "status=fail"
-contains "  the others still ticked"   "$(row STEPS)" "machines=done"
-# Not modal: the window behind it works, and the screens show their unknowns.
-check    "  and it does not block"     "$(row MODAL)" "MODAL | no"
-contains "there are two things to do"  "$(row GO)" "Try again"
-contains "  and a way to leave it"     "$(row SKIPLABEL)" "Close"
-# Try again CANCELS first. Reads do not block each other, so starting a second
-# set leaves the stuck ones in `jobs` - and a job in flight is what disables
-# Build, Play and Destroy. That made it the one thing that could not get you
-# out of a wedged window.
-contains "Try again starts the reads again" "$(row AFTER)" "deps --json"
+check    "the pipeline is gone"        "$(row ONB)" "ONB | hidden done=shown"
+contains "  and names where it runs"   "$(row STAGETEXT)" ""
+lacks    "  nothing rescans"           "$(row RAN)" ";; sweep --json"
 check    "nothing threw"               "$(row ERRS)" "ERRS | "
-ENGINE=""
 
-echo "4f. a ten-minute upload is not called a refresh"
-# `library` was written twice in the name table and the second won, so
-# `cg library push` - minutes of uploading your games to S3 - was called a
-# refresh: in the header, in the activity list, and on the button that
-# abandons it.
-ENGINE="window.__after = async () => {
-  startRun(['library', 'push']);
-  await new Promise(r => setTimeout(r, 5));
-  document.querySelector('.nav-item[data-view=\\"dashboard\\"]').click();
-  return 'activity=' + document.getElementById('d-activity').innerText.replace(/\\s+/g, ' ').trim()
-       + ' | stop=' + document.getElementById('cancel-label').textContent.trim()
-       + ' | goto=' + document.getElementById('goto-label').textContent.trim();
-};"
-OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
-              \"library list --json\": {\"games\": [], \"bucket\": \"b\", \"total_bytes\": 0}}")
-contains "the activity list says what it is" "$(row AFTER)" "the mirror to S3 started"
-lacks    "  and not which command"           "$(row AFTER)" "cg library push started"
-# The button that would abandon it, which is the worst place to be vague.
-contains "Stop names the archive change"     "$(row AFTER)" "stop=Stop archive change"
-lacks    "  not a refresh"                   "$(row AFTER)" "stop=Stop refresh"
-contains "and the pointer names it in full"  "$(row AFTER)" "goto=the mirror to S3 is running"
-check    "nothing threw"                     "$(row ERRS)" "ERRS | "
-ENGINE=""
+echo "4d. a region that cannot rent the machine is not 'ready'"
+# An enabled region with no GPU quota looks completely set up and cannot build.
+# That is the Malaysia case, and it read as a broken app rather than a step.
+OUT=$(probe "{$READY, \"machines --json\": $machines_noquota, \"sweep --cached --json\": $FULL_SWEEP}")
+contains "the pipeline stays up"       "$(row ONB)" "ONB | shown"
+contains "  with where it runs active" "$(row STAGES)" "where=active"
+contains "  naming the region"         "$(row STAGETEXT)" "ap-south-2 cannot rent this machine"
+contains "  and the two reasons"       "$(row STAGETEXT)" "no GPU quota there, or none of its machines fit"
+contains "  offering the choice"       "$(row BUTTONS)" "where=Choose where"
 
 echo "5. nothing threw"
 check "the page logged no errors"   "$(row ERRS)" "ERRS | "

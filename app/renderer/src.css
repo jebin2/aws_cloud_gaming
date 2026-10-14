@@ -108,15 +108,6 @@
   .log-row .k.ok { @apply text-primary; }
   .log-row .k.warn, .log-row .k.wait { @apply text-tertiary; }
   .log-row .t { @apply text-on-surface-variant break-all; }
-  /* The opening progress panel. It reports; it does not ask, so it is opened
-     with show() rather than showModal() - no backdrop, the window stays live,
-     and there is nothing to dismiss. That also means the browser does not
-     centre it for us: a non-modal dialog is laid out where it sits in the
-     document, which is the top of the page. So it is put in a corner. */
-  .stage-toast {
-    @apply fixed m-0 max-w-[26rem];
-    inset: auto 2rem 2rem auto;
-  }
 }
 
 /* `hidden` must win. A class that sets display - .btn is inline-flex - is an

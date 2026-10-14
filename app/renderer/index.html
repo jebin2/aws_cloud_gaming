@@ -77,7 +77,6 @@
       <div class="flex items-center gap-space-sm">
         <span class="font-headline-lg text-headline-lg" id="view-title">Dashboard</span>
         <span class="text-outline-variant font-code-sm text-code-sm">/</span>
-        <span class="font-code-sm text-code-sm text-on-surface-variant" id="job-line">idle</span>
       </div>
     </div>
     <div class="flex items-center gap-space-sm">
@@ -89,7 +88,53 @@
 
   <!-- Dashboard -->
   <section data-view="dashboard">
-    <div class="flex flex-wrap items-center gap-space-sm mb-space-lg font-code-sm text-code-sm">
+    <!-- The first-run pipeline. One stage at a time, in the order they have to be
+         met, with the stage that is active carrying the only button on screen and
+         the pane beside it carrying cg's own output.
+
+         This is the dashboard, not a screen of its own and not a dialog: on a
+         laptop that is not ready there is nothing else worth showing, and on one
+         that is, it collapses to the single line below and the cards take over.
+         What used to be here instead: a banner naming one problem at a time, and
+         a popup that had to be shoved into a corner to stop it blocking a window
+         you could not use yet. -->
+    <div id="onb" hidden>
+      <div class="flex items-baseline justify-between gap-space-md mb-space-xs">
+        <span class="font-headline-lg text-headline-lg" id="onb-title">Get your rig ready</span>
+        <span class="font-code-sm text-code-sm text-outline" id="onb-count"></span>
+      </div>
+      <p class="font-body-md text-body-md text-on-surface-variant mb-space-lg" id="onb-sub">
+        Every step here is free. Building the box is what starts the bill, and that
+        comes after.
+      </p>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop items-start">
+        <div class="flex flex-col" id="onb-steps"></div>
+        <!-- Permanent furniture, not something that appears: empty before
+             anything runs, cg's own words while it does, and the last thing it
+             said afterwards. It replaces the header's "running: cg deps" line. -->
+        <div class="rounded-lg bg-surface-container-lowest border border-surface-variant
+                    p-space-md min-h-[200px] flex flex-col">
+          <div class="flex items-baseline justify-between gap-space-sm mb-space-sm">
+            <span class="font-label-caps text-label-caps uppercase text-on-surface-variant">Log</span>
+            <span class="font-code-sm text-code-sm text-outline" id="onb-log-cmd"></span>
+          </div>
+          <pre class="font-code-sm text-code-sm text-on-surface-variant whitespace-pre-wrap
+                      break-words overflow-auto max-h-[46vh] flex-1" id="onb-log"></pre>
+          <!-- A sign-in that finishes in a browser prints a link and then waits.
+               The link has to be reachable while the command is still running. -->
+          <button class="btn btn-primary mt-space-sm self-start" id="onb-link" hidden>
+            <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the sign-in page
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- Ready: one line where the pipeline was. -->
+    <div id="onb-done" class="flex flex-wrap items-center gap-space-sm mb-space-lg
+                              pb-space-md border-b border-surface-variant" hidden>
+      <span class="material-symbols-outlined text-[18px] text-primary" data-icon="check_circle">&#xe86c;</span>
+      <span class="font-code-md text-code-md" id="onb-done-text">Your rig is ready</span>
+    </div>
+    <div class="flex flex-wrap items-center gap-space-sm mb-space-lg font-code-sm text-code-sm" id="d-chips">
       <span class="pill" id="d-session">session idle</span>
       <span class="pill ml-auto" id="d-machine">—</span>
     </div>
@@ -821,30 +866,6 @@
 </main>
 </div>
 
-<!-- What the window is doing while it opens, in words someone who did not write
-     cg can read. The header's job-line - "running: cg machines, cg refresh" -
-     is true and useless to anybody else: it names commands, and it cannot tell
-     "this is loading" apart from "this is broken".
-
-     Driven by a list of steps rather than by the thing it happens to be waiting
-     for, so the long runs that today speak only through job-line - a build, a
-     destroy, an archive push - can be given the same dialog. -->
-<dialog id="stage" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[460px] max-w-[34rem]">
-  <p class="font-headline-md text-headline-md" id="stage-title">Getting your rig ready</p>
-  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md" id="stage-sub"></p>
-  <div class="flex flex-col gap-space-xs font-code-sm text-code-sm" id="stage-steps"></div>
-  <menu class="flex justify-end gap-space-sm mt-space-lg p-0">
-    <!-- Only the two that ask for something get one of these, and only because
-         they are modal: a backdrop over the window needs a way out from under
-         it. The progress panel is not modal and has nothing to dismiss. -->
-    <button class="btn" id="stage-skip" hidden></button>
-    <!-- The one thing to do about what this dialog is reporting, when there is
-         one: try the reads again, which is the whole answer to a laptop whose
-         network was down a minute ago. -->
-    <button class="btn btn-primary" id="stage-go" hidden></button>
-  </menu>
-</dialog>
-
 <dialog id="confirm" class="rounded-lg bg-surface-container-low text-on-surface border border-surface-variant p-space-lg min-w-[460px] max-w-[560px]">
   <form method="dialog">
     <p class="font-headline-md text-headline-md" id="confirm-title"></p>
@@ -968,6 +989,22 @@
 <!-- Turning a region on. No case and no person, unlike a quota - one call, and
      AWS works through it over a few minutes. It is account-wide and slow to
      undo, which is why it is a dialog and not a toggle in a table. -->
+<!-- Where it runs. A popup rather than a panel, because changing it later is
+     this same question asked again - and the measuring behind it is free. -->
+<dialog id="whereto" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[560px] max-w-[48rem]">
+  <p class="font-code-md text-code-md">Where should it run?</p>
+  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md" id="whereto-sub">
+    Measured from this laptop.
+  </p>
+  <div class="overflow-x-auto"><table class="chooser" id="whereto-table"></table></div>
+  <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="whereto-note"></p>
+  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+    <button class="btn" id="whereto-measure">Measure again</button>
+    <button class="btn" id="whereto-cancel">Cancel</button>
+    <button class="btn btn-primary" id="whereto-use">Use it</button>
+  </menu>
+</dialog>
+
 <dialog id="optin" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[600px] max-w-[54rem]">
   <p class="font-code-md text-code-md">Enable a region</p>
   <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md">

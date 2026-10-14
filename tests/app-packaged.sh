@@ -138,13 +138,13 @@ contains "  and close is a backstop"           "$runner" "child.on('close', () =
 echo "8. a failed READ is no longer silent"
 js=$(cat app/renderer/app.js)
 contains "a non-zero read is reported"   "$js" "event.rc !== 0 || failure"
-# Kept in a map, not painted where it happens: job-line is shared with the
-# running list, and updateHeader() rewrites it whenever ANY job starts or ends.
-# A failure written directly was erased by the next of six parallel reads - so
-# a missing painter reached a user while the suite called the screen clean.
+# Kept in a map rather than painted where it happens. It used to be written to a
+# line in the header that updateHeader() rewrites whenever ANY job starts or
+# ends, so a failure was erased by the next of six parallel reads - a missing
+# painter reached a user while the suite called the screen clean. The screens
+# read the map now, and the line is gone.
 contains "  and kept until that read succeeds" "$js" "readFailures.set(job.json"
 contains "  cleared when it does"              "$js" "readFailures.delete(job.json)"
-contains "  and shown while nothing is running" "$js" "[...readFailures.values()].join"
 contains "  naming why it could not run" "$js" "could not run:"
 contains "  and the reason is kept"      "$js" "if (event.t === 'error' && event.text) job.err"
 # The message goes on the same line the header rewrites, so it has to be set
@@ -153,13 +153,15 @@ handler=$(awk '/if \(event.t === .exit.\)/,/if \(isWrite\(job.cmd\)\)/' app/rend
 order=$(grep -nE "updateHeader\(\);|event.rc !== 0 \|\| failure" <<<"$handler" \
         | sed -E 's/.*(updateHeader|\|\| failure).*/\1/' | head -2 | tr '\n' ' ')
 check "the failure is recorded after updateHeader" "$order" "updateHeader || failure "
-# A painter that THREW was silent for the same reason: the catch wrote job-line
-# and updateHeader overwrote it in the same tick. Found by rendering the page.
+# A painter that THREW was silent for the same reason: the catch wrote that
+# header line and updateHeader overwrote it in the same tick. Found by
+# rendering the page.
 contains "a throwing painter is reported too" "$js" "could not show cg"
 contains "  and names the painter it could not find" "$js" "no painter for"
-# And the colour has to go back, or one failure paints every later idle red.
-contains "the header resets the colour too" "$js" "\$('job-line').className = JOB_LINE_OK"
-contains "  from the class the markup ships" "$js" "text-on-surface-variant"
+# Nothing writes a command name into the window's furniture any more: the
+# header line that did is gone, and the pipeline's pane carries cg's own output
+# instead - see tests/startup-gate.sh.
+check "the header has no command line"   "$(grep -c 'job-line' app/renderer/index.html app/renderer/app.js | grep -vc ':0')" "0"
 
 echo ""
 echo "app-packaged: $pass passed, $fail failed"

@@ -307,6 +307,9 @@ cat > "$T/r/probe.js" <<'PROBE'
     paintCreds({ cli: false, source: null, key_id: null, account: null, arn: null,
                  valid: null, error: 'the AWS CLI is not installed' });
     paintStatus(status('no-cli'));
+    // On a screen other than the dashboard, where the first-run pipeline is
+    // what says this - the banner sits above every screen and covers the rest.
+    document.querySelector('.nav-item[data-view="deps"]').click();
     bannerRead('NOCLI');
     window.__ran = [];
     document.getElementById('banner-fix').click();
@@ -393,7 +396,7 @@ contains "a rejected key says so"      "$(row 'BAD TITLE')"    "AWS rejected thi
 # One sentence each. This was three: cg's own, then "Your games are in S3;
 # nothing here can see them until this is fixed", then where the button was.
 check    "  in one short line"         "$(row 'BAD BODY')"     "BAD BODY | Everything below is unknown, not empty."
-contains "  its button sets a key"     "$(row 'BAD FIXBTN')"   "Set AWS key"
+contains "  its button sets a key"     "$(row 'BAD FIXBTN')"   "Add your key"
 # It goes to the card rather than opening a dialog over whatever screen you
 # were on: a key has one place, the same rule the machine chooser follows.
 check    "  and runs no command"       "$(row 'BAD BANNERRAN')" "BAD BANNERRAN | "

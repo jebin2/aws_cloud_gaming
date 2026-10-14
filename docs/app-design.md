@@ -25,65 +25,49 @@ command is free, and how often it may run.
 The last figures from a paid call are cached in `.cg-cache/` with their age; the app shows the age
 rather than asking again.
 
-## Opening the window
+## Opening the window: the first-run pipeline
 
-The reads go in two batches - what this laptop has, then what is in the account - and a popup
-(`#stage`) says which is happening, one plain line per read, with no command names in it. The
-header's `job-line` keeps cg's own vocabulary; it is for whoever is working on cg.
+The dashboard, on a laptop that is not ready, **is** the setup flow: six stages in the order they
+have to be met, one of them active, and a pane beside it carrying cg's own output. When the last
+stage is met the pipeline collapses to a line and the cards take over.
 
-| Case | What appears |
-|---|---|
-| warm laptop, everything configured | **nothing**. The popup waits `STAGE_SHOW_AFTER_MS` (400 ms) before showing, and every read lands first |
-| a slow network | the panel, with the step it is waiting on still spinning; after 10 s that step says it is taking longer than usual, and offers **nothing**. Slow is not broken: a button would have to abandon a read that is about to answer, or pretend to act |
-| a read that failed | the panel stays up instead of closing over it, with **Try again** and **Close**. Try again *cancels* the in-flight reads before starting them again - reads do not block each other, so a second set would leave the stuck ones in `jobs`, and a job in flight is what disables Build, Play and Destroy |
-| no `cg` at all | one dialog saying exactly that, naming the path it looked at, with Try again. Only the main process can see this (`cg:engine`); the renderer has no filesystem. Without it every read fails identically and six spawn errors describe one problem badly |
-| AWS unreachable | `cg creds --json` now says **why** a key is not valid - `reason` is `no-cli`, `no-key`, `unreachable` or `rejected`. The window used to tell an offline laptop "AWS rejected this access key", which is a lie about a call that never arrived, and sent people to replace a key that was fine. An older cg sends no `reason` and still gets the old sentence |
-| a read that answers but cannot be painted | that step marked failed - the one place this shows, since the header's failure line is overwritten by the next read to finish |
-| something needs the person (no key, no tailnet, no alert address) | the **ladder**: every prerequisite with a verdict, and the one button that meets each unmet one |
+| Stage | met when | what it offers |
+|---|---|---|
+| the tools | `cg deps` finds them all | **Install them** - runs `cg deps install` in the pane; the password prompt is the OS's own, once |
+| the AWS CLI | `cg creds` has a CLI to ask with | same button, and the row is hidden while the tools stage is unmet - one job, one button |
+| the key | `cg creds` says AWS accepts it | **Add your key**, or **Try again** when cg reports `reason: unreachable` |
+| this laptop on the tailnet | `cg creds tailscale` says signed in | **Sign in** - runs in the pane, which carries the sign-in link while cg waits for the browser |
+| a key for the box | a key is stored, or cg can mint one | **Paste a key**. A laptop whose API token can mint one never sees this stage |
+| billing alerts | `EMAIL_ALERTS` is set | **Add an address**. Mandatory: a build sets a budget alarm and cannot leave it with nowhere to go |
+| where it runs | `cg machines` says the configured region rents something that fits | **Choose where** - a dialog of every measured location, its latency and its rupee rates |
 
-The prerequisites are one list (`prereqs()`), not a chain of `if`s that returns the first
-problem. Each rung's verdict is three-valued - met, not met, or **not known**, which is what a read
-that failed or a rung that depends on an earlier one gives: "AWS rejected this key" about a laptop
-with no CLI to ask with is a lie. The banner shows the first unmet rung, which is right for a
-problem that turns up mid-session; the ladder shows all of them, which is right for a fresh
-install, where the banner meant finding out about four jobs one at a time. Both read the same
-sentences, so neither can drift. The Tailscale API token is not a rung - nothing waits for it - so
-it stays banner-only.
+Rules it holds to:
 
-A rung's button closes the dialog before it navigates, and the ladder does not try to tick itself
-off while you work: after the first click the banner guides the rest.
+- **One active stage.** Everything unmet below it is `locked` and has no button, so you cannot
+  start in the middle. A stage that is already met is ticked wherever it sits; one that cannot be
+  judged yet - a read that has not come back, or whose prerequisite is unmet - shows `?`, which is
+  not the same as fine.
+- **The stages are `prereqs()`**, the same list the banner reads, and a stage uses the rung's own
+  button. That table used to carry its own labels, which is how the stage for a laptop that could
+  not *reach* AWS offered "add your key" instead of "try again".
+- **The pane is permanent furniture**, not something that appears: empty before anything runs,
+  cg's words while it does, the last thing it said afterwards. It replaced the header's
+  `running: cg machines, cg refresh`, which is gone.
+- **A dialog is only ever for text you have to type** - the key, an address, an auth key - or for a
+  choice, which is what *where it runs* is. Progress is never a dialog.
+- **Where it runs is judged on what AWS will let you launch**, not on whether a button was pressed.
+  A region that is switched on but has no GPU quota looks completely set up and cannot build; that
+  read as a broken app rather than as a step.
+- **No engine at all** (`cg:engine` says so) replaces the whole pipeline with one failed stage
+  naming the path it looked at, and **Try again**.
+- The banner stays for a problem that turns up mid-session, and steps aside only on the dashboard,
+  where the pipeline is already saying it. It sits above every other screen, which the pipeline
+  does not.
 
-## What a command is called
-
-One table, `CG_WORDS`, keyed by as many words of the command as it takes to tell two apart, with
-`step` (the sentence the opening popup shows) and `name` (a noun, so it can be the subject of a
-sentence: "the build is still running"). Those words appear in three places - the popup, the
-dashboard's activity list, and the refusal when something else holds the lock - and three tables
-of the same facts is how `library` came to mean both "read an index" and "upload for ten minutes".
-
-That was a real bug: `RUN_NAME` had `library` twice, the second won, and `cg library push` was
-called a **refresh** - in the header, in the activity list, and on the Stop button that would
-abandon it. A test now asserts no key is written twice in either table, and that every command
-`cg --contract` says runs alone has a name here: those are exactly the ones whose name ends up on
-a Stop button.
-
-The long runs are not given this dialog. `cg init`, `cg destroy`, `cg open` and the archive
-changes all go through `startRun`, which opens the Build screen with a progress strip, a step log,
-a failure panel and a footnote saying what the money is doing. A modal in front of that would be a
-downgrade.
-
-Modality is the line between the three. The progress panel **reports**, so it is opened with
-`show()`: no backdrop, the window stays live, and there is nothing to dismiss - it closes itself.
-It carried a Skip button for a while, which existed only to undo a backdrop it should never have
-had. The ladder and "cannot find cg" **ask**, so they are modal and each keeps its own way out
-from under that backdrop. A dialog cannot change modality while open (`showModal()` throws on
-one that is), so a progress panel becoming the ladder is closed and reopened; a non-modal dialog
-is also laid out where it sits in the document, which is why `.stage-toast` puts it in a corner.
-
-Rules: the opening popup is only shown by the window opening (`refreshAll({ narrate: true })`), never by the
-refresh that follows a build; `Skip` closes it for the rest of the window; nothing in it is ever
-the only way to do anything, because the window behind it already works. Every read it reports on
-is free.
+What this replaced, in order: a banner naming one problem at a time with no sense of how many there
+were; a modal popup over a window you could not use yet; that popup moved into a corner so it would
+stop blocking; buttons on the popup; fewer buttons on the popup. All five were ways of avoiding the
+fact that four screens were designed and every one of them assumes the rig already works.
 
 ## Dashboard
 

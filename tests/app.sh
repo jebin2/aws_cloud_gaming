@@ -180,30 +180,6 @@ contains "  shown only on the cost screen" "$js" "refresh-cost').hidden = view !
 # Nothing POLLS: a window that asked AWS something every so often would bill
 # for it without anyone touching the machine, and `cg cost` is $0.01 a call.
 check    "nothing repeats on a timer"        "$(grep -c 'setInterval' app/renderer/app.js)" "0"
-# One timer, and it starts no command: the opening popup waits this long before
-# showing itself, so a laptop that answers instantly never sees it.
-check    "the only timers are the popup's" "$(grep -c 'setTimeout' app/renderer/app.js)" "2"
-contains "  one shows the dialog"            "$js" 'stageTimer = setTimeout(() => {'
-contains "  one says a read is slow"         "$js" 'stageSlowTimer = setTimeout(stageSlow, STAGE_SLOW_AFTER_MS)'
-# Slow is not broken: the slow one says so and offers nothing, because a button
-# would have to abandon a read that is about to answer, or pretend to act.
-contains "  and slow offers nothing"         "$js" 'no button here'
-# The buttons live on the failure instead, where there is a decision to make.
-contains "a failure is what gets buttons"    "$js" 'function stageFailed()'
-contains "  Try again"                       "$js" "go: { label: 'Try again', fn: retryReads }"
-contains "  and a way to leave it"           "$js" "skip: 'Close'"
-# Reads do not block each other, so a second set leaves the stuck ones in
-# `jobs` - and a job in flight is what disables Build, Play and Destroy.
-contains "Try again cancels first"           "$js" 'if (!job.write) await window.cg.cancel(id)'
-# Closing over a failure is how a failed read came to be invisible.
-contains "  and a failure keeps it open"     "$js" 'if (!narrate || !stageFailed()) stageClose();'
-# Two buttons fetch cost - the Cost tab's Refresh and the dashboard's Fetch -
-# and both say the price. Nothing else may run it.
-check    "  and cost runs only from a button" \
-         "$(grep -c "runCg(\['cost', '--json'\]" app/renderer/app.js)" "2"
-contains "  never on opening the tab"    "$js" "Cost is not in NEEDS"
-contains "the dashboard reads fields, not tables" "$(cat app/renderer/app.js)" "dashboard: [[['status', '--json']"
-
 echo "5. the screens, and what each reads"
 for v in dashboard build library guards cost settings logs; do
   contains "a $v screen"                 "$html" "data-view=\"$v\""
@@ -212,7 +188,7 @@ contains "the dashboard reads status"    "$js" "dashboard: [[['status', '--json'
 contains "the library reads its index"   "$js" "library:   [[['library', 'list', '--json']"
 contains "the guards read the watcher"   "$js" "guards:    [[['watcher', '--json']"
 contains "a screen's reads go together"  "$js" "await Promise.all(need.map("
-contains "every free read fires on open" "$js" "async function refreshAll({ narrate = false } = {})"
+contains "every free read fires on open" "$js" "async function refreshAll() {"
 contains "  and cost is not one of them" "$js" "it waits for its button"
 contains "  and load when it is opened"  "$js" "if (NEEDS[view] && !loaded.has(view)) refresh()"
 contains "refresh is per screen"         "$js" "const need = NEEDS[view]"
@@ -241,115 +217,67 @@ contains "  and hidden where it means nothing" "$js" "(!NEEDS[view] && view !== 
 contains "cost reads the same one call"  "$js" "runCg(['cost', '--json']"
 check    "no button is left mid-page"    "$(grep -c 'cost-run' app/renderer/index.html app/renderer/app.js | grep -vc ':0')" "0"
 
-echo "5a. the opening popup"
-# The header's job-line says "running: cg machines, cg refresh". That is cg's
-# vocabulary, and the only thing the window used to say while it opened.
-contains "there is a dialog for it"      "$html" 'id="stage"'
-contains "  with a list of steps"        "$html" 'id="stage-steps"'
-# The progress panel reports; it does not ask. So it is not modal, the window
-# behind it stays usable, and it has nothing to dismiss - the Skip button it
-# carried existed only to undo a backdrop it should never have had.
-contains "the progress panel is not modal" "$js" "stepsFor(GATE_READS), { modal: false })"
-contains "  so show, not showModal"       "$js" "modal ? \$('stage').showModal() : \$('stage').show()"
-# A non-modal dialog is laid out where it sits in the document, which is the top
-# of the page, so where it goes is the stylesheet's problem.
-contains "  and it is put in a corner"    "$(cat app/renderer/src.css)" '.stage-toast'
-# The two that DO ask keep their backdrop, and therefore their way out.
-contains "the ladder is modal"            "$js" "modal: true, skip: \"I'll do it later\""
-contains "  and so is the missing engine" "$js" "modal: true, skip: 'Close'"
-contains "  which can be dismissed"       "$html" 'id="stage-skip"'
-contains "  and stays dismissed"          "$js" 'stageSkipped = true'
-# showModal() throws on a dialog that is already open, so a progress panel
-# becoming the ladder is closed and opened again rather than refilled.
-contains "modality cannot change in place" "$js" "if (dlg.open && dlg.dataset.modal !== String(modal)) dlg.close();"
-# Never a flash: a warm laptop answers everything in well under half a second.
-contains "nothing shows immediately"     "$js" 'const STAGE_SHOW_AFTER_MS'
-contains "  and not at all if it landed" "$js" "if (stageSteps.some(s => s.state === 'doing')) stageShow(modal)"
-# One table of these words, keyed by the command. There were two, and that is
-# how `library` came to mean both "read an index" and "upload for ten minutes".
-contains "every command has its words"   "$js" 'const CG_WORDS'
-words=$(sed -n '/^const CG_WORDS/,/^};/p' <<<"$js")
-for cmd in deps creds "creds tailscale" config status watcher "library list" machines sweep; do
-  check "  $cmd has a step"              "$(grep -cE "^  '?$cmd'?: +\{ step:" <<<"$words")" "1"
-done
-# A noun, so it can be the subject of a sentence: "the build is still running".
-for cmd in init destroy open "library push" "library pull" "library clean" \
-           "library forget" "library account" "creds set" "creds tailscale signin" \
-           "deps install"; do
-  check "  $cmd has a name"              "$(grep -cE "^  '?$cmd'?: +\{ name:" <<<"$words")" "1"
-done
-# Every command cg says runs alone ends up on a Stop button, so each one needs a
-# name a person recognises. cg publishes the list; this checks against it.
-check "nothing that runs alone is unnamed" "$(./cg --contract | python3 -I -c '
-import json, re, sys
-src = open("app/renderer/app.js").read()
-table = src.split("const CG_WORDS = {", 1)[1].split(chr(10) + "};", 1)[0]
-named = set()
-for line in table.splitlines():
-    m = re.match(r" +(.+?): +\{", line)
-    if m:
-        named.add(m.group(1).strip().strip(chr(39)))
-missing = [" ".join(p) for p in json.load(sys.stdin)["runs_alone"]
-           if " ".join(p) not in named]
-print(len(missing), *missing)')" "0"
-# cg's own words belong in the header. The popup is for the other audience.
-check "no step names a command"          "$(grep -o "step: '[^']*'" <<<"$words" | grep -c 'cg ')" "0"
+echo "5a. the first-run pipeline"
+# The dashboard, on a laptop that is not ready. It replaces three attempts at
+# this: a banner naming one problem at a time, a modal popup over a window you
+# could not use yet, and that popup moved into a corner so it would stop
+# blocking. All three avoided the fact that a new laptop had no screen.
+contains "the dashboard carries it"      "$html" 'id="onb"'
+contains "  one row per stage"           "$html" 'id="onb-steps"'
+contains "  and a pane for cg's words"   "$html" 'id="onb-log"'
+contains "  naming the command it runs"  "$html" 'id="onb-log-cmd"'
+# A sign-in finishes in a browser: the link has to be reachable while the
+# command is still waiting for it.
+contains "  with room for a sign-in link" "$html" 'id="onb-link"'
+contains "it collapses when ready"       "$html" 'id="onb-done"'
+contains "  which the painter decides"   "$js" "\$('onb').hidden = firstOpen === -1"
+# The stages ARE the prerequisites - the same list the banner reads, so the two
+# cannot disagree about what is left.
+contains "the stages come from prereqs"  "$js" "const rungs = prereqs().filter"
+contains "  one of them active"          "$js" "const firstOpen = rungs.findIndex(r => r.ok !== true)"
+contains "  the rest locked"             "$js" "      : 'locked';"
+# You cannot start in the middle, and a met stage is still ticked where it sits.
+contains "a locked stage offers nothing" "$js" "if (state === 'locked' || state === 'done')"
+# Two stages do their work in the pane; every other one uses the rung's own
+# button, which is how a label stops being written down twice.
+contains "the pane runs the installs"    "$js" "const ONB_ACTION = {"
+contains "  and the rest reuse the rung" "$js" "[{ label: r.problem.label, go: r.problem.go }]"
+contains "the install runs in the pane"  "$js" "return runInPipeline('tools', ['deps', 'install'"
+contains "  so does the sign-in"         "$js" "return runInPipeline('tailnet', ['creds', 'tailscale', 'signin']"
+# Stopping has to reach cg: a sign-in waits on a browser that may never answer.
+contains "a run in flight can be stopped" "$js" "if (onbJob !== null) window.cg.cancel(onbJob)"
+# Where it runs is a stage, judged on whether AWS will actually let you launch
+# there - not on whether a button was pressed.
+contains "where it runs is a stage"      "$js" "{ key: 'where', name: whereDone()"
+contains "  judged on what fits"         "$js" "(machinesNow.machines || []).some(m => m.fits_spot || m.fits_ondemand)"
+contains "  and chosen in a dialog"      "$html" 'id="whereto"'
+contains "  that can measure again"      "$html" 'id="whereto-measure"'
+# Every figure in that dialog is cg's: latency, rupees, and whether it fits.
+contains "the choice shows cg's numbers" "$js" "best ? best.inr_hour_spot : null"
+contains "  and why one cannot be used"  "$js" "no GPU quota here yet"
+# The popup and the header line are gone, and nothing may bring them back.
+check "no popup is left"                 "$(grep -c \"id=.stage\" app/renderer/index.html)" "0"
+check "  nor the header's command line"  "$(grep -c 'job-line' app/renderer/index.html app/renderer/app.js | grep -vc ':0')" "0"
+# Nothing polls: a window that asked AWS something every so often would bill
+# for it without anyone touching the machine.
+check "nothing repeats on a timer"       "$(grep -c 'setInterval' app/renderer/app.js)" "0"
+check "  and nothing is on a delay"      "$(grep -c 'setTimeout' app/renderer/app.js)" "0"
 
-echo "5a1. a command is more than its first word"
-# `library` was in RUN_NAME twice: `library list` reads an index and `library
-# push` spends ten minutes uploading your games, and the second key won. So a
-# mirror to S3 was called a refresh - in the header, and on the button that
-# abandons it.
-check "no key is written twice"          "$(sed -n '/^const RUN_NAME/,/^};/p' <<<"$js" | grep -oE "[a-z ]+:" | sort | uniq -d | wc -l)" "0"
-check "  nor in the words"               "$(grep -oE "^  [a-z' ]+:" <<<"$words" | tr -d "'" | sort | uniq -d | wc -l)" "0"
-contains "an upload is not a refresh"    "$js" "'library push': 'archive change'"
-contains "  while the index read is"     "$js" "'library list': 'refresh'"
-# Longest match first, or `library push` is just `library` again.
-contains "the longest name wins"         "$js" 'for (let n = Math.min(3, words.length); n > 0; n--)'
-contains "  and a flag is not a name"    "$js" "cmd.filter(a => !a.startsWith('-'))"
-# The verdict comes from the map every other screen already believes.
-contains "a failed read is marked failed" "$js" "readFailures.has(json) ? 'fail' : 'done'"
-# The popup is the window opening. After a build it would be a modal over the
-# screen you are reading.
-contains "only the opening narrates"     "$js" 'refreshAll({ narrate: true })'
-# A blocking problem ends the progress list either way: on the window opening
-# it becomes the ladder, and anywhere else it just goes.
-contains "  and a blocking problem ends it" "$js" 'if (problem && problem.blocking) {'
-
-echo "5a2. the setup ladder"
-# The banner shows the FIRST problem. On a fresh laptop that means four jobs
-# found one at a time, each after finishing the last, so the window opening
-# shows all of them with the button for each.
-contains "the prerequisites are a list"  "$js" 'function prereqs()'
-contains "  the banner takes the first"  "$js" "const unmet = prereqs().find(r => r.ok === false)"
-contains "  the ladder takes them all"   "$js" 'function stageLadder()'
-# Three-valued, because a rung whose read failed is not a rung that is met.
-contains "a rung can be unknown"         "$js" "if (r.ok === null) return { key: r.key, label: r.name, state: 'unknown'"
-# "AWS rejected this key" about a laptop with no CLI to ask with is a lie.
-contains "  and is, with no CLI to ask"  "$js" "ok: !credsNow ? null : credsNow.cli ? credsNow.valid === true : null"
-contains "  which the rung explains"     "$js" 'the one above it comes first'
-# Each rung's words are cg's, through the same problem object the banner shows.
-contains "a rung carries its own button" "$js" "action: { label: r.problem.label, go: r.problem.go }"
-contains "  and closes before it goes"   "$js" 'btn.onclick = () => { stageClose(); s.action.go(); }'
-# The optional token is not a prerequisite: nothing waits for it.
-check "the ladder has six rungs"         "$(sed -n '/^function prereqs()/,/^}/p' <<<"$js" | grep -c "^    { key:")" "6"
-lacks "  and the API token is not one"   "$(sed -n '/^function prereqs()/,/^}/p' <<<"$js")" "API token"
-# Skip silences the progress list; the ladder is the other message entirely.
-contains "skip does not hide the ladder" "$js" 'if (narrate && !stageSkipped) stageOpen('
-contains "  which replaces it on open"   "$js" 'if (!narrate || !stageLadder()) stageClose();'
-
-echo "5a3. no engine, and a read that never comes back"
+echo "5a2. no engine, and a read that cannot be painted"
 # Without cg every read fails identically - a spawn error each - and six broken
 # reads is not what happened. Only main can see it: the renderer has no
 # filesystem, so it asks.
 contains "main says whether cg is there"  "$main" 'function engineFacts()'
 contains "  over the bridge"              "$(cat app/main/preload.js)" 'cg:engine'
 contains "  and re-reads the contract"    "$main" 'if (found && !CONTRACT.runs_alone) loadContract();'
-contains "the window asks before reading" "$js" 'if (await engineReady()) await refreshAll({ narrate: true });'
-contains "  and says the one true thing"  "$js" "stageOpen('This app cannot find cg'"
-contains "  naming where it looked"       "$js" 'Looked for it at ${e.cg}'
+contains "the window asks before reading" "$js" 'if (await engineReady()) await refreshAll();'
+contains "  and says the one true thing"  "$js" "'This app cannot find cg'"
+contains "  naming where it looked"       "$js" 'Looked for it at ${engineGone.cg}'
 # A main process too old to answer, or a test stub, is taken at its word.
 contains "  an unanswered ask carries on" "$js" 'try { e = await window.cg.engine(); } catch { return true; }'
+# Reads do not block each other, so a second set would leave the stuck ones in
+# `jobs` - and a job in flight is what disables Build, Play and Destroy.
+contains "trying again cancels first"     "$js" 'if (!job.write) await window.cg.cancel(id)'
 # The key's sentence is cg's answer, not a guess at an error string.
 contains "why a key failed comes from cg" "$js" "switch (credsNow && credsNow.reason)"
 contains "  unreachable is not rejected"  "$js" 'Nothing was rejected - the call never arrived'
@@ -387,7 +315,7 @@ contains "  the step number and elapsed"  "$js" "\$('b-strip-meta').textContent"
 contains "  and the line cg is on now"    "$html" 'id="b-prog-step"'
 contains "steps are headings in the transcript" "$js" "head.className = 'step flex items-baseline"
 check    "  so there is no second list to grow" \
-         "$(grep -c 'b-steps' app/renderer/app.js app/renderer/index.html | awk -F: '{s+=$2} END{print s}')" "0"
+         "$(grep -c "'b-steps'" app/renderer/app.js app/renderer/index.html | awk -F: '{s+=$2} END{print s}')" "0"
 # The bar is time against the estimate, not steps done: cg never says how many
 # steps a run has, so a fraction built from the ones seen so far would go
 # backwards the moment another arrived.

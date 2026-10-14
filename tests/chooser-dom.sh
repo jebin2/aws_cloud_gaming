@@ -209,7 +209,9 @@ cat > "$T/r/probe.js" <<'PROBE'
   // while the radios were visibly ragged.
   document.querySelector('.nav-item[data-view="settings"]').click();
   await new Promise(r => setTimeout(r, 600));
-  const out = ['JOBLINE: ' + document.getElementById('job-line').textContent];
+  // The header's running/failure line is gone - the first-run pipeline carries
+  // that in words now - so a failed read is read where it is kept.
+  const out = ['FAILURES: ' + [...readFailures].map(([k, v]) => k + '=' + v).join(' ;; ')];
   out.push('VISIBLE | ' + !document.querySelector('section[data-view=settings]').hidden);
 
   // Geometry: a radio column is aligned when every radio in it shares one x.
@@ -337,12 +339,13 @@ fi
 
 echo "1. the page renders, every painter runs, and nothing throws"
 lacks    "no uncaught error" "$OUT" "ERRORS:"
-# A painter that throws was invisible twice over: the catch wrote job-line, and
-# updateHeader overwrote it - first in the same tick, then when any OTHER read
-# finished. A read failure is sticky now, so idle really means all six worked.
+# A painter that throws was invisible twice over: the catch wrote a header line,
+# and updateHeader overwrote it - first in the same tick, then when any OTHER
+# read finished. A read failure is sticky now, so an empty map really does mean
+# all six reads worked.
 lacks    "no painter failed"  "$OUT" "could not show cg"
 lacks    "  nor could not run"  "$OUT" "could not run:"
-contains "and it settles to idle" "$OUT" "JOBLINE: idle"
+contains "and no read failed at all" "$OUT" "FAILURES: "
 # Named effects, because "no error" is what passed while paintSpec was missing.
 contains "paintSpec filled the spec grid"  "$OUT" "PAINTED | status/spec | 4"
 contains "  and the build chip"            "$OUT" "PAINTED | status/chip | g4dn.xlarge · ap-south-1 · on demand"
