@@ -230,7 +230,7 @@ contains "  naming the command it runs"  "$html" 'id="onb-log-cmd"'
 # command is still waiting for it.
 contains "  with room for a sign-in link" "$html" 'id="onb-link"'
 contains "it collapses when ready"       "$html" 'id="onb-done"'
-contains "  which the painter decides"   "$js" "\$('onb').hidden = firstOpen === -1"
+contains "  which the painter decides"   "$js" "\$('onb').hidden = !showPipeline"
 # The stages ARE the prerequisites - the same list the banner reads, so the two
 # cannot disagree about what is left.
 contains "the stages come from prereqs"  "$js" "const rungs = prereqs().filter"
@@ -248,7 +248,7 @@ contains "  so does the sign-in"         "$js" "return runInPipeline('tailnet', 
 contains "a run in flight can be stopped" "$js" "if (onbJob !== null) window.cg.cancel(onbJob)"
 # Where it runs is a stage, judged on whether AWS will actually let you launch
 # there - not on whether a button was pressed.
-contains "where it runs is a stage"      "$js" "{ key: 'where', name: whereDone()"
+contains "where it runs is a stage"      "$js" "{ key: 'where', reads: 'machines', name: whereDone()"
 contains "  judged on what fits"         "$js" "(machinesNow.machines || []).some(m => m.fits_spot || m.fits_ondemand)"
 contains "  and chosen in a dialog"      "$html" 'id="whereto"'
 contains "  that can measure again"      "$html" 'id="whereto-measure"'
@@ -261,7 +261,17 @@ check "  nor the header's command line"  "$(grep -c 'job-line' app/renderer/inde
 # Nothing polls: a window that asked AWS something every so often would bill
 # for it without anyone touching the machine.
 check "nothing repeats on a timer"       "$(grep -c 'setInterval' app/renderer/app.js)" "0"
-check "  and nothing is on a delay"      "$(grep -c 'setTimeout' app/renderer/app.js)" "0"
+# One delay, and it starts no command: the finished pipeline is held on screen
+# for a beat so you see it finish, instead of six ticks flashing for 200ms.
+check "  and one delay, which it is"     "$(grep -c 'setTimeout' app/renderer/app.js)" "1"
+contains "  the handover beat"           "$js" 'onbHandover = setTimeout('
+contains "  after which it is the cards" "$js" "onbPhase = 'dashboard';"
+# The cards are not worth showing to someone who cannot build a box yet, and
+# they sat under the setup flow saying "No box" as though that were the news.
+contains "the dashboard waits its turn"  "$html" 'id="d-main"'
+contains "  hidden until handed over"    "$js" "\$('d-main').hidden = showPipeline"
+# A read in flight and a read that came back broken are not the same sentence.
+contains "a stage being read says so"    "$js" "(waiting ? 'checking' : 'unknown')"
 
 echo "5a2. no engine, and a read that cannot be painted"
 # Without cg every read fails identically - a spawn error each - and six broken

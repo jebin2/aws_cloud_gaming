@@ -41,12 +41,24 @@ stage is met the pipeline collapses to a line and the cards take over.
 | billing alerts | `EMAIL_ALERTS` is set | **Add an address**. Mandatory: a build sets a budget alarm and cannot leave it with nowhere to go |
 | where it runs | `cg machines` says the configured region rents something that fits | **Choose where** - a dialog of every measured location, its latency and its rupee rates |
 
+The dashboard has three phases, and it only ever moves forwards:
+
+| phase | what is on screen |
+|---|---|
+| `setup` | the pipeline. The cards (`#d-main`) are hidden - a box, an archive and a bill are not worth showing to someone who cannot build one yet, and they used to sit underneath saying "No box" as though that were the news |
+| `handover` | all six ticked, "Your rig is ready / Opening your dashboard…", held for `ONB_HANDOVER_MS` (900 ms). Without the beat, a laptop that is already set up flashes six ticks for 200 ms, which reads as a glitch |
+| `dashboard` | the cards, with one line where the pipeline was |
+
+A prerequisite that breaks later in the session does **not** drop back into setup - that is the
+banner's to report. Pulling a setup flow up out from under someone who is using the app would be
+worse than the problem.
+
 Rules it holds to:
 
 - **One active stage.** Everything unmet below it is `locked` and has no button, so you cannot
-  start in the middle. A stage that is already met is ticked wherever it sits; one that cannot be
-  judged yet - a read that has not come back, or whose prerequisite is unmet - shows `?`, which is
-  not the same as fine.
+  start in the middle. A stage that is already met is ticked wherever it sits. A stage whose read
+  is still in flight says `checking…`; one that came back broken, or whose prerequisite is unmet,
+  shows `?`. Those are three different sentences and they used to be one.
 - **The stages are `prereqs()`**, the same list the banner reads, and a stage uses the rung's own
   button. That table used to carry its own labels, which is how the stage for a laptop that could
   not *reach* AWS offered "add your key" instead of "try again".

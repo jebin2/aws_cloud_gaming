@@ -134,6 +134,11 @@
       <span class="material-symbols-outlined text-[18px] text-primary" data-icon="check_circle">&#xe86c;</span>
       <span class="font-code-md text-code-md" id="onb-done-text">Your rig is ready</span>
     </div>
+    <!-- The dashboard proper. Hidden until the pipeline above has handed over:
+         a box, an archive and a bill are not worth showing to someone who
+         cannot build one yet, and they were sitting underneath the setup
+         flow saying "No box" as though that were the news. -->
+    <div id="d-main" hidden>
     <div class="flex flex-wrap items-center gap-space-sm mb-space-lg font-code-sm text-code-sm" id="d-chips">
       <span class="pill" id="d-session">session idle</span>
       <span class="pill ml-auto" id="d-machine">—</span>
@@ -261,6 +266,7 @@
         <span class="font-code-sm text-code-sm text-outline" id="age-status"></span>
       </div>
       <div class="flex flex-wrap gap-space-sm" id="local-pills"></div>
+    </div>
     </div>
   </section>
 

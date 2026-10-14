@@ -105,7 +105,8 @@ JS
   // The pipeline: one row per stage, each carrying its verdict, and the pane
   // beside it carrying cg's own words.
   out.push('ONB | ' + (document.getElementById('onb').hidden ? 'hidden' : 'shown')
-           + ' done=' + (document.getElementById('onb-done').hidden ? 'hidden' : 'shown'));
+           + ' done=' + (document.getElementById('onb-done').hidden ? 'hidden' : 'shown')
+           + ' cards=' + (document.getElementById('d-main').hidden ? 'hidden' : 'shown'));
   out.push('TITLE2 | ' + document.getElementById('onb-title').textContent.trim());
   out.push('COUNT | ' + document.getElementById('onb-count').textContent.trim());
   out.push('SUB | ' + document.getElementById('onb-sub').textContent.replace(/\s+/g, ' ').trim());
@@ -247,6 +248,10 @@ contains "  saying what it will ask for"  "$(row STAGETEXT)" "asks for your pass
 # one, in order, with the button - two copies of it is what this replaced.
 check    "the banner stays out of it"  "$(row BANNER)" "BANNER | hidden"
 check    "and the log pane is empty"   "$(row LOG)" "LOG | "
+# A box, an archive and a bill are not worth showing to someone who cannot
+# build one yet - and they sat under the pipeline saying "No box" as though
+# that were the news.
+contains "the cards wait their turn"   "$(row ONB)" "cards=hidden"
 
 echo "1b. pressing Install them: the log pane is where cg speaks"
 # Not a dialog over the window, and not "running: cg deps install" in the
@@ -336,8 +341,8 @@ contains "  and the cached sweep"   "$(row RAN)" "sweep --cached --json"
 lacks    "cost is never automatic"  "$(row RAN)" "cost"
 # Nothing answered those, so where it runs cannot be judged - which is not the
 # same as judging it ready.
-contains "where it runs is unknown" "$(row STAGES)" "where=unknown"
-contains "  and says why"           "$(row STAGETEXT)" "could not be checked"
+contains "where it runs is being read" "$(row STAGES)" "where=checking"
+contains "  and says that, not that it failed" "$(row STAGETEXT)" "checking"
 contains "the pipeline is still up" "$(row ONB)" "ONB | shown"
 
 echo "4b. a laptop that has never scanned scans itself, once"
@@ -359,12 +364,30 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $EMPTY_SWEEP}")
 contains "the remembered scan is read first" "$(row RAN)" "sweep --cached --json"
 contains "  and a real scan follows it"      "$(row RAN)" "sweep --json"
 
-echo "4c. everything ready: the pipeline collapses to a line"
+echo "4c. everything ready: it finishes in front of you, then hands over"
+# Not a vanishing act. Six ticks flashed for 200ms reads as a glitch, so the
+# finished pipeline is held on screen for a beat first - and the cards only
+# appear after it.
+ENGINE="window.__after = async () => {
+  const at = n => document.getElementById(n).hidden ? 'hidden' : 'shown';
+  const before = 'onb=' + at('onb') + ' cards=' + at('d-main');
+  await new Promise(r => setTimeout(r, 1200));
+  return before + ' | after: onb=' + at('onb') + ' cards=' + at('d-main')
+       + ' done=' + document.getElementById('onb-done-text').textContent.trim();
+};"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP}")
-check    "the pipeline is gone"        "$(row ONB)" "ONB | hidden done=shown"
-contains "  and names where it runs"   "$(row STAGETEXT)" ""
-lacks    "  nothing rescans"           "$(row RAN)" ";; sweep --json"
+contains "every stage is ticked"       "$(row STAGES)" "where=done"
+lacks    "  nothing is left open"      "$(row STAGES)" "=active"
+contains "it says so"                  "$(row TITLE2)" "Your rig is ready"
+contains "  and what happens next"     "$(row SUB)" "Opening your dashboard"
+# Held, with the cards still waiting.
+contains "the finished pipeline is held" "$(row AFTER)" "onb=shown cards=hidden"
+# And then it hands over, naming where the box will run.
+contains "  then the cards take over"    "$(row AFTER)" "after: onb=hidden cards=shown"
+contains "  with one line where it was"  "$(row AFTER)" "done=It runs in Hyderabad"
+lacks    "nothing rescans"             "$(row RAN)" ";; sweep --json"
 check    "nothing threw"               "$(row ERRS)" "ERRS | "
+ENGINE=""
 
 echo "4d. a region that cannot rent the machine is not 'ready'"
 # An enabled region with no GPU quota looks completely set up and cannot build.

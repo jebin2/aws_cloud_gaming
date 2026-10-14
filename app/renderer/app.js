@@ -3277,13 +3277,13 @@ function prereqs() {
   const missing = depsNow ? (depsNow.tools || []).filter(x => !x.present).map(x => x.label) : [];
   const email = (config || []).find(r => r.key === 'EMAIL_ALERTS');
   return [
-    { key: 'tools', name: 'The tools this rig needs are installed',
+    { key: 'tools', reads: 'deps', name: 'The tools this rig needs are installed',
       ok: depsNow ? !missing.length : null,
       problem: { blocking: true,
                  title: `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not installed`,
                  body: 'Nothing here can run without them.',
                  label: 'Open Dependencies', go: () => goView('deps') } },
-    { key: 'cli', name: 'The AWS CLI is installed',
+    { key: 'cli', reads: 'creds', name: 'The AWS CLI is installed',
       // Shown only when the tools stage is happy: when it is not, this is the
       // same missing package and the same button, one row further down.
       sameAs: 'tools',
@@ -3293,25 +3293,25 @@ function prereqs() {
                  label: 'Open Dependencies', go: () => goView('deps') } },
     // Judged only once there is a CLI to ask with: "AWS rejected this key" is a
     // lie about a laptop that could not ask AWS anything.
-    { key: 'key', name: 'Amazon accepts this access key',
+    { key: 'key', reads: 'creds', name: 'Amazon accepts this access key',
       ok: !credsNow ? null : credsNow.cli ? credsNow.valid === true : null,
       problem: { blocking: true, ...keyProblem() } },
-    { key: 'tailnet', name: 'This laptop is signed in to Tailscale',
+    { key: 'tailnet', reads: 'tskey', name: 'This laptop is signed in to Tailscale',
       ok: tskeyNow ? tskeyNow.signed_in !== false : null,
       problem: { blocking: true, title: 'This laptop is not signed in to Tailscale',
                  body: 'The box has no public SSH port, so nothing here can reach it.',
                  label: 'Sign in', go: signInTailscale } },
-    { key: 'authkey', name: 'The box has a key to join your tailnet with',
+    { key: 'authkey', reads: 'tskey', name: 'The box has a key to join your tailnet with',
       ok: tskeyNow ? !!(tskeyNow.auth_key_stored || tskeyNow.can_mint) : null,
       problem: { blocking: true, title: 'The box has no Tailscale auth key',
                  body: 'A build cannot join it to your tailnet without one.',
                  label: 'Paste a key', go: setAuthKey } },
-    { key: 'email', name: 'Billing alerts have somewhere to go',
+    { key: 'email', reads: 'config', name: 'Billing alerts have somewhere to go',
       ok: email ? !!email.is_set : null,
       problem: { blocking: true, title: 'No address for billing alerts',
                  body: 'A build sets a budget alarm and needs somewhere to send it.',
                  label: 'Add an address', go: () => goSetting(settingEl('EMAIL_ALERTS')) } },
-    { key: 'where', name: whereDone(),
+    { key: 'where', reads: 'machines', name: whereDone(),
       // Not "did you click a button": whether the region .env names can rent
       // the machine it names. A laptop pointed at a region with no GPU quota
       // looks completely set up and cannot build - which is exactly how an
@@ -3461,6 +3461,19 @@ $('whereto-use').onclick = async e => {
 // What is on each stage comes from prereqs(), which the banner also reads, so
 // the two cannot disagree. What cg is doing comes from cg.
 
+// Which of three things the dashboard is doing:
+//   setup      something is unmet, or not yet known - the pipeline is the screen
+//   handover   all six are met, and the finished pipeline is held on screen for
+//              a beat so you see it finish rather than having it vanish
+//   dashboard  the cards
+//
+// It only ever moves forwards. A prerequisite that breaks later in the session
+// is the banner's to report: dropping back into a setup flow out from under
+// someone who is using the app would be worse than the problem.
+let onbPhase = 'setup';
+let onbHandover = null;
+const ONB_HANDOVER_MS = 900;
+
 // The stage that is running something, and the job it started - so it can be
 // stopped, which matters: a sign-in waits on a browser that may never answer.
 let onbRunning = null;
@@ -3535,7 +3548,8 @@ const ONB_FREE = { tools: true, cli: true, key: true, tailnet: true, authkey: tr
                    email: true };
 
 const ONB_MARK = {
-  done:    ['\u2713', 'text-primary'],
+  done:     ['\u2713', 'text-primary'],
+  checking: ['\u2026', 'text-outline animate-pulse'],
   active:  ['\u25c9', 'text-tertiary'],
   running: ['\u25cf', 'text-tertiary animate-pulse'],
   failed:  ['\u2717', 'text-error'],
@@ -3562,7 +3576,7 @@ function paintOnboard() {
   if (engineGone) {
     $('onb').hidden = false;
     $('onb-done').hidden = true;
-    if ($('d-chips')) $('d-chips').hidden = true;
+    $('d-main').hidden = true;
     $('onb-title').textContent = 'This app cannot find cg';
     $('onb-count').textContent = '';
     $('onb-sub').textContent = 'cg is the engine; this window is a face on it. '
@@ -3615,25 +3629,43 @@ function paintOnboard() {
   const firstOpen = rungs.findIndex(r => r.ok !== true);
   const done = rungs.filter(r => r.ok === true).length;
 
-  // Ready: the pipeline collapses to one line and the cards take over.
-  $('onb').hidden = firstOpen === -1;
-  $('onb-done').hidden = firstOpen !== -1;
-  for (const el of ['d-chips']) if ($(el)) $(el).hidden = firstOpen !== -1;
-  if (firstOpen === -1) {
+  const ready = firstOpen === -1;
+  // The beat where the finished pipeline is shown before the cards replace it.
+  // Without it a laptop that is already set up flashes six ticks for 200ms,
+  // which reads as a glitch rather than as "that is all done".
+  if (ready && onbPhase === 'setup') {
+    onbPhase = 'handover';
+    onbHandover = setTimeout(() => {
+      onbHandover = null;
+      onbPhase = 'dashboard';
+      paintOnboard();
+    }, ONB_HANDOVER_MS);
+  }
+  const showPipeline = onbPhase !== 'dashboard';
+  $('onb').hidden = !showPipeline;
+  $('onb-done').hidden = showPipeline;
+  $('d-main').hidden = showPipeline;
+  if (!showPipeline) {
     $('onb-done-text').textContent = whereDone() + (machinesNow && machinesNow.machines
       && machinesNow.machines.length ? ` \u00b7 ${machinesNow.machines[0].type}` : '');
     return;
   }
 
   $('onb-count').textContent = `${done} of ${rungs.length} done`;
-  $('onb-title').textContent = done === 0 ? 'Get your rig ready'
+  $('onb-title').textContent = ready ? 'Your rig is ready'
+    : done === 0 ? 'Get your rig ready'
     : `${rungs.length - done} ${rungs.length - done === 1 ? 'thing' : 'things'} left`;
+  if (ready) $('onb-sub').textContent = 'Opening your dashboard\u2026';
 
   wrap.textContent = '';
   rungs.forEach((r, i) => {
     const active = i === firstOpen;
+    // A verdict of null has two causes that must not share a sentence: the read
+    // behind it has not come back yet, or it came back broken.
+    const waiting = r.ok === null && !readFailures.has(r.reads)
+                    && rungs.slice(0, i).every(x => x.ok === true);
     const state = r.ok === true ? 'done'
-      : r.ok === null ? 'unknown'
+      : r.ok === null ? (waiting ? 'checking' : 'unknown')
       : onbRunning === r.key ? 'running'
       : active ? (onbTone === 'bad' ? 'failed' : 'active')
       : 'locked';
@@ -3669,6 +3701,18 @@ function paintOnboard() {
     body.append(title);
 
     if (state === 'locked' || state === 'done') { row.append(rail, body); wrap.append(row); return; }
+
+    if (state === 'checking') {
+      title.textContent = r.name;
+      title.className = 'font-body-md text-body-md text-outline';
+      const why = document.createElement('div');
+      why.className = 'font-code-sm text-code-sm text-outline';
+      why.textContent = 'checking\u2026';
+      body.append(why);
+      row.append(rail, body);
+      wrap.append(row);
+      return;
+    }
 
     if (state === 'unknown') {
       const why = document.createElement('div');
