@@ -3087,7 +3087,16 @@ window.cg.onEvent(({ id, event }) => {
       box.textContent = '';
       delete box.dataset.fresh;
     }
+    // Measured BEFORE the line is added, because appending to a box that is
+    // already scrolled to the bottom moves the bottom away from you.
+    //
+    // Only if that is where you already were: an install prints for minutes,
+    // and yanking the view back down while someone is reading up the log is
+    // worse than not following at all. The build's transcript has a checkbox
+    // for the same decision - this is the small version of it.
+    const following = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
     box.textContent += (event.t === 'step' ? '\n' + event.text : '  ' + (event.text || '')) + '\n';
+    if (following) box.scrollTop = box.scrollHeight;
   }
   if (event.t === 'exit') {
     // Why the reason is KEPT rather than printed somewhere here: it used to be

@@ -64,7 +64,10 @@ Rules it holds to:
   not *reach* AWS offered "add your key" instead of "try again".
 - **The pane is permanent furniture**, not something that appears: empty before anything runs,
   cg's words while it does, the last thing it said afterwards. It replaced the header's
-  `running: cg machines, cg refresh`, which is gone.
+  `running: cg machines, cg refresh`, which is gone. It follows the output to the bottom - an
+  install prints for minutes and the pane is a few lines tall - but only when that is already
+  where you are: scroll up to read something and it leaves you there. Measured before the line is
+  appended, since appending to a box at the bottom moves the bottom.
 - **A dialog is only ever for text you have to type** - the key, an address, an auth key - or for a
   choice, which is what *where it runs* is. Progress is never a dialog.
 - **Where it runs is judged on what AWS will let you launch**, not on whether a button was pressed.

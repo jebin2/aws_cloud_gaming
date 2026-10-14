@@ -275,6 +275,36 @@ contains "the stage says it is running" "$(row AFTER)" "state=running"
 contains "  and offers to stop it"     "$(row AFTER)" "buttons=Stop waiting"
 ENGINE=""
 
+echo "1c. the log pane follows the output, unless you are reading it"
+# An install prints for minutes and the pane is a few lines tall, so without
+# this the interesting part - what it is doing NOW - is always off the bottom.
+ENGINE="window.__after = async () => {
+  document.querySelector('#onb-steps button').click();
+  await new Promise(r => setTimeout(r, 10));
+  const box = document.getElementById('onb-log');
+  const line = n => window.__emit(window.__lastId, { t: 'line', text: 'step ' + n });
+  for (let i = 0; i < 80; i++) line(i);
+  await new Promise(r => setTimeout(r, 10));
+  const bottom = Math.abs(box.scrollHeight - box.scrollTop - box.clientHeight) < 2;
+  // Now read back up the log, the way someone chasing an error would, and keep
+  // printing: the view must stay where it was put.
+  box.scrollTop = 0;
+  for (let i = 80; i < 120; i++) line(i);
+  await new Promise(r => setTimeout(r, 10));
+  return 'scrollable=' + (box.scrollHeight > box.clientHeight)
+       + ' followed=' + bottom
+       + ' stayedPut=' + (box.scrollTop === 0)
+       + ' lastline=' + box.textContent.trim().split('\n').pop().trim();
+};"
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_BAD" true), \"creds --json\": $creds_bad, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
+contains "the pane overflows, as it will"  "$(row AFTER)" "scrollable=true"
+contains "  and it is at the bottom"       "$(row AFTER)" "followed=true"
+contains "  showing the newest line"       "$(row AFTER)" "lastline=step 119"
+# Yanking the view down while someone is reading up the log is worse than not
+# following at all.
+contains "but it leaves a reader alone"    "$(row AFTER)" "stayedPut=true"
+ENGINE=""
+
 echo "2. tools are there, the key is not"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_bad, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
 contains "the tools stage is ticked"   "$(row STAGES)" "tools=done"
