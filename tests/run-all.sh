@@ -20,24 +20,40 @@
 #
 #     bash tests/run-all.sh > /tmp/t.log || { tail -20 /tmp/t.log; false; }
 #
-# The suites run side by side, TEST_JOBS at a time (default 8). Each makes its
-# own temporary HOME and writes nothing into the repo, so they share no state;
-# run one after another they took seven minutes, most of it waiting. Results
-# are still printed in order, and the exit status still says whether any failed.
+# The suites run side by side, TEST_JOBS at a time (default 8). The runner gives
+# each one an empty HOME of its own - most also make their own, but that was a
+# habit, not a rule, and side by side two suites writing ~/.config would be two
+# suites failing at random. They write nothing into the repo.
+#
+# Each suite's time is printed, so a slow one is visible rather than guessed at.
+# A failed suite's whole output is kept, at the path printed beside it; a run
+# that passes keeps nothing.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 TIMEOUT="${TEST_TIMEOUT:-180}"
 JOBS="${TEST_JOBS:-8}"
-dir=$(mktemp -d); trap 'rm -rf "$dir"' EXIT
+[[ $JOBS =~ ^[1-9][0-9]*$ ]] || { echo "TEST_JOBS must be a whole number of 1 or more, not '$JOBS'" >&2; exit 2; }
+[[ $TIMEOUT =~ ^[1-9][0-9]*$ ]] || { echo "TEST_TIMEOUT must be a whole number of seconds, not '$TIMEOUT'" >&2; exit 2; }
+dir=$(mktemp -d)
+keep=0
+trap '(( keep )) || rm -rf "$dir"' EXIT
 
 suites=()
 for t in tests/*.sh; do [[ $t == tests/run-all.sh ]] || suites+=("$t"); done
 
-# One suite: its output and its exit status, each in a file named after it.
+# One suite: its output, its exit status and how long it took, each in a file
+# named after it. Whether the time limit fired is recorded by the limit itself,
+# not inferred from exit 124 - which a suite could return on its own.
 run_one() {
-  local t=$1 n; n=$(basename "$t" .sh)
-  timeout "$TIMEOUT" bash "$t" >"$dir/$n.out" 2>&1
+  local t=$1 n start; n=$(basename "$t" .sh)
+  mkdir -p "$dir/home-$n"
+  start=$(date +%s%N)
+  # CG_SLEEP_PCT=1: cg's poll loops wait 1% as long (see cg_sleep in
+  # lib/common.sh). Four suites spent most of their minutes asleep in them.
+  HOME="$dir/home-$n" CG_SLEEP_PCT="${CG_SLEEP_PCT:-1}" \
+    timeout "$TIMEOUT" bash "$t" >"$dir/$n.out" 2>&1
   echo $? >"$dir/$n.rc"
+  echo $(( ($(date +%s%N) - start) / 1000000 )) >"$dir/$n.ms"
 }
 export -f run_one; export TIMEOUT dir
 printf '%s\0' "${suites[@]}" | xargs -0 -P "$JOBS" -I{} bash -c 'run_one "$1"' _ {}
@@ -46,20 +62,22 @@ failed=0 ran=0
 for t in "${suites[@]}"; do
   n=$(basename "$t" .sh); ran=$((ran+1))
   rc=$(cat "$dir/$n.rc" 2>/dev/null || echo 1)
-  printf '%-28s' "$t"
+  ms=$(cat "$dir/$n.ms" 2>/dev/null || echo 0)
+  printf '%-28s %6.1fs  ' "$t" "$(awk "BEGIN{print $ms/1000}")"
   if [[ $rc == 0 ]]; then
     printf 'PASS  (%s assertions)\n' "$(grep -c '^  ok ' "$dir/$n.out" 2>/dev/null || echo '?')"
   else
-    failed=$((failed+1))
-    [[ $rc == 124 ]] && printf 'TIMEOUT after %ss\n' "$TIMEOUT" || printf 'FAIL (exit %d)\n' "$rc"
+    failed=$((failed+1)); keep=1
+    if [[ $rc == 124 ]] && (( ms >= TIMEOUT * 1000 )); then printf 'TIMEOUT after %ss\n' "$TIMEOUT"
+    else printf 'FAIL (exit %d)\n' "$rc"; fi
     sed 's/^/      /' "$dir/$n.out" | grep -E 'FAIL|error|Traceback' | head -8
-    echo "      --- rerun: bash $t"
+    echo "      --- full output: $dir/$n.out   rerun: bash $t"
   fi
 done
 
 echo
 if (( failed )); then
-  echo "$failed of $ran suites FAILED"
+  echo "$failed of $ran suites FAILED (logs kept in $dir)"
   exit 1
 fi
 echo "all $ran suites passed"
