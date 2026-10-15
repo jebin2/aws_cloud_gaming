@@ -48,14 +48,14 @@ wait_for() { # wait_for <desc> <tries> <cmd...>
     local i
     for (( i = 0; i < tries; i++ )); do
       if "$@" &>/dev/null; then _cg_line ok "${desc#waiting for } is up"; return 0; fi
-      _cg_live "$desc ${_CG_GREY}$(_cg_dur $(( i * 2 )))${_CG_R}"; sleep 2
+      _cg_live "$desc ${_CG_GREY}$(_cg_dur $(( i * 2 )))${_CG_R}"; cg_sleep 2
     done
     _cg_line fail "$desc - TIMEOUT"; return 1
   fi
   printf '%s' "$desc"
   for _ in $(seq 1 "$tries"); do
     if "$@" &>/dev/null; then printf ' ok\n'; return 0; fi
-    printf '.'; sleep 2
+    printf '.'; cg_sleep 2
   done
   printf ' TIMEOUT\n'; return 1
 }

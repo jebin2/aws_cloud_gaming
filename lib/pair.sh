@@ -56,7 +56,7 @@ pair_moonlight() {
       kill "$p" 2>/dev/null || true
     fi
   done
-  sleep 2
+  cg_sleep 2
 
   # What is already saved, so "a client appeared" means THIS pairing and not a
   # leftover from an earlier one.
@@ -73,7 +73,7 @@ pair_moonlight() {
   while (( tries < max_tries )); do
     pid=$(_sunshine_pending_id "$ip" "$su" "$sp")
     [[ -n $pid ]] && break
-    sleep 2; tries=$(( tries + 1 ))
+    cg_sleep 2; tries=$(( tries + 1 ))
   done
   if [[ -z ${pid:-} ]]; then
     kill "$mlpid" 2>/dev/null; wait "$mlpid" 2>/dev/null || true
@@ -84,7 +84,7 @@ pair_moonlight() {
     while (( tries < max_tries )); do
       pid=$(_sunshine_pending_id "$ip" "$su" "$sp")
       [[ -n $pid ]] && break
-      sleep 2; tries=$(( tries + 1 ))
+      cg_sleep 2; tries=$(( tries + 1 ))
     done
   fi
   [[ -n $pid ]] || { kill "$mlpid" 2>/dev/null; log "moonlight never registered a pairing request"; return 1; }
@@ -105,7 +105,7 @@ pair_moonlight() {
     after=$(_sunshine_client_uuids "$ip" "$su" "$sp")
     new=$(comm -13 <(sort <<<"$before") <(sort <<<"$after") | grep -v '^$' || true)
     [[ -n $new ]] && break
-    sleep 2; v=$(( v + 1 ))
+    cg_sleep 2; v=$(( v + 1 ))
   done
 
   # `moonlight pair` runs the full Qt GUI and does not always close itself

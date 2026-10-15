@@ -1082,7 +1082,7 @@ destroy_everything() {
   for i in $(seq 1 40); do
     [[ $(ec2 describe-volumes --volume-ids "$vol" --query 'Volumes[0].State' \
          --output text 2>/dev/null) == available ]] && break
-    sleep 3
+    cg_sleep 3
   done
   if ec2 delete-volume --volume-id "$vol" >/dev/null 2>&1; then
     log "deleted $vol - storage charges stop now"

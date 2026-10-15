@@ -267,6 +267,20 @@ say() {
     "$_CG_GREY" "$(printf '%*s' "$fill" '' | tr ' ' '.')" "$t" "$_CG_R"
   _CG_SEC=1 _CG_SEC_T0=$SECONDS _CG_SEC_COL=$col
 }
+# cg_sleep SECONDS - sleep, for a poll loop. Exactly `sleep` unless
+# CG_SLEEP_PCT is set: a percentage to scale every wait by, which the test
+# runner sets to 1. The loops count time by the nominal seconds (waited += 3),
+# so timeouts and "still waiting (30s)" lines mean the same either way - only
+# the real wall-clock wait shrinks. Against real AWS it is never set; the
+# suites that drive these loops spent most of their minutes asleep.
+cg_sleep() {
+  local s=$1 pct=${CG_SLEEP_PCT:-100} whole frac ms
+  whole=${s%%.*}; [[ $s == *.* ]] && frac=${s#*.} || frac=0
+  frac=${frac}000; frac=$(( 10#${frac:0:3} ))
+  ms=$(( (${whole:-0} * 1000 + frac) * pct / 100 ))
+  sleep "$(( ms / 1000 )).$(printf '%03d' $(( ms % 1000 )))"
+}
+
 log() {
   if cg_json; then _cg_event line kind "$(_cg_kind "$*")" text "$*"; return; fi
   if ! _cg_styled; then printf '%s      %s\n' "$(ts)" "$*"; return; fi
@@ -553,7 +567,7 @@ wait_instance_state() {
         [[ $now == "$want" ]] && { _cg_line ok "$now after $(_cg_dur "$waited")"; return 0; }
       fi
       _cg_live "$now ${_CG_GREY}$(_cg_dur "$waited")${_CG_R}"
-      sleep 1; waited=$(( waited + 1 ))
+      cg_sleep 1; waited=$(( waited + 1 ))
     done
     _cg_line fail "TIMEOUT after $(_cg_dur "$timeout"), last state: $now"
     return 1
@@ -569,7 +583,7 @@ wait_instance_state() {
       log "still $now (${waited}s)"; beat=$waited
     fi
     [[ $now == "$want" ]] && { log "$now after ${waited}s"; return 0; }
-    sleep 3; waited=$(( waited + 3 ))
+    cg_sleep 3; waited=$(( waited + 3 ))
   done
   log "TIMEOUT after ${timeout}s, last state: $last"
   return 1
@@ -681,7 +695,7 @@ stream_build() {
       # Do NOT reset `seen`: the log is a file that survives the reboot, so
       # starting over replays every line that was already printed.
     fi
-    sleep 10; waited=$(( waited + 10 ))
+    cg_sleep 10; waited=$(( waited + 10 ))
   done
   log "TIMEOUT after $(( timeout / 60 ))m. Check on the box:"
   log "  ssh -i $key $target"
@@ -805,7 +819,7 @@ _stream_build_styled() {
       fi
     fi
     _cg_live "$(_cg_build_status "$step" "$waited" "$have" "${CG_RESTORE_BYTES:-0}" "$rate" "${CG_RESTORE_LABEL:-games}")"
-    sleep 1; waited=$(( waited + 1 ))
+    cg_sleep 1; waited=$(( waited + 1 ))
   done
   _cg_line fail "TIMEOUT after $(( timeout / 60 ))m. Check on the box:"
   _cg_line cont "  ssh -i $key $target"
@@ -863,7 +877,7 @@ wait_new_node() {
         fi
       fi
       _cg_live "waiting for the box to join ${_CG_GREY}$(_cg_dur "$waited")${_CG_R}" >&2
-      sleep 1; waited=$(( waited + 1 ))
+      cg_sleep 1; waited=$(( waited + 1 ))
     done
     _cg_line fail "TIMEOUT after $(( timeout / 60 ))m - no new node joined the tailnet" >&2
     return 1
@@ -876,7 +890,7 @@ wait_new_node() {
       return 0
     fi
     (( waited - beat >= 60 )) && { log "still waiting for the box to join (${waited}s)" >&2; beat=$waited; }
-    sleep 10; waited=$(( waited + 10 ))
+    cg_sleep 10; waited=$(( waited + 10 ))
   done
   log "TIMEOUT after $(( timeout / 60 ))m - no new node joined the tailnet" >&2
   return 1
@@ -897,7 +911,7 @@ wait_image_available() {
     fi
     [[ $now == available ]] && { log "available after ${waited}s"; return 0; }
     [[ $now == failed ]] && { log "image creation FAILED"; return 1; }
-    sleep 5; waited=$(( waited + 5 ))
+    cg_sleep 5; waited=$(( waited + 5 ))
   done
   log "TIMEOUT after ${timeout}s, last state: $last"
   return 1
@@ -926,7 +940,7 @@ wait_for_steam() {
              "$(du -shcL ~/.steam ~/.local/share/Steam 2>/dev/null | tail -1 | cut -f1)"' 2>/dev/null || echo "working|")
       fi
       _cg_live "${phase:-working}${size:+ ($size)} ${_CG_GREY}· $(_cg_dur "$waited")${_CG_R}"
-      sleep 1; waited=$(( waited + 1 ))
+      cg_sleep 1; waited=$(( waited + 1 ))
     done
     _cg_line fail "steam did not finish within $(( timeout / 60 ))m - check ~/steam-prewarm.log on the box"
     return 1
@@ -952,7 +966,7 @@ wait_for_steam() {
     elif (( waited - beat >= 60 )); then
       log "${phase:-working} (${waited}s)"; beat=$waited
     fi
-    sleep 15; waited=$(( waited + 15 ))
+    cg_sleep 15; waited=$(( waited + 15 ))
   done
   log "steam did not finish within $(( timeout / 60 ))m - check ~/steam-prewarm.log on the box"
   return 1
