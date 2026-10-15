@@ -19,24 +19,41 @@
 # already in the repo. If you want a short view, use the file:
 #
 #     bash tests/run-all.sh > /tmp/t.log || { tail -20 /tmp/t.log; false; }
+#
+# The suites run side by side, TEST_JOBS at a time (default 8). Each makes its
+# own temporary HOME and writes nothing into the repo, so they share no state;
+# run one after another they took seven minutes, most of it waiting. Results
+# are still printed in order, and the exit status still says whether any failed.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 TIMEOUT="${TEST_TIMEOUT:-180}"
-failed=0 ran=0
-out=$(mktemp); trap 'rm -f "$out"' EXIT
+JOBS="${TEST_JOBS:-8}"
+dir=$(mktemp -d); trap 'rm -rf "$dir"' EXIT
 
-for t in tests/*.sh; do
-  [[ $t == tests/run-all.sh ]] && continue
-  ran=$((ran+1))
+suites=()
+for t in tests/*.sh; do [[ $t == tests/run-all.sh ]] || suites+=("$t"); done
+
+# One suite: its output and its exit status, each in a file named after it.
+run_one() {
+  local t=$1 n; n=$(basename "$t" .sh)
+  timeout "$TIMEOUT" bash "$t" >"$dir/$n.out" 2>&1
+  echo $? >"$dir/$n.rc"
+}
+export -f run_one; export TIMEOUT dir
+printf '%s\0' "${suites[@]}" | xargs -0 -P "$JOBS" -I{} bash -c 'run_one "$1"' _ {}
+
+failed=0 ran=0
+for t in "${suites[@]}"; do
+  n=$(basename "$t" .sh); ran=$((ran+1))
+  rc=$(cat "$dir/$n.rc" 2>/dev/null || echo 1)
   printf '%-28s' "$t"
-  if timeout "$TIMEOUT" bash "$t" >"$out" 2>&1; then
-    printf 'PASS  (%s assertions)\n' "$(grep -c '^  ok ' "$out" 2>/dev/null || echo '?')"
+  if [[ $rc == 0 ]]; then
+    printf 'PASS  (%s assertions)\n' "$(grep -c '^  ok ' "$dir/$n.out" 2>/dev/null || echo '?')"
   else
-    rc=$?
     failed=$((failed+1))
     [[ $rc == 124 ]] && printf 'TIMEOUT after %ss\n' "$TIMEOUT" || printf 'FAIL (exit %d)\n' "$rc"
-    sed 's/^/      /' "$out" | grep -E 'FAIL|error|Traceback' | head -8
-    echo "      --- full output above this line was captured; rerun: bash $t"
+    sed 's/^/      /' "$dir/$n.out" | grep -E 'FAIL|error|Traceback' | head -8
+    echo "      --- rerun: bash $t"
   fi
 done
 
