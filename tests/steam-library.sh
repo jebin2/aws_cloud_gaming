@@ -19,7 +19,12 @@ awk "/^cat > \\/usr\\/local\\/bin\\/steam-ensure-library.sh <<'EOF'\$/{f=1;next}
 bash -n "$SRC" || { echo "extracted script does not parse"; exit 1; }
 
 T=$(mktemp -d)
-sed 's|^export PATH=.*|:|' "$SRC" > "$T/ensure.sh"
+# Its polls wait 3-5s each, as they should on the box; against a fake Steam
+# that starts at once they were twenty seconds of this suite's twenty-five. The
+# test copy waits a hundredth as long - the order of events, which is what is
+# tested, is the same. The script that goes to the box is not touched.
+sed -e 's|^export PATH=.*|:|' -e 's/\bsleep \([0-9]\+\)/sleep 0.0\1/g' "$SRC" > "$T/ensure.sh"
+grep -q 'sleep 0\.03' "$T/ensure.sh" || { echo "the sleeps were not scaled - did the script change?"; exit 1; }
 
 export HOME="$T/home" STEAM_LIB_DIR="$T/scratch/steam"
 ROOT="$HOME/.local/share/Steam"
@@ -45,7 +50,7 @@ p=sys.argv[1]; s=open(p).read()
 open(p,'w').write(re.sub(r'\t"1"\n\t\{\n(?:.*\n)*?\t\}\n','',s,count=1))
 P
 fi
-sleep 2; rm -f "$T/running"
+sleep 0.2; rm -f "$T/running"
 FAKE
   printf '#!/bin/sh\nexit 0\n' > "$T/bin/xset"
   printf '#!/bin/sh\ntest -f %s/running\n' "$T" > "$T/bin/pgrep"

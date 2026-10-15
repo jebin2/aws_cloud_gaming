@@ -38,6 +38,18 @@ dir=$(mktemp -d)
 keep=0
 trap '(( keep )) || rm -rf "$dir"' EXIT
 
+# python3 as the interpreter itself, not a version manager's shim. pyenv's
+# python3 is a bash script that works out which Python to run on every call -
+# about 80ms each, four times the interpreter's own start - and the suites call
+# it thousands of times: init-watchdog's fake aws alone is 31 calls per cg run,
+# and the suite took 33s instead of 11. Asked once here, then first on PATH.
+# Where python3 is already the binary this changes nothing.
+real_py=$(python3 -c 'import sys; print(sys.executable)' 2>/dev/null || true)
+if [[ -x $real_py && $(command -v python3) != "$real_py" ]]; then
+  mkdir -p "$dir/py" && ln -s "$real_py" "$dir/py/python3"
+  export PATH="$dir/py:$PATH"
+fi
+
 suites=()
 for t in tests/*.sh; do [[ $t == tests/run-all.sh ]] || suites+=("$t"); done
 
