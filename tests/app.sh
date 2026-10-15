@@ -227,24 +227,32 @@ echo "5a. the first-run pipeline"
 # blocking. All three avoided the fact that a new laptop had no screen.
 contains "the dashboard carries it"      "$html" 'id="onb"'
 contains "  one row per stage"           "$html" 'id="onb-steps"'
-contains "  and a pane for cg's words"   "$html" 'id="onb-log"'
-contains "  naming the command it runs"  "$html" 'id="onb-log-cmd"'
+# Each step keeps its own log, folded under it, parked here between paints.
+contains "  and a home for each step's log" "$html" 'id="onb-logs"'
+contains "  built per step, in the painter"  "$js" "u.id = 'onb-unit-' + key"
 # A sign-in finishes in a browser: the link has to be reachable while the
-# command is still waiting for it.
-contains "  with room for a sign-in link" "$html" 'id="onb-link"'
+# command is still waiting for it - on the step that is waiting.
+contains "  with room for a sign-in link"   "$js" "link.id = 'onb-link-' + key"
 contains "it collapses when ready"       "$html" 'id="onb-done"'
 contains "  which the painter decides"   "$js" "\$('onb').hidden = !showPipeline"
+# Setup is the whole window: no sidebar or header until it is done, and every
+# open starts on the splash.
+contains "the window opens in setup"     "$html" '<body class="setup'
+lacks    "  and no splash in front of it" "$html" 'id="onb-splash"'
+contains "  and the CSS hides the rest"  "$(cat app/renderer/src.css)" 'body.setup > aside'
+contains "  for less motion, none"       "$(cat app/renderer/src.css)" 'prefers-reduced-motion: reduce' 
 # The stages ARE the prerequisites - the same list the banner reads, so the two
 # cannot disagree about what is left.
-contains "the stages come from prereqs"  "$js" "const rungs = prereqs().filter"
+contains "the stages come from prereqs"  "$js" "const setup = prereqs().filter"
 contains "  one of them active"          "$js" "const firstOpen = rungs.findIndex(r => r.ok !== true)"
 contains "  the rest locked"             "$js" "      : 'locked';"
 # You cannot start in the middle, and a met stage is still ticked where it sits.
-contains "a locked stage offers nothing" "$js" "if (state === 'locked' || state === 'done')"
-# Two stages do their work in the pane; every other one uses the rung's own
-# button, which is how a label stops being written down twice.
-contains "the pane runs the installs"    "$js" "const ONB_ACTION = {"
-contains "  and the rest reuse the rung" "$js" "[{ label: r.problem.label, go: r.problem.go }]"
+contains "a locked stage offers nothing" "$js" "if (quiet || state === 'checking') { row.append(rail, body); wrap.append(row); return; }"
+# Every step's button is the first run's own - written for someone new, where
+# the banner's are for someone mid-session - and a stage without one falls
+# back to the rung's.
+contains "the steps have their own buttons" "$js" "const ONB_ACTION = {"
+contains "  and fall back to the rung's"  "$js" "[{ label: x.problem.label, go: x.problem.go }]"
 contains "the install runs in the pane"  "$js" "return runInPipeline('tools', ['deps', 'install'"
 contains "  so does the sign-in"         "$js" "return runInPipeline('tailnet', ['creds', 'tailscale', 'signin']"
 # Stopping has to reach cg: a sign-in waits on a browser that may never answer.

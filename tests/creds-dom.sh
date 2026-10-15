@@ -412,7 +412,7 @@ contains "an empty form says so"       "$(row 'EMPTY ERR')"    "Both halves are 
 check    "  and runs nothing"          "$(row 'EMPTY RAN')"    "EMPTY RAN | "
 check    "  staying open"              "$(row 'EMPTY OPEN')"   "EMPTY OPEN | true"
 check    "submitting runs cg creds set" "$(row 'SUBMIT RAN')"  "SUBMIT RAN | creds set"
-contains "  the button shows it is working" "$(row 'SUBMIT BTN')" "Checking with AWS"
+contains "  the button shows it is working" "$(row 'SUBMIT BTN')" "Checking with Amazon"
 contains "  and cannot be pressed twice"    "$(row 'SUBMIT BTN')" "disabled=true"
 # cg still asks its two questions; the form answers them, so no second modal
 # appears on top of the one being looked at.
@@ -423,7 +423,7 @@ contains "  showing AWS's reason there" "$(row 'FAIL ERR')"    "InvalidClientTok
 contains "  and that nothing was saved" "$(row 'FAIL ERR')"    "nothing was saved"
 # The line telling you where to find a key is noise when you are holding one.
 lacks    "  without the how-to line"   "$(row 'FAIL ERR')"     "paste an access key"
-contains "  and the button comes back" "$(row 'FAIL BTN')"     "Save key disabled=false"
+contains "  and the button comes back" "$(row 'FAIL BTN')"     "Connect disabled=false"
 check    "a key that works closes it"  "$(row 'OK OPEN')"      "OK OPEN | false"
 
 echo "4c. Tailscale is its own card, and fails in two ways"

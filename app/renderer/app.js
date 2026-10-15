@@ -111,7 +111,7 @@ function updateHeader() {
   const busy = writing();
   // The dashboard's refresh is two commands - status and the watcher - but one
   // action to you, so count what they are called, not how many there are.
-  const hereNames = [...new Set(mine.map(j => runName(j.cmd)))];
+  const hereNames = [...new Set(mine.map(j => j.group || runName(j.cmd)))];
   $('cancel').hidden = !mine.length;
   if (mine.length) $('cancel-label').textContent =
     hereNames.length === 1 ? `Stop ${hereNames[0]}` : `Stop ${hereNames.length} runs`;
@@ -1966,8 +1966,12 @@ function oneFieldFail(text, go) {
 // because it is a credential sitting on screen, an email address is typed
 // wrong constantly and must be readable. The field was hard-coded to a
 // password because for a while every caller was a key.
+// `log` is a step's log in the first-run pipeline, when it was opened from
+// there: what cg said while checking lands under the step, folded.
 function openOneField({ title, note, label, placeholder, args, askId, save = 'Save',
-                        working = 'Checking…', strip, after, secret = true }) {
+                        working = 'Checking…', strip, after, secret = true, log }) {
+  // Wired straight to onclick in places, which hands over an event, not a log.
+  if (typeof log !== 'string') log = undefined;
   $('onefield-title').textContent = title;
   $('onefield-note').textContent = note;
   $('onefield-label').textContent = label;
@@ -1987,7 +1991,7 @@ function openOneField({ title, note, label, placeholder, args, askId, save = 'Sa
     $('onefield-err').hidden = true;
     $('onefield-go').disabled = true;
     $('onefield-go').textContent = working;
-    const { rc, err } = await runCg(argv, { wantRc: true });
+    const { rc, err } = await runCg(argv, { wantRc: true, collect: log });
     oneFieldPending = null;
     if (rc === 0) {
       $('onefield').close();
@@ -2024,12 +2028,13 @@ function openTskey() {
 // The box's own key, pasted. Only needed when the API token cannot make one -
 // a tailnet whose ACLs want tags, or no token at all - so the button appears
 // only then, and the dialog says what kind of key to make.
-function setAuthKey() {
+function setAuthKey(log) {
   openOneField({
-    title: 'Tailscale auth key for the box',
-    note: 'A pre-auth key from login.tailscale.com > Settings > Keys. Reusable on, ephemeral off - '
-        + 'the box goes offline every time the watchdog stops it.',
-    label: 'auth key', placeholder: 'tskey-auth-…',
+    title: 'A key for your games machine',
+    note: 'In Tailscale: Settings \u2192 Keys \u2192 Generate auth key. Turn Reusable on and '
+        + 'Ephemeral off - the machine goes offline every time it is stopped, and an ephemeral '
+        + 'key would forget it.',
+    label: 'auth key', placeholder: 'tskey-auth-…', log,
     args: ['creds', 'tailscale', 'authkey'], askId: ASK.tsAuthKey,
     save: 'Save key', working: 'Checking with Tailscale…',
     strip: 'A pre-auth key for the box',
@@ -2043,13 +2048,13 @@ function setAuthKey() {
 //
 // Not a secret, and not an ask either: `cg config set` takes the value as an
 // argument, validates it against the registry rule and writes .env.
-function openAlertEmail() {
+function openAlertEmail(log) {
   openOneField({
-    title: 'Where billing alerts go',
-    note: 'Amazon emails this address if the bill passes your budget - it is the only thing that '
-        + 'tells you a box is still running when you thought it was not. Separate several with '
-        + 'commas.',
-    label: 'email', placeholder: 'you@example.com', secret: false,
+    title: 'Where should bill alerts go?',
+    note: 'Amazon emails this address if the month passes your budget - it is also what tells '
+        + 'you a machine is still running when you thought it was not. Several? Separate them '
+        + 'with commas.',
+    label: 'email', placeholder: 'you@example.com', secret: false, log,
     args: v => ['config', 'set', 'EMAIL_ALERTS', v],
     save: 'Save address', working: 'Saving\u2026',
     // `cg config set` is not a command cg says runs alone, so no re-read
@@ -2062,19 +2067,21 @@ function openAlertEmail() {
 // before anything is written, and the failure shown HERE rather than in a log
 // pane behind the dialog.
 let awsKeyPending = null;
+let awsKeyLog = null;     // a pipeline step's log, when it was opened from there
 function awsKeyAnswer(askId) {
   if (!awsKeyPending) return null;
   if (askId === ASK.awsId) return awsKeyPending.id;
   if (askId === ASK.awsSecret) return awsKeyPending.secret;
   return null;
 }
-function openAwsKey() {
+function openAwsKey(log) {
+  awsKeyLog = typeof log === 'string' ? log : null;
   $('awskey-id').value = '';
   $('awskey-secret').value = '';
   $('awskey-err').hidden = true;
   $('awskey-err').textContent = '';
   $('awskey-go').disabled = false;
-  $('awskey-go').textContent = 'Save key';
+  $('awskey-go').textContent = 'Connect';
   $('awskey').showModal();
   $('awskey-id').focus();
 }
@@ -2083,7 +2090,7 @@ function awsKeyFail(text) {
   box.hidden = false;
   box.textContent = text;
   $('awskey-go').disabled = false;
-  $('awskey-go').textContent = 'Save key';
+  $('awskey-go').textContent = 'Connect';
   awsKeyPending = null;
 }
 $('awskey-cancel').onclick = e => { e.preventDefault(); awsKeyPending = null; $('awskey').close(); };
@@ -2094,8 +2101,8 @@ $('awskey-go').onclick = async e => {
   awsKeyPending = { id, secret };
   $('awskey-err').hidden = true;
   $('awskey-go').disabled = true;
-  $('awskey-go').textContent = 'Checking with AWS…';
-  const { rc, err } = await runCg(['creds', 'set'], { wantRc: true });
+  $('awskey-go').textContent = 'Checking with Amazon\u2026';
+  const { rc, err } = await runCg(['creds', 'set'], { wantRc: true, collect: awsKeyLog });
   awsKeyPending = null;
   if (rc === 0) {
     // cg has written it and every screen re-reads, because this counts as a
@@ -3138,6 +3145,7 @@ window.cg.onEvent(({ id, event }) => {
     const following = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
     box.textContent += (event.t === 'step' ? '\n' + event.text : '  ' + (event.text || '')) + '\n';
     if (following) box.scrollTop = box.scrollHeight;
+    if (box.id.startsWith('onb-log-')) onbLogGrew(box, event.text);
   }
   if (event.t === 'exit') {
     // Why the reason is KEPT rather than printed somewhere here: it used to be
@@ -3182,6 +3190,15 @@ window.cg.onEvent(({ id, event }) => {
       }
       updateHeader();
     }
+    // Not every painter repaints the pipeline, and the opening list is a line
+    // per read: it ticks as each one lands, not all at once at the end.
+    if (job.json && readingBehindGate) paintOnboardSoon();
+    // The read that judges a step that has just been done: it has answered, so
+    // the step shows what it says - ticked, or back to what is still missing.
+    if (onbVerifying && job.json && onbPending.has(job.json)) {
+      onbPending.delete(job.json);
+      if (!onbPending.size) onbVerified();
+    }
     // A gate read that has just cleared the last blocking stage - see gateShut.
     if (gateShut && GATE_READS.some(([, j]) => j === job.json)) gateMayOpen();
     // A build, a destroy or a session changes what every free screen shows -
@@ -3196,7 +3213,10 @@ window.cg.onEvent(({ id, event }) => {
   }
 });
 
-function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart } = {}) {
+// `group` names a run by what started it rather than by what it is: one click on
+// Refresh is several reads, and naming them each made the Build screen offer to
+// "Stop 2 runs" for a click that was one.
+function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart, group } = {}) {
   return new Promise(async resolve => {
     const res = await window.cg.run(args, env);
     if (!res.ok) {
@@ -3205,7 +3225,7 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart 
       if (panel) $(panel).textContent = why;
       return resolve(wantRc ? { rc: null, err: why } : undefined);
     }
-    jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, wantRc,
+    jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, wantRc, group,
                       // cg's verdict, not a second guess at it.
                       write: !!res.write,
                       out: [], collected: '', resolve });
@@ -3244,7 +3264,7 @@ async function refresh() {
   const need = NEEDS[view];
   if (!need) return;               // logs need nothing
   loaded.add(view);
-  await Promise.all(need.map(([args, json]) => runCg(args, { json })));
+  await Promise.all(need.map(([args, json]) => runCg(args, { json, group: 'refresh' })));
 }
 
 // On open, every free read goes at once and each screen paints when its own
@@ -3319,10 +3339,10 @@ function keyProblem() {
 // The done line for the region stage, which names the place rather than the
 // setting: "ap-south-2" means nothing to someone who has not read .env.
 function whereDone() {
-  if (!machinesNow) return 'Where it runs';
+  if (!machinesNow) return 'Location';
   const city = ((sweepNow && sweepNow.regions) || [])
     .find(r => r.region === machinesNow.region);
-  return city && city.city ? `It runs in ${shortCity(city.city)}` : `It runs in ${machinesNow.region}`;
+  return city && city.city ? `Runs in ${shortCity(city.city)}` : `Runs in ${machinesNow.region}`;
 }
 
 // Whether a region is written in .env - chosen - as against cg's default.
@@ -3335,8 +3355,12 @@ function prereqs() {
   const missing = depsNow ? (depsNow.tools || []).filter(x => !x.present).map(x => x.label) : [];
   const email = (config || []).find(r => r.key === 'EMAIL_ALERTS');
   return [
+    // Installed is not enough for the AWS CLI: it also has to run, which only
+    // cg creds can say. Both answers decide this one step - the pipeline used
+    // to show the second as a row of its own, also called Tools, that came and
+    // went as the two answers landed a second apart.
     { key: 'tools', reads: 'deps', name: 'The tools this rig needs are installed',
-      ok: depsNow ? !missing.length : null,
+      ok: depsNow ? !missing.length && !cliBroken() : null,
       problem: { blocking: true,
                  title: `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not installed`,
                  body: 'Nothing here can run without them.',
@@ -3355,7 +3379,10 @@ function prereqs() {
       ok: !credsNow ? null : credsNow.cli ? credsNow.valid === true : null,
       problem: { blocking: true, ...keyProblem() } },
     { key: 'tailnet', reads: 'tskey', name: 'This laptop is signed in to Tailscale',
-      ok: tskeyNow ? tskeyNow.signed_in !== false : null,
+      // Only a clear yes. cg says null when it cannot tell - Tailscale is not
+      // installed - and "not false" read that as signed in: an empty laptop
+      // showed this step ticked before it had Tailscale at all.
+      ok: tskeyNow ? tskeyNow.signed_in === true : null,
       problem: { blocking: true, title: 'This laptop is not signed in to Tailscale',
                  body: 'The box has no public SSH port, so nothing here can reach it.',
                  label: 'Sign in', go: signInTailscale } },
@@ -3430,6 +3457,8 @@ function openWhereTo() {
   // the measuring is free.
   if (!sweepNow || !(sweepNow.regions || []).length) whereToMeasure();
 }
+// The dialog follows every scan, whoever started it.
+const repaintWhereTo = () => { if ($('whereto').open) paintWhereTo(); };
 
 function whereToRows() {
   const regions = (sweepNow && sweepNow.regions) || [];
@@ -3492,22 +3521,44 @@ function paintWhereTo() {
   }
   const usable = rows.filter(r => r.usable).length;
   $('whereto-sub').textContent = rows.length
-    ? `Measured from this laptop\u00b7 ${usable} of ${rows.length} can run your machine`
-    : 'Measuring every AWS location - about 90 seconds, and free.';
+    ? `Measured from this laptop \u00b7 ${usable} of ${rows.length} can run your machine`
+    : 'Nearer means lower latency.';
   $('whereto-note').textContent = rows.length && !usable
     ? 'None of them can yet. A region starts with no GPU quota and the request is free - '
       + 'Settings has it.'
     : '';
   $('whereto-use').disabled = !whereToPick || !rows.some(r => r.region === whereToPick && r.usable);
+  // The button names the place, so what it does is never in doubt.
+  $('whereto-use').textContent = whereToPick ? `Use ${placeName(whereToPick)}` : 'Use it';
+
+  // Three ways for there to be nothing to list, and each says which it is:
+  // still measuring, the measurement failed, or nothing answered.
+  const failed = !sweeping && !rows.length && readFailures.has('sweep');
+  // Measuring shows the spinner whether or not there is a table yet. Measuring
+  // AGAIN used to change one grey line of text and nothing else, so pressing
+  // the button looked like it had done nothing: the old table stays, faded and
+  // out of reach, under a spinner, until the new numbers replace it.
+  $('whereto-busy').hidden = !sweeping;
+  $('whereto-busy-text').textContent = rows.length
+    ? 'Measuring again from this laptop. About 90 seconds.'
+    : 'Measuring every AWS location from this laptop. About 90 seconds, and free.';
+  $('whereto-list').hidden = !rows.length;
+  $('whereto-list').classList.toggle('stale', sweeping);
+  $('whereto-err').hidden = sweeping || rows.length > 0;
+  $('whereto-err').textContent = failed
+    ? `The measurement did not finish: ${readFailures.get('sweep')}`
+    : 'No AWS location answered from this laptop. Check the internet connection and try again.';
+  if (sweeping) $('whereto-sub').textContent = 'Nearer means lower latency.';
+  $('whereto-measure').hidden = sweeping;
+  $('whereto-measure').textContent = rows.length ? 'Measure again' : 'Try again';
+  $('whereto-use').hidden = !rows.length || sweeping;
 }
 
+// One measurement at a time: the app starts one by itself on a laptop that has
+// never measured, and this used to start a second on top of it.
 function whereToMeasure() {
-  $('whereto-measure').disabled = true;
-  $('whereto-sub').textContent = 'Measuring every AWS location - about 90 seconds, and free.';
-  return runCg(['sweep', '--json'], { json: 'sweep' }).then(() => {
-    $('whereto-measure').disabled = false;
-    paintWhereTo();
-  });
+  if (sweeping) return paintWhereTo();
+  return scanRegions(null);
 }
 $('whereto-measure').onclick = e => { e.preventDefault(); whereToMeasure(); };
 $('whereto-cancel').onclick = e => { e.preventDefault(); $('whereto').close(); };
@@ -3517,16 +3568,16 @@ $('whereto-use').onclick = async e => {
   $('whereto').close();
   // cg owns the setting and its rules - the app does not write .env.
   const ok = await runInPipeline('where', ['config', 'set', 'GAME_REGION', code],
-                                 `moving to ${code}\u2026`);
+                                 `Saving ${placeName(code)}\u2026`);
   // `cg config set` is not a write by cg's contract, so nothing re-reads on its
   // own, and the stage sat on "Pick where it runs" after you had picked. The
   // setting, so the stage sees a region was chosen - and then everything behind
   // the gate, because all of it is per region: the machines it rents, the box,
   // the archive. Read before the choice, the dashboard would open on the old one.
-  if (ok) {
-    await runCg(['config', '--json'], { json: 'config' });
-    await readBehindGate();
-  }
+  // Together, not one after the other: the setting lands first and ticks the
+  // last step, and if the reads had not started by then the dashboard opened
+  // on a box read for the old region, still loading.
+  if (ok) await Promise.all([runCg(['config', '--json'], { json: 'config' }), readBehindGate()]);
 };
 
 // ── The first-run pipeline ────────────────────────────────────────────────────
@@ -3562,97 +3613,334 @@ let onbPhase = 'setup';
 // handover waits for this to reach zero instead: the dashboard arrives filled.
 let readingBehindGate = 0;
 let onbHandover = null;
+let onbBeatDone = false;
 const ONB_HANDOVER_MS = 900;
 
 // The stage that is running something, and the job it started - so it can be
 // stopped, which matters: a sign-in waits on a browser that may never answer.
 let onbRunning = null;
 let onbJob = null;
+// A sentence about the last attempt at the active stage - why it failed - and
+// whether the run in flight is now waiting on a browser rather than working.
 let onbNote = '';
+let onbTone = '';
+let onbWaiting = false;
+// The step whose command just succeeded, until the read that judges it comes
+// back. Without it the step fell back to exactly what it showed before - red
+// marks and "Install them" - for as long as the re-read took, which looked like
+// the install had not happened.
+let onbVerifying = null;
+// Every read that has to answer before that step is judged again - for Tools,
+// both the tool list and the AWS CLI check - and the tools that were missing
+// when the install started, which show "…" until then rather than ✗ or ✓.
+let onbPending = new Set();
+let onbWasMissing = new Set();
+const ONB_REREAD = { tools: ['deps', 'creds'], cli: ['deps', 'creds'], tailnet: ['tskey'],
+                     where: ['config', 'machines'] };
+const ONB_VERIFY = { tools: 'Installed. Checking\u2026', cli: 'Installed. Checking\u2026',
+                     tailnet: 'Signed in. Checking\u2026', where: 'Saved. Checking\u2026' };
 
-function onbStatus(text, tone) {
-  onbNote = text;
-  onbTone = tone;
+// Called by watchForSignInLink when the sign-in prints its link: the command
+// is not stuck, it is waiting for you, and the stage says that instead.
+function onbStatus() {
+  onbWaiting = true;
+  // Nothing is being worked on now, so no sweep and no "current line": the
+  // step's own sentence says what is being waited for, and the link is there.
+  if (onbRunning) {
+    $('onb-live-' + onbRunning).hidden = true;
+    $('onb-prog-' + onbRunning).hidden = true;
+  }
   paintOnboard();
 }
-let onbTone = '';
 
-// A stage's command, run in the pane rather than in a modal. Same shape as
-// runInDialog; the difference is where the words go, and that the stage row
-// itself is what carries the buttons.
+// ── Each step's own log ──────────────────────────────────────────────────────
+//
+// One log per step rather than one pane for all of them: when step three fails
+// you want step three's output, not whatever ran last. Each is a small unit -
+// the line cg is on now, a progress sweep, the sign-in link when there is one,
+// and the full output folded behind "Details" - built once and kept in
+// #onb-logs between paints, because the steps are redrawn every time a read
+// lands and an install's half-written log must survive that.
+const onbLogId = key => 'onb-log-' + key;
+function onbUnit(key) {
+  let u = document.getElementById('onb-unit-' + key);
+  if (u) return u;
+  u = document.createElement('div');
+  u.id = 'onb-unit-' + key;
+  u.className = 'mt-space-sm';
+  u.dataset.open = 'no';
+
+  const live = document.createElement('div');
+  live.id = 'onb-live-' + key;
+  live.className = 'font-code-sm text-code-sm text-on-surface-variant truncate';
+  live.hidden = true;
+  const prog = document.createElement('div');
+  prog.id = 'onb-prog-' + key;
+  prog.className = 'onb-progress mt-space-xs';
+  prog.hidden = true;
+  prog.append(document.createElement('i'));
+  // A sign-in prints a link and then waits: it has to be reachable while the
+  // command is still running, and the browser it opened may be behind this.
+  const link = document.createElement('button');
+  link.id = 'onb-link-' + key;
+  link.className = 'btn mt-space-sm';
+  link.textContent = 'Open the sign-in page again';
+  link.hidden = true;
+
+  const bar = document.createElement('div');
+  bar.className = 'flex items-center gap-space-sm mt-space-xs';
+  bar.id = 'onb-bar-' + key;
+  bar.hidden = true;
+  const tog = document.createElement('button');
+  tog.id = 'onb-tog-' + key;
+  tog.className = 'font-code-sm text-code-sm text-outline hover:text-on-surface';
+  const copy = document.createElement('button');
+  copy.className = 'font-code-sm text-code-sm text-outline hover:text-on-surface ml-auto';
+  copy.textContent = 'Copy';
+  copy.hidden = true;
+  bar.append(tog, copy);
+
+  const pre = document.createElement('pre');
+  pre.id = onbLogId(key);
+  pre.className = 'font-code-sm text-code-sm text-on-surface-variant whitespace-pre-wrap break-words '
+    + 'overflow-auto max-h-[32vh] mt-space-xs p-space-sm rounded bg-surface-container-lowest '
+    + 'border border-surface-variant';
+  pre.hidden = true;
+  pre.dataset.n = '0';
+
+  tog.onclick = () => onbLogOpen(key, u.dataset.open !== 'yes');
+  copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(pre.textContent); copy.textContent = 'Copied'; }
+    catch { copy.textContent = 'Could not copy'; }
+  };
+  u.append(live, prog, link, bar, pre);
+  $('onb-logs').append(u);
+  onbLogCount(key);
+  return u;
+}
+function onbLogCount(key) {
+  const u = onbUnit(key), pre = $(onbLogId(key)), n = Number(pre.dataset.n || 0);
+  $('onb-bar-' + key).hidden = n === 0;
+  $('onb-tog-' + key).textContent = `${u.dataset.open === 'yes' ? '▾' : '▸'} Details · `
+    + `${n} line${n === 1 ? '' : 's'}`;
+}
+function onbLogOpen(key, open) {
+  const u = onbUnit(key), pre = $(onbLogId(key));
+  u.dataset.open = open ? 'yes' : 'no';
+  pre.hidden = !open;
+  u.querySelector('#onb-bar-' + key + ' button:last-child').hidden = !open;
+  // Opened at the end, which is where the news is.
+  if (open) pre.scrollTop = pre.scrollHeight;
+  onbLogCount(key);
+}
+// A fresh attempt at a step: its old output stays on screen until the new run
+// says something, then is replaced - the collect handler's "fresh" rule.
+function onbLogFresh(key) {
+  onbUnit(key);
+  const pre = $(onbLogId(key));
+  pre.dataset.fresh = 'yes';
+  pre.dataset.freshCount = 'yes';
+  return onbLogId(key);
+}
+// Every line that reaches a step's log: count it, and show it as the line the
+// step is on. Called from the shared collect handler.
+function onbLogGrew(box, text) {
+  const key = box.id.slice('onb-log-'.length);
+  if (box.dataset.freshCount === 'yes') { box.dataset.n = '0'; delete box.dataset.freshCount; }
+  box.dataset.n = String(Number(box.dataset.n || 0) + 1);
+  const said = (text || '').trim();
+  if (said) $('onb-live-' + key).textContent = said;
+  onbLogCount(key);
+}
+
+// A stage's command, run inside the stage itself. Same shape as runInDialog;
+// the difference is where the words go.
 async function runInPipeline(key, args, status) {
-  runSurface = { link: 'onb-link', log: 'onb-log', status: onbStatus };
-  $('onb-log-cmd').textContent = 'cg ' + args.filter(a => !a.startsWith('-')).join(' ');
-  $('onb-log').textContent = '';
-  $('onb-log').dataset.fresh = 'yes';
-  $('onb-link').hidden = true;
+  onbUnit(key);
+  const pre = $(onbLogId(key));
+  pre.dataset.fresh = 'yes';
+  pre.dataset.freshCount = 'yes';
+  runSurface = { link: 'onb-link-' + key, log: onbLogId(key), status: onbStatus };
+  $('onb-link-' + key).hidden = true;
+  $('onb-live-' + key).textContent = status || 'Starting…';
+  $('onb-live-' + key).hidden = false;
+  $('onb-prog-' + key).hidden = false;
   onbRunning = key;
-  onbNote = status || 'starting…';
+  onbWaiting = false;
+  onbNote = '';
   onbTone = '';
   paintOnboard();
-  const { rc } = await runCg(args, { collect: 'onb-log', wantRc: true,
+  const { rc } = await runCg(args, { collect: onbLogId(key), wantRc: true,
                                      onStart: id => { onbJob = id; } });
   onbJob = null;
   onbRunning = null;
-  $('onb-link').hidden = true;
-  onbNote = rc === 0 ? '' : rc === null ? 'something else is running - this has to wait for it'
-                                        : `that did not finish (exit ${rc})`;
-  onbTone = rc === 0 ? '' : 'bad';
+  onbWaiting = false;
+  $('onb-link-' + key).hidden = true;
+  $('onb-live-' + key).hidden = true;
+  // Done, not yet judged: the sweep keeps going until the re-read lands.
+  if (rc === 0) {
+    onbVerifying = key;
+    onbPending = new Set(ONB_REREAD[key] || []);
+  }
+  else $('onb-prog-' + key).hidden = true;
+  if (rc !== 0) {
+    onbNote = rc === null ? 'Something else is running - this waits for it to finish.'
+      : rc === 130 ? 'Stopped.'
+      : (ONB_FAIL[key] || 'That did not finish. The details below say why.');
+    onbTone = 'bad';
+    // The reason is in cg's words, and nobody should have to find the toggle
+    // to read why the thing they just pressed did not work.
+    if (rc !== 130) onbLogOpen(key, true);
+  }
   // A write re-reads everything behind it, which repaints this - but only on
   // success does the stage move on, so say so either way.
   paintOnboard();
   return rc === 0;
 }
+const ONB_FAIL = {
+  tools: 'The install did not finish. The details below say why.',
+  cli: 'The AWS CLI did not install. The details below say why.',
+  tailnet: 'Sign-in did not finish. The details below say why.',
+  where: 'The location could not be saved. The details below say why.',
+};
 
-// Installing the tools is the one stage that runs here rather than opening
-// something: it needs no answer from you beyond the password your OS asks for.
+// Installing the tools runs here rather than opening something: it needs no
+// answer from you beyond the password your OS asks for.
 function onbInstall() {
   const missing = depsNow ? (depsNow.tools || []).filter(x => !x.present).map(x => x.tool) : [];
-  return runInPipeline('tools', ['deps', 'install', ...missing],
-                       'your password first - the dialog can open behind this window');
+  onbWasMissing = new Set(missing);
+  return runInPipeline('tools', ['deps', 'install', ...missing], 'Asking for your password…');
+}
+function onbInstallCli() {
+  return runInPipeline('cli', ['deps', 'install', 'aws'], 'Asking for your password…');
 }
 function onbSignIn() {
-  return runInPipeline('tailnet', ['creds', 'tailscale', 'signin'],
-                       'starting - a password dialog opens first');
+  return runInPipeline('tailnet', ['creds', 'tailscale', 'signin'], 'Opening your browser…');
 }
 
-// Two stages do their work HERE, in the pane, because they need nothing from
-// you beyond the password your OS asks for - where the banner can only send
-// you to a screen that has the button.
-const ONB_ACTION = {
-  tools:   () => [{ label: 'Install them', go: onbInstall, note: 'asks for your password once' }],
-  cli:     () => [{ label: 'Install them', go: onbInstall, note: 'asks for your password once' }],
-  tailnet: () => [{ label: 'Sign in', go: onbSignIn, note: 'finishes in your browser' }],
-  // The key is already asked for in a dialog, so the stage opens THAT dialog
-  // where it stands. Sending someone on their first run to Settings to find a
-  // second button, on a screen written for a systems engineer, loses them -
-  // and it is the same form either way, so there is still one place a key is
-  // set. The exception is a rung offering Try again: a read that never reached
-  // AWS is not a request for a key, so it keeps its own button.
-  email:   () => [{ label: 'Add an address', go: openAlertEmail,
-                    note: 'Amazon sends the alert there' }],
-  key: r => r.problem.go === retryReads
-    ? [{ label: r.problem.label, go: r.problem.go }]
-    : [{ label: 'Add your key', go: openAwsKey,
-         note: 'two lines of text from your Amazon account' }],
+// What each step is called, in the words of someone who has never used AWS.
+// The banner keeps prereqs()' own sentences, which are for someone mid-session
+// who already knows what a key is; these are for the first run, and nothing in
+// them names a command, a flag or an AWS service without saying what it is.
+//
+//   name  the step, short - what the dim list of steps still to come shows
+//   done  what is now true, said once it is
+//   body  why it matters, and what pressing the button will do
+const missingTools = () => depsNow
+  ? (depsNow.tools || []).filter(x => !x.present).map(x => x.label) : [];
+// Short and plain: what is needed and what it is for, in one or two sentences.
+// The Tools step has no sentence at all - it shows the tools themselves.
+// The AWS CLI is installed - cg deps found it - but does not run: cg creds
+// says there is no CLI. Shown on its own chip, not as a second Tools row.
+function cliBroken() {
+  if (!depsNow || !credsNow || credsNow.cli !== false) return false;
+  const aws = (depsNow.tools || []).find(t => t.tool === 'aws');
+  return !!(aws && aws.present);
+}
+
+// Every read behind a just-done step has answered: it shows what they say.
+// Still unmet after an install that exited cleanly means something did not
+// take, and that is said, with the log open - not the step silently going back
+// to what it showed before.
+function onbVerified() {
+  const key = onbVerifying;
+  onbVerifying = null;
+  onbWasMissing = new Set();
+  const prog = document.getElementById('onb-prog-' + key);
+  if (prog) prog.hidden = true;
+  const rung = prereqs().find(x => x.key === key);
+  if (rung && rung.ok === false) {
+    const still = key === 'tools' || key === 'cli'
+      ? [...missingTools(), ...(cliBroken() ? ['AWS CLI v2 (installed, but it will not run)'] : [])]
+      : [];
+    onbNote = still.length ? `Still missing: ${still.join(', ')}. The details below say why.`
+      : (ONB_FAIL[key] || 'That did not finish. The details below say why.');
+    onbTone = 'bad';
+    onbLogOpen(key, true);
+  }
+  paintOnboardSoon();
+}
+
+const ONB_COPY = {
+  open: { name: 'Loading the app', done: () => 'App ready', body: () => '' },
+  tools: { name: 'Tools', done: () => 'Tools installed', body: () => '' },
+  cli: { name: 'Tools', done: () => 'Tools installed',
+    body: () => 'The AWS CLI is not installed.' },
+  key: { name: 'Amazon account', done: () => 'Amazon account connected',
+    body: () => ({
+      unreachable: 'AWS could not be reached from this laptop, so the key was not checked. '
+                 + 'It may be fine.',
+      'no-key': 'Add an AWS access key. The app uses it to start and stop your games machine.',
+    }[credsNow && credsNow.reason]
+      || 'AWS rejected the saved access key. Add a new one.') },
+  tailnet: { name: 'Private connection', done: () => 'Private connection ready',
+    body: () => 'Sign this laptop in to Tailscale. Your games machine is reachable only over '
+              + 'your private Tailscale network.' },
+  authkey: { name: 'Machine key', done: () => 'Machine key saved',
+    body: () => 'Paste a Tailscale auth key. Each new games machine uses it to join your network.' },
+  email: { name: 'Bill alerts',
+    done: () => { const e = cfgVal('EMAIL_ALERTS'); return e ? `Alerts go to ${e}` : 'Bill alerts on'; },
+    body: () => 'Set the address AWS emails when spending passes your budget.' },
+  where: { name: 'Location', done: () => whereDone(),
+    body: () => regionChosen() && machinesNow
+      ? `${placeName(machinesNow.region)} has no GPU quota for your machine. Choose another location.`
+      : 'Choose where your games machine runs. Nearer means lower latency.' },
 };
-// Every other stage offers the rung's own button - the same one the banner
-// shows. This table used to carry its own labels, which is how the stage for a
-// laptop that could not REACH AWS offered "add your key" instead of "try
-// again": two places naming one action, and they disagreed.
+// The city, when the scan knows it; the code otherwise.
+function placeName(region) {
+  const r = ((sweepNow && sweepNow.regions) || []).find(x => x.region === region);
+  return r && r.city ? shortCity(r.city) : region;
+}
+
+// The one button a step offers, in the same words. Each opens its dialog right
+// here or runs right here: nothing in the first run sends you to another screen.
+const ONB_ACTION = {
+  // Installed but will not run is not something installing fixes - cg deps
+  // install skips a tool it can find - so that case offers a fresh look.
+  tools:   () => [!missingTools().length && cliBroken()
+                    ? { label: 'Check again', go: retryReads }
+                    : { label: 'Install them', go: onbInstall }],
+  cli:     () => [{ label: 'Install it', go: onbInstallCli }],
+  tailnet: () => [{ label: 'Sign in to Tailscale', go: onbSignIn }],
+  // A read that never reached AWS is not a request for a key, so it keeps the
+  // rung's own Try again rather than opening the key form.
+  key: r => r.problem.go === retryReads
+    ? [{ label: 'Try again', go: retryReads }]
+    : [{ label: credsNow && credsNow.reason === 'no-key' ? 'Connect Amazon' : 'Connect again',
+         go: () => openAwsKey(onbLogFresh('key')) }],
+  authkey: () => [{ label: 'Paste a key', go: () => setAuthKey(onbLogFresh('authkey')) }],
+  email:   () => [{ label: 'Add your email', go: () => openAlertEmail(onbLogFresh('email')) }],
+  where:   () => [{ label: 'Choose a location', go: openWhereTo }],
+};
 const onbActions = r =>
   (ONB_ACTION[r.key] || (x => [{ label: x.problem.label, go: x.problem.go }]))(r);
 
-// Said on the stage itself, for the ones whose own sentence does not already
-// say it. Nothing in the pipeline spends anything - the build does, and that
-// comes after the last stage.
-const ONB_FREE = { tools: true, cli: true, key: true, tailnet: true, authkey: true,
-                   email: true };
+// What each step looked like at the last paint, so the motion runs on the
+// paint where a step CHANGED and not on every repaint after it.
+const onbSeen = {};
+
+// The last step: loading the app. Every tab shows something cg has to read
+// first - the box, the archive, the guards, the machines - and on real AWS that
+// takes seconds. Without this step the dashboard opened on empty cards and
+// "Stop refresh", and the other tabs were empty until visited.
+//
+// One chip per TAB, not per read: "Cost guards" and "Game archive" meant
+// nothing on their own, and two of the five said what the Location step had
+// already said. A tab is ticked when every read it shows has landed; which
+// reads those are is NEEDS, the same table its own Refresh uses. Cost is not
+// here: its read is a paid Cost Explorer call, made only when you press Fetch.
+const OPENING = [
+  ['dashboard', 'Dashboard'], ['build', 'Build'], ['library', 'Library'],
+  ['guards', 'Guards'], ['settings', 'Settings'],
+];
+const readOut = json => [...jobs.values()].some(j => j.json === json);
 
 const ONB_MARK = {
   done:     ['\u2713', 'text-primary'],
   checking: ['\u2026', 'text-outline animate-pulse'],
   active:  ['\u25c9', 'text-tertiary'],
+  loading: ['\u25cf', 'text-primary animate-pulse'],
+  verifying: ['\u25cf', 'text-primary animate-pulse'],
   running: ['\u25cf', 'text-tertiary animate-pulse'],
   failed:  ['\u2717', 'text-error'],
   locked:  ['\u25cb', 'text-outline-variant'],
@@ -3676,7 +3964,10 @@ function paintOnboard() {
   // identically without cg, and six broken reads is not what happened. One
   // thing did, and only the main process can see it.
   if (engineGone) {
+    document.body.classList.add('setup');
     $('onb').hidden = false;
+    $('onb-head').hidden = false;
+    wrap.hidden = false;
     $('onb-done').hidden = true;
     $('d-main').hidden = true;
     $('onb-title').textContent = 'This app cannot find cg';
@@ -3723,139 +4014,259 @@ function paintOnboard() {
     return;
   }
 
-  const rungs = prereqs().filter(r => {
-    if (!r.sameAs) return true;
-    const other = prereqs().find(x => x.key === r.sameAs);
-    return !other || other.ok === true;
-  });
+  // A rung that is the same fix as another is its own step only in the one case
+  // the other cannot cover: the tools are all there and the AWS CLI alone is
+  // not. Met, it is part of "Tools installed" - drawn as a second identical
+  // line, it was, and the count read "of 7" on one laptop and "of 6" on the next.
+  // A rung that is the same fix as another is never a row of its own: the AWS
+  // CLI is judged inside Tools. Six steps, every time.
+  const setup = prereqs().filter(r => !r.sameAs);
+  // Setup is done when the six are; the dashboard step is done when, on top of
+  // that, everything it shows has been read.
+  const ready = setup.every(r => r.ok === true);
+  const rungs = [...setup, { key: 'open', reads: null, name: 'Loading the app',
+                             ok: ready && !readingBehindGate ? true : null }];
   const firstOpen = rungs.findIndex(r => r.ok !== true);
   const done = rungs.filter(r => r.ok === true).length;
 
-  const ready = firstOpen === -1;
-  // The beat where the finished pipeline is shown before the cards replace it.
-  // Without it a laptop that is already set up flashes six ticks for 200ms,
-  // which reads as a glitch rather than as "that is all done".
+  // Every open is the same flow: the six steps, each ticking as its check comes
+  // back, stopping at the first that is not met. There was a "Checking your
+  // rig" splash in front of them that stayed up until something was found
+  // missing - so a laptop with five steps done sat on it for as long as the
+  // slow reads behind Location took, instead of watching five ticks land.
+  //
+  // The handover has a beat first: six ticks replaced in 200ms reads as a
+  // glitch rather than as "that is all done".
   if (ready && onbPhase === 'setup' && !readingBehindGate) {
     onbPhase = 'handover';
     onbHandover = setTimeout(() => {
       onbHandover = null;
-      onbPhase = 'dashboard';
+      onbBeatDone = true;
       paintOnboard();
     }, ONB_HANDOVER_MS);
   }
+  // The beat is a minimum, not a deadline: reads that started during it are
+  // waited for too, or the dashboard opens on "Stop refresh".
+  if (onbPhase === 'handover' && onbBeatDone && !readingBehindGate) {
+    enterDashboard();
+    return;
+  }
   const showPipeline = onbPhase !== 'dashboard';
+  document.body.classList.toggle('setup', showPipeline);
   $('onb').hidden = !showPipeline;
   $('onb-done').hidden = showPipeline;
   $('d-main').hidden = showPipeline;
   if (!showPipeline) {
     $('onb-done-text').textContent = whereDone() + (machinesNow && machinesNow.machines
-      && machinesNow.machines.length ? ` \u00b7 ${machinesNow.machines[0].type}` : '');
+      && machinesNow.machines.length ? ` · ${machinesNow.machines[0].type}` : '');
     return;
   }
 
-  $('onb-count').textContent = `${done} of ${rungs.length} done`;
-  $('onb-title').textContent = ready ? 'Your rig is ready'
-    : done === 0 ? 'Get your rig ready'
-    : `${rungs.length - done} ${rungs.length - done === 1 ? 'thing' : 'things'} left`;
-  if (ready) $('onb-sub').textContent = 'Opening your dashboard\u2026';
+  wrap.hidden = false;
 
+  // The count is the only heading: the steps say the rest.
+  $('onb-count').textContent = `${done} of ${rungs.length} done`;
+  $('onb-head').hidden = true;
+
+  // The log units are kept, not rebuilt: park them before the rows go.
+  for (const u of [...wrap.querySelectorAll('[id^="onb-unit-"]')]) {
+    const pre = u.querySelector('pre');
+    u.dataset.scroll = String(pre.scrollTop);
+    u.dataset.follow = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24 ? 'yes' : 'no';
+    $('onb-logs').append(u);
+  }
   wrap.textContent = '';
+
   rungs.forEach((r, i) => {
+    const copy = ONB_COPY[r.key] || { name: r.name, done: () => r.name, body: () => r.problem.body };
     const active = i === firstOpen;
+    const blocked = rungs.slice(0, i).some(x => x.ok !== true);
     // A verdict of null has two causes that must not share a sentence: the read
     // behind it has not come back yet, or it came back broken.
-    const waiting = r.ok === null && !readFailures.has(r.reads)
-                    && rungs.slice(0, i).every(x => x.ok === true);
-    const state = r.ok === true ? 'done'
+    const waiting = r.ok === null && !readFailures.has(r.reads) && !blocked;
+    const state = r.key === 'open' ? (r.ok ? 'done' : blocked ? 'locked' : 'loading')
+      : onbVerifying === r.key ? 'verifying'
+      : r.ok === true ? 'done'
       : r.ok === null ? (waiting ? 'checking' : 'unknown')
       : onbRunning === r.key ? 'running'
       : active ? (onbTone === 'bad' ? 'failed' : 'active')
       : 'locked';
+    // When this step last changed, and from what. The steps are redrawn every
+    // time a read lands, often mid-animation; a redrawn tick has to carry on
+    // from where it was rather than start again, so each animation is given a
+    // negative delay of however long ago the change happened. No timer: the
+    // clock is only read, at paint.
+    const now = performance.now();
+    const seen = onbSeen[r.key];
+    if (!seen || seen.state !== state) {
+      onbSeen[r.key] = { state, from: seen ? seen.state : null, at: now };
+    }
+    const { from, at } = onbSeen[r.key];
+    const since = now - at;
+    const justDone = state === 'done' && from !== null && from !== 'done' && since < 600;
+    const justOpened = state === 'active' && from !== null
+                       && !['active', 'failed', 'running'].includes(from) && since < 900;
+    const motion = (el, cls, delay) => {
+      el.classList.add(cls);
+      el.style.animationDelay = `${delay - since}ms`;
+    };
+    // Still to come, however it is judged: a name, dimmed, with nothing to press.
+    const quiet = state === 'locked' || (state === 'unknown' && blocked);
+
     const row = document.createElement('div');
-    row.className = 'flex gap-space-sm items-start';
+    row.className = 'flex gap-space-md items-stretch';
     row.dataset.stage = r.key;
     row.dataset.state = state;
 
-    // The line down the left: it is what makes this a pipeline rather than a
-    // list, and it goes green behind you.
+    // The line down the left: what makes this a pipeline rather than a list,
+    // and it goes green behind you.
     const rail = document.createElement('div');
-    rail.className = 'flex flex-col items-center shrink-0 w-6';
-    const [mark, cls] = ONB_MARK[state];
+    rail.className = 'flex flex-col items-center shrink-0 w-5';
+    const [mark, cls] = quiet ? ONB_MARK.locked : ONB_MARK[state];
     const dot = document.createElement('span');
-    dot.className = 'font-code-md text-code-md ' + cls;
+    dot.className = 'font-code-md text-code-md leading-6 ' + cls;
+    if (justDone) motion(dot, 'onb-tick', 0);
     dot.textContent = mark;
     rail.append(dot);
     if (i < rungs.length - 1) {
       const line = document.createElement('div');
-      line.className = 'w-px flex-1 min-h-[16px] my-space-xs '
-        + (r.ok === true ? 'bg-primary/60' : 'bg-surface-variant');
+      line.className = 'w-px flex-1 min-h-[12px] my-1 '
+        + (r.ok === true ? 'bg-primary/70' : 'bg-surface-variant');
+      if (justDone) motion(line, 'onb-fill', 140);
       rail.append(line);
     }
 
     const body = document.createElement('div');
-    body.className = 'min-w-0 pb-space-md flex-1';
+    body.className = 'min-w-0 flex-1 ' + (quiet || state === 'done' ? 'pb-space-sm' : 'pb-space-lg');
+    const head = document.createElement('div');
+    head.className = 'flex items-baseline justify-between gap-space-sm';
     const title = document.createElement('div');
-    title.className = 'font-body-md text-body-md '
-      + (state === 'done' ? 'text-on-surface-variant'
-        : state === 'locked' ? 'text-outline'
-        : state === 'failed' ? 'text-error' : 'text-on-surface');
-    title.textContent = state === 'done' ? r.name : r.problem.title;
-    body.append(title);
-
-    if (state === 'locked' || state === 'done') { row.append(rail, body); wrap.append(row); return; }
-
-    if (state === 'checking') {
-      title.textContent = r.name;
-      title.className = 'font-body-md text-body-md text-outline';
-      const why = document.createElement('div');
-      why.className = 'font-code-sm text-code-sm text-outline';
-      why.textContent = 'checking\u2026';
-      body.append(why);
-      row.append(rail, body);
-      wrap.append(row);
-      return;
+    title.className = 'leading-6 ' + (state === 'done' ? 'font-body-md text-body-md text-on-surface-variant'
+      : quiet ? 'font-body-md text-body-md text-outline'
+      : state === 'failed' ? 'font-body-md text-body-md text-error font-medium'
+      : 'font-body-md text-body-md text-on-surface font-medium');
+    title.textContent = state === 'done' ? copy.done() : copy.name;
+    head.append(title);
+    const tag = { running: onbWaiting ? 'waiting for browser' : 'working', failed: 'failed',
+                  verifying: 'checking\u2026', loading: 'loading\u2026',
+                  checking: 'checking…' }[state];
+    if (tag && !quiet) {
+      const t = document.createElement('span');
+      t.className = 'font-code-sm text-code-sm shrink-0 '
+        + (state === 'failed' ? 'text-error' : state === 'checking' ? 'text-outline' : 'text-tertiary');
+      t.textContent = tag;
+      head.append(t);
     }
+    body.append(head);
 
+    const unit = document.getElementById('onb-unit-' + r.key);
+    const hasLog = unit && Number($(onbLogId(r.key)).dataset.n || 0) > 0;
+    const place = () => {
+      if (!unit) return;
+      body.append(unit);
+      const pre = unit.querySelector('pre');
+      pre.scrollTop = unit.dataset.follow === 'no' ? Number(unit.dataset.scroll || 0) : pre.scrollHeight;
+    };
+
+    if (state === 'loading') {
+      const list = document.createElement('div');
+      list.className = 'flex flex-wrap gap-space-xs mt-space-sm';
+      list.id = 'onb-reads';
+      for (const [tab, label] of OPENING) {
+        const reads = (NEEDS[tab] || []).map(([, json]) => json);
+        const st = reads.some(readOut) ? 'checking'
+          : reads.some(j => readFailures.has(j)) ? 'failed' : 'done';
+        const chip = document.createElement('span');
+        chip.className = 'pill ' + (st === 'done' ? 'pill-ok' : st === 'failed' ? 'pill-bad' : '');
+        chip.dataset.tab = tab;
+        chip.dataset.state = st;
+        chip.textContent = ({ done: '\u2713 ', failed: '\u2717 ', checking: '\u2026 ' })[st] + label;
+        list.append(chip);
+      }
+      const sweep = document.createElement('div');
+      sweep.className = 'onb-progress mt-space-sm';
+      sweep.append(document.createElement('i'));
+      body.append(list, sweep);
+      row.append(rail, body); wrap.append(row); return;
+    }
+    if (quiet || state === 'checking') { row.append(rail, body); wrap.append(row); return; }
+    if (state === 'done') {
+      // What it did stays, folded: you can still look at what the install said.
+      if (hasLog) place();
+      row.append(rail, body); wrap.append(row); return;
+    }
     if (state === 'unknown') {
       const why = document.createElement('div');
-      why.className = 'font-body-sm text-body-sm text-outline';
-      why.textContent = rungs.slice(0, i).some(x => x.ok !== true)
-        ? 'not checked yet - the step above comes first'
-        : 'this could not be checked';
+      why.className = 'font-body-sm text-body-sm text-on-surface-variant mt-0.5';
+      why.textContent = 'This couldn’t be checked just now.';
       body.append(why);
-      row.append(rail, body);
-      wrap.append(row);
-      return;
+      const b = document.createElement('button');
+      b.className = 'btn mt-space-sm';
+      b.textContent = 'Try again';
+      b.onclick = retryReads;
+      body.append(b);
+      row.append(rail, body); wrap.append(row); return;
     }
 
-    const why = document.createElement('div');
-    why.className = 'font-body-sm text-body-sm text-outline mt-0.5';
-    why.textContent = r.problem.body + (ONB_FREE[r.key] ? ' Free.' : '');
-    body.append(why);
-
-    if (onbNote) {
+    // The open step: why it matters, what is happening, and the one thing to do.
+    const inner = document.createElement('div');
+    if (justOpened) motion(inner, 'onb-open', 260);
+    const said = state === 'verifying' ? ONB_VERIFY[r.key] || 'Done. Checking\u2026'
+      : state === 'running' && onbWaiting
+      ? 'Finish signing in in your browser. This continues by itself when you are done.'
+      : copy.body();
+    if (said) {
+      const why = document.createElement('div');
+      why.className = 'font-body-sm text-body-sm text-on-surface-variant mt-0.5';
+      why.textContent = said;
+      inner.append(why);
+    }
+    // The tools themselves, rather than a sentence about them: what is already
+    // here in green, what is missing in red.
+    if (r.key === 'tools' && depsNow) {
+      const list = document.createElement('div');
+      list.className = 'flex flex-wrap gap-space-xs mt-space-sm';
+      list.id = 'onb-tools';
+      for (const t of depsNow.tools || []) {
+        const chip = document.createElement('span');
+        const broken = t.tool === 'aws' && cliBroken();
+        const recheck = state === 'verifying' && onbWasMissing.has(t.tool);
+        const ok = t.present && !broken;
+        chip.className = 'pill ' + (recheck ? '' : ok ? 'pill-ok' : 'pill-bad');
+        chip.dataset.tool = t.tool;
+        chip.dataset.present = recheck ? 'checking' : ok ? 'yes' : 'no';
+        chip.textContent = (recheck ? '\u2026 ' : ok ? '\u2713 ' : '\u2717 ') + t.label
+          + (broken && !recheck ? ' - installed, will not run' : '');
+        list.append(chip);
+      }
+      inner.append(list);
+    }
+    if (onbNote && state === 'failed') {
       const note = document.createElement('div');
-      note.className = 'font-code-sm text-code-sm mt-space-xs '
-        + (onbTone === 'bad' ? 'text-error' : 'text-tertiary');
+      note.className = 'font-body-sm text-body-sm text-error mt-space-sm';
       note.textContent = onbNote;
-      body.append(note);
+      inner.append(note);
     }
+    body.append(inner);
+    if (state === 'running' || state === 'verifying' || hasLog) place();
 
     const bar = document.createElement('div');
-    bar.className = 'flex flex-wrap items-center gap-space-sm mt-space-sm';
-    if (state === 'running') {
+    bar.className = 'flex flex-wrap items-center gap-space-sm mt-space-md';
+    if (state === 'verifying') {
+      // Nothing to press while the answer is on its way.
+    } else if (state === 'running') {
       // Stopping has to reach cg: a sign-in is waiting on a browser that may
       // never answer, and a package manager can be sitting on a lock.
       const stop = document.createElement('button');
       stop.className = 'btn';
-      stop.textContent = 'Stop waiting';
+      stop.textContent = onbWaiting ? 'Stop waiting' : 'Stop';
       stop.onclick = () => { if (onbJob !== null) window.cg.cancel(onbJob); };
       bar.append(stop);
     } else {
       for (const a of onbActions(r)) {
         const b = document.createElement('button');
-        b.className = 'btn' + (a === undefined ? '' : '');
-        b.textContent = a.label;
+        b.className = 'btn btn-primary';
+        b.textContent = state === 'failed' && a.go !== retryReads ? 'Try again' : a.label;
         b.onclick = () => { onbNote = ''; onbTone = ''; a.go(); };
         bar.append(b);
         if (a.note) {
@@ -3870,6 +4281,17 @@ function paintOnboard() {
     row.append(rail, body);
     wrap.append(row);
   });
+}
+
+// Setup is over: the sidebar slides in, the header drops in, the cards come up.
+// Only ever forwards - a prerequisite that breaks later is the banner's.
+function enterDashboard() {
+  if (onbPhase === 'dashboard') return;
+  onbPhase = 'dashboard';
+  document.body.classList.remove('setup');
+  document.body.classList.add('arriving');
+  paintOnboard();
+  paintBanner();
 }
 
 function paintBanner() {
@@ -3941,7 +4363,7 @@ async function retryReads() {
 let gateShut = false;
 async function refreshAll() {
   gateShut = false;
-  await Promise.all(GATE_READS.map(([args, json]) => runCg(args, { json })));
+  await Promise.all(GATE_READS.map(([args, json]) => runCg(args, { json, group: 'refresh' })));
   paintBanner();
   // A prerequisite is missing. The reads that need AWS or a tailnet would
   // every one come back unknown, and the pipeline is already showing the one
@@ -3966,7 +4388,7 @@ async function readBehindGate() {
   // In parallel, because they share nothing and each screen paints when its own
   // answer lands. cg cost is not among them: it bills.
   try {
-    await Promise.all(ALL_READS.map(([args, json]) => runCg(args, { json })));
+    await Promise.all(ALL_READS.map(([args, json]) => runCg(args, { json, group: 'refresh' })));
   } finally { readingBehindGate--; }
   paintOnboard();
   return firstScan();
@@ -4135,12 +4557,14 @@ async function scanRegions(btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'scanning all regions…'; }
   sweeping = true;
   paintChooser();                 // the table says what it is waiting for
+  repaintWhereTo();
   try {
     await runCg(['sweep', '--json'], { json: 'sweep' });
   } finally {
     sweeping = false;
     if (btn) { btn.disabled = false; btn.textContent = was; }
     paintChooser();
+    repaintWhereTo();
   }
 }
 const sweepBtn = $('s-sweep');
@@ -4257,6 +4681,9 @@ checkAsks();
 // Is there an engine? Then what does it say. In that order: without cg the
 // reads cannot even be started, and nine spawn errors describe one problem
 // badly.
+// The steps are drawn at once, all of them still being checked, so the window
+// never opens on a blank page while the first answers come back.
+paintOnboard();
 (async () => {
   if (await engineReady()) await refreshAll();
 })();

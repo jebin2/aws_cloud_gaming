@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="tailwind.css">
 </head>
-<body class="bg-surface font-body-md text-body-md text-on-surface min-h-screen">
+<body class="setup bg-surface font-body-md text-body-md text-on-surface min-h-screen">
 
 <header class="fixed top-0 left-0 right-0 h-12 z-50 bg-surface-container-lowest flex items-center justify-between px-margin select-none border-b border-surface-variant">
   <div class="flex items-center gap-space-sm">
@@ -52,7 +52,7 @@
   </div>
 </aside>
 
-<div class="pl-60">
+<div class="shell pl-60">
 <main class="pt-12 min-h-screen bg-surface px-margin-desktop py-space-lg w-full">
 
   <!-- Something cg could not read at all. Not a screen's problem: every screen's. -->
@@ -70,7 +70,7 @@
     </div>
   </div>
 
-  <div class="sticky top-12 z-30 -mx-margin-desktop px-margin-desktop pt-space-xs
+  <div id="viewbar" class="sticky top-12 z-30 -mx-margin-desktop px-margin-desktop pt-space-xs
               bg-surface border-b border-surface-variant/40
               flex items-center justify-between gap-space-md pb-space-md mb-space-lg">
     <div class="flex flex-col gap-space-xs">
@@ -98,35 +98,30 @@
          What used to be here instead: a banner naming one problem at a time, and
          a popup that had to be shoved into a corner to stop it blocking a window
          you could not use yet. -->
-    <div id="onb" hidden>
-      <div class="flex items-baseline justify-between gap-space-md mb-space-xs">
-        <span class="font-headline-lg text-headline-lg" id="onb-title">Get your rig ready</span>
-        <span class="font-code-sm text-code-sm text-outline" id="onb-count"></span>
-      </div>
-      <p class="font-body-md text-body-md text-on-surface-variant mb-space-lg" id="onb-sub">
-        Every step here is free. Building the box is what starts the bill, and that
-        comes after.
-      </p>
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop items-start">
-        <div class="flex flex-col" id="onb-steps"></div>
-        <!-- Permanent furniture, not something that appears: empty before
-             anything runs, cg's own words while it does, and the last thing it
-             said afterwards. It replaces the header's "running: cg deps" line. -->
-        <div class="rounded-lg bg-surface-container-lowest border border-surface-variant
-                    p-space-md min-h-[200px] flex flex-col">
-          <div class="flex items-baseline justify-between gap-space-sm mb-space-sm">
-            <span class="font-label-caps text-label-caps uppercase text-on-surface-variant">Log</span>
-            <span class="font-code-sm text-code-sm text-outline" id="onb-log-cmd"></span>
-          </div>
-          <pre class="font-code-sm text-code-sm text-on-surface-variant whitespace-pre-wrap
-                      break-words overflow-auto max-h-[46vh] flex-1" id="onb-log"></pre>
-          <!-- A sign-in that finishes in a browser prints a link and then waits.
-               The link has to be reachable while the command is still running. -->
-          <button class="btn btn-primary mt-space-sm self-start" id="onb-link" hidden>
-            <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the sign-in page
-          </button>
+    <div id="onb" class="onb">
+      <!-- The whole window while setup runs: no sidebar, no header, one column.
+           A person who has never used AWS sees this and nothing else until the
+           rig works, so every word in it is written for them. -->
+      <div class="onb-col" id="onb-col">
+        <div class="flex items-center gap-space-sm mb-space-xl">
+          <span class="material-symbols-outlined text-primary text-[44px]" data-icon="sports_esports">&#xea28;</span>
+          <span class="font-headline-lg text-headline-lg font-semibold tracking-tight">cloud gaming</span>
+          <span class="ml-auto font-code-sm text-code-sm text-outline" id="onb-count"></span>
         </div>
+        <div id="onb-head" hidden>
+          <div class="flex items-baseline justify-between gap-space-md mb-space-xs">
+            <span class="font-headline-lg text-headline-lg" id="onb-title">Let&rsquo;s get your games machine ready</span>
+          </div>
+          <p class="font-body-md text-body-md text-on-surface-variant mb-space-xl" id="onb-sub">
+            A few one-time steps. None of them cost anything.
+          </p>
+        </div>
+        <div class="flex flex-col" id="onb-steps"></div>
       </div>
+      <!-- Each step's own log lives here between paints. The steps are redrawn
+           whenever a read lands; the logs are not, so a half-read install
+           keeps its lines, its count and where you had scrolled to. -->
+      <div id="onb-logs" hidden></div>
     </div>
     <!-- Ready: one line where the pipeline was. -->
     <div id="onb-done" class="flex flex-wrap items-center gap-space-sm mb-space-lg
@@ -151,7 +146,7 @@
         <div>
           <div class="flex items-center justify-between pb-space-md">
             <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Instance stage</span>
-            <div class="flex items-center gap-space-xs font-code-sm text-code-sm" id="d-stages"></div>
+            <div class="flex items-center gap-space-xs font-code-sm text-code-sm whitespace-nowrap" id="d-stages"></div>
           </div>
           <div class="flex items-center gap-space-sm mb-space-lg">
             <p class="font-headline-xl text-headline-xl" id="box-state">—</p>
@@ -902,11 +897,12 @@
 <!-- The AWS access key: one dialog, both halves, and the answer checked before
      it is believed. It used to be two separate prompts with the failure landing
      in the log pane behind them. -->
-<dialog id="awskey" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[460px]">
-  <p class="font-code-md text-code-md">AWS access key</p>
+<dialog id="awskey" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[460px] max-w-[560px]">
+  <p class="font-code-md text-code-md">Connect your Amazon account</p>
   <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md">
-    IAM &gt; Users &gt; Security credentials &gt; Create access key. Saved to ~/.aws/credentials,
-    and checked with AWS before anything is written.
+    On the Amazon website: your name &rarr; Security credentials &rarr; Create access key.
+    It is checked with Amazon before anything is saved, and kept on this laptop only
+    (~/.aws/credentials).
   </p>
   <label class="font-code-sm text-code-sm text-outline" for="awskey-id">access key id</label>
   <input id="awskey-id" autocomplete="off" spellcheck="false" placeholder="AKIA…"
@@ -917,7 +913,7 @@
   <pre class="font-code-sm text-code-sm text-error whitespace-pre-wrap mt-space-sm max-h-[30vh] overflow-auto" id="awskey-err" hidden></pre>
   <menu class="flex justify-end gap-space-sm mt-space-md p-0">
     <button class="btn" id="awskey-cancel">Cancel</button>
-    <button class="btn btn-primary" id="awskey-go">Save key</button>
+    <button class="btn btn-primary" id="awskey-go">Connect</button>
   </menu>
 </dialog>
 
@@ -1002,7 +998,20 @@
   <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md" id="whereto-sub">
     Measured from this laptop.
   </p>
-  <div class="overflow-x-auto"><table class="chooser" id="whereto-table"></table></div>
+  <!-- The first time, there is nothing to list yet: say so, visibly, for the
+       ninety seconds it takes, rather than an empty table and two greyed
+       buttons that look like the dialog broke. -->
+  <div id="whereto-busy" class="py-space-md" hidden>
+    <div class="flex items-center gap-space-sm">
+      <span class="spinner" aria-hidden="true"></span>
+      <p class="font-body-sm text-body-sm text-on-surface-variant" id="whereto-busy-text">
+        Measuring every AWS location from this laptop. About 90 seconds, and free.
+      </p>
+    </div>
+    <div class="onb-progress mt-space-sm"><i></i></div>
+  </div>
+  <pre class="font-code-sm text-code-sm text-error whitespace-pre-wrap py-space-sm" id="whereto-err" hidden></pre>
+  <div class="overflow-x-auto" id="whereto-list"><table class="chooser" id="whereto-table"></table></div>
   <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="whereto-note"></p>
   <menu class="flex justify-end gap-space-sm mt-space-md p-0">
     <button class="btn" id="whereto-measure">Measure again</button>
