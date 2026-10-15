@@ -62,7 +62,7 @@ window.cg = {
       setTimeout(() => {
         window.__emit(id, { t: 'raw', stream: 'stdout', text: JSON.stringify(reply) });
         window.__emit(id, { t: 'exit', rc: 0 });
-      }, (window.__slow || []).includes(line) ? 600 : 0);
+      }, (window.__slow || []).includes(line) ? (window.__slowMs || 600) : 0);
     }
     // main answers with cg's own verdict, and it gets that verdict from
     // `cg --contract`. This stub used to carry a hand-written list instead,
@@ -518,6 +518,28 @@ lacks    "nothing rescans"             "$(row RAN)" ";; sweep --json"
 check    "nothing threw"               "$(row ERRS)" "ERRS | "
 ENGINE=""
 
+echo "4c2. it hands over only once the dashboard has something to show"
+# The stages are judged on the fast reads, so the pipeline finished while the
+# box, the archive and the guards were still being read: the dashboard opened
+# on "Stop refresh" and empty cards, which reads as the app starting again.
+# Sampled past the handover beat but before the box answers: that is the
+# window in which it used to have handed over already.
+ENGINE="window.__slow = ['status --json']; window.__slowMs = 2500;
+window.__after = async () => {
+  const at = n => document.getElementById(n).hidden ? 'hidden' : 'shown';
+  await new Promise(r => setTimeout(r, 1000));
+  const before = 'onb=' + at('onb') + ' cards=' + at('d-main');
+  await new Promise(r => setTimeout(r, 2200));
+  return before + ' | after: onb=' + at('onb') + ' cards=' + at('d-main')
+       + ' stop=' + at('cancel');
+};"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP}")
+contains "every stage is ticked"            "$(row STAGES)" "where=done"
+contains "  but the box is still being read, so it waits" "$(row AFTER)" "onb=shown cards=hidden |"
+contains "then the dashboard arrives"       "$(row AFTER)" "after: onb=hidden cards=shown"
+contains "  with nothing left running"      "$(row AFTER)" "stop=hidden"
+ENGINE=""
+
 echo "4d. a region that cannot rent the machine is not 'ready'"
 # An enabled region with no GPU quota looks completely set up and cannot build.
 # That is the Malaysia case, and it read as a broken app rather than a step.
@@ -547,7 +569,8 @@ ENGINE="window.__after = async () => {
   return 'popup=' + popup + ' usable=' + usable
        + ' saved=' + window.__ran.includes('config set GAME_REGION ap-south-2')
        + ' reread=' + window.__ran.includes('config --json')
-       + ' where=' + document.querySelector('#onb-steps [data-stage=\"where\"]').dataset.state;
+       + ' where=' + document.querySelector('#onb-steps [data-stage=\"where\"]').dataset.state
+       + ' status=' + window.__ran.includes('status --json');
 };"
 # A scan where Hyderabad can rent the machine, so it can be picked.
 FIT_SWEEP='{"cached": true, "age_seconds": 90, "too_far": [], "unreachable": [],
@@ -572,6 +595,8 @@ contains "using it reaches cg"          "$(row AFTER)" "saved=true"
 # without it the stage sat on "Pick where it runs" after you had picked.
 contains "  and the setting is re-read" "$(row AFTER)" "reread=true"
 contains "  so the stage is done"       "$(row AFTER)" "where=done"
+# Everything behind the gate is per region, so it is read again for the new one.
+contains "  and the box is read for it" "$(row AFTER)" "status=true"
 ENGINE=""
 
 echo "5. nothing threw"

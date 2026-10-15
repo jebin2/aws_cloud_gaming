@@ -3520,10 +3520,13 @@ $('whereto-use').onclick = async e => {
                                  `moving to ${code}\u2026`);
   // `cg config set` is not a write by cg's contract, so nothing re-reads on its
   // own, and the stage sat on "Pick where it runs" after you had picked. The
-  // setting, so the stage sees a region was chosen; the machines, because a
-  // different region rents a different list.
-  if (ok) await Promise.all([runCg(['config', '--json'], { json: 'config' }),
-                             runCg(['machines', '--json'], { json: 'machines' })]);
+  // setting, so the stage sees a region was chosen - and then everything behind
+  // the gate, because all of it is per region: the machines it rents, the box,
+  // the archive. Read before the choice, the dashboard would open on the old one.
+  if (ok) {
+    await runCg(['config', '--json'], { json: 'config' });
+    await readBehindGate();
+  }
 };
 
 // ── The first-run pipeline ────────────────────────────────────────────────────
@@ -3552,6 +3555,12 @@ $('whereto-use').onclick = async e => {
 // is the banner's to report: dropping back into a setup flow out from under
 // someone who is using the app would be worse than the problem.
 let onbPhase = 'setup';
+// How many sets of the reads behind the gate are in flight. The pipeline's
+// stages are judged on the fast ones, so it used to finish and hand over while
+// the box, the archive and the guards were still being read - and the first
+// thing on the new dashboard was "Stop refresh" and three empty cards. The
+// handover waits for this to reach zero instead: the dashboard arrives filled.
+let readingBehindGate = 0;
 let onbHandover = null;
 const ONB_HANDOVER_MS = 900;
 
@@ -3726,7 +3735,7 @@ function paintOnboard() {
   // The beat where the finished pipeline is shown before the cards replace it.
   // Without it a laptop that is already set up flashes six ticks for 200ms,
   // which reads as a glitch rather than as "that is all done".
-  if (ready && onbPhase === 'setup') {
+  if (ready && onbPhase === 'setup' && !readingBehindGate) {
     onbPhase = 'handover';
     onbHandover = setTimeout(() => {
       onbHandover = null;
@@ -3953,9 +3962,12 @@ function gateMayOpen() {
 }
 async function readBehindGate() {
   for (const v of Object.keys(NEEDS)) loaded.add(v);
+  readingBehindGate++;
   // In parallel, because they share nothing and each screen paints when its own
   // answer lands. cg cost is not among them: it bills.
-  await Promise.all(ALL_READS.map(([args, json]) => runCg(args, { json })));
+  try {
+    await Promise.all(ALL_READS.map(([args, json]) => runCg(args, { json })));
+  } finally { readingBehindGate--; }
   paintOnboard();
   return firstScan();
 }
