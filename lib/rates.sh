@@ -15,8 +15,11 @@ CG_EGRESS_USD_GB="${CG_EGRESS_USD_GB:-0.1093}"           # after the free 100 GB
 CG_EGRESS_FREE_GB="${CG_EGRESS_FREE_GB:-100}"
 CG_CE_CALL_USD="${CG_CE_CALL_USD:-0.01}"                 # one Cost Explorer call
 CG_INR_PER_USD="${CG_INR_PER_USD:-88}"
+# Every public IPv4 address, attached or not, since February 2024: the running
+# box's own, and an Elastic IP left behind with no box at all.
+CG_IPV4_USD_HOUR="${CG_IPV4_USD_HOUR:-0.005}"
 export CG_S3_USD_GB_MONTH CG_EBS_USD_GB_MONTH CG_SNAPSHOT_USD_GB_MONTH \
-       CG_EGRESS_USD_GB CG_EGRESS_FREE_GB CG_CE_CALL_USD CG_INR_PER_USD
+       CG_EGRESS_USD_GB CG_EGRESS_FREE_GB CG_CE_CALL_USD CG_INR_PER_USD CG_IPV4_USD_HOUR
 
 # rates_json - the table itself, for a program that must show a price without
 # inventing one.
@@ -32,5 +35,6 @@ print(json.dumps({
   "egress_free_gb":    float(g("CG_EGRESS_FREE_GB")),
   "ce_call_usd":       float(g("CG_CE_CALL_USD")),
   "inr_per_usd":       float(g("CG_INR_PER_USD")),
+  "ipv4_hour":         float(g("CG_IPV4_USD_HOUR")),
 }))'
 }

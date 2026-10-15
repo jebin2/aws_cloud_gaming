@@ -35,10 +35,11 @@ case "$args" in
   *L-3819A6DF*)                       echo 4.0 ;;
   *"describe-instances"*"tag:Name"*)  [[ ${BOX:-none} == none ]] && echo None || echo i-0abc123 ;;
   *"describe-instances --instance-ids"*State.Name*InstanceType*)
-                                      printf 'running\tg6.xlarge\t13.1.1.1\t2026-09-26T10:00:00+00:00\n' ;;
+                                      printf 'running\tg6.xlarge\t13.1.1.1\t2026-09-26T10:00:00+00:00\t%s\n' "${LIFECYCLE:-spot}" ;;
   *"describe-volumes"*tag:Name*)      echo "None	None	None" ;;
   *"describe-volumes"*sum*)           [[ ${BOX:-none} == none ]] && echo 0 || echo 50 ;;
-  *describe-snapshots*)               echo 0 ;;
+  *describe-snapshots*VolumeSize*)    echo "${SNAP_GB:-0}" ;;
+  *describe-snapshots*)               echo "${SNAPS:-0}" ;;
   *describe-images*)                  echo 0 ;;
   *describe-addresses*)               echo 0 ;;
   *describe-key-pairs*)               echo gamevps ;;
@@ -85,6 +86,7 @@ chmod +x "$T/bin"/*
 
 run() { # run [--json]
   ( cd "$T/repo" && env -i PATH="$T/bin:$PATH" HOME="$T/home" BOX="${BOX:-none}" TS_STATE="${TS_STATE-}" TS_NODE_GONE="${TS_NODE_GONE-}" AWS_DEAD="${AWS_DEAD-}" \
+      LIFECYCLE="${LIFECYCLE-}" SNAPS="${SNAPS-}" SNAP_GB="${SNAP_GB-}" \
       CG_COLOR=never bash lib/setup status ${1:+--json} 2>&1 )
 }
 jq_() { python3 -c 'import json,sys;d=json.load(sys.stdin)
@@ -132,6 +134,21 @@ check    "  state"                      "$(jq_ box.state <<<"$json")" '"running"
 check    "  type"                       "$(jq_ box.type <<<"$json")" '"g6.xlarge"'
 check    "  and when it launched"       "$(jq_ box.launched <<<"$json")" '"2026-09-26T10:00:00+00:00"'
 check    "json: volumes follow the box" "$(jq_ res.volumes_gb <<<"$json")" "50"
+# Spot and on-demand bill at very different rates, and the dashboard prices it.
+check    "  spot or on-demand"          "$(jq_ box.lifecycle <<<"$json")" '"spot"'
+json=$(BOX=running LIFECYCLE=None run --json)
+check    "  AWS's None is on-demand"    "$(jq_ box.lifecycle <<<"$json")" '"on-demand"'
+
+echo "2b. what bills, priced by cg, not by the app"
+json=$(SNAPS=2 SNAP_GB=80 run --json)
+check    "snapshots counted"            "$(jq_ res.snapshots <<<"$json")" "2"
+check    "  and their size"             "$(jq_ res.snapshots_gb <<<"$json")" "80"
+check    "the price table is there"     "$(jq_ rates.s3_gb_month <<<"$json")" "0.025"
+check    "  disk"                       "$(jq_ rates.ebs_gb_month <<<"$json")" "0.0912"
+check    "  snapshots"                  "$(jq_ rates.snapshot_gb_month <<<"$json")" "0.0125"
+check    "  a public IPv4 address"      "$(jq_ rates.ipv4_hour <<<"$json")" "0.005"
+check    "  and the rupee"              "$(jq_ rates.inr_per_usd <<<"$json")" "88.0"
+check    "  and what an exact-cost call costs" "$(jq_ rates.ce_call_usd <<<"$json")" "0.01"
 
 echo "3. the local side, as booleans"
 json=$(run --json)
