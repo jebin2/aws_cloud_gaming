@@ -38,6 +38,7 @@ while [[ ${1:-} == -* ]]; do
     ["library", "clean"], ["library", "account"],
     ["creds", "set"],
     ["creds", "tailscale", "signin"],
+    ["creds", "tailscale", "authkey"],
     ["deps", "install"]
   ],
   "asks": [

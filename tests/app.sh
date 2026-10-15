@@ -136,6 +136,9 @@ contains "a build runs alone"            "$alone" "init"
 contains "  a destroy too"               "$alone" "destroy"
 contains "  the library writes"          "$alone" "library push"
 contains "  setting a key"               "$alone" "creds set"
+# It writes .env, and the app re-reads only after a write: left out of this
+# list, saving the box auth key changed nothing on screen.
+contains "  the box auth key too"        "$alone" "creds tailscale authkey"
 contains "  and installing a tool"       "$alone" "deps install"
 # Naming the free ones here would be the same duplication in a third place, so
 # this asserts only that they are NOT in the alone list.

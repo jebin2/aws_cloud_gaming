@@ -25,6 +25,9 @@ for b in chromium chromium-browser google-chrome-stable google-chrome; do
 done
 [[ -n $BROWSER ]] || { echo "  (no chromium - skipped)"; echo "startup-gate: 0 passed, 0 failed"; exit 0; }
 
+# What cg says runs alone, verbatim, for the stub to answer `write` with.
+ALONE=$(./cg --contract | python3 -I -c 'import json,sys;print(json.dumps(json.load(sys.stdin)["runs_alone"]))')
+
 mkdir -p "$T/r"
 cp app/renderer/index.html app/renderer/app.js "$T/r/"
 cp app/renderer/*.css "$T/r/"
@@ -61,9 +64,13 @@ window.cg = {
         window.__emit(id, { t: 'exit', rc: 0 });
       }, (window.__slow || []).includes(line) ? 600 : 0);
     }
-    // main answers with cg's own verdict; these are the ones cg lists.
-    const write = ['init', 'destroy', 'open'].includes(args[0])
-      || (args[0] === 'library' && args[1] !== 'list');
+    // main answers with cg's own verdict, and it gets that verdict from
+    // `cg --contract`. This stub used to carry a hand-written list instead,
+    // which disagreed with cg about `creds tailscale authkey` - the very
+    // disagreement the contract exists to prevent - so a stage that had just
+    // been fixed looked, in here, like one that would never tick.
+    const cmd = args.filter(a => !a.startsWith('-'));
+    const write = (window.__alone || []).some(p => p.every((w, i) => cmd[i] === w));
     return Promise.resolve({ ok: true, id, write });
   },
   answer: () => Promise.resolve(true),
@@ -83,6 +90,7 @@ STUB
 probe() { # probe <json answers object literal>
   cat > "$T/r/answers.js" <<JS
 window.__answers = $1;
+window.__alone = $ALONE;
 ${ENGINE:-}
 JS
   cat > "$T/r/probe.js" <<'PROBE'
@@ -183,8 +191,14 @@ creds_nokey='{"cli":true,"source":null,"key_id":null,"account":null,"arn":null,"
               "reason":"no-key","error":"Unable to locate credentials."}'
 creds_rejected='{"cli":true,"source":"s","key_id":"****1234","account":null,"arn":null,"valid":false,
                  "reason":"rejected","error":"An error occurred (InvalidClientTokenId)"}'
-cfg_ok='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":true,"value":"a@b.c","default":null,"note":"n"}]'
-cfg_noemail='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":false,"value":null,"default":null,"note":"n"}]'
+cfg_ok='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":true,"value":"a@b.c","default":null,"note":"n"},
+         {"key":"GAME_REGION","kind":"text","secret":false,"is_set":true,"value":"ap-south-2","default":"ap-south-2","note":"n"}]'
+cfg_noemail='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":false,"value":null,"default":null,"note":"n"},
+             {"key":"GAME_REGION","kind":"text","secret":false,"is_set":true,"value":"ap-south-2","default":"ap-south-2","note":"n"}]'
+# A fresh laptop: no region written, so cg is using its default - which is not
+# a choice anybody made.
+cfg_noregion='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":true,"value":"a@b.c","default":null,"note":"n"},
+              {"key":"GAME_REGION","kind":"text","secret":false,"is_set":false,"value":null,"default":"ap-south-2","note":"n"}]'
 
 # Signed in, with an API token the app can mint a key with.
 tskey_canmint='{"present":true,"valid":true,"state":"ok","detail":null,"signed_in":true,"node":"laptop","auth_key_stored":false,"can_mint":true}'
@@ -329,6 +343,32 @@ contains "  saying what it stops"       "$(row STAGETEXT)" "cannot join it to yo
 # No API token here, so there is nothing to mint one with: one button, not two.
 check    "and only pasting is offered"  "$(row BUTTONS)" "BUTTONS | authkey=Paste a key"
 
+echo "3b2. pasting the key saves it, and the stage moves on"
+# The save worked and the screen did not change: cg wrote .env, the dialog
+# closed, and nothing re-read - because `creds tailscale authkey` was missing
+# from `cg --contract`, so main called it a read. A write is what triggers the
+# re-read, so a real save read as nothing happening at all.
+ENGINE="window.__after = async () => {
+  document.querySelector('#onb-steps [data-stage=\"authkey\"] button').click();
+  const open1 = document.getElementById('onefield').open;
+  document.getElementById('onefield-input').value = 'tskey-auth-abc123';
+  window.__ran = [];
+  document.getElementById('onefield-go').click();
+  await new Promise(r => setTimeout(r, 40));
+  return 'dialog=' + open1
+       + ' saved=' + window.__ran.includes('creds tailscale authkey')
+       + ' closed=' + !document.getElementById('onefield').open
+       + ' reread=' + window.__ran.includes('creds tailscale --json')
+       + ' type=' + document.getElementById('onefield-input').type;
+};"
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_nokey, \"config --json\": $cfg_ok, \"creds tailscale authkey\": {}}")
+contains "the paste dialog opens here" "$(row AFTER)" "dialog=true"
+contains "  and Save reaches cg"       "$(row AFTER)" "saved=true"
+contains "  the dialog closes"         "$(row AFTER)" "closed=true"
+contains "  and the stage is re-read"  "$(row AFTER)" "reread=true"
+contains "  a key is still bulleted"   "$(row AFTER)" "type=password"
+ENGINE=""
+
 echo "3c. a token that can mint a key means there is no stage at all"
 # cg makes the key when the build needs it, so the prerequisite is already met
 # and the pipeline does not ask you for one.
@@ -340,6 +380,46 @@ echo "3d. nowhere to send a billing alert"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_noemail}")
 contains "the alerts stage is active"  "$(row STAGES)" "email=active"
 contains "  and says a build needs it" "$(row STAGETEXT)" "budget alarm"
+
+echo "3d2. the address is asked for here too"
+# Same detour as the key stage: this one sent you to Settings, to find the row
+# among the watchdog knobs and edit it in place. `cg config set` takes the
+# value as an argument and validates it, so it is the same one-line dialog.
+ENGINE="window.__after = async () => {
+  document.querySelector('#onb-steps [data-stage=\"email\"] button').click();
+  const open1 = document.getElementById('onefield').open;
+  document.getElementById('onefield-input').value = 'me@example.com';
+  // From now on cg reports the address as set, the way the real one would.
+  window.__answers['config --json'] = [{key: 'EMAIL_ALERTS', kind: 'text', secret: false,
+                                        is_set: true, value: 'me@example.com'},
+                                       {key: 'GAME_REGION', kind: 'text', secret: false,
+                                        is_set: true, value: 'ap-south-2'}];
+  window.__ran = [];
+  document.getElementById('onefield-go').click();
+  await new Promise(r => setTimeout(r, 40));
+  return 'dialog=' + open1
+       + ' saved=' + window.__ran.includes('config set EMAIL_ALERTS me@example.com')
+       + ' closed=' + !document.getElementById('onefield').open
+       + ' reread=' + window.__ran.includes('config --json')
+       + ' type=' + document.getElementById('onefield-input').type
+       + ' aws=' + window.__ran.includes('machines --json')
+       + ' view=' + (document.querySelector('.nav-item.on') || {}).dataset?.view;
+};"
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_noemail, \"config set EMAIL_ALERTS me@example.com\": {}}")
+contains "the address dialog opens here" "$(row AFTER)" "dialog=true"
+contains "  and Save reaches cg"         "$(row AFTER)" "saved=true"
+contains "  the dialog closes"           "$(row AFTER)" "closed=true"
+# `cg config set` is not a command cg says runs alone, so nothing re-reads on
+# its own: the dialog asks for the read itself.
+contains "  and the setting is re-read"  "$(row AFTER)" "reread=true"
+lacks    "  nobody went to Settings"     "$(row AFTER)" "view=settings"
+# An address is not a credential, and a bulleted one cannot be proof-read.
+contains "  and it is readable"          "$(row AFTER)" "type=text"
+# The last blocking stage just cleared, by a save that is not a write: the
+# reads behind the gate still have to be asked, or "where it runs" waits on a
+# cg machines that nobody will ever start.
+contains "  and the gate opens behind it" "$(row AFTER)" "aws=true"
+ENGINE=""
 
 echo "3e. the laptop could not reach AWS, which is not the key's fault"
 # It used to say "AWS rejected this access key" to a laptop with no network - a
@@ -355,6 +435,25 @@ echo "3f. there is no key at all, which is not a rejection either"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_nokey, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
 contains "it says there is none"       "$(row STAGETEXT)" "no AWS access key on this laptop"
 contains "  and offers to take one"    "$(row BUTTONS)" "key=Add your key"
+
+echo "3f2. the key is asked for where you are standing"
+# The stage used to send you to Settings and flash the card there, which puts a
+# first-time user on the one screen written for someone who already knows what
+# a vCPU is, to press a second button for the dialog they could have had here.
+# It is the same dialog either way, so there is still one place a key is set.
+ENGINE="window.__after = async () => {
+  document.querySelector('#onb-steps [data-stage=\"key\"] button').click();
+  await new Promise(r => setTimeout(r, 10));
+  return 'dialog=' + document.getElementById('awskey').open
+       + ' halves=' + !!(document.getElementById('awskey-id')
+                         && document.getElementById('awskey-secret'))
+       + ' view=' + (document.querySelector('.nav-item.on') || {}).dataset?.view;
+};"
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_nokey, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
+contains "the key dialog opens here"  "$(row AFTER)" "dialog=true"
+contains "  asking for both halves"   "$(row AFTER)" "halves=true"
+lacks    "  and nothing navigated"    "$(row AFTER)" "view=settings"
+ENGINE=""
 
 echo "3g. a key AWS actually refused still says so"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_rejected, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
@@ -428,6 +527,52 @@ contains "  with where it runs active" "$(row STAGES)" "where=active"
 contains "  naming the region"         "$(row STAGETEXT)" "ap-south-2 cannot rent this machine"
 contains "  and the two reasons"       "$(row STAGETEXT)" "no GPU quota there, or none of its machines fit"
 contains "  offering the choice"       "$(row BUTTONS)" "where=Choose where"
+
+echo "4d2. a region nobody chose is not a choice"
+# A fresh laptop names no region, cg falls back to its default, the default
+# rents the machine - and the stage used to tick itself. The pipeline finished
+# and vanished without ever showing the list to choose from.
+ENGINE="window.__after = async () => {
+  document.querySelector('#onb-steps [data-stage=\"where\"] button').click();
+  await new Promise(r => setTimeout(r, 20));
+  const popup = document.getElementById('whereto').open;
+  const usable = !document.getElementById('whereto-use').disabled;
+  // From here on cg reports the region as written, the way the real one would.
+  window.__answers['config --json'] = [
+    {key: 'EMAIL_ALERTS', kind: 'text', secret: false, is_set: true, value: 'a@b.c'},
+    {key: 'GAME_REGION', kind: 'text', secret: false, is_set: true, value: 'ap-south-2'}];
+  window.__ran = [];
+  document.getElementById('whereto-use').click();
+  await new Promise(r => setTimeout(r, 60));
+  return 'popup=' + popup + ' usable=' + usable
+       + ' saved=' + window.__ran.includes('config set GAME_REGION ap-south-2')
+       + ' reread=' + window.__ran.includes('config --json')
+       + ' where=' + document.querySelector('#onb-steps [data-stage=\"where\"]').dataset.state;
+};"
+# A scan where Hyderabad can rent the machine, so it can be picked.
+FIT_SWEEP='{"cached": true, "age_seconds": 90, "too_far": [], "unreachable": [],
+            "regions": [{"region": "ap-south-2", "city": "Asia Pacific (Hyderabad)",
+                         "rtt_ms": 19, "enabled": true,
+                         "machines": [{"type": "g6.xlarge", "fits_spot": true, "fits_ondemand": true,
+                                       "inr_hour_spot": 16, "inr_hour_ondemand": 85}]}]}'
+OUT=$(probe "{$READY, \"config --json\": $cfg_noregion, \"sweep --cached --json\": $FIT_SWEEP,
+              \"config set GAME_REGION ap-south-2\": {}}")
+contains "the pipeline stays up"        "$(row ONB)" "ONB | shown"
+contains "  with where it runs active"  "$(row STAGES)" "where=active"
+contains "  asking, not blaming"        "$(row STAGETEXT)" "Pick where it runs"
+lacks    "  and no region is accused"   "$(row STAGETEXT)" "cannot rent this machine"
+# The stage is judged on cg machines, which is behind the gate: it must not
+# be what keeps the gate shut, or the list it opens has nothing in it.
+contains "the reads behind the gate ran" "$(row RAN)" "machines --json"
+contains "  and so did the scan"        "$(row RAN)" "sweep --cached --json"
+contains "its button opens the list"    "$(row AFTER)" "popup=true"
+contains "  with the region in use offered" "$(row AFTER)" "usable=true"
+contains "using it reaches cg"          "$(row AFTER)" "saved=true"
+# Not a write by cg's contract, so the popup has to ask for the read itself -
+# without it the stage sat on "Pick where it runs" after you had picked.
+contains "  and the setting is re-read" "$(row AFTER)" "reread=true"
+contains "  so the stage is done"       "$(row AFTER)" "where=done"
+ENGINE=""
 
 echo "5. nothing threw"
 check "the page logged no errors"   "$(row ERRS)" "ERRS | "

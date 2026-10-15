@@ -71,7 +71,11 @@ const CG_WORDS = {
   'library clean':           { name: 'the delete from S3' },
   'library account':         { name: 'the Steam account change' },
   'creds set':               { name: 'saving the AWS key' },
+  // Longer than 'creds set', which is the AWS key: without this, saving a
+  // Tailscale token was announced as saving an AWS one.
+  'creds set tailscale':     { name: 'saving the Tailscale token' },
   'creds tailscale signin':  { name: 'the Tailscale sign-in' },
+  'creds tailscale authkey': { name: 'saving the box auth key' },
   'deps install':            { name: 'installing the tools' },
 };
 const cgWords = cmd => byCommand(CG_WORDS, cmd) || {};
@@ -1953,11 +1957,21 @@ function oneFieldFail(text, go) {
   $('onefield-go').textContent = go;
   oneFieldPending = null;
 }
+// `args` is either the command, or a function of the typed value for a command
+// that takes it as an argument rather than answering a question - `cg config
+// set` is the second kind. `after` is for those: cg does not list them as
+// running alone, so the window does not count them as writes and nothing
+// re-reads by itself.
+// `secret` is what the field is for, not how long it is: a key is bulleted
+// because it is a credential sitting on screen, an email address is typed
+// wrong constantly and must be readable. The field was hard-coded to a
+// password because for a while every caller was a key.
 function openOneField({ title, note, label, placeholder, args, askId, save = 'Save',
-                        working = 'Checking…', strip }) {
+                        working = 'Checking…', strip, after, secret = true }) {
   $('onefield-title').textContent = title;
   $('onefield-note').textContent = note;
   $('onefield-label').textContent = label;
+  $('onefield-input').type = secret ? 'password' : 'text';
   $('onefield-input').value = '';
   $('onefield-input').placeholder = placeholder || '';
   $('onefield-err').hidden = true;
@@ -1968,18 +1982,23 @@ function openOneField({ title, note, label, placeholder, args, askId, save = 'Sa
     e.preventDefault();
     const value = $('onefield-input').value.trim();
     if (!value) return oneFieldFail('Paste it first.', save);
-    oneFieldPending = { askId, value };
+    const argv = typeof args === 'function' ? args(value) : args;
+    if (askId) oneFieldPending = { askId, value };
     $('onefield-err').hidden = true;
     $('onefield-go').disabled = true;
     $('onefield-go').textContent = working;
-    const { rc, err } = await runCg(args, { wantRc: true });
+    const { rc, err } = await runCg(argv, { wantRc: true });
     oneFieldPending = null;
-    if (rc === 0) { $('onefield').close(); return; }
+    if (rc === 0) {
+      $('onefield').close();
+      if (after) await after();
+      return;
+    }
     // cg's own words, minus the lines that only say where to make one - you
     // are holding one.
-    oneFieldFail((err || `cg ${args.join(' ')} exited ${rc}`).split('\n')
+    oneFieldFail((err || `cg ${argv.join(' ')} exited ${rc}`).split('\n')
       .filter(l => l.trim() && !(strip && l.includes(strip)))
-      .join('\n').trim() || `cg ${args.join(' ')} exited ${rc}`, save);
+      .join('\n').trim() || `cg ${argv.join(' ')} exited ${rc}`, save);
   };
   $('onefield').showModal();
   $('onefield-input').focus();
@@ -2014,6 +2033,28 @@ function setAuthKey() {
     args: ['creds', 'tailscale', 'authkey'], askId: ASK.tsAuthKey,
     save: 'Save key', working: 'Checking with Tailscale…',
     strip: 'A pre-auth key for the box',
+  });
+}
+
+// Where the billing alert goes, asked where it is needed. It is one line of
+// text and cg validates it, so it is the same dialog as the keys - and the
+// alternative was sending someone to Settings to find the row and edit it in
+// place, which is the detour the key stage used to make.
+//
+// Not a secret, and not an ask either: `cg config set` takes the value as an
+// argument, validates it against the registry rule and writes .env.
+function openAlertEmail() {
+  openOneField({
+    title: 'Where billing alerts go',
+    note: 'Amazon emails this address if the bill passes your budget - it is the only thing that '
+        + 'tells you a box is still running when you thought it was not. Separate several with '
+        + 'commas.',
+    label: 'email', placeholder: 'you@example.com', secret: false,
+    args: v => ['config', 'set', 'EMAIL_ALERTS', v],
+    save: 'Save address', working: 'Saving\u2026',
+    // `cg config set` is not a command cg says runs alone, so no re-read
+    // follows it on its own: the stage would stay exactly as it was.
+    after: () => runCg(['config', '--json'], { json: 'config' }),
   });
 }
 
@@ -3141,6 +3182,8 @@ window.cg.onEvent(({ id, event }) => {
       }
       updateHeader();
     }
+    // A gate read that has just cleared the last blocking stage - see gateShut.
+    if (gateShut && GATE_READS.some(([, j]) => j === job.json)) gateMayOpen();
     // A build, a destroy or a session changes what every free screen shows -
     // the box, the archive, the guards - so read them again once it is over.
     if (job.write) {
@@ -3282,6 +3325,12 @@ function whereDone() {
   return city && city.city ? `It runs in ${shortCity(city.city)}` : `It runs in ${machinesNow.region}`;
 }
 
+// Whether a region is written in .env - chosen - as against cg's default.
+const regionChosen = () => {
+  const r = (config || []).find(x => x.key === 'GAME_REGION');
+  return !!(r && r.is_set);
+};
+
 function prereqs() {
   const missing = depsNow ? (depsNow.tools || []).filter(x => !x.present).map(x => x.label) : [];
   const email = (config || []).find(r => r.key === 'EMAIL_ALERTS');
@@ -3325,13 +3374,30 @@ function prereqs() {
       // the machine it names. A laptop pointed at a region with no GPU quota
       // looks completely set up and cannot build - which is exactly how an
       // enabled-but-empty Malaysia read as a broken app.
+      //
+      // And not cg's default either: a region nobody chose is not a choice.
+      // On a fresh laptop .env names no region, cg falls back to ap-south-2,
+      // that happens to rent the machine - and the stage ticked itself, so the
+      // pipeline finished and handed over without ever showing the list. The
+      // popup IS this stage; it is skipped only once a region has been
+      // written to .env, by it or by Settings.
+      //
+      // Still judged only once `cg machines` has answered, never before: it is
+      // one of the reads behind the gate, and a stage that could shut the gate
+      // on the reads it needs would wait for ever.
       ok: !machinesNow ? null
-        : !machinesNow.error && (machinesNow.machines || []).some(m => m.fits_spot || m.fits_ondemand),
-      problem: { blocking: true,
-                 title: machinesNow ? `${machinesNow.region} cannot rent this machine` : 'Nowhere to run it yet',
-                 body: 'Either AWS gives you no GPU quota there, or none of its machines fit. '
-                     + 'Closer is smoother, and measuring every location is free.',
-                 label: 'Choose where', go: openWhereTo } },
+        : regionChosen()
+          && !machinesNow.error && (machinesNow.machines || []).some(m => m.fits_spot || m.fits_ondemand),
+      problem: regionChosen()
+        ? { blocking: true,
+            title: machinesNow ? `${machinesNow.region} cannot rent this machine` : 'Nowhere to run it yet',
+            body: 'Either AWS gives you no GPU quota there, or none of its machines fit. '
+                + 'Closer is smoother, and measuring every location is free.',
+            label: 'Choose where', go: openWhereTo }
+        : { blocking: true, title: 'Pick where it runs',
+            body: 'Closer is smoother. This measures every Amazon location from here - free, '
+                + 'about 90 seconds.',
+            label: 'Choose where', go: openWhereTo } },
   ];
 }
 
@@ -3450,8 +3516,14 @@ $('whereto-use').onclick = async e => {
   const code = whereToPick;
   $('whereto').close();
   // cg owns the setting and its rules - the app does not write .env.
-  await runInPipeline('where', ['config', 'set', 'GAME_REGION', code],
-                      `moving to ${code}\u2026`);
+  const ok = await runInPipeline('where', ['config', 'set', 'GAME_REGION', code],
+                                 `moving to ${code}\u2026`);
+  // `cg config set` is not a write by cg's contract, so nothing re-reads on its
+  // own, and the stage sat on "Pick where it runs" after you had picked. The
+  // setting, so the stage sees a region was chosen; the machines, because a
+  // different region rents a different list.
+  if (ok) await Promise.all([runCg(['config', '--json'], { json: 'config' }),
+                             runCg(['machines', '--json'], { json: 'machines' })]);
 };
 
 // ── The first-run pipeline ────────────────────────────────────────────────────
@@ -3542,13 +3614,25 @@ const ONB_ACTION = {
   tools:   () => [{ label: 'Install them', go: onbInstall, note: 'asks for your password once' }],
   cli:     () => [{ label: 'Install them', go: onbInstall, note: 'asks for your password once' }],
   tailnet: () => [{ label: 'Sign in', go: onbSignIn, note: 'finishes in your browser' }],
+  // The key is already asked for in a dialog, so the stage opens THAT dialog
+  // where it stands. Sending someone on their first run to Settings to find a
+  // second button, on a screen written for a systems engineer, loses them -
+  // and it is the same form either way, so there is still one place a key is
+  // set. The exception is a rung offering Try again: a read that never reached
+  // AWS is not a request for a key, so it keeps its own button.
+  email:   () => [{ label: 'Add an address', go: openAlertEmail,
+                    note: 'Amazon sends the alert there' }],
+  key: r => r.problem.go === retryReads
+    ? [{ label: r.problem.label, go: r.problem.go }]
+    : [{ label: 'Add your key', go: openAwsKey,
+         note: 'two lines of text from your Amazon account' }],
 };
 // Every other stage offers the rung's own button - the same one the banner
 // shows. This table used to carry its own labels, which is how the stage for a
 // laptop that could not REACH AWS offered "add your key" instead of "try
 // again": two places naming one action, and they disagreed.
 const onbActions = r =>
-  (ONB_ACTION[r.key] || (() => [{ label: r.problem.label, go: r.problem.go }]))();
+  (ONB_ACTION[r.key] || (x => [{ label: x.problem.label, go: x.problem.go }]))(r);
 
 // Said on the stage itself, for the ones whose own sentence does not already
 // say it. Nothing in the pipeline spends anything - the build does, and that
@@ -3834,13 +3918,40 @@ async function retryReads() {
 // It used to fire all nine reads at once. On a laptop with no AWS CLI that is
 // six reads that cannot work, a screen of unknowns, and the actual problem - a
 // missing tool - somewhere in the middle of it.
+//
+// When the gate stays shut, it has to open again by itself once the last
+// blocking stage is fixed - and not every fix is a write that comes back
+// through here. The billing address is a `cg config set`, which cg does not
+// list as running alone, so the window re-reads only the setting: the stage
+// ticked, and "where it runs" sat on "checking…" for ever, waiting on a
+// `cg machines` that nothing was ever going to ask for. So `gateShut` remembers
+// that the reads behind the gate were skipped, and ANY gate read that lands
+// with nothing blocking left - from a dialog, from Settings, from anywhere -
+// asks them. Cleared at the start of this function, so the gate reads it
+// makes itself never open it a second time underneath it.
+let gateShut = false;
 async function refreshAll() {
+  gateShut = false;
   await Promise.all(GATE_READS.map(([args, json]) => runCg(args, { json })));
-  const problem = paintBanner();
+  paintBanner();
   // A prerequisite is missing. The reads that need AWS or a tailnet would
   // every one come back unknown, and the pipeline is already showing the one
   // thing to do about it.
-  if (problem && problem.blocking) return;
+  if (gateBlocked()) { gateShut = true; return; }
+  return readBehindGate();
+}
+// Only a stage judged on a gate read can keep the gate shut. "Where it runs"
+// is judged on `cg machines`, which is BEHIND the gate - letting it shut the
+// gate would stop the very read that answers it, and leave the region popup
+// with nothing to list.
+const GATE_JSON = new Set(GATE_READS.map(([, json]) => json));
+const gateBlocked = () => prereqs().some(r => r.ok === false && GATE_JSON.has(r.reads));
+function gateMayOpen() {
+  if (gateBlocked()) return;
+  gateShut = false;
+  readBehindGate();
+}
+async function readBehindGate() {
   for (const v of Object.keys(NEEDS)) loaded.add(v);
   // In parallel, because they share nothing and each screen paints when its own
   // answer lands. cg cost is not among them: it bills.
