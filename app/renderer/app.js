@@ -139,6 +139,8 @@ function updateHeader() {
     $(b).disabled = jobs.size > 0;
   for (const b of ['b-open', 'd-open']) if (sessionNow) $(b).disabled = true;
 
+  // A build starting or finishing is the dashboard's news too.
+  paintDash();
 }
 
 // The dashboard's activity list: what cg did in this window. The app keeps no
@@ -334,116 +336,259 @@ function pill(parent, text, tone, icon) {
 // something that is not there, the fix is a field in cg - never a regex here.
 function paintStatus(s) {
   paintSpec(s);
-  // cg could not talk to AWS at all. Every number on every screen is then
-  // unknown - which is not the same as zero, and must not be drawn as zero.
-  const credErr = s.error && s.error.credentials;
+  statusNow = s;
   paintBanner();
-  if (credErr) {
-    $('arch-size').textContent = 'unknown';
-    $('arch-objects').textContent = '—';
-    $('arch-cost').textContent = '—';
-    $('arch-chip').hidden = false;
-    $('arch-chip').textContent = 'unknown - not empty';
-    $('arch-chip').className = 'pill pill-bad';
-  }
-  $('chip-region').textContent = `${s.region} · ${s.host}`;
-
-  // The mockup's three stages. cg reports one state; the stage is which of the
-  // three that state falls into, and nothing is ever shown as "Ready" while a
-  // build is still running.
-  const st = s.box ? s.box.state : null;
-  const stage = !st ? 'No box'
-    : (st === 'pending' || jobsFor('init')) ? 'Building'
-    : st === 'running' ? 'Ready' : st;
-  const stages = $('d-stages');
-  stages.textContent = '';
-  for (const name of ['No box', 'Building', 'Ready']) {
-    const el = document.createElement('span');
-    el.className = 'px-space-sm py-0.5 rounded ' + (name === stage
-      ? 'bg-primary/15 text-primary' : 'text-outline');
-    el.textContent = name;
-    stages.append(el);
-  }
-
-  // The machine, and whether anything is streaming: the two things the mockup
-  // puts beside the title.
-  const spec = s.spec || {};
-  $('d-machine').textContent = spec.gpu
-    ? `${spec.gpu} · ${Math.round((spec.gpu_memory_mib || 0) / 1024)} GB VRAM · ${spec.vcpus} vCPU · `
-      + `${Math.round((spec.memory_mib || 0) / 1024)} GB RAM`
-    : s.instance_type;
-
-  $('box-state').textContent = s.box ? s.box.state : 'No box';
-  $('box-state').className = 'font-headline-xl text-headline-xl mb-space-lg '
-    + (s.box ? 'text-primary' : 'text-outline');
-  $('dot-conn').className = 'w-2 h-2 rounded-full ' + (s.box ? 'bg-primary animate-pulse' : 'bg-outline');
-  $('chip-conn').textContent = s.box ? 'box running' : 'no box';
-  $('box-type').textContent = s.box ? s.box.type : s.instance_type;
-  $('box-region').textContent = s.region;
-  const spot = s.config && s.config.spot;
-  $('box-buy').textContent = spot === '0' ? 'on demand' : spot === '1' ? 'spot' : 'spot when it can';
-  $('box-chip').hidden = !s.box;
-  if (s.box) {
-    $('box-chip').textContent = s.box.state === 'running' ? 'billing' : s.box.state;
-    $('box-chip').className = 'pill ' + (s.box.state === 'running' ? 'pill-bad' : '');
-  }
-  $('box-uptime').textContent = s.box ? uptime(s.box.launched) : 'not running';
-  // Guarded, even though cg now always sends it: this line threw for every
-  // machine whose node was absent and took the whole status paint down with it
-  // - the box, the archive, the guards, all of it blank. One missing field
-  // should cost one field. The fix for the field itself is in lib/setup.
-  const tn = s.tailnet || {};
-  $('box-node').textContent = tn.node
-    ? `${tn.node} · ${tn.online ? 'online' : 'offline'}` : 'no node';
-
-  if (credErr) {
-    // already said above: unknown, and the banner explains why
-  } else if (s.archive && s.archive.error) {
-    $('arch-size').textContent = 'unknown';
-    $('arch-objects').textContent = '—';
-    $('arch-cost').textContent = '—';
-    $('arch-chip').hidden = false;
-    $('arch-chip').textContent = 'cannot read S3 - this is not "empty"';
-    $('arch-chip').className = 'pill pill-bad';
-  } else if (s.archive && s.archive.bucket) {
-    $('arch-bucket').textContent = `s3://${s.archive.bucket}`;
-    $('arch-size').textContent = s.archive.bytes ? GB(s.archive.bytes) : 'empty';
-    $('arch-objects').textContent = s.archive.objects ?? '—';
-    $('arch-cost').textContent = s.archive.usd_month != null ? `$${s.archive.usd_month}` : '—';
-    $('arch-chip').hidden = !s.archive.decision;
-    $('arch-expiry').textContent = s.archive.decision || '';
-    // Expiry off reads as reassurance, not a warning.
-    $('arch-expiry').className = 'font-code-sm text-code-sm '
-      + (s.archive.expiry_days === 0 ? 'text-primary' : 'text-tertiary');
-  }
-
   statusBudget = s.budget || null;
-  paintGuardStrip();
-
-  const local = $('local-pills');
-  local.textContent = '';
-  for (const [name, ok] of [['tailscale', s.local.tailscale], ['moonlight', s.local.moonlight],
-                            ['ssh key', s.local.ssh_key], ['auth key', s.local.auth_key]]) {
-    pill(local, name, ok ? 'ok' : 'bad', ok ? 'check_circle' : 'error');
-  }
-  pill(local, `plan ${s.account.plan}`, s.account.plan === 'PAID' ? 'ok' : 'bad', 'cloud');
-  pill(local, `credits $${s.account.credits}`, null, 'attach_money');
-  $('age-status').textContent = new Date().toLocaleTimeString();
-
   // What the app may do with the box that exists. A stream can be running that
   // this window never started - closing the app does not end it - so Play asks
   // cg rather than remembering, and refuses to start a second Moonlight.
   sessionNow = s.session || null;
-  const running = !!(s.box && s.box.state === 'running');
-  $('d-open').hidden = !running;
-  $('d-destroy').hidden = !s.box;
-  $('d-build').hidden = !!s.box;
   paintSession();
-  $('d-note').textContent = sessionNow
-    ? 'A stream is already open from this laptop. cg refuses a second one.'
-    : s.box
-      ? 'Destroy mirrors your games to S3 first, and refuses if that fails.'
-      : 'A build takes 10-20 minutes and starts billing.';
+  paintDash();
+}
+
+// ── The dashboard ───────────────────────────────────────────────────────────
+//
+// Three questions, in order: can I play right now, what is it costing, and are
+// my games and my money safe. Drawn whole from what cg has already said -
+// status, the machines, the archive, the guards - and redrawn when any of them
+// lands. Money is in rupees only; every price is cg's (status carries the
+// table), and the rate for a machine is `cg machines`'s.
+
+// Rupees, with paise only where they matter.
+const rs = n => n == null || !isFinite(n) ? '—'
+  : '₹' + (n < 10 ? n.toFixed(2) : Math.round(n).toLocaleString('en-IN'));
+// An hourly figure keeps its paise when it has any: ₹20 + ₹0.44 has to read as
+// ₹20.44, or the total does not add up to the lines above it.
+const rsh = n => n != null && isFinite(n) && n < 100 && Math.round(n * 100) % 100 ? '₹' + n.toFixed(2) : rs(n);
+// NaN, not 0, when cg sent no price table (an older cg): every figure then reads
+// "—", which is true, instead of ₹0, which is not.
+const inrRate = () => (statusNow && statusNow.rates && statusNow.rates.inr_per_usd) || NaN;
+
+// What a machine of this type costs an hour, bought this way, in rupees.
+function hourlyInr(type, spot) {
+  const m = machinesNow && (machinesNow.machines || []).find(x => x.type === type);
+  if (!m) return null;
+  return spot ? m.inr_hour_spot : m.inr_hour_ondemand;
+}
+
+// Everything billing right now, each with its cost. Built from status's own
+// counts and cg's price table; nothing here is a guess at a resource cg did not
+// report. Hourly items bill while they exist; monthly ones are storage.
+function billingItems(s) {
+  const r = s.rates || {}, inr = r.inr_per_usd || NaN, res = s.res || {}, items = [];
+  const box = s.box && !['terminated', 'shutting-down'].includes(s.box.state) ? s.box : null;
+  if (box) {
+    const spot = box.lifecycle === 'spot';
+    items.push({ name: `Machine · ${box.type}, ${spot ? 'spot' : 'on demand'}`,
+                 hour: box.state === 'running' || box.state === 'pending'
+                   ? hourlyInr(box.type, spot) : null,
+                 note: box.state === 'stopped' ? 'stopped - not billed by the hour' : null });
+    if (box.public_ip) items.push({ name: 'Public IP address', hour: r.ipv4_hour * inr });
+  }
+  if (res.volumes_gb > 0) {
+    items.push({ name: `${box ? 'Machine disk' : 'Disk left behind'} · ${res.volumes_gb} GB`,
+                 month: res.volumes_gb * r.ebs_gb_month * inr,
+                 warn: !box, note: box ? null : 'no machine is using it' });
+  }
+  const a = s.archive || {};
+  if (a.bytes > 0) items.push({ name: `Game archive · ${GB(a.bytes)}`, month: (a.usd_month || 0) * inr });
+  if (res.snapshots > 0) {
+    items.push({ name: `Snapshots · ${res.snapshots}${res.snapshots_gb ? `, ${res.snapshots_gb} GB` : ''}`,
+                 month: (res.snapshots_gb || 0) * r.snapshot_gb_month * inr, upTo: true,
+                 warn: true, note: 'cg does not make these' });
+  }
+  if (res.elastic_ips > 0) {
+    items.push({ name: `Elastic IP address${res.elastic_ips === 1 ? '' : 'es'} · ${res.elastic_ips}`,
+                 hour: res.elastic_ips * r.ipv4_hour * inr, warn: !box,
+                 note: box ? null : 'reserved with no machine' });
+  }
+  return items;
+}
+
+function machineLine(s) {
+  const spec = s.spec || {}, cfg = s.config || {};
+  const type = s.box ? s.box.type : s.instance_type;
+  const buy = s.box ? (s.box.lifecycle === 'spot' ? 'spot' : 'on demand')
+    : cfg.spot === '0' ? 'on demand' : cfg.spot === '1' ? 'spot' : 'spot when available';
+  return [type, spec.gpu ? `NVIDIA ${spec.gpu}` : null, placeName(s.region), buy]
+    .filter(Boolean).join(' · ');
+}
+
+function paintDash() {
+  const s = statusNow;
+  if (!s || !$('d-main')) return;
+  const inr = inrRate();
+  const credErr = s.error && s.error.credentials;
+  const box = s.box && !['terminated'].includes(s.box.state) ? s.box : null;
+  const building = jobsFor('init');
+  const running = !!(box && box.state === 'running');
+  const spot = box ? box.lifecycle === 'spot' : (s.config || {}).spot !== '0';
+  const hour = hourlyInr(box ? box.type : s.instance_type, spot);
+  const upHours = box && box.launched ? (Date.now() - new Date(box.launched)) / 3600000 : 0;
+  const idleGuard = ((watcher && watcher.guards) || []).find(g => g.layer === 2);
+  const idleAfter = idleGuard && idleGuard.reaction ? idleGuard.reaction.replace(/ idle$/, '') : '15 min';
+
+  // ── the machine ──
+  const tag = $('d-tag');
+  let title, sub, note = '';
+  if (credErr) {
+    title = 'Status unknown';
+    sub = 'AWS could not be reached, so nothing below is known. The banner says why.';
+  } else if (building) {
+    title = 'Building your machine';
+    sub = box && box.launched ? `Started ${uptime(box.launched)} ago · usually 10–20 minutes`
+                              : 'Usually 10–20 minutes';
+  } else if (running && sessionNow) {
+    title = 'Playing';
+    sub = `Up ${uptime(box.launched)} · ${rs(hour != null ? hour * upHours : null)} so far · ${rs(hour)}/hour`;
+    note = 'Closing Moonlight asks whether to keep the machine or delete it.';
+  } else if (running) {
+    title = 'Ready to play';
+    sub = `Up ${uptime(box.launched)} · ${rs(hour != null ? hour * upHours : null)} so far · ${rs(hour)}/hour`;
+    note = `Stops by itself after ${idleAfter} with nobody playing.`;
+  } else if (box) {
+    title = `Machine ${box.state}`;
+    sub = box.state === 'pending' ? 'Starting.' : box.state === 'stopping' || box.state === 'shutting-down'
+      ? 'Shutting down.' : 'Not running.';
+  } else {
+    title = 'No machine running';
+    sub = '';
+  }
+  $('d-title').textContent = title;
+  $('d-sub').textContent = sub;
+  $('d-sub').hidden = !sub;
+  tag.hidden = !(running || building);
+  tag.textContent = building ? 'building' : sessionNow ? 'streaming' : 'running';
+  tag.className = 'pill shrink-0 pill-ok';
+  $('d-machine').textContent = machineLine(s);
+  $('d-rate').textContent = box || building ? ''
+    : `${rs(hour)}/hour while it runs · ready in 10–20 minutes`;
+  $('d-rate').hidden = !$('d-rate').textContent;
+  $('d-prog').hidden = !building;
+  $('d-build').hidden = !!box || building || !!credErr;
+  $('d-open').hidden = !running || building;
+  $('d-watch').hidden = !building;
+  $('d-destroy').hidden = !box || building;
+  $('d-change').hidden = !!box || building;
+  $('d-note').textContent = note;
+  $('d-note').hidden = !note;
+
+  // ── billing now ──
+  const list = $('d-bill');
+  list.textContent = '';
+  const totals = $('d-bill-total');
+  totals.textContent = '';
+  const items = credErr ? null : billingItems(s);
+  if (!items) {
+    list.append(Object.assign(document.createElement('p'),
+      { className: 'font-body-sm text-body-sm text-outline', textContent: 'Unknown - AWS could not be reached.' }));
+  } else if (!items.length) {
+    list.append(Object.assign(document.createElement('p'),
+      { className: 'font-body-sm text-body-sm text-on-surface-variant', textContent: 'No billing items.' }));
+  }
+  for (const it of items || []) {
+    const row = document.createElement('div');
+    row.className = 'flex items-baseline justify-between gap-space-md';
+    const left = document.createElement('div');
+    left.className = 'min-w-0';
+    const name = document.createElement('p');
+    name.className = 'font-body-md text-body-md ' + (it.warn ? 'text-tertiary' : 'text-on-surface');
+    name.textContent = it.name;
+    left.append(name);
+    if (it.note) {
+      left.append(Object.assign(document.createElement('p'),
+        { className: 'font-code-sm text-code-sm text-outline', textContent: it.note }));
+    }
+    const cost = document.createElement('span');
+    cost.className = 'font-code-md text-code-md shrink-0 ' + (it.warn ? 'text-tertiary' : 'text-on-surface-variant');
+    cost.textContent = it.hour != null ? `${rsh(it.hour)}/hour`
+      : it.month != null ? `${it.upTo ? 'up to ' : ''}${rs(it.month)}/month` : '—';
+    row.append(left, cost);
+    list.append(row);
+  }
+  const perHour = (items || []).reduce((n, i) => n + (i.hour || 0), 0);
+  const perMonth = (items || []).reduce((n, i) => n + (i.month || 0), 0);
+  for (const [label, v] of [['While running', perHour ? `${rsh(perHour)}/hour` : null],
+                            ['Storage', perMonth ? `${rs(perMonth)}/month` : null]]) {
+    if (!v) continue;
+    const row = document.createElement('div');
+    row.className = 'flex justify-between font-code-sm text-code-sm';
+    row.append(Object.assign(document.createElement('span'), { className: 'text-outline', textContent: label }),
+               Object.assign(document.createElement('span'), { className: 'text-on-surface', textContent: v }));
+    totals.append(row);
+  }
+  totals.hidden = !totals.childElementCount;
+
+  // ── this month ──
+  const b = s.budget || {};
+  const exact = costNow && costNow.month && costNow.month.total_inr != null ? costNow.month.total_inr : null;
+  const spent = exact != null ? exact : b.spent != null ? b.spent * inr : null;
+  const limit = b.limit != null ? b.limit * inr : null;
+  $('d-month').textContent = spent == null ? '—' : limit ? `${rs(spent)} of ${rs(limit)}` : rs(spent);
+  $('d-month-bar').style.width = spent != null && limit ? `${Math.min(100, (spent / limit) * 100)}%` : '0%';
+  $('d-month-bar').className = 'h-full ' + (spent != null && limit && spent >= limit * 0.8 ? 'bg-tertiary' : 'bg-primary');
+  // cg projects the month from an exact fetch; the window renders that number
+  // and works out none of its own.
+  const m = (costNow && costNow.month) || {};
+  const proj = exact != null && m.projected_inr != null ? ` · on track for ${rs(m.projected_inr)}` : '';
+  $('d-month-sub').textContent = (limit == null ? 'No monthly budget is set.'
+    : spent == null ? `Budget ${rs(limit)}`
+    : `${Math.round((spent / limit) * 100)}% of the monthly budget`) + proj;
+  $('d-month-src').textContent = exact != null
+    ? `Exact, from Cost Explorer at ${costNowAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    : b.spent != null ? 'From AWS Budgets - updates a few times a day' : '';
+  const call = (s.rates || {}).ce_call_usd;
+  $('d-cost-price').textContent = call && isFinite(inr) ? rs(call * inr) : '';
+
+  // ── your games ──
+  const a = s.archive || {};
+  const n = (archive.games || []).length;
+  if (credErr || a.error) {
+    $('d-games').textContent = 'Unknown';
+    $('d-games-sub').textContent = a.error ? 'The archive could not be read. This is not the same as empty.'
+      : 'AWS could not be reached.';
+    $('d-games-keep').textContent = '';
+  } else {
+    $('d-games').textContent = !a.bytes ? 'No games saved yet'
+      : `${n || '—'} game${n === 1 ? '' : 's'} · ${GB(a.bytes)}`;
+    $('d-games-sub').textContent = a.bytes
+      ? `Saved in ${placeName(s.region)} · ${rs((a.usd_month || 0) * inr)} a month to keep` : '';
+    const days = a.expiry_days;
+    $('d-games-keep').textContent = !a.bytes ? ''
+      : days ? `Deleted after ${days} days with no machine.` : 'Kept until you delete them.';
+    $('d-games-keep').className = 'font-code-sm text-code-sm mt-space-sm '
+      + (days ? 'text-tertiary' : 'text-primary');
+  }
+
+  // ── protection ──
+  const prot = $('d-protect');
+  prot.textContent = '';
+  const guards = (watcher && watcher.guards) || [];
+  const g2 = guards.find(g => g.layer === 2), g3 = guards.find(g => g.layer === 3);
+  const lines = [
+    // Installed with every build: with no machine there is nothing for it to
+    // watch, which is not the same as it being off.
+    [g2 ? (g2.armed === false ? false : true) : null,
+     `An idle machine stops after ${idleAfter}`],
+    [g3 ? g3.armed : null,
+     g3 && g3.armed ? 'Cloud watchdog: stops a forgotten machine' : 'Cloud watchdog is off'],
+    [b.limit != null ? true : (statusNow ? false : null),
+     b.limit != null ? `Budget alert at ${rs(limit)} - emails ${b.alerts || 0} address${b.alerts === 1 ? '' : 'es'}`
+                     : 'No budget alert is set'],
+  ];
+  for (const [ok, text] of lines) {
+    const row = document.createElement('div');
+    row.className = 'flex items-baseline gap-space-sm';
+    row.append(Object.assign(document.createElement('span'), {
+      className: 'font-code-md text-code-md w-4 shrink-0 '
+        + (ok === true ? 'text-primary' : ok === false ? 'text-error' : 'text-outline'),
+      textContent: ok === true ? '✓' : ok === false ? '✗' : '…' }),
+      Object.assign(document.createElement('span'), {
+      className: 'font-body-md text-body-md ' + (ok === false ? 'text-error' : 'text-on-surface'),
+      textContent: text }));
+    prot.append(row);
+  }
 }
 
 // Play, on both screens, says what it would do - and says no when a stream is
@@ -458,11 +603,6 @@ function paintSession() {
     b.title = live
       ? `a stream is already running from this laptop (pid ${sessionNow.pid})`
       : 'opens Moonlight and streams the box';
-  }
-  const chip = $('d-session');
-  if (chip) {
-    chip.textContent = live ? `streaming (pid ${sessionNow.pid})` : 'session idle';
-    chip.className = 'pill ' + (live ? 'pill-ok' : '');
   }
   const note = $('b-session');
   if (note) {
@@ -496,40 +636,8 @@ function paintSpend(d) {
   // The dashboard shows the last paid fetch and says how old it is. It never
   // fetches on its own: Cost Explorer bills a cent a call.
   costNow = d;
-  const m = d.month || {};
-  const rate = d.rates || {};
-  const inr = rate.inr_per_usd || m.inr_per_usd || 0;
-  const days = m.days || [];
-  $('d-spend').textContent = m.total_inr != null ? INR(m.total_inr) : '—';
-  $('d-spend-sub').textContent = m.total_usd != null
-    ? `${money(m.total_usd)} · fetched ${new Date().toLocaleTimeString()}` : 'not fetched yet';
-  if (rate.ce_call_usd) $('d-cost-price').textContent = money(rate.ce_call_usd);
-
-  const box = d.resources && d.resources.instance;
-  $('d-burn').textContent = box
-    ? `${box.id} is ${box.state} - billing by the hour`
-    : 'no box - nothing is billing by the hour';
-  $('d-burn').className = 'font-code-sm text-code-sm ' + (box ? 'text-tertiary' : 'text-primary');
-  $('d-burn-icon').textContent = box ? ICON.error : ICON.check_circle;
-  $('d-burn-icon').className = 'material-symbols-outlined text-[16px] mt-0.5 '
-    + (box ? 'text-tertiary' : 'text-primary');
-
-  // A bar per billed day, at the same scale, so a heavy day is obvious.
-  const spark = $('d-spark');
-  spark.textContent = '';
-  const max = days.reduce((n, x) => Math.max(n, x.total), 0) || 1;
-  for (const day of days.slice(-14)) {
-    const bar = document.createElement('div');
-    bar.className = 'flex-1 bg-primary/60 rounded-t min-w-[3px]';
-    bar.style.height = Math.max(2, (day.total / max) * 100) + '%';
-    bar.title = `${day.date}: ${INR(day.total * inr)}`;
-    spark.append(bar);
-  }
-  // cg projects the month - it has the billed window and the day count. The
-  // window renders that number; it does not work out one of its own.
-  $('d-projected').textContent = m.projected_inr != null
-    ? `projected ${INR(m.projected_inr)} this month`
-    : 'projected —';
+  costNowAt = new Date();
+  paintDash();
 }
 
 function paintCost(d) {
@@ -920,31 +1028,7 @@ async function forgetLogin(l) {
   if (ok) await startRun(['library', 'account', 'forget']);
 }
 
-function paintArchiveCard(d) {
-  const wrap = $('arch-games');
-  if (!wrap) return;
-  wrap.textContent = '';
-  $('arch-cost-line').textContent = d.error ? '' : (d.usd_month ? `${money(d.usd_month)}/mo` : '');
-  for (const g of (d.games || []).slice(0, 3)) {
-    const row = document.createElement('div');
-    row.className = 'row font-code-sm text-code-sm';
-    const n = document.createElement('span');
-    n.className = 'truncate';
-    n.textContent = g.name || g.appid;
-    const sz = document.createElement('span');
-    sz.className = 'text-outline shrink-0';
-    sz.textContent = GB(g.bytes);
-    row.append(n, sz);
-    wrap.append(row);
-  }
-  const more = (d.games || []).length - 3;
-  if (more > 0) {
-    const el = document.createElement('span');
-    el.className = 'font-code-sm text-code-sm text-outline';
-    el.textContent = `and ${more} more`;
-    wrap.append(el);
-  }
-}
+function paintArchiveCard() { paintDash(); }
 
 // Layer 1 is not armed or unarmed - `cg open` either runs or it does not - so
 // it is not counted. Counting it as unarmed read as a missing guard.
@@ -953,55 +1037,7 @@ const guardCount = guards => [
   guards.filter(g => g.armed !== null && g.armed !== undefined).length,
 ];
 
-function paintGuardStrip() {
-  const pills = $('pills');
-  pills.textContent = '';
-  const guards = (watcher && watcher.guards) || [];
-  for (const g of guards) {
-    const card = document.createElement('div');
-    card.className = 'p-space-md rounded bg-surface-container';
-    const top = document.createElement('div');
-    top.className = 'flex items-center justify-between gap-space-sm';
-    const name = document.createElement('span');
-    name.className = 'font-code-md text-code-md';
-    name.textContent = g.name;
-    const tone = g.armed === true ? 'pill-ok' : g.armed === false ? 'pill-bad' : '';
-    const chip = document.createElement('span');
-    chip.className = 'pill ' + tone;
-    chip.textContent = g.state || (g.armed ? 'armed' : 'unknown');
-    top.append(name, chip);
-    const sub = document.createElement('p');
-    sub.className = 'font-code-sm text-code-sm text-outline mt-0.5';
-    sub.textContent = g.reaction || '';
-    card.append(top, sub);
-    pills.append(card);
-  }
-  // The budget belongs beside them even though it stops nothing.
-  const b = statusBudget || {};
-  const card = document.createElement('div');
-  card.className = 'p-space-md rounded bg-surface-container';
-  const top = document.createElement('div');
-  top.className = 'flex items-center justify-between gap-space-sm';
-  const name = document.createElement('span');
-  name.className = 'font-code-md text-code-md';
-  name.textContent = 'monthly budget';
-  const chip = document.createElement('span');
-  chip.className = 'pill ' + (b.limit != null ? 'pill-ok' : 'pill-bad');
-  chip.textContent = b.limit != null ? `$${b.limit}` : 'none';
-  top.append(name, chip);
-  const sub = document.createElement('p');
-  sub.className = 'font-code-sm text-code-sm text-outline mt-0.5';
-  sub.textContent = b.limit != null
-    ? `${b.alerts || 0} alert address${b.alerts === 1 ? '' : 'es'} - it emails, it stops nothing`
-    : 'nothing will warn you';
-  card.append(top, sub);
-  pills.append(card);
-
-  const [armed, armable] = guardCount(guards);
-  $('d-armed').hidden = !guards.length;
-  $('d-armed').textContent = `${armed} of ${armable} armed`;
-  $('d-armed').className = 'pill ' + (armed === armable ? 'pill-ok' : 'pill-bad');
-}
+function paintGuardStrip() { paintDash(); }
 
 function paintGuards(d) {
   watcher = d;
@@ -2336,6 +2372,8 @@ let config = [];     // the settings registry, as `cg config --json` last gave i
 let watcher = null;  // `cg watcher --json`, for the guard strip and the Guards screen
 let statusBudget = null;
 let costNow = null;  // the last paid cost fetch, if one was made in this window
+let costNowAt = null;
+let statusNow = null; // `cg status --json`, as last read
 const activity = [];  // what cg has done in this window, newest first
 const picked = new Set();
 
@@ -2452,7 +2490,7 @@ let sweepNow = null;
 // is the difference between "still working" and "the other regions are gone".
 let sweeping = false;
 let sweepAnswered = false;
-function paintSweep(d) { sweepNow = d; sweepAnswered = true; paintChooser(); paintOnboardSoon(); }
+function paintSweep(d) { sweepNow = d; sweepAnswered = true; paintChooser(); paintOnboardSoon(); paintDash(); }
 
 // The settings rows defer to the table - but they are painted by whichever read
 // lands first, and `cg config` usually beats `cg machines` and `cg sweep`. So
@@ -2819,7 +2857,7 @@ let machinesNow = null;
 // the region in force, and the table falls back to it before any sweep - but
 // the single <select> it used to fill is gone, replaced by the chooser table.
 let machinesAnswered = false;
-function paintMachines(d) { machinesNow = d; machinesAnswered = true; paintChooser(); paintOnboardSoon(); }
+function paintMachines(d) { machinesNow = d; machinesAnswered = true; paintChooser(); paintOnboardSoon(); paintDash(); }
 
 function paintSpec(s) {
   const spec = s.spec || {};
@@ -3968,7 +4006,6 @@ function paintOnboard() {
     $('onb').hidden = false;
     $('onb-head').hidden = false;
     wrap.hidden = false;
-    $('onb-done').hidden = true;
     $('d-main').hidden = true;
     $('onb-title').textContent = 'This app cannot find cg';
     $('onb-count').textContent = '';
@@ -4054,11 +4091,8 @@ function paintOnboard() {
   const showPipeline = onbPhase !== 'dashboard';
   document.body.classList.toggle('setup', showPipeline);
   $('onb').hidden = !showPipeline;
-  $('onb-done').hidden = showPipeline;
   $('d-main').hidden = showPipeline;
   if (!showPipeline) {
-    $('onb-done-text').textContent = whereDone() + (machinesNow && machinesNow.machines
-      && machinesNow.machines.length ? ` · ${machinesNow.machines[0].type}` : '');
     return;
   }
 
@@ -4465,6 +4499,8 @@ $('cancel').onclick = async () => {
   for (const [id, j] of jobs) if (j.view === view) window.cg.cancel(id);
 };
 $('d-build').onclick = () => goView('build');
+$('d-watch').onclick = () => goView('build');
+$('d-change').onclick = () => goSetting($('s-machine-card'));
 $('d-library').onclick = () => goView('library');
 for (const b of document.querySelectorAll('[data-filter]')) {
   b.onclick = () => applyLogFilter(b.dataset.filter);

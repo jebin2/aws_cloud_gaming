@@ -194,7 +194,6 @@ body:not(.setup) .onb { min-height: 0; padding: 0; }
 body.arriving > aside   { animation: cg-slide-in 340ms cubic-bezier(.2,.8,.2,1) both; }
 body.arriving > header  { animation: cg-drop-in 280ms 120ms ease-out both; }
 body.arriving #viewbar  { animation: cg-fade-up 280ms 200ms ease-out both; }
-body.arriving #onb-done { animation: cg-fade-up 320ms 240ms ease-out both; }
 body.arriving #d-main > * { animation: cg-fade-up 380ms ease-out both; }
 body.arriving #d-main > :nth-child(1) { animation-delay: 300ms; }
 body.arriving #d-main > :nth-child(2) { animation-delay: 380ms; }
@@ -207,7 +206,7 @@ body.arriving #d-main > :nth-child(n+5) { animation-delay: 620ms; }
 @media (prefers-reduced-motion: reduce) {
   .onb-tick, .onb-fill, .onb-open, .onb-in, .onb-dots > span,
   body.arriving > aside, body.arriving > header, body.arriving #viewbar,
-  body.arriving #onb-done, body.arriving #d-main > * { animation: none !important; }
+  body.arriving #d-main > * { animation: none !important; }
   .onb-progress > i { animation: none; width: 100%; opacity: .5; }
 }
 

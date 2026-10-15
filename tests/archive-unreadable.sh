@@ -86,6 +86,6 @@ echo "5. the rule, in the code"
 check "the silent fallback is gone" "$(grep -c "echo '{\"apps\":\[\]}' *$" cg)" "0"
 contains "the reason travels on stderr" "$(cat cg)" "The reason goes to STDERR"
 contains "status says unknown, not empty" "$(cat lib/setup)" "UNREADABLE"
-contains "  and the app repeats the distinction" "$(cat app/renderer/app.js)" 'this is not "empty"'
+contains "  and the app repeats the distinction" "$(cat app/renderer/app.js)" 'This is not the same as empty.'
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

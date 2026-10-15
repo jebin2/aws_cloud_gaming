@@ -16,18 +16,6 @@
   <div class="flex items-center gap-space-sm">
     <span class="material-symbols-outlined text-primary text-[18px]" data-icon="sports_esports">&#xea28;</span>
     <span class="font-code-md text-code-md font-medium tracking-tight">cg</span>
-    <span class="text-outline-variant font-code-sm text-code-sm">/</span>
-    <span class="font-body-sm text-body-sm text-on-surface-variant">personal cloud gaming</span>
-  </div>
-  <div class="flex items-center gap-space-sm">
-    <div class="flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container border border-surface-variant">
-      <span class="material-symbols-outlined text-secondary text-[14px]" data-icon="public">&#xe80b;</span>
-      <span class="font-code-sm text-code-sm text-on-surface-variant" id="chip-region">—</span>
-    </div>
-    <div class="flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container border border-surface-variant">
-      <div class="w-2 h-2 rounded-full bg-outline" id="dot-conn"></div>
-      <span class="font-code-sm text-code-sm text-on-surface-variant uppercase tracking-wider" id="chip-conn">idle</span>
-    </div>
   </div>
 </header>
 
@@ -76,7 +64,6 @@
     <div class="flex flex-col gap-space-xs">
       <div class="flex items-center gap-space-sm">
         <span class="font-headline-lg text-headline-lg" id="view-title">Dashboard</span>
-        <span class="text-outline-variant font-code-sm text-code-sm">/</span>
       </div>
     </div>
     <div class="flex items-center gap-space-sm">
@@ -123,145 +110,91 @@
            keeps its lines, its count and where you had scrolled to. -->
       <div id="onb-logs" hidden></div>
     </div>
-    <!-- Ready: one line where the pipeline was. -->
-    <div id="onb-done" class="flex flex-wrap items-center gap-space-sm mb-space-lg
-                              pb-space-md border-b border-surface-variant" hidden>
-      <span class="material-symbols-outlined text-[18px] text-primary" data-icon="check_circle">&#xe86c;</span>
-      <span class="font-code-md text-code-md" id="onb-done-text">Your rig is ready</span>
-    </div>
     <!-- The dashboard proper. Hidden until the pipeline above has handed over:
          a box, an archive and a bill are not worth showing to someone who
          cannot build one yet, and they were sitting underneath the setup
          flow saying "No box" as though that were the news. -->
     <div id="d-main" hidden>
-    <div class="flex flex-wrap items-center gap-space-sm mb-space-lg font-code-sm text-code-sm" id="d-chips">
-      <span class="pill" id="d-session">session idle</span>
-      <span class="pill ml-auto" id="d-machine">—</span>
-    </div>
+      <!-- The dashboard answers three questions, in order: can I play, what is
+           it costing, and are my games and my money safe. Every word in it is
+           drawn by paintDash() from what cg has already said. -->
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter-desktop mb-space-xl">
-
-      <!-- the box -->
-      <div class="flex flex-col justify-between p-space-lg rounded-lg bg-surface-container-low min-h-[340px]">
-        <div>
-          <div class="flex items-center justify-between pb-space-md">
-            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Instance stage</span>
-            <div class="flex items-center gap-space-xs font-code-sm text-code-sm whitespace-nowrap" id="d-stages"></div>
+      <!-- The machine: one status, one line about it, and the next action. -->
+      <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop" id="d-hero">
+        <div class="flex items-start justify-between gap-space-md">
+          <div class="min-w-0">
+            <p class="font-headline-lg text-headline-lg" id="d-title">&mdash;</p>
+            <p class="font-body-md text-body-md text-on-surface-variant mt-space-xs" id="d-sub"></p>
           </div>
-          <div class="flex items-center gap-space-sm mb-space-lg">
-            <p class="font-headline-xl text-headline-xl" id="box-state">—</p>
-            <span class="pill" id="box-chip" hidden>—</span>
-          </div>
-          <dl class="grid grid-cols-2 gap-space-md">
-            <div><dt class="font-label-caps text-label-caps uppercase text-outline">instance type</dt>
-                 <dd class="font-code-md text-code-md mt-0.5" id="box-type">—</dd></div>
-            <div><dt class="font-label-caps text-label-caps uppercase text-outline">purchase</dt>
-                 <dd class="font-code-md text-code-md mt-0.5" id="box-buy">—</dd></div>
-            <div><dt class="font-label-caps text-label-caps uppercase text-outline">region</dt>
-                 <dd class="font-code-md text-code-md mt-0.5" id="box-region">—</dd></div>
-            <div><dt class="font-label-caps text-label-caps uppercase text-outline">uptime</dt>
-                 <dd class="font-code-md text-code-md mt-0.5" id="box-uptime">—</dd></div>
-            <div class="col-span-2"><dt class="font-label-caps text-label-caps uppercase text-outline">tailnet</dt>
-                 <dd class="font-code-md text-code-md mt-0.5 truncate" id="box-node">—</dd></div>
-          </dl>
+          <span class="pill shrink-0" id="d-tag" hidden></span>
         </div>
-        <div>
-          <div class="flex gap-space-sm mt-space-lg">
-            <button class="btn btn-primary flex-1 justify-center" id="d-open" hidden>
-              <span class="material-symbols-outlined text-[18px]" data-icon="sports_esports">&#xea28;</span>Play
-            </button>
-            <button class="btn btn-primary flex-1 justify-center" id="d-build">
-              <span class="material-symbols-outlined text-[18px]" data-icon="rocket_launch">&#xeb9b;</span>Build box
-            </button>
-            <button class="btn btn-danger" id="d-destroy" hidden>
-              <span class="material-symbols-outlined text-[18px]" data-icon="delete">&#xe92e;</span>Destroy
-            </button>
-          </div>
-          <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="d-note">A build takes 10-20 minutes and starts billing.</p>
-        </div>
-      </div>
-
-      <!-- what it is spending -->
-      <div class="flex flex-col justify-between p-space-lg rounded-lg bg-surface-container-low min-h-[340px]">
-        <div>
-          <div class="flex items-center justify-between pb-space-md">
-            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Spend control</span>
-            <span class="font-code-sm text-code-sm text-outline">month to date</span>
-          </div>
-          <p class="font-headline-xl text-headline-xl" id="d-spend">—</p>
-          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="d-spend-sub">not fetched yet</p>
-          <div class="flex items-start gap-space-xs p-space-sm rounded bg-surface-container mt-space-md">
-            <span class="material-symbols-outlined text-[16px] mt-0.5" data-icon="check_circle" id="d-burn-icon">&#xe86c;</span>
-            <span class="font-code-sm text-code-sm" id="d-burn">no box - nothing is billing by the hour</span>
-          </div>
-          <div class="flex items-end gap-0.5 h-16 mt-space-md" id="d-spark"></div>
-        </div>
-        <div class="flex items-center justify-between mt-space-md">
-          <span class="font-code-sm text-code-sm text-outline" id="d-projected">projected —</span>
-          <button class="btn" id="d-cost">
-            <span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span>Fetch<em class="not-italic text-tertiary" id="d-cost-price">$0.01</em>
+        <p class="font-code-md text-code-md mt-space-lg" id="d-machine"></p>
+        <p class="font-code-sm text-code-sm text-outline mt-0.5" id="d-rate"></p>
+        <div class="onb-progress mt-space-md" id="d-prog" hidden><i></i></div>
+        <div class="flex flex-wrap items-center gap-space-sm mt-space-lg">
+          <button id="d-build" class="btn btn-primary">
+            <span class="material-symbols-outlined text-[16px]" data-icon="rocket_launch">&#xeb9b;</span>Build machine
+          </button>
+          <button id="d-open" class="btn btn-primary" hidden>
+            <span class="material-symbols-outlined text-[16px]" data-icon="stadia_controller">&#xf135;</span>Play
+          </button>
+          <button id="d-watch" class="btn" hidden>Watch the build</button>
+          <button id="d-destroy" class="btn btn-danger" hidden>
+            <span class="material-symbols-outlined text-[16px]" data-icon="delete">&#xe92e;</span>Delete machine
+          </button>
+          <button id="d-change" class="font-code-sm text-code-sm text-outline hover:text-on-surface ml-space-sm">
+            Change machine or location &rarr;
           </button>
         </div>
+        <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="d-note"></p>
       </div>
 
-      <!-- what is in S3 -->
-      <div class="flex flex-col justify-between p-space-lg rounded-lg bg-surface-container-low min-h-[340px]">
-        <div>
-          <div class="flex items-center justify-between pb-space-md">
-            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Game archive</span>
-            <span class="font-code-sm text-code-sm text-outline" id="arch-bucket">—</span>
-          </div>
-          <div class="flex items-baseline gap-space-sm">
-            <p class="font-headline-xl text-headline-xl" id="arch-size">—</p>
-            <span class="font-code-sm text-code-sm text-outline" id="arch-cost-line">—</span>
-          </div>
-          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs">
-            <span id="arch-objects">—</span> objects · <span id="arch-cost">—</span> a month
-          </p>
-          <div class="flex flex-col gap-space-xs mt-space-md" id="arch-games"></div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mb-gutter-desktop">
+        <!-- Everything that costs money right now, and what each costs. -->
+        <div class="p-space-lg rounded-lg bg-surface-container-low">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Billing now</span>
+          <div class="flex flex-col gap-space-sm mt-space-md" id="d-bill"></div>
+          <div class="flex flex-col gap-0.5 mt-space-md pt-space-sm border-t border-surface-variant" id="d-bill-total"></div>
         </div>
-        <div>
-          <div class="flex items-start gap-space-xs p-space-sm rounded bg-surface-container mt-space-md" id="arch-chip" hidden>
-            <span class="material-symbols-outlined text-[16px] text-tertiary mt-0.5" data-icon="schedule">&#xefd6;</span>
-            <span class="font-code-sm text-code-sm text-tertiary" id="arch-expiry"></span>
+
+        <!-- The month, from AWS Budgets (free); the exact figure is a paid call,
+             made only when asked. -->
+        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">This month</span>
+          <p class="font-headline-md text-headline-md mt-space-md" id="d-month">&mdash;</p>
+          <div class="h-2 rounded-full bg-surface-variant mt-space-sm overflow-hidden">
+            <div class="h-full bg-primary" id="d-month-bar" style="width:0%"></div>
           </div>
-          <button class="btn w-full justify-center mt-space-sm" id="d-library">
-            <span class="material-symbols-outlined text-[16px]" data-icon="storage">&#xe1db;</span>Manage the archive
-          </button>
+          <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="d-month-sub"></p>
+          <div class="flex items-center justify-between gap-space-sm mt-auto pt-space-md">
+            <span class="font-code-sm text-code-sm text-outline" id="d-month-src"></span>
+            <button id="d-cost" class="btn shrink-0">Exact cost <em class="not-italic text-tertiary" id="d-cost-price"></em></button>
+          </div>
         </div>
       </div>
-    </div>
 
-    <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop">
-      <div class="flex items-center justify-between pb-space-md">
-        <div class="flex items-center gap-space-sm">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Cost guards</span>
-          <span class="pill" id="d-armed" hidden>—</span>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop">
+        <!-- The games: the only copy is in the archive, so how long it is kept
+             is the news, not the bucket name. -->
+        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Your games</span>
+          <p class="font-headline-md text-headline-md mt-space-md" id="d-games">&mdash;</p>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5" id="d-games-sub"></p>
+          <p class="font-code-sm text-code-sm mt-space-sm" id="d-games-keep"></p>
+          <div class="mt-auto pt-space-md">
+            <button id="d-library" class="btn">Manage games</button>
+          </div>
         </div>
-        <button class="btn" id="d-guards">
-          <span class="material-symbols-outlined text-[16px]" data-icon="shield">&#xe9e0;</span>In detail
-        </button>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-space-sm" id="pills"></div>
-    </div>
 
-    <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop">
-      <div class="flex items-center justify-between pb-space-md">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Recent activity</span>
-        <span class="font-code-sm text-code-sm text-outline">what cg has done in this window, and the watchdog's last word</span>
+        <!-- What stops a forgotten machine, and what warns about the bill. -->
+        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Protection</span>
+          <div class="flex flex-col gap-space-sm mt-space-md" id="d-protect"></div>
+          <div class="mt-auto pt-space-md">
+            <button id="d-guards" class="btn">Details</button>
+          </div>
+        </div>
       </div>
-      <div class="flex flex-col gap-space-xs font-code-sm text-code-sm" id="d-activity">
-        <span class="text-outline">nothing yet</span>
-      </div>
-    </div>
-
-    <div class="p-space-lg rounded-lg bg-surface-container-low">
-      <div class="flex items-center justify-between pb-space-md">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">This laptop</span>
-        <span class="font-code-sm text-code-sm text-outline" id="age-status"></span>
-      </div>
-      <div class="flex flex-wrap gap-space-sm" id="local-pills"></div>
-    </div>
     </div>
   </section>
 

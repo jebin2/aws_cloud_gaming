@@ -113,7 +113,6 @@ JS
   // The pipeline: one row per stage, each carrying its verdict, and the pane
   // beside it carrying cg's own words.
   out.push('ONB | ' + (document.getElementById('onb').hidden ? 'hidden' : 'shown')
-           + ' done=' + (document.getElementById('onb-done').hidden ? 'hidden' : 'shown')
            + ' cards=' + (document.getElementById('d-main').hidden ? 'hidden' : 'shown'));
   out.push('TITLE2 | ' + document.getElementById('onb-title').textContent.trim());
   out.push('COUNT | ' + document.getElementById('onb-count').textContent.trim());
@@ -667,17 +666,15 @@ ENGINE="window.__after = async () => {
   const at = n => document.getElementById(n).hidden ? 'hidden' : 'shown';
   return 'then=' + at('onb') + '/' + at('d-main')
        + ' setup=' + document.body.classList.contains('setup')
-       + ' arriving=' + document.body.classList.contains('arriving')
-       + ' line=' + document.getElementById('onb-done-text').textContent.trim();
+       + ' arriving=' + document.body.classList.contains('arriving');
 };"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP}")
 contains "the steps are shown"          "$(row MODE)" "MODE | steps"
 check    "  every one ticked"           "$(row STAGES)" "STAGES | tools=done,key=done,tailnet=done,authkey=done,email=done,where=done,open=done"
-contains "  and held for a beat"        "$(row ONB)" "ONB | shown done=hidden cards=hidden"
+contains "  and held for a beat"        "$(row ONB)" "ONB | shown cards=hidden"
 contains "then the dashboard takes over" "$(row AFTER)" "then=hidden/shown"
 contains "  with the sidebar back"      "$(row AFTER)" "setup=false"
 contains "  and it arrives, not appears" "$(row AFTER)" "arriving=true"
-contains "  one line naming where it runs" "$(row AFTER)" "line=Runs in Hyderabad"
 lacks    "nothing rescans"              "$(row RAN)" ";; sweep --json"
 check    "nothing threw"                "$(row ERRS)" "ERRS | "
 ENGINE=""
@@ -895,6 +892,79 @@ contains "it stops saying measuring"      "$(row AFTER)" "busy=hidden"
 contains "  says it failed"               "$(row AFTER)" "err=shown"
 contains "  in cg's words"                "$(row AFTER)" "could not reach AWS"
 contains "  and offers another go"        "$(row AFTER)" "measure=Try again/shown"
+ENGINE=""
+
+echo "6. the dashboard: what is billing, item by item, in rupees"
+# It used to say "nothing is billing by the hour" and stop there - while the game
+# archive, a disk left behind or a reserved address billed by the month. Now it
+# lists each thing that costs money with what it costs, or says there are none.
+RATES='"rates": {"s3_gb_month": 0.025, "ebs_gb_month": 0.0912, "snapshot_gb_month": 0.0125,
+                 "ipv4_hour": 0.005, "inr_per_usd": 88, "ce_call_usd": 0.01}'
+st() { # st <box json> <archive json> <res json> <budget json>
+  echo "{\"box\": $1, \"session\": null, \"region\": \"ap-south-2\", \"host\": \"laptop\",
+         \"instance_type\": \"g6.xlarge\", \"archive\": $2, \"res\": $3, \"budget\": $4,
+         \"spec\": {\"gpu\": \"L4\"}, \"tailnet\": {}, \"config\": {\"spot\": \"auto\"},
+         \"local\": {}, \"account\": {\"plan\": \"PAID\", \"credits\": 0}, $RATES}"
+}
+DASH="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  const t = id => document.getElementById(id).innerText.replace(/\\s+/g, ' ').trim();
+  const shown = id => !document.getElementById(id).hidden;
+  return 'title=' + t('d-title') + ' | machine=' + t('d-machine') + ' | rate=' + t('d-rate')
+       + ' | bill=' + t('d-bill') + ' | total=' + t('d-bill-total')
+       + ' | month=' + t('d-month') + ' | src=' + t('d-month-src') + ' | price=' + t('d-cost-price')
+       + ' | games=' + t('d-games') + ' ' + t('d-games-sub') + ' ' + t('d-games-keep')
+       + ' | protect=' + t('d-protect')
+       + ' | buttons=' + ['d-build', 'd-open', 'd-destroy'].filter(shown).join(',')
+       + ' | destroy=' + t('d-destroy');
+};"
+
+ENGINE="$DASH"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0, "snapshots": 0, "elastic_ips": 0}' '{"limit": 57, "spent": 4.5, "alerts": 2}')}")
+contains "no machine, said plainly"        "$(row AFTER)" "title=No machine running"
+lacks    "  not 'nothing is billed'"        "$(row AFTER)" "billed by the hour"
+contains "  what it would be"              "$(row AFTER)" "machine=g6.xlarge · NVIDIA L4 · Hyderabad · spot when available"
+contains "  and what it would cost"        "$(row AFTER)" "rate=₹16/hour while it runs"
+contains "nothing billing: no items"       "$(row AFTER)" "bill=No billing items."
+contains "the month, in rupees, of the budget" "$(row AFTER)" "month=₹396 of ₹5,016"
+contains "  from Budgets, which is free"   "$(row AFTER)" "src=From AWS Budgets"
+contains "the exact figure's price, in rupees" "$(row AFTER)" "price=₹0.88"
+contains "no games yet"                    "$(row AFTER)" "games=No games saved yet"
+contains "the budget is protection"        "$(row AFTER)" "Budget alert at ₹5,016 - emails 2 addresses"
+contains "one action: build"               "$(row AFTER)" "buttons=d-build |"
+lacks    "no dollars anywhere on it"       "$(row AFTER)" "$"
+
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st '{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle": "spot", "public_ip": "13.1.1.1", "launched": "2026-01-01T00:00:00Z"}' \
+     '{"bytes": 136365211648, "usd_month": 3.18, "expiry_days": 14}' \
+     '{"volumes_gb": 50, "snapshots": 0, "elastic_ips": 0}' '{"limit": 57, "spent": 4.5, "alerts": 2}')}")
+contains "a running machine: ready"        "$(row AFTER)" "title=Ready to play"
+contains "  the machine, priced by the hour" "$(row AFTER)" "Machine · g6.xlarge, spot ₹16/hour"
+contains "  its public address"            "$(row AFTER)" "Public IP address ₹0.44/hour"
+contains "  its disk, by the month"        "$(row AFTER)" "Machine disk · 50 GB ₹401/month"
+contains "  the archive, by the month"     "$(row AFTER)" "Game archive · 127.0 GB ₹280/month"
+contains "  totalled both ways"            "$(row AFTER)" "total=While running ₹16.44/hour Storage ₹681/month"
+contains "  how long the games are kept"   "$(row AFTER)" "Deleted after 14 days with no machine."
+contains "play and delete, nothing else"   "$(row AFTER)" "buttons=d-open,d-destroy |"
+# (The icon glyph comes first, so this checks the words after it.)
+contains "  it says delete, not destroy"   "$(row AFTER)" " Delete machine"
+lacks    "    anywhere on the page"         "$(row AFTER)" "Destroy"
+
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 30, "snapshots": 2, "snapshots_gb": 80, "elastic_ips": 1}' '{"limit": 57, "spent": 4.5, "alerts": 2}')}")
+# No machine, and things still billing: each one named, and the ones cg did not
+# make or that nothing is using marked as such.
+contains "a disk left behind"              "$(row AFTER)" "Disk left behind · 30 GB no machine is using it ₹241/month"
+contains "  snapshots, as the most they cost" "$(row AFTER)" "Snapshots · 2, 80 GB cg does not make these up to ₹88/month"
+contains "  a reserved address"            "$(row AFTER)" "Elastic IP address · 1 reserved with no machine ₹0.44/hour"
+# An older cg sends no price table: every figure is unknown, never ₹0.
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": {\"box\": null, \"region\": \"ap-south-2\", \"instance_type\": \"g6.xlarge\",
+     \"archive\": {\"bytes\": 1073741824, \"usd_month\": 0.03}, \"res\": {\"volumes_gb\": 0},
+     \"budget\": {\"limit\": 57, \"spent\": 4.5}, \"config\": {}, \"local\": {}, \"account\": {}}}")
+contains "no price table: the archive cost is unknown" "$(row AFTER)" "Game archive · 1.0 GB —"
+lacks    "  never zero"                    "$(row AFTER)" "₹0.00"
 ENGINE=""
 
 echo "5. nothing threw"

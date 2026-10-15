@@ -233,7 +233,9 @@ contains "  built per step, in the painter"  "$js" "u.id = 'onb-unit-' + key"
 # A sign-in finishes in a browser: the link has to be reachable while the
 # command is still waiting for it - on the step that is waiting.
 contains "  with room for a sign-in link"   "$js" "link.id = 'onb-link-' + key"
-contains "it collapses when ready"       "$html" 'id="onb-done"'
+# Setup hands over to the dashboard and leaves nothing behind: the "Runs in
+# Mumbai" line it used to leave above the cards said what the Build tab says.
+lacks    "it leaves no line behind"      "$html" 'id="onb-done"'
 contains "  which the painter decides"   "$js" "\$('onb').hidden = !showPipeline"
 # Setup is the whole window: no sidebar or header until it is done, and every
 # open starts on the splash.
@@ -493,23 +495,30 @@ echo "5f. the app holds no prices"
 # renderer. Every one of them now arrives from cg.
 check "no price literal in the renderer" \
       "$(grep -vE '^\s*(//|\*)' app/renderer/app.js | grep -cE '[^0-9.](0\.[0-9]{2,})')" "0"
-check "  nor in the markup, bar the buttons" "$(grep -cE '\$0\.[0-9]+' app/renderer/index.html)" "3"
+# Two: the Refresh and Fetch buttons on the Cost screen. The dashboard's exact
+# cost button carries no literal - its price comes from status, in rupees.
+check "  nor in the markup, bar the buttons" "$(grep -cE '\$0\.[0-9]+' app/renderer/index.html)" "2"
 contains "  which is what Refresh costs" "$html" 'id="refresh-cost"'
 contains "  and cg overwrites it"        "$js" "money(rate.ce_call_usd)"
 contains "rates come from cg"            "$js" "const rate = d.rates || {}"
 contains "  the standby burn too"        "$js" "const standby = d.standby || {}"
 contains "  and each game's monthly cost" "$js" "money(g.usd_month)"
-check    "cg publishes the table"        "$(grep -c 'ce_call_usd' lib/setup)" "1"
+# Twice: `cg cost --json` and `cg status --json` both carry it, each read from
+# the one variable rates.sh sets.
+check    "cg publishes the table"        "$(grep -c 'ce_call_usd' lib/setup)" "2"
+check    "  status carries the prices"   "$(grep -c 'out\["rates"\]' lib/setup)" "1"
 check    "  from one file"               "$(grep -c 'CG_EGRESS_USD_GB=' lib/rates.sh)" "1"
 lacks    "the build confirm quotes no rate" "$js" "an hour on spot"
 
 echo "5g. the dashboard and guards screens"
 # The dashboard answers "what is it doing and what is it spending" without
 # spending anything itself; only its Fetch button bills.
-contains "the stages from the mockup"    "$js" "for (const name of ['No box', 'Building', 'Ready'])"
+contains "one painter draws the dashboard" "$js" "function paintDash()"
+contains "  money in rupees only"         "$js" "const rs = n =>"
+contains "  what is billing, item by item" "$js" "function billingItems(s)"
 contains "  building means a build is running" "$js" "jobsFor('init')"
 contains "the machine strip"             "$js" "GB VRAM"
-contains "the archive lists its games"   "$js" "function paintArchiveCard(d)"
+contains "the archive repaints the dashboard" "$js" "function paintArchiveCard() { paintDash(); }"
 contains "spend comes from a fetch"      "$js" "function paintSpend(d)"
 check    "  which is the only paid button" \
          "$(grep -c "runCg(\['cost', '--json'\]" app/renderer/app.js)" "2"
