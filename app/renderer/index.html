@@ -274,6 +274,22 @@
         <button class="btn shrink-0" id="b-setup">Change</button>
       </div>
       <p class="font-code-sm text-code-sm text-tertiary mt-space-xs" id="b-type-note"></p>
+      <p class="font-code-sm text-code-sm text-tertiary mt-space-xs" id="b-session" hidden></p>
+      <!-- The bill and the button belong to the machine they build. -->
+      <div class="flex flex-wrap items-center justify-between gap-space-md mt-space-lg pt-space-md border-t border-surface-variant">
+        <p class="font-code-sm text-code-sm text-on-surface-variant" id="b-chip">&mdash;</p>
+        <div class="flex items-center gap-space-sm">
+          <button class="btn btn-primary" id="b-build">
+            <span class="material-symbols-outlined text-[18px]" data-icon="rocket_launch">&#xeb9b;</span>Build
+          </button>
+          <button class="btn btn-primary" id="b-open" hidden>
+            <span class="material-symbols-outlined text-[18px]" data-icon="sports_esports">&#xea28;</span>Play
+          </button>
+          <button class="btn btn-danger" id="b-destroy" hidden>
+            <span class="material-symbols-outlined text-[18px]" data-icon="delete">&#xe92e;</span>Delete machine
+          </button>
+        </div>
+      </div>
       </div>
 
       <div class="p-space-lg rounded-lg bg-surface-container-low">
@@ -309,21 +325,6 @@
         <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-login-note"></p>
       </div>
 
-      <p class="font-code-sm text-code-sm text-tertiary" id="b-session" hidden></p>
-      <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-wrap items-center justify-between gap-space-md">
-        <p class="font-code-sm text-code-sm text-on-surface-variant" id="b-chip">&mdash;</p>
-        <div class="flex items-center gap-space-sm">
-          <button class="btn btn-primary" id="b-build">
-            <span class="material-symbols-outlined text-[18px]" data-icon="rocket_launch">&#xeb9b;</span>Build
-          </button>
-          <button class="btn btn-primary" id="b-open" hidden>
-            <span class="material-symbols-outlined text-[18px]" data-icon="sports_esports">&#xea28;</span>Play
-          </button>
-          <button class="btn btn-danger" id="b-destroy" hidden>
-            <span class="material-symbols-outlined text-[18px]" data-icon="delete">&#xe92e;</span>Delete machine
-          </button>
-        </div>
-      </div>
     </div>
   </section>
 
