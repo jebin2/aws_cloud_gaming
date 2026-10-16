@@ -52,7 +52,9 @@ verify "nvidia driver $NVIDIA_MIN or newer installed" nvidia_driver_ok
 # which reads as a network fault and is nothing of the sort. This box has no
 # physical display and needs nothing KMS provides, so turn it off. The build
 # reboots at the end anyway, which is when this takes effect.
-progress "disabling nvidia DRM KMS (NvFBC cannot capture with it on)"
+# Worded with no failure word in it: cg reads "cannot", "failed" or "error"
+# in a progress line as a failure, and this one is a normal step.
+progress "disabling nvidia DRM KMS (NvFBC needs it off to capture)"
 printf 'options nvidia_drm modeset=0 fbdev=0\n' > /etc/modprobe.d/zz-nvfbc-no-kms.conf
 sed -i 's/^options nvidia_drm modeset=1/options nvidia_drm modeset=0/' \
   /etc/modprobe.d/nvidia-graphics-drivers-kms.conf 2>/dev/null || true

@@ -219,10 +219,11 @@ function applyLogFilter(which) {
 
 // The app's own confirmation. window.confirm draws a native alert box that
 // belongs to no design and says the app's name in its title bar.
-function askConfirm({ title, body, yes = 'Continue', danger = false }) {
+function askConfirm({ title, body, yes = 'Continue', no = 'Cancel', danger = false }) {
   return new Promise(resolve => {
     $('confirm-title').textContent = title;
     $('confirm-body').textContent = body;
+    $('confirm-no').textContent = no;
     const btn = $('confirm-yes');
     btn.textContent = yes;
     btn.className = 'btn ' + (danger ? 'btn-danger' : 'btn-primary');
@@ -310,6 +311,19 @@ async function checkAsks() {
 }
 
 const GB = bytes => (bytes / 1073741824).toFixed(1) + ' GB';
+// When a game was saved to the archive, as a date: "10 Oct".
+const savedOn = iso => iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '—';
+// What the configured machine costs an hour, bought the configured way, plus
+// its public address - what Build starts billing. cg's numbers throughout.
+function buildRate() {
+  const s = statusNow;
+  if (!s) return null;
+  const type = s.box ? s.box.type : s.instance_type;
+  const spot = s.box ? s.box.lifecycle === 'spot' : (s.config || {}).spot !== '0';
+  const h = hourlyInr(type, spot);
+  const r = s.rates || {};
+  return h == null ? null : h + (r.ipv4_hour && r.inr_per_usd ? r.ipv4_hour * r.inr_per_usd : 0);
+}
 function uptime(iso) {
   if (!iso) return '—';
   const mins = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
@@ -334,9 +348,20 @@ function pill(parent, text, tone, icon) {
 
 // Everything below reads fields from `cg status --json`. If a screen ever wants
 // something that is not there, the fix is a field in cg - never a regex here.
+function paintPing(d) { pingNow = d; paintDash(); }
+function askPing(s) {
+  const online = !!(s.box && s.box.state === 'running' && s.tailnet && s.tailnet.online);
+  if (!online) { pingNow = null; return; }
+  if (pingBusy || Date.now() - pingAt < 60000) return;
+  pingBusy = true;
+  pingAt = Date.now();
+  runCg(['ping', '--json'], { json: 'ping', group: 'refresh' }).then(() => { pingBusy = false; });
+}
+
 function paintStatus(s) {
   paintSpec(s);
   statusNow = s;
+  askPing(s);
   paintBanner();
   statusBudget = s.budget || null;
   // What the app may do with the box that exists. A stream can be running that
@@ -560,6 +585,46 @@ function paintDash() {
     $('d-games-keep').className = 'font-code-sm text-code-sm mt-space-sm '
       + (days ? 'text-tertiary' : 'text-primary');
   }
+
+  // ── tailscale ──
+  const ts = $('d-ts');
+  ts.textContent = '';
+  const tn = s.tailnet || {};
+  const tsLines = [];
+  // This laptop. null is "not read yet", not "signed out".
+  const me = tskeyNow ? tskeyNow.signed_in : null;
+  tsLines.push([me === true ? true : me === false ? false : null,
+    me === true ? `This laptop is signed in${tskeyNow.node ? ` as ${tskeyNow.node}` : ''}`
+      : me === false ? 'This laptop is not signed in' : 'Checking this laptop']);
+  // The machine, only if there is one.
+  if (!box) {
+    tsLines.push([undefined, 'No machine on the network']);
+  } else if (tn.node) {
+    tsLines.push([!!tn.online, `Machine ${tn.node} is ${tn.online ? 'online' : 'offline'}`]);
+  } else {
+    tsLines.push([null, building ? 'Machine has not joined yet' : 'Machine is not on the network']);
+  }
+  // The path, while the machine is online.
+  if (box && tn.online) {
+    const ms = pingNow && pingNow.median_ms != null ? ` · ${pingNow.median_ms} ms` : '';
+    tsLines.push(!pingNow ? [null, 'Checking the connection']
+      : pingNow.path === 'direct' ? [true, `Direct connection${ms}`]
+      : pingNow.path === 'DERP' ? ['warn', `Relayed through Tailscale${ms} - slower for streaming`]
+      : [null, 'The connection could not be measured']);
+  }
+  for (const [ok, text] of tsLines) {
+    const row = document.createElement('div');
+    row.className = 'flex items-baseline gap-space-sm';
+    row.append(Object.assign(document.createElement('span'), {
+      className: 'font-code-md text-code-md w-4 shrink-0 '
+        + (ok === true ? 'text-primary' : ok === false ? 'text-error' : ok === 'warn' ? 'text-tertiary' : 'text-outline'),
+      textContent: ok === true ? '✓' : ok === false ? '✗' : ok === 'warn' ? '!' : ok === undefined ? '·' : '…' }),
+      Object.assign(document.createElement('span'), {
+      className: 'font-body-md text-body-md ' + (ok === false ? 'text-error' : ok === undefined ? 'text-outline' : 'text-on-surface'),
+      textContent: text }));
+    ts.append(row);
+  }
+  $('d-ts-signin').hidden = me !== false;
 
   // ── protection ──
   const prot = $('d-protect');
@@ -1393,6 +1458,7 @@ function paintTskey(ts) {
   paintOnboardSoon();
   tskeyNow = ts;
   paintKeys();
+  paintDash();
   paintBanner();
   const state = $('tskey-state'), detail = $('tskey-detail'), btn = $('tskey-set');
   const canRootNow = Boolean(depsNow && depsNow.root);
@@ -2366,6 +2432,7 @@ function editSetting(r, row) {
 // The picker mirrors cg's own arithmetic so the button can be refused early;
 // the box enforces it again at boot, which is where it must be enforced.
 let archive = { games: [], selectable_gb: null };
+let boxSeenAt = 0;   // when it was read
 let boxNow = null;   // the box `cg status` last reported, or null
 let sessionNow = null; // a `cg open` streaming from this laptop, per cg status
 let config = [];     // the settings registry, as `cg config --json` last gave it
@@ -2374,6 +2441,10 @@ let statusBudget = null;
 let costNow = null;  // the last paid cost fetch, if one was made in this window
 let costNowAt = null;
 let statusNow = null; // `cg status --json`, as last read
+// `cg ping --json` - direct or relayed, and the latency - asked only while the
+// machine is online, and at most once a minute: it is a local tailscale ping,
+// free, but it takes a few seconds and means nothing with no machine.
+let pingNow = null, pingAt = 0, pingBusy = false;
 const activity = [];  // what cg has done in this window, newest first
 const picked = new Set();
 
@@ -2387,7 +2458,6 @@ function daysAgo(iso) {
 function paintPicker(d) {
   archive = d;
   const failed = !!d.error;
-  $('b-bucket').textContent = d.bucket ? `s3://${d.bucket}` : 'no bucket yet';
   const body = $('b-games');
   body.textContent = '';
   if (!(d.games || []).length) {
@@ -2397,7 +2467,7 @@ function paintPicker(d) {
     td.className = 'py-space-md ' + (failed ? 'text-error' : 'text-outline');
     td.textContent = failed
       ? `The archive could not be read: ${d.error}`
-      : 'The archive is empty - a build starts with nothing to restore.';
+      : 'No games are saved yet. The machine starts empty, and Steam installs games as usual.';
     tr.append(td); body.append(tr);
   }
   for (const g of d.games || []) {
@@ -2411,16 +2481,9 @@ function paintPicker(d) {
     box.onchange = () => { box.checked ? picked.add(g.appid) : picked.delete(g.appid); paintFit(); };
     cell('py-space-sm pr-space-sm').append(box);
 
-    const name = cell('py-space-sm pr-space-md');
-    const n = document.createElement('div');
-    n.textContent = g.name || g.installdir || g.appid;
-    const id = document.createElement('div');
-    id.className = 'text-outline';
-    id.textContent = `appid ${g.appid}`;
-    name.append(n, id);
-
+    cell('py-space-sm pr-space-md text-on-surface').textContent = g.name || g.installdir || g.appid;
     cell('py-space-sm px-space-md text-right text-on-surface-variant').textContent = GB(g.bytes);
-    cell('py-space-sm pl-space-md text-right text-outline').textContent = daysAgo(g.pushed);
+    cell('py-space-sm pl-space-md text-right text-outline').textContent = savedOn(g.pushed);
 
     tr.onclick = e => { if (e.target !== box) { box.checked = !box.checked; box.onchange(); } };
     body.append(tr);
@@ -2439,18 +2502,13 @@ function paintFit() {
   // enforces the real limit at boot, which is where it must be enforced.
   const gb = selectedGb(), cap = archive.selectable_gb;
   const over = cap != null && gb > cap;
-  $('b-fit').textContent = !picked.size
-    ? 'nothing selected - the box builds empty'
-    : cap != null ? `${gb.toFixed(1)} GB of ${cap} GB on the box's NVMe`
-    : `${gb.toFixed(1)} GB selected - the box's free disk is not known yet`;
-  $('b-fit').className = 'font-code-sm text-code-sm ' + (over ? 'text-error' : 'text-on-surface-variant');
+  $('b-fit').textContent = 'Space on the machine';
+  $('b-fit').className = 'font-code-sm text-code-sm text-outline';
   const pct = cap != null ? Math.min(100, (gb / cap) * 100) : 0;
-  $('b-fit-pct').textContent = over ? `over by ${(gb - cap).toFixed(1)} GB`
-    : cap != null ? `${Math.round(pct)}%` : '—';
-  $('b-fit-pct').className = 'font-code-sm text-code-sm ' + (over ? 'text-error' : 'text-primary');
-  $('b-buffer').textContent = cap == null ? ''
-    : over ? 'it will not fit - deselect something'
-    : `${(cap - gb).toFixed(1)} GB buffer remaining`;
+  $('b-fit-pct').textContent = over ? `Too big by ${(gb - cap).toFixed(1)} GB - untick a game`
+    : cap != null ? `${gb.toFixed(1)} of ${cap} GB`
+    : picked.size ? `${gb.toFixed(1)} GB - the machine's space is not known yet` : '';
+  $('b-fit-pct').className = 'font-code-sm text-code-sm ' + (over ? 'text-error' : 'text-on-surface-variant');
   $('b-bar').style.width = pct + '%';
   $('b-bar').className = 'h-full ' + (over ? 'bg-error' : 'bg-primary');
   // A box is already running: there is nothing to build, and cg would refuse.
@@ -2464,8 +2522,14 @@ function paintFit() {
   // Nothing here applies while a box is up: what it holds was chosen at build.
   $('b-alloc').hidden = up;
   $('b-hint').textContent = up
-    ? 'A box is already running. What it holds was chosen when it was built; destroy it to change that.'
-    : 'Pulled from S3 while the box builds. Nothing is selected by default.';
+    ? 'A machine is already running. Its games were chosen when it was built.'
+    : 'Downloaded from your archive while the machine starts.';
+  // What pressing Build does to the bill, said beside the button.
+  const rate = buildRate();
+  $('b-chip').textContent = up
+    ? `The machine is running${rate != null ? ` · ${rsh(rate)}/hour` : ''}.`
+    : `Billing starts when the machine launches${rate != null ? ` · ${rsh(rate)}/hour` : ''}`
+      + ` · ready in about 10–20 min${picked.size ? ', plus the game download' : ''}`;
 }
 
 // The machine strip: the type you asked for, and what AWS says that type is.
@@ -2832,11 +2896,15 @@ function paintBuildPick(rows, cur) {
   const el = $('b-pick');
   if (!el) return;
   const hit = rows.find(r => r.region === cur.region && r.type === cur.type);
-  const price = hit && (cur.spot ? hit.spot : hit.od);
-  const bits = [cur.region, cur.type, cur.spot ? 'spot' : 'on demand'].filter(Boolean);
-  if (hit && hit.gpu) bits.push(hit.vram ? `${hit.gpu} ${hit.vram} GB` : hit.gpu);
-  if (price != null) bits.push(`INR ${price}/hr`);
-  el.textContent = bits.length ? bits.join(' · ') : '—';
+  const price = (hit && (cur.spot ? hit.spot : hit.od)) ?? hourlyInr(cur.type, cur.spot);
+  // The machine, once: what it is on one line, where and at what price on the next.
+  const spec = (statusNow && statusNow.spec) || {};
+  el.textContent = [cur.type,
+    hit && hit.gpu ? `NVIDIA ${hit.gpu}${hit.vram ? `, ${hit.vram} GB` : ''}` : spec.gpu ? `NVIDIA ${spec.gpu}` : null,
+    spec.vcpus ? `${spec.vcpus} CPUs` : null,
+    spec.memory_mib ? `${Math.round(spec.memory_mib / 1024)} GB RAM` : null].filter(Boolean).join(' · ') || '—';
+  $('b-pick-where').textContent = [cur.region ? placeName(cur.region) : null,
+    cur.spot ? 'spot' : 'on demand', price != null ? `₹${price}/hour` : null].filter(Boolean).join(' · ');
 
   // The warnings belong here too: the only place that shows the choice should
   // also say when the choice cannot launch.
@@ -2857,47 +2925,18 @@ let machinesNow = null;
 // the region in force, and the table falls back to it before any sweep - but
 // the single <select> it used to fill is gone, replaced by the chooser table.
 let machinesAnswered = false;
-function paintMachines(d) { machinesNow = d; machinesAnswered = true; paintChooser(); paintOnboardSoon(); paintDash(); }
+function paintMachines(d) { machinesNow = d; machinesAnswered = true; paintChooser(); paintOnboardSoon(); paintDash(); paintFit(); }
 
 function paintSpec(s) {
   const spec = s.spec || {};
   boxNow = s.box || null;
-  const cells = [
-    ['vCPU',  spec.vcpus ?? '—',                                       s.quota ? `quota ${s.quota.vcpus}` : ''],
-    ['RAM',   spec.memory_mib ? `${Math.round(spec.memory_mib / 1024)} GB` : '—', ''],
-    ['GPU',   spec.gpu || '—', spec.gpu_memory_mib ? `${Math.round(spec.gpu_memory_mib / 1024)} GB VRAM` : ''],
-    ['PROTOCOL', 'Sunshine', 'Moonlight client'],
-  ];
-  const wrap = $('b-spec');
-  wrap.textContent = '';
-  for (const [label, value, meta] of cells) {
-    const box = document.createElement('div');
-    box.className = 'p-space-md rounded bg-surface-container';
-    const l = document.createElement('div');
-    l.className = 'font-code-sm text-code-sm text-outline uppercase tracking-wider';
-    l.textContent = label;
-    const v = document.createElement('div');
-    v.className = 'font-code text-code text-on-surface mt-0.5';
-    v.textContent = value;
-    const m = document.createElement('div');
-    m.className = 'font-code-sm text-code-sm text-outline';
-    m.textContent = meta;
-    box.append(l, v, m);
-    wrap.append(box);
-  }
-  $('b-ready').textContent = s.box ? `${s.box.state} for ${uptime(s.box.launched)}` : 'ready to build';
-  // The chip beside the button: what will be launched, and how it is paid for.
-  const spot = s.config && s.config.spot;
-  const pay = spot === '0' ? 'on demand' : spot === '1' ? 'spot' : 'spot when the quota allows';
-  const disk = s.config && s.config.disk_gb ? ` · ${s.config.disk_gb} GB root` : '';
-  $('b-chip').textContent = s.box
-    ? `${s.box.id} · ${s.box.type} · ${s.region} · billing`
-    : `${s.instance_type} · ${s.region} · ${pay}${disk}`;
+  boxSeenAt = Date.now();
   // The reads land in whatever order they finish, and whether a pick is allowed
   // at all depends on this one - so repaint the chooser once a box is known, or
   // a table that arrived first would stay selectable beside a running box.
   paintChooser();
   paintFit();
+  paintRun();
 }
 
 // Numbered steps, the way cg reports them: the one running is marked, the ones
@@ -2909,32 +2948,436 @@ let buildStarted = 0;
 const RUN_EXPECT = { init: 20 };
 let buildSteps = 0;
 
-// A step is a heading in the transcript, not a row in a second list. Keeping
-// both meant two boxes that each grew, which is what stretched the page; the
-// log scrolls on its own and loses nothing.
+// ── A run, as steps ─────────────────────────────────────────────────────────
+//
+// cg reports about twelve steps for a build, in its own words, and the box adds
+// a dozen more of its own ("installing nvidia driver", "configuring headless X").
+// Someone building a games machine needs eight, in plain words - so each step
+// cg announces is placed in one of these, and only ever moves the run forwards.
+// A step cg announces that matches none of them belongs to the one in progress,
+// and shows as its current line. A delete or a session has no such list: each
+// of cg's steps is its own row.
+const BUILD_STEPS = [
+  { doing: 'Checking your setup', done: 'Checked your setup', match: /cloud watchdog|preflight/i },
+  { doing: 'Setting the budget alert', done: 'Budget alert set', match: /budget/i },
+  { doing: 'Renting the machine', done: 'Machine rented', bills: true,
+    match: /provisioning|launching|confirming what shutdown|starting the existing|reusing the existing/i },
+  { doing: 'Connecting to Tailscale', done: 'Connected to Tailscale',
+    match: /join the tailnet|on the tailnet|key expiry/i },
+  { doing: 'Installing the software', done: 'Software installed', parts: true,
+    match: /building the box|^installing|^installed |^configuring|^setting up|^disabling|nvidia/i },
+  { doing: 'Downloading your games', done: 'Games downloaded', games: true, match: /finishing up|restor/i },
+  { doing: 'Pairing Moonlight', done: 'Moonlight paired', match: /on-host watchdog|sunshine account|pairing/i },
+  { doing: 'Starting Steam', done: 'Steam started', match: /waiting for steam/i },
+];
+// A session, as steps. `cg open` announces none - it prints lines, and under
+// the app its waits print only once they are over ("waiting for sunshine ok") -
+// so each step is closed by the line that says it is done.
+const OPEN_STEPS = [
+  { doing: 'Starting the machine', done: 'Machine on',
+    end: /instance already running|^running after|waiting for tailscale|^\s*pong|\bvia\b/i },
+  { doing: 'Connecting over Tailscale', done: 'Connected over Tailscale',
+    end: /waiting for tailscale ok|tailscale is up|^\s*pong|\bvia\b/i },
+  { doing: 'Waiting for Sunshine', done: 'Sunshine answered', end: /waiting for sunshine ok|sunshine is up|^disk:/i },
+  { doing: 'Playing', done: 'Played', end: /session ended/i, stream: true,
+    note: 'Close Moonlight to stop. You are then asked whether to keep the machine or delete it.' },
+];
+// What the machine installs, in the order it does it, each matched to the
+// progress line the box prints when it starts that piece (lib/bootstrap.d).
+// Shown as chips inside "Installing the software", ticked as the box moves on:
+// the step installs far more than a driver, and said so in three words.
+const BUILD_PARTS = [
+  ['Base system', /^installing base packages/i],
+  ['Game disk', /^setting up local nvme/i],
+  ['Idle watchdog', /^installing the idle watchdog/i],
+  ['Tailscale', /^installing tailscale/i],
+  ['Game library', /^installing the s3 game library/i],
+  ['Desktop', /^installing desktop/i],
+  ['NVIDIA driver', /nvidia driver|nvidia-driver|nvidia drm/i],
+  ['Display', /^configuring headless x/i],
+  ['Autologin', /^configuring autologin/i],
+  ['Steam', /^installing steam/i],
+  ['Firefox', /^installing firefox/i],
+  ['Audio', /^installing audio/i],
+  ['Sunshine', /^installing sunshine/i],
+];
+// Each part: not started, started (the latest one to start is in progress), or
+// done - because a later one has started, or the whole step has finished.
+function partStates(lines, stepDone) {
+  const firstAt = BUILD_PARTS.map(([, re]) => lines.findIndex(l => re.test(l)));
+  const started = firstAt.map(i => i >= 0);
+  const latest = firstAt.reduce((best, i, k) => (i > (best < 0 ? -1 : firstAt[best]) ? k : best), -1);
+  return BUILD_PARTS.map(([name], k) => [name,
+    stepDone ? 'done' : !started[k] ? 'waiting' : k === latest ? 'running' : 'done']);
+}
+
+// The run on screen: which kind, when it began, its steps and their lines, and
+// how it ended. null while the Build screen is choosing what to build.
+let run = null;
+let builtOpen = false;   // whether "How it was built" is unfolded
+const runRow = text => ({ name: text, start: Date.now(), end: null, lines: [], failed: false });
+function runBegin(kind, opts = {}) {
+  run = { kind, start: Date.now(), billFrom: null, state: 'running', idx: -1, steps: [],
+          games: opts.games || 0, gamesGb: opts.gamesGb || 0, apps: opts.apps || 'none',
+          rate: kind === 'init' ? buildRate() : null };
+  if (kind === 'init') run.steps = BUILD_STEPS.map(() => null);
+  if (kind === 'open') {
+    run.steps = OPEN_STEPS.map(() => null);
+    run.steps[0] = runRow('');
+    run.idx = 0;
+    // The machine has been billing since it launched, not since Play.
+    const box = liveBox();
+    run.billFrom = box && box.launched ? new Date(box.launched).getTime() : null;
+    run.rate = buildRate();
+  }
+}
+// A session's line: move past every step it says is over.
+function openLine(text) {
+  const last = OPEN_STEPS.reduce((k, d, i) => (d.end.test(text) ? i : k), -1);
+  if (last < run.idx) return;
+  const now = Date.now();
+  for (let i = 0; i <= last; i++) {
+    if (!run.steps[i]) run.steps[i] = { ...runRow(''), start: now };
+    if (!run.steps[i].end) run.steps[i].end = now;
+  }
+  if (last === OPEN_STEPS.length - 1) { run.streamEnded = true; return; }
+  run.steps[last + 1] = runRow('');
+  run.idx = last + 1;
+}
+// A step cg announced: move to the step it belongs to, closing the ones before.
+function runStep(text) {
+  if (!run) return;
+  const now = Date.now();
+  // The stream has ended and "delete" was the answer: cg open hands over to
+  // cg destroy in the same process, so the run becomes the delete.
+  if (run.kind === 'open' && run.streamEnded) runBegin('destroy');
+  if (run.kind === 'open') { runLine(text); return; }
+  if (run.kind !== 'init') {
+    if (run.idx >= 0) run.steps[run.idx].end = now;
+    run.steps.push(runRow(text));
+    run.idx = run.steps.length - 1;
+    return;
+  }
+  const at = BUILD_STEPS.findIndex((d, i) => i >= Math.max(run.idx, 0) && d.match.test(text));
+  if (at > run.idx) {
+    for (let i = 0; i < at; i++) {
+      if (!run.steps[i]) run.steps[i] = { ...runRow(''), start: now };
+      if (!run.steps[i].end) run.steps[i].end = now;
+    }
+    run.steps[at] = runRow('');
+    run.idx = at;
+    // A step that was passed did not fail; whatever it said that sounded like
+    // failure is not the headline of a later one.
+    if (buildFailures.length) buildFailClear();
+    // Billing starts with a machine that exists: when the renting step has
+    // finished, counted from when it began. A rental that fails bills nothing.
+    const rent = BUILD_STEPS.findIndex(d => d.bills);
+    if (!run.billFrom && at > rent && run.steps[rent]) run.billFrom = run.steps[rent].start;
+  }
+  if (run.idx >= 0) run.steps[run.idx].lines.push(text);
+}
+function runLine(text) {
+  if (!run || run.idx < 0 || !text) return;
+  // The box reports its own progress as lines, not steps. Its last one, the
+  // reboot that waits for the game download, is a step of its own here.
+  if (run.kind === 'init' && /^finishing up/i.test(text)
+      && run.idx < BUILD_STEPS.findIndex(d => d.games)) { runStep(text); return; }
+  if (run.kind === 'open' && !run.streamEnded) openLine(text);
+  const lines = run.steps[run.idx].lines;
+  lines.push(text);
+  if (lines.length > 400) lines.splice(0, lines.length - 400);
+}
+function runEnd(rc) {
+  if (!run) return;
+  const now = Date.now();
+  run.state = rc === 0 ? 'done' : 'failed';
+  run.ended = now;
+  if (rc === 0) {
+    run.steps = run.steps.map(x => x ? { ...x, end: x.end || now } : { ...runRow(''), start: now, end: now });
+  } else if (run.idx >= 0) {
+    run.steps[run.idx].failed = true;
+    run.steps[run.idx].end = now;
+  }
+}
+
+const mins = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 1 ? 'under a minute' : `${m} min`; };
+const took = (a, b) => { const s = Math.round((b - a) / 1000); return s < 60 ? `${s} s` : `${Math.round(s / 60)} min`; };
+
+const RUN_HEAD = {
+  init: { running: 'Building your machine', done: 'Ready to play', failed: 'The build stopped' },
+  destroy: { running: 'Deleting the machine', done: 'Machine deleted', failed: 'The delete stopped' },
+  open: { running: 'Starting the stream', done: 'Stream ended', failed: 'The stream stopped' },
+  library: { running: 'Changing the archive', done: 'Archive changed', failed: 'The change stopped' },
+};
+
+// Which card the Build screen shows is decided by the machine, never by where
+// you have been: the plan only when there is no machine, a run while one goes,
+// and otherwise the machine itself. It used to be whatever `run` held, and
+// "Back to dashboard" cleared that - so leaving and coming back swapped a
+// finished build for the plan of a machine that already existed.
+const liveBox = () => boxNow && boxNow.state !== 'terminated' ? boxNow : null;
+
+// A finished run that the machine has moved past gives way to it.
+function settleRun() {
+  if (!run || run.state !== 'done') return;
+  if (run.kind === 'destroy') {
+    // cg said the machine is gone; the status read that confirms it is still
+    // on its way, and the plan should not wait for it.
+    run = null;
+    boxNow = null;
+    paintFit();
+  } else if (run.kind !== 'init') {
+    run = null;                               // a stream ended: back to the machine
+  } else if (!liveBox() && boxSeenAt > (run.ended || Infinity)) {
+    // Built, and gone since (idle, reclaimed) - by a read taken after the
+    // build ended, not one from before the machine existed.
+    run = null;
+  }
+}
+
+// The machine, when no run is in memory - the app was reopened, or a stream
+// has ended. A machine that exists is shown as one, never as a plan.
+function machineCard() {
+  const box = liveBox();
+  if (!box) return null;
+  const t = box.launched ? new Date(box.launched).getTime() : null;
+  return { kind: 'machine', state: 'done', start: t || Date.now(), billFrom: t, steps: [], idx: -1,
+           rate: buildRate(), games: 0, gamesGb: 0, apps: 'none' };
+}
+
+// What a machine is doing, as the heading of its card.
+function machineTitle() {
+  const box = liveBox();
+  if (sessionNow) return 'Playing';
+  if (!box || box.state === 'running') return 'Ready to play';
+  if (box.state === 'pending') return 'Starting up';
+  return `Machine ${box.state}`;
+}
+
+function paintBuildMode() {
+  settleRun();
+  const card = !!(run || liveBox());
+  $('b-plan').hidden = card;
+  $('b-strip').hidden = !card;
+}
+
+// Cancel a build: stop cg, then delete whatever it rented. The delete runs
+// even when no machine has been seen yet - the launch may have gone through
+// before the status caught up, and a delete with nothing to delete is quick
+// and free. --no-push: a half-built machine holds nothing worth saving.
+async function cancelBuild() {
+  const ok = await askConfirm({
+    title: 'Cancel the build?',
+    body: 'The machine is deleted and billing stops. Your saved games are not touched.',
+    yes: 'Cancel the build', no: 'Keep building', danger: true,
+  });
+  if (!ok || !run || run.kind !== 'init' || run.state !== 'running') return;
+  run.cancelling = true;
+  paintRun();
+  for (const [id, j] of jobs) if (j.cmd[0] === 'init') window.cg.cancel(id);
+}
+
+function paintRun() {
+  paintBuildMode();
+  const r = run || machineCard();
+  if (!r) return;
+  const head = RUN_HEAD[r.kind] || { running: 'Running', done: 'Done', failed: 'Stopped' };
+  const machine = r.state === 'done' && (r.kind === 'init' || r.kind === 'machine');
+  const now = r.state === 'running' ? Date.now() : (r.steps.reduce((t, x) => Math.max(t, x && x.end || 0), 0) || Date.now());
+  const title = $('b-strip-title');
+  title.textContent = r.cancelling ? 'Cancelling the build' : machine ? machineTitle()
+    : r.kind === 'open' && r.state === 'running' && OPEN_STEPS[r.idx] && OPEN_STEPS[r.idx].stream
+      ? (r.streamEnded ? 'Stream ended' : 'Playing') : head[r.state];
+  title.className = 'font-headline-md text-headline-md ' + (r.state === 'failed' ? 'text-error' : '');
+  // The bill, in the heading, from the moment the machine is rented.
+  const so = r.billFrom && r.rate != null ? r.rate * (now - r.billFrom) / 3600000 : null;
+  $('b-strip-meta').textContent = [
+    r.state === 'running' ? mins(now - r.start) : r.kind === 'machine' ? `up ${mins(now - r.start)}`
+      : r.state === 'done' && r.kind === 'init' ? `built in ${mins(now - r.start)}` : null,
+    so != null ? `${rs(so)} so far` : r.kind === 'init' && r.state === 'failed' ? 'Nothing was billed' : null,
+    r.billFrom && r.rate != null ? `${rsh(r.rate)}/hour` : null,
+  ].filter(Boolean).join(' · ');
+  const s = statusNow || {};
+  $('b-run-sum').textContent = r.kind === 'init' || r.kind === 'machine' || r.kind === 'open'
+    ? [r.kind !== 'init' && liveBox() ? liveBox().type : s.instance_type, s.region ? placeName(s.region) : null,
+       (r.kind !== 'init' && liveBox() ? liveBox().lifecycle !== 'spot' : (s.config || {}).spot === '0') ? 'on demand' : 'spot',
+       r.kind !== 'init' ? null
+         : r.games ? `${r.games} game${r.games === 1 ? '' : 's'}, ${r.gamesGb.toFixed(1)} GB` : 'no games']
+        .filter(Boolean).join(' · ')
+    : '';
+  $('b-run-sum').hidden = !$('b-run-sum').textContent;
+  // Time against the usual length, and only while it runs.
+  const expect = RUN_EXPECT[r.kind];
+  $('b-bar-track').hidden = !(r.state === 'running' && expect);
+  if (expect) $('b-prog').style.width = `${Math.min(95, ((now - r.start) / 60000 / expect) * 100).toFixed(1)}%`;
+
+  const wrap = $('b-steps');
+  // The failure panel is drawn into the failed step; park it before the rows go.
+  const fail = $('b-fail');
+  $('b-strip').insertBefore(fail, $('b-run-acts'));
+  // A machine found already running has no run behind it, so no log either.
+  $('b-logbox').hidden = r.kind === 'machine';
+  if (r.state === 'running' || machine || r.cancelling) fail.classList.add('hidden');
+  else if (buildFailures.length) fail.classList.remove('hidden');
+  wrap.textContent = '';
+  const defs = r.kind === 'init' ? BUILD_STEPS : r.kind === 'open' ? OPEN_STEPS : null;
+  const rows = defs
+    ? defs.map((d, i) => ({ def: d, st: r.steps[i] }))
+    : r.steps.map(st => ({ def: null, st }));
+  rows.forEach(({ def, st }, i) => {
+    const state = !st ? (r.state === 'running' ? 'locked' : 'skipped')
+      : st.failed ? 'failed' : st.end ? 'done' : 'running';
+    const row = document.createElement('div');
+    row.className = 'flex gap-space-md items-stretch';
+    row.dataset.step = def ? String(i) : st.name;
+    row.dataset.state = state;
+    const rail = document.createElement('div');
+    rail.className = 'flex flex-col items-center shrink-0 w-5';
+    const [mark, cls] = { done: ['✓', 'text-primary'], running: ['●', 'text-tertiary animate-pulse'],
+                          failed: ['✗', 'text-error'], locked: ['○', 'text-outline-variant'],
+                          skipped: ['○', 'text-outline-variant'] }[state];
+    rail.append(Object.assign(document.createElement('span'),
+      { className: 'font-code-md text-code-md leading-6 ' + cls, textContent: mark }));
+    if (i < rows.length - 1) {
+      rail.append(Object.assign(document.createElement('div'), {
+        className: 'w-px flex-1 min-h-[12px] my-1 ' + (state === 'done' ? 'bg-primary/70' : 'bg-surface-variant') }));
+    }
+    const body = document.createElement('div');
+    body.className = 'min-w-0 flex-1 ' + (state === 'running' || state === 'failed' ? 'pb-space-lg' : 'pb-space-sm');
+    const top = document.createElement('div');
+    top.className = 'flex items-baseline justify-between gap-space-sm';
+    let name = def ? (state === 'done' ? def.done : def.doing) : st.name;
+    if (def && def.games) {
+      name = !r.games ? (state === 'done' ? 'Restarted into the desktop' : 'Restarting into the desktop')
+        : state === 'done' ? name : `${name} · ${r.gamesGb.toFixed(1)} GB`;
+    }
+    if (def && def.bills && state === 'done' && r.billFrom) {
+      name += ` · billing from ${new Date(r.billFrom).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+    top.append(Object.assign(document.createElement('span'), {
+      className: 'leading-6 font-body-md text-body-md ' + (state === 'done' ? 'text-on-surface-variant'
+        : state === 'locked' || state === 'skipped' ? 'text-outline'
+        : state === 'failed' ? 'text-error font-medium' : 'text-on-surface font-medium'),
+      textContent: name }));
+    const meta = state === 'done' && st.start && st.end ? took(st.start, st.end)
+      : state === 'running' ? took(st.start, Date.now()) : state === 'failed' ? 'failed' : '';
+    if (meta) top.append(Object.assign(document.createElement('span'), {
+      className: 'font-code-sm text-code-sm shrink-0 ' + (state === 'failed' ? 'text-error' : 'text-outline'),
+      textContent: meta }));
+    body.append(top);
+    if (def && def.note && state === 'running') {
+      body.append(Object.assign(document.createElement('p'), {
+        className: 'font-code-sm text-code-sm text-outline mt-0.5', textContent: def.note }));
+    }
+    if (def && def.parts && st && (state === 'running' || state === 'failed')) {
+      const chips = document.createElement('div');
+      chips.className = 'flex flex-wrap gap-space-xs mt-space-sm';
+      chips.id = 'b-parts';
+      for (const [part, ps] of partStates(st.lines, false)) {
+        chips.append(Object.assign(document.createElement('span'), {
+          className: 'pill ' + (ps === 'done' ? 'pill-ok' : ps === 'running' ? 'pill-warn' : ''),
+          textContent: ({ done: '\u2713 ', running: '\u25cf ', waiting: '\u2026 ' })[ps] + part }));
+        chips.lastChild.dataset.part = part;
+        chips.lastChild.dataset.state = ps;
+      }
+      body.append(chips);
+    }
+    // Playing is not a wait: no progress sweep, and no echo of cg's last line.
+    if (state === 'running' && !(def && def.stream)) {
+      const last = [...st.lines].reverse().find(Boolean);
+      if (last) body.append(Object.assign(document.createElement('p'),
+        { className: 'font-code-sm text-code-sm text-on-surface-variant truncate mt-0.5', textContent: last }));
+      const sweep = document.createElement('div');
+      sweep.className = 'onb-progress mt-space-xs';
+      sweep.append(document.createElement('i'));
+      body.append(sweep);
+    }
+    if (state === 'failed') body.append(fail);
+    // A failed step shows cg's words once, in the failure above - not again here.
+    if (st && st.lines.length && state !== 'locked' && state !== 'failed') {
+      // This step's own lines, folded - opened by itself when it failed.
+      const det = document.createElement('details');
+      det.className = 'mt-space-xs';
+      det.open = st.open != null ? st.open : state === 'failed';
+      det.ontoggle = () => { st.open = det.open; };
+      det.append(Object.assign(document.createElement('summary'), {
+        className: 'font-code-sm text-code-sm text-outline cursor-pointer',
+        textContent: `Details · ${st.lines.length} line${st.lines.length === 1 ? '' : 's'}` }));
+      const pre = document.createElement('pre');
+      pre.className = 'font-code-sm text-code-sm text-on-surface-variant whitespace-pre-wrap break-words '
+        + 'max-h-[32vh] overflow-auto mt-space-xs p-space-sm rounded bg-surface-container-lowest '
+        + 'border border-surface-variant';
+      pre.textContent = st.lines.join('\n');
+      det.append(pre);
+      body.append(det);
+      if (det.open) pre.scrollTop = pre.scrollHeight;
+    }
+    row.append(rail, body);
+    wrap.append(row);
+  });
+  // A finished build is the machine now; how it was built folds away under it.
+  if (r.kind === 'init' && r.state === 'done') {
+    const det = document.createElement('details');
+    det.open = builtOpen;
+    det.ontoggle = () => { builtOpen = det.open; };
+    det.append(Object.assign(document.createElement('summary'), {
+      className: 'font-code-sm text-code-sm text-outline cursor-pointer mb-space-sm',
+      textContent: `How it was built · ${mins(now - r.start)}` }), ...wrap.children);
+    wrap.append(det);
+  }
+
+  // What to do now, by how it ended.
+  const acts = $('b-run-acts');
+  acts.textContent = '';
+  const btn = (label, go, primary) => {
+    const b = document.createElement('button');
+    b.className = 'btn' + (primary ? ' btn-primary' : '');
+    b.textContent = label;
+    b.onclick = go;
+    acts.append(b);
+  };
+  if (r.state === 'running' && r.kind === 'init') {
+    btn(r.cancelling ? 'Cancelling…' : 'Cancel', cancelBuild);
+    acts.lastChild.disabled = !!r.cancelling;
+  } else if (machine) {
+    const box = liveBox();
+    // Just built, the status may not have read the machine yet: it is there.
+    if (!sessionNow && (box ? box.state === 'running' : r.kind === 'init')) btn('▶ Play', play, true);
+    btn('Delete machine', () => $('d-destroy').onclick());
+    acts.lastChild.classList.add('btn-danger');
+  } else if (r.state === 'failed' && r.kind === 'init') {
+    btn('Try again', () => retryBuild(), true);
+    btn('Close', () => { run = null; paintRun(); });
+  } else if (r.state !== 'running') {
+    btn('Done', () => { run = null; paintRun(); });
+  }
+}
+
+// The durations and the bill move with cg's own lines - a build reports at
+// least every ten seconds - so nothing here runs on a timer.
+
+// The live line and step heading for runs, now that the strip has no line of
+// its own: kept as functions because the event handler calls them.
 function buildStep(text) {
   const log = $('b-log');
   if (log.dataset.fresh !== 'no') { log.textContent = ''; log.dataset.fresh = 'no'; buildStarted = Date.now(); }
   buildSteps += 1;
   const head = document.createElement('div');
   head.className = 'step flex items-baseline gap-space-sm pt-space-sm first:pt-0';
-  const n = document.createElement('span');
-  n.className = 'text-outline shrink-0';
-  n.textContent = String(buildSteps).padStart(2, '0');
   const label = document.createElement('span');
   label.className = 'text-on-surface';
   label.textContent = text;
   const meta = document.createElement('span');
   meta.className = 'meta ml-auto pl-space-sm text-outline shrink-0';
-  head.append(n, label, meta);
+  head.append(label, meta);
   log.append(head);
   $('b-prog-step').textContent = text;
-  paintProgress();
+  runStep(text);
+  paintRun();
   if ($('b-follow').checked) log.scrollTop = log.scrollHeight;
 }
 
-// cg times every step; the finished ones carry how long they took, which is the
-// only honest answer to "how much longer" on a box that varies.
+// cg times every step; the transcript keeps how long each took.
 function buildStepEnd(event) {
   const heads = $('b-log').querySelectorAll('.step');
   const last = heads[heads.length - 1];
@@ -2943,54 +3386,17 @@ function buildStepEnd(event) {
   const ok = !event.rc;
   meta.textContent = event.secs != null ? `${Math.round(event.secs)}s` : (ok ? 'ok' : `exit ${event.rc}`);
   if (!ok) meta.classList.add('text-error');
-  paintProgress();
 }
 
-// The bar is TIME against the expected window, not steps completed: cg does not
-// announce how many steps a run has, and a fraction invented from the steps seen
-// so far would move backwards the moment another one arrived. It stops short of
-// full until the run actually ends, so it never claims to be finished.
-function paintProgress() {
-  const strip = $('b-strip');
-  strip.hidden = false;
-  const mins = buildStarted ? (Date.now() - buildStarted) / 60000 : 0;
-  const expect = RUN_EXPECT[runKind];
-  const bar = $('b-prog');
-  if (expect) {
-    bar.style.width = `${Math.min(95, (mins / expect) * 100).toFixed(1)}%`;
-    bar.classList.remove('animate-pulse');
-  } else {
-    // No estimate: show that something is happening rather than a made-up share.
-    bar.style.width = '100%';
-    bar.classList.add('animate-pulse');
-  }
-  const foot = (RUN_FOOT[runKind] || RUN_FOOT.init)[1];
-  $('b-strip-meta').textContent =
-    [buildSteps ? `step ${String(buildSteps).padStart(2, '0')}` : null,
-     buildStarted ? `${Math.floor(mins)}m${foot ? ' ' + foot : ''}` : null].filter(Boolean).join(' · ');
-}
-
+function paintProgress() { paintRun(); }
 function buildProgressDone(rc) {
-  if (buildFailures.length) return;   // the strip is showing why it stopped
-  const bar = $('b-prog');
-  bar.classList.remove('animate-pulse');
-  bar.style.width = '100%';
-  bar.className = bar.className.replace('bg-primary', rc === 0 ? 'bg-primary' : 'bg-error');
-  $('b-prog-step').textContent = rc === 0 ? 'done' : 'stopped';
+  const cancelled = run && run.kind === 'init' && run.cancelling;
+  runEnd(rc);
+  paintRun();
+  // After the exit has been handled, so the init job is gone when the delete starts.
+  if (cancelled) Promise.resolve().then(() => startRun(['destroy', '--no-push']));
 }
-
-function buildStatus(text, tone) {
-  $('b-status').textContent = text;
-  $('b-status').className = 'font-code-sm text-code-sm ' + tone;
-}
-
-function paintElapsed() {
-  if (!buildStarted) return;
-  const mins = Math.floor((Date.now() - buildStarted) / 60000);
-  const scale = (RUN_FOOT[runKind] || RUN_FOOT.init)[1];
-  $('b-elapsed').textContent = `${mins}m elapsed${scale ? ' ' + scale : ''}`;
-  paintProgress();
-}
+function paintElapsed() { paintRun(); }
 
 // Every line cg marked as a failure, plus whatever `error` event ended the run.
 // Kept out of the log on purpose: the log holds 200 lines and auto-scrolls, so by
@@ -3009,29 +3415,22 @@ let buildFailing = false;
 // Nothing is invented: every action here is one cg already offers somewhere
 // else, reached from the moment it is relevant.
 const FAIL_ACTS = {
-  InsufficientInstanceCapacity: (spot) => spot ? [
-    ['Build on demand instead', async () => {
-      await runCg(['config', 'set', 'GAME_SPOT', '0']);
-      goView('build');
-    }],
-    ['Scan all regions', () => { goView('settings'); const b = $('s-sweep'); if (b) b.click(); }],
-    ['Pick another machine', () => goSetting($('s-machine-card'))],
-  ] : [
-    ['Pick another machine', () => goSetting($('s-machine-card'))],
-    ['Scan all regions', () => { goView('settings'); const b = $('s-sweep'); if (b) b.click(); }],
-  ],
+  // Spot ran out. Full price, another location and another machine were all
+  // offered here, and three ways out of one failure was more confusing than
+  // helpful: the machine picker shows price and place together, so it is the
+  // one choice. Try again sits beside it, for capacity that comes back.
+  InsufficientInstanceCapacity: () => [['Pick another machine', () => goSetting($('s-machine-card'))]],
   SpotMaxPriceTooLow: (spot) => FAIL_ACTS.InsufficientInstanceCapacity(spot),
-  MaxSpotInstanceCountExceeded: () => [
-    ['Try the build again', () => $('b-build').click()],
-  ],
+  // Try again is already beside the step; nothing more to offer.
+  MaxSpotInstanceCountExceeded: () => [],
   VcpuLimitExceeded: () => [['Ask AWS for GPU quota', () => openQuota()]],
   InstanceLimitExceeded: () => [['Ask AWS for GPU quota', () => openQuota()]],
   'InvalidKeyPair.NotFound': () => [
     ['Run the preflight fix', () => runCg(['check', '--fix'])],
   ],
   OptInRequired: () => [['Open Dependencies', () => goView('deps')]],
-  AuthFailure: () => [['Set AWS key', () => goSetting($('s-creds-card'))]],
-  UnauthorizedOperation: () => [['Set AWS key', () => goSetting($('s-creds-card'))]],
+  AuthFailure: () => [['Connect Amazon again', () => openAwsKey()]],
+  UnauthorizedOperation: () => [['Connect Amazon again', () => openAwsKey()]],
 };
 
 // cg's own words, read back: the marked line is the headline, and the two
@@ -3076,10 +3475,10 @@ function buildFail(text) {
   // The strip's own heading carries the state, rather than a second heading
   // under it: "Provisioning" above "Provisioning stopped" was the same words
   // twice, and cg's first line says what failed anyway.
-  const title = $('b-strip-title');
-  title.textContent = `${RUN_TITLE[runKind] || RUN_TITLE.init} stopped`;
-  title.classList.add('text-error');
-  title.classList.remove('text-outline');
+  // Noted, not believed: a step is failed only when the run ends in failure.
+  // cg reads "cannot" in a line as a failure, and the box's own healthy
+  // progress said "NvFBC cannot capture" - the driver step went red while the
+  // build carried on installing Steam.
   const whole = buildFailures.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   $('b-error').textContent = whole;
   // The headline above the fold, the detail behind a disclosure, and the two or
@@ -3094,9 +3493,8 @@ function buildFail(text) {
   $('b-fail').classList.remove('hidden');
   // The failure takes the bar's place. A bar frozen at 35% beside the reason it
   // froze is two things saying the same moment, and the useful one is smaller.
-  $('b-strip').hidden = false;
   $('b-bar-track').hidden = true;
-  $('b-prog-step').hidden = true;
+  paintRun();
 }
 
 function buildFailClear() {
@@ -3109,9 +3507,6 @@ function buildFailClear() {
   $('b-error').textContent = '';
   $('b-error').classList.add('hidden');
   $('b-bar-track').hidden = false;
-  $('b-prog-step').hidden = false;
-  $('b-strip-title').classList.remove('text-error');
-  $('b-strip-title').classList.add('text-outline');
 }
 
 function buildLine(event) {
@@ -3126,7 +3521,8 @@ function buildLine(event) {
   if (event.text && event.kind !== 'fail') $('b-prog-step').textContent = event.text;
   while (log.children.length > 200) log.firstChild.remove();
   if ($('b-follow').checked) log.scrollTop = log.scrollHeight;
-  paintElapsed();
+  runLine(event.text);
+  paintRun();
 }
 
 window.cg.onEvent(({ id, event }) => {
@@ -3142,12 +3538,10 @@ window.cg.onEvent(({ id, event }) => {
     if (event.t === 'step') buildFailing = false;
     if (event.t === 'error') buildFail(event.text);
     if (event.t === 'exit') {
-      buildStatus(event.rc === 0 ? 'done' : `stopped (exit ${event.rc})`,
-                  event.rc === 0 ? 'text-primary' : 'text-error');
       buildProgressDone(event.rc);
       // A nonzero exit with nothing marked is still a failure, and saying so
       // beats a bare status label the eye slides over.
-      if (event.rc !== 0 && !buildFailures.length)
+      if (event.rc !== 0 && !buildFailures.length && !(run && run.cancelling))
         buildFail(`cg ${job.cmd.join(' ')} exited ${event.rc} without saying why - the log above is all there is.`);
     }
   }
@@ -3199,7 +3593,7 @@ window.cg.onEvent(({ id, event }) => {
         const paint = { cost: paintCost, library: paintLibrary, guards: paintGuards,
                         config: paintConfig, status: paintStatus, machines: paintMachines,
                         sweep: paintSweep, creds: paintCreds, deps: paintDeps,
-                        tskey: paintTskey }[job.json];
+                        tskey: paintTskey, ping: paintPing }[job.json];
         if (!paint) throw new Error(`no painter for ${job.json}`);
         paint(data);
       } catch (err) {
@@ -4501,6 +4895,7 @@ $('cancel').onclick = async () => {
 $('d-build').onclick = () => goView('build');
 $('d-watch').onclick = () => goView('build');
 $('d-change').onclick = () => goSetting($('s-machine-card'));
+$('d-ts-signin').onclick = signInTailscale;
 $('d-library').onclick = () => goView('library');
 for (const b of document.querySelectorAll('[data-filter]')) {
   b.onclick = () => applyLogFilter(b.dataset.filter);
@@ -4615,38 +5010,35 @@ $('d-guards').onclick = () => goView('guards');
 $('g-settings').onclick = () => goView('settings');
 // The only button on the dashboard that spends money, and it says so.
 $('d-cost').onclick = () => runCg(['cost', '--json'], { json: 'cost' });
-// A build, a destroy and a session all report the same way - steps, lines, an
-// exit - so they all run in the Build screen's panel, and starting one goes
-// there. Watching a destroy in a panel that says nothing was the complaint.
-const RUN_TITLE = { init: 'Provisioning', destroy: 'Destroying', open: 'Session',
-                    library: 'Changing the archive' };
-// The footer says what the money is doing, which is not the same for all three.
-const RUN_FOOT = {
-  init: ['the box bills from the moment it launches', 'of 10-20'],
-  destroy: ['the games are pushed to S3 first; billing stops when the box is gone', ''],
-  open: ['the box bills while this streams', ''],
-  library: ['deleting from S3 stops its storage charge', ''],
-};
+// A build, a delete and a session all report the same way - steps, lines, an
+// exit - so they all run on the Build screen as steps, and starting one goes
+// there. Watching a delete in a panel that says nothing was the complaint.
 let runKind = 'init';
-function startRun(args) {
+function startRun(args, opts = {}) {
   runKind = args[0];
   goView('build');
   $('b-log').dataset.fresh = 'yes';
   $('b-log').textContent = '';
+  $('b-log-title').textContent = 'cg ' + args.join(' ');
   buildSteps = 0;
   buildStarted = Date.now();
   $('b-prog').className = 'h-full bg-primary rounded-full';
   $('b-prog').style.width = '0%';
   $('b-prog-step').textContent = 'starting…';
-  $('b-strip').hidden = false;
   buildFailClear();
-  $('b-log-title').textContent = 'cg ' + args.join(' ');
-  $('b-strip-title').textContent = RUN_TITLE[args[0]] || 'Running';
-  $('b-burn').textContent = (RUN_FOOT[args[0]] || RUN_FOOT.init)[0];
-  buildStatus('running', 'text-primary');
-  buildStarted = Date.now();
-  paintElapsed();
-  return runCg(args);
+  runBegin(args[0], opts);
+  paintRun();
+  return runCg(args, opts.env ? { env: opts.env } : {});
+}
+
+// A build, with the games ticked now. Try again uses the ones the failed build
+// had, so a retry builds the same machine.
+function buildWith(apps, games, gamesGb) {
+  return startRun(['init'], { env: { GAME_APPS: apps }, apps, games, gamesGb });
+}
+function retryBuild() {
+  const r = run || {};
+  return buildWith(r.apps || 'none', r.games || 0, r.gamesGb || 0);
 }
 
 const play = () => {
@@ -4658,42 +5050,28 @@ $('b-open').onclick = play;
 $('b-destroy').onclick = () => $('d-destroy').onclick();
 $('d-destroy').onclick = async () => {
   const ok = await askConfirm({
-    title: 'Destroy the box?',
+    title: 'Delete the machine?',
     body: (sessionNow ? 'The stream open from this laptop is closed first - cg asks before it does.\n\n' : '')
-        + 'Your games are mirrored to S3 first, and the destroy refuses if that fails.\n\n'
-        + 'The box and its disk go. Rebuilding takes 10 to 20 minutes.',
-    yes: 'Destroy', danger: true,
+        + 'Your games are saved to the archive first, and nothing is deleted if that fails.\n\n'
+        + 'The machine and its disk go. Building a new one takes 10 to 20 minutes.',
+    yes: 'Delete machine', danger: true,
   });
   if (ok) await startRun(['destroy']);
 };
 $('b-build').onclick = async () => {
   const apps = picked.size ? [...picked].join(',') : 'none';
   const gb = selectedGb();
+  const rate = buildRate();
   const ok = await askConfirm({
-    title: 'Build the box?',
-    body: `${picked.size ? `${picked.size} game(s), ${gb.toFixed(1)} GB` : 'Nothing'} will be restored `
-        + 'from S3 while it builds.\n\nThis starts billing by the hour, and takes 10 to 20 '
-        + 'minutes. The Cost tab shows the rate you are actually paying.',
-    yes: 'Build box',
+    title: 'Build the machine?',
+    body: `${picked.size ? `${picked.size} game${picked.size === 1 ? '' : 's'}, ${gb.toFixed(1)} GB, will be`
+                         : 'No games will be'} downloaded while it builds.\n\n`
+        + `Billing starts when the machine launches${rate != null ? `, at ${rsh(rate)}/hour` : ''}. `
+        + 'It is ready in about 10 to 20 minutes.',
+    yes: 'Build',
   });
   if (!ok) return;
-  goView('build');
-  $('b-log').dataset.fresh = 'yes';
-  $('b-log').textContent = '';
-  buildSteps = 0;
-  buildStarted = Date.now();
-  $('b-prog').className = 'h-full bg-primary rounded-full';
-  $('b-prog').style.width = '0%';
-  $('b-prog-step').textContent = 'starting…';
-  $('b-strip').hidden = false;
-  buildFailClear();
-  $('b-log-title').textContent = 'cg init';
-  $('b-strip-title').textContent = RUN_TITLE.init;
-  $('b-burn').textContent = RUN_FOOT.init[0];
-  runKind = 'init';
-  buildStatus('running', 'text-primary');
-  buildStarted = Date.now();
-  await runCg(['init'], { env: { GAME_APPS: apps } });
+  await buildWith(apps, picked.size, gb);
 };
 
 for (const link of document.querySelectorAll('.nav-item')) {

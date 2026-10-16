@@ -123,7 +123,7 @@ exec "$@"
 
 cg_() { # cg_ <args...> - EXTRA passes env through
   # shellcheck disable=SC2086
-  ( cd "$T/repo" && env -i PATH="$PATH_USE" HOME="$T/home" CG_COLOR=never \
+  ( cd "$T/repo" && env -i CG_INR_PER_USD=88 PATH="$PATH_USE" HOME="$T/home" CG_COLOR=never \
       CFG="$T/key" AWS_LOG="$T/awslog" KEY_STATE="${KEY_STATE:-ok}" \
       CURL_LOG="$T/curllog" TS_STATE="${TS_STATE:-ok}" \
       TS_LOG="$T/tslog" TS_UP_FILE="$T/tsup" TS_UP_FAILS="${TS_UP_FAILS:-0}" \

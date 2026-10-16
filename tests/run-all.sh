@@ -58,11 +58,17 @@ for t in tests/*.sh; do [[ $t == tests/run-all.sh ]] || suites+=("$t"); done
 # not inferred from exit 124 - which a suite could return on its own.
 run_one() {
   local t=$1 n start; n=$(basename "$t" .sh)
-  mkdir -p "$dir/home-$n"
+  mkdir -p "$dir/home-$n/run"
   start=$(date +%s%N)
   # CG_SLEEP_PCT=1: cg's poll loops wait 1% as long (see cg_sleep in
   # lib/common.sh). Four suites spent most of their minutes asleep in them.
-  HOME="$dir/home-$n" CG_SLEEP_PCT="${CG_SLEEP_PCT:-1}" \
+  # CG_INR_PER_USD=88: the rupee rate is otherwise fetched once a day from an
+  # exchange-rate endpoint (lib/rates.sh). Pinned, the suites are offline and
+  # every rupee they check is the same on every run.
+  # XDG_RUNTIME_DIR: cg's "a stream is open" marker lives there, not in HOME.
+  # Shared, a suite streaming beside destroy-all made its destroy ask "close
+  # the stream first?" - which ate the typed DESTROY-ALL, so it aborted.
+  HOME="$dir/home-$n" XDG_RUNTIME_DIR="$dir/home-$n/run" CG_SLEEP_PCT="${CG_SLEEP_PCT:-1}" CG_INR_PER_USD="${CG_INR_PER_USD:-88}" \
     timeout "$TIMEOUT" bash "$t" >"$dir/$n.out" 2>&1
   echo $? >"$dir/$n.rc"
   echo $(( ($(date +%s%N) - start) / 1000000 )) >"$dir/$n.ms"

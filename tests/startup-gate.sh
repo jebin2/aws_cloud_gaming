@@ -958,6 +958,34 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
 contains "a disk left behind"              "$(row AFTER)" "Disk left behind · 30 GB no machine is using it ₹241/month"
 contains "  snapshots, as the most they cost" "$(row AFTER)" "Snapshots · 2, 80 GB cg does not make these up to ₹88/month"
 contains "  a reserved address"            "$(row AFTER)" "Elastic IP address · 1 reserved with no machine ₹0.44/hour"
+echo "6b. the dashboard: Tailscale"
+TS="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  const t = id => document.getElementById(id).innerText.replace(/\\s+/g, ' ').trim();
+  return 'ts=' + t('d-ts') + ' | signin=' + !document.getElementById('d-ts-signin').hidden
+       + ' | pings=' + window.__ran.filter(c => c === 'ping --json').length;
+};"
+ENGINE="$TS"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "the laptop, by name"             "$(row AFTER)" "This laptop is signed in as laptop"
+contains "  no machine on the network"     "$(row AFTER)" "No machine on the network"
+contains "  and no path to measure"        "$(row AFTER)" "pings=0"
+contains "  nothing to sign in to"         "$(row AFTER)" "signin=false"
+
+ONLINE=$(st '{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle": "spot", "launched": "2026-01-01T00:00:00Z"}' '{"bytes": 0}' '{"volumes_gb": 50}' '{"limit": 57}' \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); d["tailnet"]={"node":"gamevps","online":True}; print(json.dumps(d))')
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP, \"status --json\": $ONLINE,
+  \"ping --json\": {\"node\": \"gamevps\", \"path\": \"direct\", \"median_ms\": 18}}")
+contains "a running machine, online"       "$(row AFTER)" "Machine gamevps is online"
+contains "  the path, measured once"       "$(row AFTER)" "Direct connection · 18 ms"
+contains "  only once"                     "$(row AFTER)" "pings=1"
+
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP, \"status --json\": $ONLINE,
+  \"ping --json\": {\"node\": \"gamevps\", \"path\": \"DERP\", \"median_ms\": 74}}")
+contains "a relayed path says it is slower" "$(row AFTER)" "Relayed through Tailscale · 74 ms - slower for streaming"
+
+ENGINE="$DASH"
 # An older cg sends no price table: every figure is unknown, never ₹0.
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": {\"box\": null, \"region\": \"ap-south-2\", \"instance_type\": \"g6.xlarge\",
@@ -965,6 +993,284 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
      \"budget\": {\"limit\": 57, \"spent\": 4.5}, \"config\": {}, \"local\": {}, \"account\": {}}}")
 contains "no price table: the archive cost is unknown" "$(row AFTER)" "Game archive · 1.0 GB —"
 lacks    "  never zero"                    "$(row AFTER)" "₹0.00"
+ENGINE=""
+
+echo "7. the Build page: a build is eight plain steps"
+# cg reports a dozen steps of its own and the box a dozen more ("installing
+# nvidia driver", "configuring headless X"); the page shows eight, in plain
+# words, with the bill in the heading from the moment the machine is rented.
+BUILD="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  document.querySelector('.nav-item[data-view=build]').click();
+  const plan = !document.getElementById('b-plan').hidden;
+  const chip = document.getElementById('b-chip').textContent.trim();
+  // The confirm dialog is its own suite's business; here it is answered yes,
+  // and what it would have asked is kept.
+  let ask = '';
+  window.askConfirm = async o => { ask = o.body.replace(/\\s+/g, ' '); return true; };
+  document.getElementById('b-build').click();
+  await new Promise(r => setTimeout(r, 30));
+  const id = window.__lastId;
+  const step = t => window.__emit(id, { t: 'step', text: t });
+  const line = t => window.__emit(id, { t: 'line', text: t });
+  for (const t of ['updating the cloud watchdog: settings changed', 'preflight',
+                   'arming the budget before anything launches', 'provisioning instance']) step(t);
+  line('launching g6.xlarge (spot)');
+  step('waiting for the box to join the tailnet');
+  step('building the box - live progress below (10-20 min)');
+  step('installing base packages');
+  step('installing nvidia driver (the slowest step, ~10 min)');
+  line('nvidia-driver-580 unpacked');
+  await new Promise(r => setTimeout(r, 30));
+  const st = () => [...document.querySelectorAll('#b-steps [data-step]')]
+    .map(r => r.dataset.step + '=' + r.dataset.state).join(',');
+  const mid = 'mid=' + st() + ' | title=' + document.getElementById('b-strip-title').textContent
+    + ' | meta=' + document.getElementById('b-strip-meta').textContent
+    + ' | text=' + document.getElementById('b-steps').innerText.replace(/\\s+/g, ' ')
+    + ' | plan=' + !document.getElementById('b-plan').hidden;
+  window.__emit(id, { t: 'line', kind: 'fail', text: 'the driver did not install' });
+  window.__emit(id, { t: 'exit', rc: 1 });
+  await new Promise(r => setTimeout(r, 30));
+  const failed = 'failed=' + st() + ' | head=' + document.getElementById('b-strip-title').textContent
+    + ' | acts=' + [...document.querySelectorAll('#b-run-acts button')].map(b => b.textContent.trim()).join(',')
+    + ' | panelIn=' + (document.getElementById('b-fail').closest('[data-step]') || {}).dataset?.step;
+  return 'plan=' + plan + ' | chip=' + chip + ' | ask=' + ask + ' || ' + mid + ' || ' + failed;
+};"
+ENGINE="$BUILD"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "before a build: the plan"          "$(row AFTER)" "plan=true"
+contains "  saying what Build starts billing" "$(row AFTER)" "chip=Billing starts when the machine launches · ₹16.44/hour"
+contains "the confirm names the rate"        "$(row AFTER)" "Billing starts when the machine launches, at ₹16.44/hour"
+# Mid-build: setup, budget, machine and Tailscale done; the box's own steps
+# (base packages, the driver) are one step, installing.
+contains "four steps done, the fifth running" "$(row AFTER)" "mid=0=done,1=done,2=done,3=done,4=running,5=locked,6=locked,7=locked"
+contains "  in plain words"                   "$(row AFTER)" "Checked your setup"
+contains "    the rental, with when billing began" "$(row AFTER)" "Machine rented · billing from"
+contains "    the box's steps as one"         "$(row AFTER)" "Installing the software"
+contains "    with the line it is on"         "$(row AFTER)" "nvidia-driver-580 unpacked"
+contains "  the heading is the build"         "$(row AFTER)" "title=Building your machine"
+contains "  with the rate in it"              "$(row AFTER)" "₹16.44/hour"
+contains "  and the plan is put away"         "$(row AFTER)" "plan=false"
+contains "a failure stops at its step"        "$(row AFTER)" "failed=0=done,1=done,2=done,3=done,4=failed,5=skipped"
+contains "  the heading says so"              "$(row AFTER)" "head=The build stopped"
+contains "  the reason sits in that step"     "$(row AFTER)" "panelIn=4"
+contains "  with try again, or close"         "$(row AFTER)" "acts=Try again,Close"
+ENGINE=""
+
+echo "7b. a rental that fails bills nothing; a build that finishes is ready to play"
+B2="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  document.querySelector('.nav-item[data-view=build]').click();
+  window.askConfirm = async () => true;
+  const go = async (steps, rc) => {
+    document.getElementById('b-build').click();
+    await new Promise(r => setTimeout(r, 30));
+    const id = window.__lastId;
+    for (const t of steps) window.__emit(id, { t: 'step', text: t });
+    window.__emit(id, { t: 'exit', rc });
+    await new Promise(r => setTimeout(r, 30));
+    return document.getElementById('b-strip-title').textContent + ' / '
+      + document.getElementById('b-strip-meta').textContent + ' / '
+      + [...document.querySelectorAll('#b-run-acts button')].map(b => b.textContent.trim()).join(',');
+  };
+  const a = await go(['preflight', 'arming the budget', 'provisioning instance'], 1);
+  run = null; paintRun();
+  const b = await go(['preflight', 'arming the budget', 'provisioning instance', 'waiting for the box to join the tailnet',
+                      'building the box', 'finishing up', 'moonlight pairing', 'waiting for Steam to finish installing'], 0);
+  const st = [...document.querySelectorAll('#b-steps [data-step]')].map(r => r.dataset.state).join(',');
+  return 'failed=' + a + ' | done=' + b + ' | steps=' + st;
+};"
+ENGINE="$B2"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "a failed rental: nothing was billed" "$(row AFTER)" "failed=The build stopped / Nothing was billed"
+contains "a finished build: ready to play"     "$(row AFTER)" "done=Ready to play / built in"
+contains "  with play, and delete"            "$(row AFTER)" "▶ Play,Delete machine"
+contains "  and all eight steps ticked"        "$(row AFTER)" "steps=done,done,done,done,done,done,done,done"
+ENGINE=""
+
+echo "7d. the Build screen shows the machine, wherever you have been"
+# Leaving mid-build and coming back used to show the plan again, and "Back to
+# dashboard" threw the finished build away - so the card swapped between the
+# plan and the run depending on where you had clicked, not on the machine.
+B4="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  const nav = v => document.querySelector('.nav-item[data-view=' + v + ']').click();
+  const card = () => (document.getElementById('b-plan').hidden ? '' : 'plan')
+    + (document.getElementById('b-strip').hidden ? '' : 'run:' + document.getElementById('b-strip-title').textContent);
+  const acts = () => [...document.querySelectorAll('#b-run-acts button')].map(b => b.textContent.trim()).join(',');
+  const wait = () => new Promise(r => setTimeout(r, 30));
+  nav('build');
+  window.askConfirm = async () => true;
+  document.getElementById('b-build').click();
+  await wait();
+  let id = window.__lastId;
+  for (const t of ['preflight', 'arming the budget', 'provisioning instance']) window.__emit(id, { t: 'step', text: t });
+  await wait();
+  const during = card() + ' acts=' + acts();
+  nav('dashboard'); nav('build');
+  const back = card();
+  for (const t of ['waiting for the box to join the tailnet', 'building the box', 'finishing up',
+                   'moonlight pairing', 'waiting for Steam to finish installing']) window.__emit(id, { t: 'step', text: t });
+  // The status read after the build finds the machine it made.
+  window.__answers['status --json'].box = { id: 'i-1', state: 'running', type: 'g6.xlarge', lifecycle: 'spot',
+                                            launched: new Date().toISOString() };
+  window.__emit(id, { t: 'exit', rc: 0 });
+  await wait();
+  const done = card() + ' acts=' + acts() + ' folded=' + !!document.querySelector('#b-steps details:not([open])');
+  nav('dashboard'); nav('build');
+  const done2 = card();
+  // Cancel: cg is interrupted, then whatever it rented is deleted, and the
+  // plan comes straight back.
+  window.__answers['status --json'].box = null;
+  run = null; boxNow = null; paintRun();
+  let del = null;
+  const orig = window.cg.run;
+  window.cg.run = async a => { const r = await orig(a); if (a[0] === 'destroy') del = r.id; return r; };
+  document.getElementById('b-build').click();
+  await wait();
+  id = window.__lastId;
+  window.__emit(id, { t: 'step', text: 'provisioning instance' });
+  await wait();
+  window.__ran = [];
+  [...document.querySelectorAll('#b-run-acts button')].find(b => b.textContent === 'Cancel').click();
+  await wait(); await wait();
+  const cancel = 'cancelled=' + window.__cancelled.includes(id) + ' ran=' + window.__ran.join(';') + ' ' + card();
+  window.__emit(del, { t: 'exit', rc: 0 });
+  await wait();
+  return 'during=' + during + ' | back=' + back + ' | done=' + done + ' | done2=' + done2
+    + ' | cancel=' + cancel + ' | after=' + card();
+};"
+ENGINE="$B4"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "a build shows the run"              "$(row AFTER)" "during=run:Building your machine acts=Cancel"
+contains "  and still does after leaving"     "$(row AFTER)" "back=run:Building your machine |"
+contains "a finished build is the machine"    "$(row AFTER)" "done=run:Ready to play acts=▶ Play,Delete machine folded=true"
+contains "  and stays it after leaving"       "$(row AFTER)" "done2=run:Ready to play |"
+contains "cancel interrupts cg"               "$(row AFTER)" "cancelled=true"
+contains "  then deletes what it rented"      "$(row AFTER)" ";destroy --no-push;"
+contains "  shown as the delete"              "$(row AFTER)" "run:Deleting the machine"
+contains "  and the plan is back after it"    "$(row AFTER)" "after=plan"
+ENGINE=""
+
+echo "7e. a machine that exists is never shown as a plan"
+B5="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  document.querySelector('.nav-item[data-view=build]').click();
+  await new Promise(r => setTimeout(r, 30));
+  return 'plan=' + !document.getElementById('b-plan').hidden
+    + ' | title=' + document.getElementById('b-strip-title').textContent
+    + ' | meta=' + document.getElementById('b-strip-meta').textContent
+    + ' | acts=' + [...document.querySelectorAll('#b-run-acts button')].map(b => b.textContent.trim()).join(',');
+};"
+ENGINE="$B5"
+BOX='{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle": "spot", "launched": "2026-01-01T00:00:00Z"}'
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st "$BOX" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "no plan beside a machine"   "$(row AFTER)" "plan=false"
+contains "  the machine, ready"       "$(row AFTER)" "title=Ready to play"
+contains "  how long it has been up"  "$(row AFTER)" "meta=up "
+contains "  play, or delete it"       "$(row AFTER)" "acts=▶ Play,Delete machine"
+ENGINE=""
+
+echo "7f. play is a session, as steps, ending in keep or delete"
+# cg open announces no steps, so the card used to say "Starting the stream" over
+# an empty list for the whole session.
+B6="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  document.querySelector('.nav-item[data-view=build]').click();
+  const wait = () => new Promise(r => setTimeout(r, 30));
+  const st = () => [...document.querySelectorAll('#b-steps [data-step]')].map(r => r.dataset.state).join(',');
+  const card = () => (document.getElementById('b-plan').hidden ? '' : 'plan')
+    + (document.getElementById('b-strip').hidden ? '' : 'run:' + document.getElementById('b-strip-title').textContent);
+  const play = async () => {
+    [...document.querySelectorAll('#b-run-acts button')].find(b => b.textContent.includes('Play')).click();
+    await wait();
+    return window.__lastId;
+  };
+  let id = await play();
+  const line = t => window.__emit(id, { t: 'line', text: t });
+  const starting = card() + ' ' + st();
+  line('instance already running');
+  line('  pong from game (100.64.0.2) via 1.2.3.4:41641 in 23ms');
+  line('waiting for sunshine ok');
+  line('disk:');
+  await wait();
+  const playing = card() + ' ' + st() + ' | ' + document.getElementById('b-steps').innerText.replace(/\\s+/g, ' ')
+    + ' | ' + document.getElementById('b-strip-meta').textContent;
+  line('session ended after 5m');
+  window.__emit(id, { t: 'exit', rc: 0 });
+  await wait();
+  const kept = card();
+  id = await play();
+  for (const t of ['instance already running', 'waiting for sunshine ok', 'session ended after 1m'])
+    window.__emit(id, { t: 'line', text: t });
+  window.__emit(id, { t: 'step', text: 'destroying the box' });
+  await wait();
+  const deleting = card();
+  window.__emit(id, { t: 'exit', rc: 0 });
+  await wait();
+  return 'starting=' + starting + ' | playing=' + playing + ' | kept=' + kept
+    + ' | deleting=' + deleting + ' | after=' + card();
+};"
+ENGINE="$B6"
+BOX='{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle": "spot", "launched": "2026-01-01T00:00:00Z"}'
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st "$BOX" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "play starts with the machine"     "$(row AFTER)" "starting=run:Starting the stream running,locked,locked,locked"
+contains "  then is playing"                "$(row AFTER)" "playing=run:Playing done,done,done,running"
+contains "  saying how to stop"             "$(row AFTER)" "Close Moonlight to stop"
+contains "  and what it costs"              "$(row AFTER)" "so far"
+contains "kept: back to the machine"        "$(row AFTER)" "kept=run:Ready to play"
+contains "deleted: the delete is shown"     "$(row AFTER)" "deleting=run:Deleting the machine"
+ENGINE=""
+
+echo "7c. a line that sounds like failure does not fail a healthy build"
+# What happened on a real build: the box's progress said "NvFBC cannot capture
+# with it on", cg reads "cannot" as a failure, and the driver step went red
+# while the build carried on installing Steam.
+B3="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  document.querySelector('.nav-item[data-view=build]').click();
+  window.askConfirm = async () => true;
+  document.getElementById('b-build').click();
+  await new Promise(r => setTimeout(r, 30));
+  const id = window.__lastId;
+  for (const t of ['preflight', 'arming the budget', 'provisioning instance',
+                   'waiting for the box to join the tailnet', 'building the box'])
+    window.__emit(id, { t: 'step', text: t });
+  window.__emit(id, { t: 'line', kind: 'fail', text: 'disabling nvidia DRM KMS (NvFBC cannot capture with it on)' });
+  for (let i = 0; i < 80; i++) window.__emit(id, { t: 'line', text: 'installing steam ' + i });
+  await new Promise(r => setTimeout(r, 30));
+  const parts = [...document.querySelectorAll('#b-parts [data-part]')]
+    .map(c => c.dataset.part + ':' + c.dataset.state).join(',');
+  window.__emit(id, { t: 'line', text: 'finishing up (reboots, then waits for the game restore to finish)' });
+  await new Promise(r => setTimeout(r, 30));
+  const st = () => [...document.querySelectorAll('#b-steps [data-step]')].map(r => r.dataset.state).join(',');
+  const mid = 'parts=' + parts + ' | mid=' + st() + ' failpanel=' + !document.getElementById('b-fail').classList.contains('hidden')
+    + ' pageScrolls=' + (document.scrollingElement.scrollHeight > innerHeight + 1);
+  window.__emit(id, { t: 'step', text: 'moonlight pairing' });
+  window.__emit(id, { t: 'step', text: 'waiting for Steam to finish installing' });
+  window.__emit(id, { t: 'exit', rc: 0 });
+  await new Promise(r => setTimeout(r, 30));
+  return mid + ' | end=' + document.getElementById('b-strip-title').textContent + ' ' + st();
+};"
+ENGINE="$B3"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "the driver step is not failed"   "$(row AFTER)" "mid=done,done,done,done,done,running"
+contains "  'finishing up' is the games step" "$(row AFTER)" ",running,locked,locked"
+contains "  and no failure is shown"       "$(row AFTER)" "failpanel=false"
+# The step installs far more than a driver; each piece is a chip, ticked as the
+# box moves on to the next.
+contains "the parts are listed"            "$(row AFTER)" "parts=Base system:"
+contains "  the driver, done once Steam starts" "$(row AFTER)" "NVIDIA driver:done"
+contains "  Steam, in progress"            "$(row AFTER)" "Steam:running"
+contains "  Firefox and audio still to come" "$(row AFTER)" "Firefox:waiting,Audio:waiting"
+contains "a long build scrolls in its card, not the page" "$(row AFTER)" "pageScrolls=false"
+contains "it finishes ready to play"       "$(row AFTER)" "end=Ready to play done,done,done,done,done,done,done,done"
 ENGINE=""
 
 echo "5. nothing threw"

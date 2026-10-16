@@ -250,7 +250,8 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('LEGEND | ' + document.getElementById('s-chooser-legend').innerText
                           .replace(/\s+/g, ' ').trim());
   // One line per painter, naming a DOM effect only that painter produces.
-  out.push('PAINTED | status/spec | ' + document.getElementById('b-spec').children.length);
+  // The machine on one line - there is no spec card any more.
+  out.push('PAINTED | status/spec | ' + document.getElementById('b-pick').textContent.trim());
   out.push('PAINTED | status/chip | ' + document.getElementById('b-chip').textContent.trim());
   out.push('PAINTED | config | ' + document.getElementById('s-count').textContent.trim());
   out.push('PAINTED | guards | ' + document.getElementById('guard-cards').children.length);
@@ -272,6 +273,7 @@ cat > "$T/r/probe.js" <<'PROBE'
   paintLibrary(DATA.library);
   if (window.__errs.length) out.push('ERRORS: ' + window.__errs.join(' | '));
   out.push('BPICK | ' + document.getElementById('b-pick').textContent.trim());
+  out.push('BWHERE | ' + document.getElementById('b-pick-where').textContent.trim());
   out.push('BNOTE | ' + document.getElementById('b-type-note').textContent.trim());
   out.push('BTABLE | ' + (document.getElementById('b-chooser') ? 'PRESENT' : 'absent'));
   out.push('BSETUP | ' + (document.getElementById('b-setup') ? 'present' : 'ABSENT'));
@@ -347,8 +349,8 @@ lacks    "no painter failed"  "$OUT" "could not show cg"
 lacks    "  nor could not run"  "$OUT" "could not run:"
 contains "and no read failed at all" "$OUT" "FAILURES: "
 # Named effects, because "no error" is what passed while paintSpec was missing.
-contains "paintSpec filled the spec grid"  "$OUT" "PAINTED | status/spec | 4"
-contains "  and the build chip"            "$OUT" "PAINTED | status/chip | g4dn.xlarge · ap-south-1 · on demand"
+contains "the machine is one line"         "$OUT" "PAINTED | status/spec | g4dn.xlarge"
+contains "  and the chip says what Build bills" "$OUT" "PAINTED | status/chip | Billing starts when the machine launches"
 contains "paintConfig counted the settings" "$OUT" "PAINTED | config | 4 of 4 set"
 contains "paintGuards drew a card"          "$OUT" "PAINTED | guards | 1"
 contains "paintLibrary sized the disk"      "$OUT" "PAINTED | library | "
@@ -356,8 +358,9 @@ contains "paintLibrary sized the disk"      "$OUT" "PAINTED | library | "
 echo "1b. a disk size cg did not give is not guessed"
 contains "the library says it cannot tell" "$OUT" "NOCAP | lib | 50.0 GB archived - how much a box offers is not known yet"
 contains "  and shows no percentage"       "$OUT" "NOCAP | libnum | —"
-contains "the picker counts what is picked" "$OUT" "NOCAP | fit | 50.0 GB selected - the box's free disk is not known yet"
-contains "  with no fraction of an unknown" "$OUT" "NOCAP | pct | —"
+contains "the meter is labelled plainly"   "$OUT" "NOCAP | fit | Space on the machine"
+contains "  and counts what is picked, with no fraction of an unknown" \
+         "$OUT" "NOCAP | pct | 50.0 GB - the machine's space is not known yet"
 # The box checks the real limit at boot. Refusing the build here on a number
 # nobody has would be guessing in the other direction.
 contains "  and Build is still allowed"    "$OUT" "NOCAP | build | on"
@@ -397,9 +400,10 @@ contains "and a usable row is selectable" "$OUT" "ap-south-2 | Hyderabad | 19 ms
 echo "5b. Build states the choice without offering a second control"
 # The one line that matters, from the same rows the table uses, so the two
 # cannot disagree.
-contains "the region, machine and model" "$OUT" "BPICK | ap-south-1 · g4dn.xlarge · on demand"
-contains "  with the GPU"                "$OUT" "T4 16 GB"
-contains "  and the hourly rate"         "$OUT" "INR 51/hr"
+contains "the machine, once"             "$OUT" "BPICK | g4dn.xlarge"
+contains "  then where and how it is bought" "$OUT" "· on demand"
+contains "  with the GPU"                "$(grep -m1 '^BPICK ' <<<"$OUT")" "NVIDIA T4, 16 GB"
+contains "  and the hourly rate, in rupees" "$(grep -m1 '^BWHERE ' <<<"$OUT")" "₹51/hour"
 
 echo "6. capacity is shown next to price, which is the whole point"
 contains "the good score is there" "$OUT" "9/10"

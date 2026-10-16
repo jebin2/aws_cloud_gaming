@@ -33,7 +33,7 @@ fresh() { rm -f "$T/repo/.env" "$T/log"; touch "$T/log"; }
 # run '<code>' [stdin] - EXTRA holds KEY=value pairs, as lib/setup's .env loader exports them.
 run() {
   # shellcheck disable=SC2086
-  ( cd "$T/repo" && printf '%b' "${2:-}" | env -i HOME="$T/home" PATH="$T/bin:/usr/bin:/bin" LOG="$T/log" \
+  ( cd "$T/repo" && printf '%b' "${2:-}" | env -i CG_INR_PER_USD=88 HOME="$T/home" PATH="$T/bin:/usr/bin:/bin" LOG="$T/log" \
       NTFY="${NTFY:-None}" AWS_FAIL="${AWS_FAIL:-0}" REGION=ap-south-2 TS_HOST=gamevps CG_COLOR=never ${EXTRA:-} \
       bash -c 'source lib/common.sh; source lib/cloud-watchdog.sh; source lib/settings.sh; settings_tty() { true; }; '"$1" 2>&1 )
 }

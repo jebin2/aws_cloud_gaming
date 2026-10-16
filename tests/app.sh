@@ -313,11 +313,13 @@ contains "an archive table"              "$html" 'id="b-games"'
 contains "  with the appid"              "$js" 'appid ${g.appid}' 
 contains "  and when it was archived"    "$js" "daysAgo(g.pushed)"
 contains "the allocation bar"            "$html" 'id="b-bar"'
-contains "  says what is left"           "$js" "buffer remaining"
+contains "  says what is left, plainly"  "$js" "Too big by"
 contains "the machine comes from cg"     "$js" "const spec = s.spec || {}"
 check    "  with no type hardcoded"      "$(grep -c 'g6\.xlarge\|L4\|16 GiB' app/renderer/app.js)" "0"
-contains "  and the chip names the purchase model" "$js" "on demand' : spot === '1'"
-contains "steps are numbered"            "$js" "String(buildSteps).padStart(2, '0')"
+contains "  and the chip says what Build bills" "$js" "Billing starts when the machine launches"
+# cg's dozen-odd steps, and the box's own, are placed in eight plain ones.
+contains "steps are the eight plain ones" "$js" "const BUILD_STEPS = ["
+contains "  and only move forwards"       "$js" "if (at > run.idx)"
 contains "  and carry how long they took" "$js" "function buildStepEnd(event)"
 contains "  the live line shows in the strip" "$js" "\$('b-prog-step').textContent = event.text"
 # A box that is already up cannot be built again - cg would refuse, so the
@@ -332,13 +334,13 @@ contains "the log is bounded and scrolls" "$html" 'max-h-[46vh] overflow-y-auto'
 # Progress used to live in the right panel: a step list that grew beside a log
 # that grew, which stretched the grid row and made the whole page taller than
 # the window on every build. One strip across the top, one bounded transcript.
-contains "progress is a strip above both columns" "$html" 'id="b-strip"'
+# A run is the steps, as setup is; the full transcript is behind "Full log".
+contains "a run is a panel of its own"   "$html" 'id="b-strip"'
 contains "  with a bar"                   "$html" 'id="b-prog"'
-contains "  the step number and elapsed"  "$js" "\$('b-strip-meta').textContent"
-contains "  and the line cg is on now"    "$html" 'id="b-prog-step"'
-contains "steps are headings in the transcript" "$js" "head.className = 'step flex items-baseline"
-check    "  so there is no second list to grow" \
-         "$(grep -c "'b-steps'" app/renderer/app.js app/renderer/index.html | awk -F: '{s+=$2} END{print s}')" "0"
+contains "  the time and the bill in its heading" "$js" "\$('b-strip-meta').textContent"
+contains "  the steps"                    "$html" 'id="b-steps"'
+contains "  and the full log folded away" "$html" 'id="b-logbox"'
+contains "the transcript keeps cg's headings" "$js" "head.className = 'step flex items-baseline"
 # The bar is time against the estimate, not steps done: cg never says how many
 # steps a run has, so a fraction built from the ones seen so far would go
 # backwards the moment another arrived.
@@ -359,9 +361,9 @@ contains "  hidden until something fails"  "$html" '<div class="hidden" id="b-fa
 contains "  with a headline"               "$html" 'id="b-fail-head"'
 contains "  what it means"                 "$html" 'id="b-fail-why"'
 contains "  what to do about it"           "$html" 'id="b-fail-acts"'
-contains "  and cg's own words kept"       "$html" "what cg said"
+contains "  and cg's own words kept"       "$html" "What cg said"
 contains "the actions are keyed by the AWS code" "$js" "const FAIL_ACTS = {"
-contains "  spot capacity offers on demand"      "$js" "Build on demand instead"
+contains "  spot capacity offers another machine"   "$js" "InsufficientInstanceCapacity: () => [['Pick another machine'"
 contains "  a quota failure offers the ask"      "$js" "Ask AWS for GPU quota"
 # It lives in the strip, taking the BAR's place: a bar frozen at 35% says
 # nothing, and in the right-hand panel the reason sat under a 200-line
@@ -370,10 +372,10 @@ check    "  and sits in the strip, not the panel" \
          "$(awk '/id="b-strip"/{s=NR} /id="b-error"/{e=NR} /id="b-log"/{l=NR} END{print (s && e && l && s < e && e < l) ? "yes" : "no"}' app/renderer/index.html)" "yes"
 contains "  the bar gives way to it"       "$js" "\$('b-bar-track').hidden = true"
 contains "  and comes back on the next run" "$js" "\$('b-bar-track').hidden = false"
-contains "  a failed run paints no full bar" "$js" "if (buildFailures.length) return;"
+contains "  and the step that failed holds it" "$js" "if (state === 'failed') body.append(fail);"
 # A fixed "launch failed" heading sat directly above cg's own "launch failed:
 # InsufficientInstanceCapacity", which read as the same sentence twice.
-contains "  the strip's own heading names the phase" "$js" 'RUN_TITLE[runKind] || RUN_TITLE.init} stopped'
+contains "  the heading says it stopped"  "$js" "failed: 'The build stopped'"
 check    "  with no second heading under it" \
          "$(grep -c 'b-error-title' app/renderer/app.js app/renderer/index.html | awk -F: '{s+=$2} END{print s}')" "0"
 contains "  fed by the lines cg marked"    "$js" "if (event.kind === 'fail') { buildFailing = true;"
@@ -479,11 +481,12 @@ check    "  the app never hunts for moonlight" "$(grep -ci 'moonlight' app/main/
 echo "5e. one panel for every long run"
 # A destroy reports the same way a build does - steps, lines, an exit - so it is
 # watched in the same panel, and starting one goes there.
-contains "a run opens the panel it reports in" "$js" "function startRun(args)"
+contains "a run opens the panel it reports in" "$js" "function startRun(args, opts = {})"
 contains "  which is the build screen"   "$js" "goView('build')"
-contains "  titled for what is running"  "$js" "destroy: 'Destroying'"
+contains "  titled for what is running"  "$js" "running: 'Deleting the machine'"
 contains "  with the command on the log" "$js" "'cg ' + args.join(' ')"
-contains "  and a footer about the money" "$js" "billing stops when the box is gone"
+# Billing counts from a machine that exists: the rental has to have finished.
+contains "  and the bill from when it was rented" "$js" "if (!run.billFrom && at > rent && run.steps[rent])"
 contains "destroy runs through it"       "$js" "startRun(['destroy'])"
 contains "  and so does play"            "$js" "startRun(['open'])"
 contains "every long run paints the steps" "$js" "if (job.write) {"
@@ -680,9 +683,9 @@ echo "6. the actions that spend money ask first"
 # window.confirm draws a native alert that belongs to no design.
 check    "no native alert boxes"         "$(grep -cE '(^|[^a-zA-Z.])confirm\(' app/renderer/app.js)" "0"
 contains "  the app asks in its own dialog" "$html" 'id="confirm-title"'
-contains "a build confirms"              "$js" "This starts billing"
+contains "a build confirms, with its rate" "$js" 'Billing starts when the machine launches${rate != null'
 contains "  and passes the chosen games" "$js" "GAME_APPS: apps"
-contains "a destroy confirms"            "$js" "Destroy the box?"
+contains "a delete confirms"             "$js" "Delete the machine?"
 contains "only GAME_APPS may cross"      "$(cat app/main/index.js)" "ENV_ALLOWED = new Set(['GAME_APPS'])"
 check    "no secret is rendered"         "$(grep -cE 'TAILSCALE_AUTH_KEY|SUNSHINE_PASS|GAME_NTFY_URL *=' app/renderer/app.js)" "0"
 # Settings are read from the registry and written back through it: the app

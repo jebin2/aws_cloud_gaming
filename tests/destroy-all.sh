@@ -98,7 +98,10 @@ chmod +x "$T/bin/scp"
 run() { # run <stdin> <args...>
   local input=$1; shift
   LOG="$T/log" rm -f "$T/log"
-  printf '%s\n' "$input" | ( cd "$T" && HOME="$T/home" LOG="$T/log" PATH="$T/bin:$PATH" \
+  # Its own runtime dir: a stream marker from anything else running would make
+  # destroy ask to close it first, and that question would eat the typed word.
+  mkdir -p "$T/run"
+  printf '%s\n' "$input" | ( cd "$T" && HOME="$T/home" XDG_RUNTIME_DIR="$T/run" LOG="$T/log" PATH="$T/bin:$PATH" \
     BOX_STATE="${BOX_STATE:-stopped}" \
     ROLE_EXISTS="${ROLE_EXISTS:-1}" IAM_FAILS="${IAM_FAILS:-0}" CW_EXISTS="${CW_EXISTS:-0}" \
     bash ./cg destroy "$@" 2>&1 )
@@ -119,6 +122,9 @@ check "warns it is the only copy" "$(grep -c 'ONLY COPY' <<<"$out")" "1"
 
 echo "3. --all with the typed word removes the box, the bucket, the IAM role and the cloud watchdog"
 out=$(CW_EXISTS=1 run "DESTROY-ALL" --all)
+# It failed now and then under the full runner and never alone; when it does,
+# what cg said is the only clue, so it is printed.
+grep -q SETUP-DESTROY-CALLED "$T/log" 2>/dev/null || printf '  --- cg said:\n%s\n  ---\n' "$out"
 check "box destroyed"         "$(did SETUP-DESTROY-CALLED)" "yes"
 check "bucket removed"        "$(did 's3 rb')" "yes"
 check "instance profile gone" "$(did 'delete-instance-profile')" "yes"

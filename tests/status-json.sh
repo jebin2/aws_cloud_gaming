@@ -85,7 +85,7 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$T/bin/moonlight"
 chmod +x "$T/bin"/*
 
 run() { # run [--json]
-  ( cd "$T/repo" && env -i PATH="$T/bin:$PATH" HOME="$T/home" BOX="${BOX:-none}" TS_STATE="${TS_STATE-}" TS_NODE_GONE="${TS_NODE_GONE-}" AWS_DEAD="${AWS_DEAD-}" \
+  ( cd "$T/repo" && env -i CG_INR_PER_USD=88 PATH="$T/bin:$PATH" HOME="$T/home" BOX="${BOX:-none}" TS_STATE="${TS_STATE-}" TS_NODE_GONE="${TS_NODE_GONE-}" AWS_DEAD="${AWS_DEAD-}" \
       LIFECYCLE="${LIFECYCLE-}" SNAPS="${SNAPS-}" SNAP_GB="${SNAP_GB-}" \
       CG_COLOR=never bash lib/setup status ${1:+--json} 2>&1 )
 }

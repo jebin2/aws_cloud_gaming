@@ -122,7 +122,7 @@ case "$*" in
 esac
 FAKE
 chmod +x "$T/bin/aws"
-cj=$( cd "$T/repo" && env -i PATH="$T/bin:$PATH" HOME="$T/home" CG_COLOR=never \
+cj=$( cd "$T/repo" && env -i CG_INR_PER_USD=88 PATH="$T/bin:$PATH" HOME="$T/home" CG_COLOR=never \
         bash lib/setup cost --json 2>/dev/null )
 jq2() { python3 -c 'import json,sys
 d=json.load(sys.stdin)

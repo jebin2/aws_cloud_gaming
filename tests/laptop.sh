@@ -61,7 +61,7 @@ P
 
 # run '<code>' [stdin]: source the library on the sandboxed PATH, with a terminal.
 run() {
-  ( cd "$REPO" && printf '%s' "${2:-}" | env -i HOME="$T/home" LOG="$T/log" BIN="$T/bin" TSUP="$T/ts-up" \
+  ( cd "$REPO" && printf '%s' "${2:-}" | env -i CG_INR_PER_USD=88 HOME="$T/home" LOG="$T/log" BIN="$T/bin" TSUP="$T/ts-up" \
       PATH="$T/bin:$T/sys" CG_COLOR=never "$BASH_BIN" -c \
       'source lib/common.sh; source lib/laptop.sh; laptop_tty() { true; }; '"$1" 2>&1 )
 }
@@ -206,10 +206,10 @@ check    "a stopped daemon is started first" "$(grep -cE '^sudo .*/systemctl ena
 
 echo "10. setup: check takes --fix and nothing else"
 mkdir -p "$T/repo"; cp -r lib cg "$T/repo/"
-r=$(cd "$T/repo" && env -i HOME="$T/home" PATH="$T/sys" CG_COLOR=never "$BASH_BIN" lib/setup check --nope 2>&1; echo "rc=$?")
+r=$(cd "$T/repo" && env -i CG_INR_PER_USD=88 HOME="$T/home" PATH="$T/sys" CG_COLOR=never "$BASH_BIN" lib/setup check --nope 2>&1; echo "rc=$?")
 contains "an unknown option is refused"      "$r" "usage: setup [check [--fix]"
 fresh python3 ssh
-r=$(cd "$T/repo" && env -i HOME="$T/home" LOG="$T/log" PATH="$T/bin:$T/sys" CG_COLOR=never "$BASH_BIN" lib/setup check 2>&1; echo "rc=$?")
+r=$(cd "$T/repo" && env -i CG_INR_PER_USD=88 HOME="$T/home" LOG="$T/log" PATH="$T/bin:$T/sys" CG_COLOR=never "$BASH_BIN" lib/setup check 2>&1; echo "rc=$?")
 contains "cg check lists the missing tools"  "$r" "missing: AWS CLI v2"
 contains "  all of them"                     "$r" "missing: Tailscale"
 contains "  and stops before AWS"            "$r" "the laptop is not ready"

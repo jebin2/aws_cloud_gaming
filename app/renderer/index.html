@@ -173,7 +173,7 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter-desktop">
         <!-- The games: the only copy is in the archive, so how long it is kept
              is the news, not the bucket name. -->
         <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
@@ -183,6 +183,17 @@
           <p class="font-code-sm text-code-sm mt-space-sm" id="d-games-keep"></p>
           <div class="mt-auto pt-space-md">
             <button id="d-library" class="btn">Manage games</button>
+          </div>
+        </div>
+
+        <!-- The private network the machine is reached over: this laptop, the
+             machine, and - while it is up - whether the path between them is
+             direct or relayed, which is what decides how a stream feels. -->
+        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Tailscale</span>
+          <div class="flex flex-col gap-space-sm mt-space-md" id="d-ts"></div>
+          <div class="mt-auto pt-space-md">
+            <button id="d-ts-signin" class="btn" hidden>Sign in to Tailscale</button>
           </div>
         </div>
 
@@ -200,156 +211,114 @@
 
   <!-- Build -->
   <section data-view="build" hidden>
-    <!-- Progress, across both columns. It used to live in the right panel,
-         where a growing step list plus a growing log stretched the grid row and
-         made the whole page taller than the window. Here it costs a fixed
-         strip, and the panel below it never changes height. -->
-    <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop" id="b-strip" hidden>
-      <div class="flex items-center justify-between pb-space-sm gap-space-md">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline" id="b-strip-title">Provisioning</span>
+    <!-- Two modes, like setup. Before a build: what will be built, which games
+         go on it, and what it costs - one card, one button. During and after a
+         build: the same vertical steps as setup, in plain words, with the bill
+         in the heading from the moment the machine is rented. -->
+
+    <!-- Mode B: a run - a build, a delete, a session - as steps. -->
+    <div class="p-space-lg rounded-lg bg-surface-container-low fit-view" id="b-strip" hidden>
+      <div class="flex items-baseline justify-between gap-space-md">
+        <p class="font-headline-md text-headline-md" id="b-strip-title">Building your machine</p>
         <span class="font-code-sm text-code-sm text-outline shrink-0" id="b-strip-meta"></span>
       </div>
-      <div class="h-1.5 rounded-full bg-surface-container overflow-hidden" id="b-bar-track">
+      <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-run-sum"></p>
+      <!-- Time against the usual length of a build - never a share of steps,
+           which cg does not announce in advance. -->
+      <div class="h-1 rounded-full bg-surface-container overflow-hidden mt-space-md" id="b-bar-track">
         <div class="h-full bg-primary rounded-full" id="b-prog" style="width:0%"></div>
       </div>
-      <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm truncate" id="b-prog-step"></p>
+      <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm truncate" id="b-prog-step" hidden></p>
 
-      <!-- Why the run stopped, in place of the bar rather than below the fold:
-           a bar that has stopped moving says nothing, and the log holds 200
-           auto-scrolling lines, so the one line that explains the failure had
-           already gone by the time anyone looked. -->
-      <!-- A failure, as something to act on. cg's own text is kept underneath -
-           it is the record, and it says more than any button can - but the two
-           or three things actually worth doing about it are buttons. -->
+      <div class="flex flex-col mt-space-lg" id="b-steps"></div>
+
+      <!-- A failure, as something to act on: cg's headline, whether anything is
+           billing, and the two or three things worth doing, as buttons. Drawn
+           inside the step that failed. -->
       <div class="hidden" id="b-fail">
-        <p class="font-code-md text-code-md text-error" id="b-fail-head"></p>
+        <p class="font-body-md text-body-md text-error" id="b-fail-head"></p>
         <p class="font-code-sm text-code-sm text-on-surface-variant mt-0.5" id="b-fail-why"></p>
         <div class="flex flex-wrap items-center gap-space-sm mt-space-sm" id="b-fail-acts"></div>
         <details class="mt-space-sm">
-          <summary class="font-code-sm text-code-sm text-outline cursor-pointer">what cg said</summary>
+          <summary class="font-code-sm text-code-sm text-outline cursor-pointer">What cg said</summary>
           <div class="font-code-sm text-code-sm text-on-surface whitespace-pre-wrap mt-space-xs" id="b-error"></div>
         </details>
       </div>
-    </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop">
+      <div class="flex flex-wrap items-center gap-space-sm mt-space-lg" id="b-run-acts"></div>
 
-      <!-- left: what to restore, and what fits -->
-      <div class="flex flex-col gap-gutter-desktop">
-        <div class="p-space-lg rounded-lg bg-surface-container-low">
-          <div class="flex items-start justify-between pb-space-md">
-            <div>
-              <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Archive to restore</span>
-              <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-hint">
-                Pulled from S3 while the box builds. Nothing is selected by default.
-              </p>
-            </div>
-            <span class="font-code-sm text-code-sm text-outline whitespace-nowrap" id="b-bucket">—</span>
-          </div>
-
-          <table class="w-full font-code-sm text-code-sm">
-            <thead class="text-outline">
-              <tr class="text-left border-b border-surface-variant">
-                <th class="py-space-xs pr-space-sm font-normal w-6"></th>
-                <th class="py-space-xs pr-space-md font-normal">GAME</th>
-                <th class="py-space-xs px-space-md font-normal text-right">SIZE</th>
-                <th class="py-space-xs pl-space-md font-normal text-right">ARCHIVED</th>
-              </tr>
-            </thead>
-            <tbody id="b-games"></tbody>
-          </table>
-
-          <div class="mt-space-lg p-space-md rounded bg-surface-container" id="b-alloc">
-            <div class="flex items-center justify-between font-code-sm text-code-sm">
-              <span class="text-outline uppercase tracking-wider">NVMe allocation</span>
-              <span id="b-fit-pct" class="text-primary">0%</span>
-            </div>
-            <div class="h-1.5 rounded-full bg-surface-container-lowest mt-space-sm overflow-hidden">
-              <div class="h-full bg-primary" id="b-bar" style="width:0%"></div>
-            </div>
-            <div class="flex items-center justify-between mt-space-sm font-code-sm text-code-sm">
-              <span id="b-fit" class="text-on-surface-variant">nothing selected</span>
-              <span id="b-buffer" class="text-outline"></span>
-            </div>
-          </div>
-
-          <!-- Which machine to launch, beside the button that launches it. Every
-               option comes from `cg machines`; the renderer holds no list of its
-               own, because one typed in here goes stale the first time the region
-               gains a shape. It sat in the machine panel lower down, where a
-               narrow window put it under the fold and nobody found it. -->
-          <!-- Build says WHAT will be built and sends you elsewhere to change it.
-               The comparison table lives on Settings alone: two copies of a
-               control that writes the same three settings is the confusion this
-               replaced, in a new shape. -->
-          <div class="mt-space-lg pt-space-md border-t border-surface-variant">
-            <div class="flex flex-wrap items-center justify-between gap-space-sm">
-              <div class="min-w-0">
-                <p class="font-code-sm text-code-sm text-outline">machine</p>
-                <p class="font-code-md text-code-md text-on-surface" id="b-pick">—</p>
-              </div>
-              <button class="btn shrink-0" id="b-setup">
-                <span class="material-symbols-outlined text-[16px]" data-icon="settings">&#xe8b8;</span>Change setup
-              </button>
-            </div>
-            <p class="font-code-sm text-code-sm text-outline mt-space-xs" id="b-type-note"></p>
-            <!-- Who the box will be when it comes up. The machine is half of
-                 what a build decides; the other half is whether Steam is
-                 already signed in on it, and as whom. -->
-            <div class="mt-space-md">
-              <p class="font-code-sm text-code-sm text-outline">steam</p>
-              <p class="font-code-md text-code-md text-on-surface" id="b-login">—</p>
-              <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-login-note"></p>
-            </div>
-          </div>
-
-          <p class="font-code-sm text-code-sm text-tertiary mt-space-md" id="b-session" hidden></p>
-          <div class="flex items-center justify-between gap-space-md mt-space-lg">
-            <div class="font-code-sm text-code-sm text-on-surface-variant" id="b-chip">—</div>
-            <div class="flex items-center gap-space-sm">
-              <button class="btn btn-primary" id="b-build">
-                <span class="material-symbols-outlined text-[18px]" data-icon="rocket_launch">&#xeb9b;</span>Build (10-20 min)
-              </button>
-              <button class="btn btn-primary" id="b-open" hidden>
-                <span class="material-symbols-outlined text-[18px]" data-icon="sports_esports">&#xea28;</span>Play
-              </button>
-              <button class="btn btn-danger" id="b-destroy" hidden>
-                <span class="material-symbols-outlined text-[18px]" data-icon="delete">&#xe92e;</span>Destroy
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="p-space-lg rounded-lg bg-surface-container-low">
-          <div class="flex items-center justify-between pb-space-md">
-            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">The machine</span>
-            <span class="font-code-sm text-code-sm text-outline" id="b-ready">from your quota</span>
-          </div>
-          <div class="grid grid-cols-4 gap-space-sm" id="b-spec"></div>
-        </div>
-      </div>
-
-      <!-- right: the build itself -->
-      <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col h-full min-h-[560px]">
-        <div class="flex items-center justify-between pb-space-md">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline" id="b-panel">Output</span>
-          <span class="font-code-sm text-code-sm" id="b-status">not running</span>
-        </div>
-
-
-        <div class="rounded bg-surface-container-lowest overflow-hidden flex-1 flex flex-col min-h-0">
+      <details class="mt-space-lg" id="b-logbox">
+        <summary class="font-code-sm text-code-sm text-outline cursor-pointer">Full log</summary>
+        <div class="rounded bg-surface-container-lowest mt-space-sm">
           <div class="flex items-center justify-between px-space-md py-space-xs border-b border-surface-variant">
             <span class="font-code-sm text-code-sm text-outline" id="b-log-title">build log</span>
             <label class="font-code-sm text-code-sm text-outline flex items-center gap-space-xs">
               <input type="checkbox" id="b-follow" class="accent-primary" checked>auto-scroll
             </label>
           </div>
-          <div class="font-code-sm text-code-sm flex-1 min-h-[180px] max-h-[46vh] overflow-y-auto px-space-md py-space-sm" id="b-log"></div>
+          <div class="font-code-sm text-code-sm max-h-[46vh] overflow-y-auto px-space-md py-space-sm" id="b-log"></div>
         </div>
+      </details>
+    </div>
 
-        <div class="flex items-center justify-between mt-space-md pt-space-md border-t border-surface-variant">
-          <span class="font-code-sm text-code-sm text-outline" id="b-burn">the box bills from the moment it launches</span>
-          <span class="font-code-sm text-code-sm text-outline" id="b-elapsed"></span>
+    <!-- Mode A: what will be built. -->
+    <div class="p-space-lg rounded-lg bg-surface-container-low fit-view" id="b-plan">
+      <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Machine</span>
+      <div class="flex flex-wrap items-start justify-between gap-space-md mt-space-sm">
+        <div class="min-w-0">
+          <p class="font-code-md text-code-md text-on-surface" id="b-pick">&mdash;</p>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-pick-where"></p>
+        </div>
+        <button class="btn shrink-0" id="b-setup">Change</button>
+      </div>
+      <p class="font-code-sm text-code-sm text-tertiary mt-space-xs" id="b-type-note"></p>
+
+      <div class="mt-space-xl">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Games to install</span>
+        <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-hint">
+          Downloaded from your archive while the machine starts.
+        </p>
+        <table class="w-full font-code-sm text-code-sm mt-space-sm">
+          <thead class="text-outline">
+            <tr class="text-left border-b border-surface-variant">
+              <th class="py-space-xs pr-space-sm font-normal w-6"></th>
+              <th class="py-space-xs pr-space-md font-normal">GAME</th>
+              <th class="py-space-xs px-space-md font-normal text-right">SIZE</th>
+              <th class="py-space-xs pl-space-md font-normal text-right">SAVED</th>
+            </tr>
+          </thead>
+          <tbody id="b-games"></tbody>
+        </table>
+        <div class="mt-space-md" id="b-alloc">
+          <div class="flex items-center justify-between font-code-sm text-code-sm">
+            <span id="b-fit" class="text-outline">Space on the machine</span>
+            <span id="b-fit-pct" class="text-on-surface-variant"></span>
+          </div>
+          <div class="h-1.5 rounded-full bg-surface-container mt-space-xs overflow-hidden">
+            <div class="h-full bg-primary" id="b-bar" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-space-xl">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Steam</span>
+        <p class="font-body-md text-body-md text-on-surface mt-space-sm" id="b-login">&mdash;</p>
+        <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-login-note"></p>
+      </div>
+
+      <p class="font-code-sm text-code-sm text-tertiary mt-space-md" id="b-session" hidden></p>
+      <div class="flex flex-wrap items-center justify-between gap-space-md mt-space-xl pt-space-md border-t border-surface-variant">
+        <p class="font-code-sm text-code-sm text-on-surface-variant" id="b-chip">&mdash;</p>
+        <div class="flex items-center gap-space-sm">
+          <button class="btn btn-primary" id="b-build">
+            <span class="material-symbols-outlined text-[18px]" data-icon="rocket_launch">&#xeb9b;</span>Build
+          </button>
+          <button class="btn btn-primary" id="b-open" hidden>
+            <span class="material-symbols-outlined text-[18px]" data-icon="sports_esports">&#xea28;</span>Play
+          </button>
+          <button class="btn btn-danger" id="b-destroy" hidden>
+            <span class="material-symbols-outlined text-[18px]" data-icon="delete">&#xe92e;</span>Delete machine
+          </button>
         </div>
       </div>
     </div>
@@ -805,7 +774,7 @@
     <p class="font-headline-md text-headline-md" id="confirm-title"></p>
     <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm whitespace-pre-line" id="confirm-body"></p>
     <menu class="flex justify-end gap-space-sm mt-space-lg p-0">
-      <button value="no" class="btn">Cancel</button>
+      <button value="no" class="btn" id="confirm-no">Cancel</button>
       <button value="yes" class="btn btn-primary" id="confirm-yes">Continue</button>
     </menu>
   </form>

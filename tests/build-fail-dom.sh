@@ -136,11 +136,13 @@ contains "cg's headline is the headline" "$(row 'SPOT HEAD')" "no spare g6.xlarg
 contains "it leads with the reassurance" "$(row 'SPOT WHY')"  "Nothing was launched, and nothing is billing"
 contains "  then AWS's own words"        "$(row 'SPOT WHY')"  "Insufficient capacity"
 contains "  and the code, in brackets"   "$(row 'SPOT WHY')"  "(InsufficientInstanceCapacity)"
-# The three answers, as buttons rather than as commands to type.
-contains "on demand is offered first"    "$(row 'SPOT ACTS')" "Build on demand instead"
-contains "  then another region"         "$(row 'SPOT ACTS')" "Scan all regions"
-contains "  then another machine"        "$(row 'SPOT ACTS')" "Pick another machine"
-check    "and it does what it says"      "$(row 'SPOT RAN')"  "SPOT RAN | config set GAME_SPOT 0"
+# One answer, as a button. Full price, another location and another machine
+# were all offered, and three ways out of one failure confused more than they
+# helped; the machine picker shows price and place together.
+contains "another machine is offered"    "$(row 'SPOT ACTS')" "Pick another machine"
+lacks    "  not full price"              "$(row 'SPOT ACTS')" "Pay full price"
+lacks    "  nor another location"        "$(row 'SPOT ACTS')" "Try another location"
+lacks    "and choosing changes no setting by itself" "$(row 'SPOT RAN')" "config set"
 # cg said more than three buttons can, and it is kept.
 contains "cg's full text is kept"        "$(row 'SPOT KEPT')" "true"
 
