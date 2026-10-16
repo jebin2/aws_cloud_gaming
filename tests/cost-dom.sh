@@ -83,6 +83,15 @@ cat > "$T/r/probe.js" <<'PROBE'
                      storage: { billed_usd_month: 4.02, known_usd_month: 4.0, unknown_usd_month: 0.02 },
                      standby: { usd_month: 8.56, archive_usd_month: 4.0, volumes_usd_month: 4.56, snapshots_usd_month: 0 } }));
     read('KNOWN');
+    // The games cg found in another place explain the storage: the page names
+    // them instead of calling it a mystery, and does not ask AWS again.
+    paintCost(COST({}));
+    window.__ran = [];
+    paintElsewhere({ error: null, places: [{ bucket: 'cg-library-old', region: 'ap-south-2', error: null,
+      bytes: 174813455930, games_bytes: 174813206488, usd_month: 4.07,
+      games: [{ name: 'Diablo IV', bytes: 174813206488 }], login: true }] });
+    read('AWAY');
+    out.push('AWAY RAN | ' + window.__ran.length);
   } catch (e) { out.push('THREW | ' + e.message + ' ' + e.stack); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -141,6 +150,12 @@ contains "  and standby is what cg knows" "$(row 'KNOWN c-standby')" "₹813 a m
 contains "  saved games with their size" "$(row 'KNOWN c-bills')" "Saved games160.2 GB · ₹380 a month"
 contains "  a leftover disk is named"    "$(row 'KNOWN c-bills')" "Leftover disks50 GB · ₹433 a month"
 contains "no budget in AWS is said, in red" "$(row 'KNOWN c-cap-note')" "No spending alert exists in AWS"
+
+echo "3b. storage explained by games in another place"
+contains "they are named in the list"    "$(row 'AWAY c-bills')" "Saved in ap-south-2162.8 GB · ₹386 a month - not used, see Library"
+contains "  and counted in standby"      "$(row 'AWAY c-standby')" "₹386 a month"
+contains "  so nothing is a mystery"     "$(row 'AWAY UNKNOWN')" "hidden"
+check    "  and AWS was not asked again" "$(row 'AWAY RAN')" "AWAY RAN | 0"
 
 echo "4. free streaming"
 contains "used of free"                  "$(row 'REAL c-egress')" "0.4 of 100 GB used this month"

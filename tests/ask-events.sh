@@ -81,7 +81,7 @@ done
 check "and these are all of them" \
       "$(grep -oE 'cg_ask_typed [a-z-]+ "type [A-Z-]+' cg \
          | sed -E 's/cg_ask_typed ([a-z-]+) "type ([A-Z-]+)/\1=\2/' | sort | tr '\n' ' ')" \
-      "clean-orphans=CLEAN delete-volume=DELETE destroy-all=DESTROY-ALL forget-game=FORGET forget-login=FORGET "
+      "clean-orphans=CLEAN delete-volume=DELETE destroy-all=DESTROY-ALL forget-game=FORGET forget-login=FORGET move-game=MOVE "
 check "the session-end prompt asks"  "$(grep -c 'cg_ask session-end' lib/game)" "1"
 
 echo "7. the settings prompts, driven"

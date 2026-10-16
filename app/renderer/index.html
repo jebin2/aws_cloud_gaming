@@ -27,9 +27,8 @@
       <a class="nav-item" data-view="library" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="stadia_controller">&#xf135;</span><span>Library</span></a>
       <a class="nav-item" data-view="guards" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="shield">&#xe9e0;</span><span>Guards</span></a>
       <a class="nav-item" data-view="cost" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="attach_money">&#xe227;</span><span>Cost</span></a>
-      <a class="nav-item" data-view="deps" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="build_circle">&#xef48;</span><span>Dependencies</span></a>
-      <a class="nav-item" data-view="settings" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="settings">&#xe8b8;</span><span>Settings</span></a>
       <a class="nav-item" data-view="logs" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="terminal">&#xeb8e;</span><span>Logs</span></a>
+      <a class="nav-item" data-view="settings" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="settings">&#xe8b8;</span><span>Settings</span></a>
     </nav>
   </div>
   <div class="p-space-md border-t border-surface-variant bg-surface-container-lowest">
@@ -42,21 +41,6 @@
 
 <div class="shell pl-60">
 <main class="pt-12 min-h-screen bg-surface px-margin-desktop py-space-lg w-full">
-
-  <!-- Something cg could not read at all. Not a screen's problem: every screen's. -->
-  <div class="mb-space-lg p-space-md rounded-lg border border-error/50 bg-error/5" id="banner" hidden>
-    <div class="flex items-start justify-between gap-space-md">
-      <div class="min-w-0 flex-1">
-        <p class="font-code-md text-code-md text-error" id="banner-title">—</p>
-        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="banner-body"></p>
-      </div>
-      <!-- The banner is where you are told, so it is where the fix lives.
-           It used to name two ways to fix this and neither worked from here. -->
-      <button id="banner-fix" class="btn shrink-0" hidden>
-        <span class="material-symbols-outlined text-[16px]" data-icon="person">&#xe7fd;</span><span id="banner-fix-label">Set AWS key</span>
-      </button>
-    </div>
-  </div>
 
   <div id="viewbar" class="sticky top-12 z-30 -mx-margin-desktop px-margin-desktop pt-space-xs
               bg-surface border-b border-surface-variant/40
@@ -321,7 +305,13 @@
 
       <div class="p-space-lg rounded-lg bg-surface-container-low">
         <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Steam</span>
-        <p class="font-body-md text-body-md text-on-surface mt-space-sm" id="b-login">&mdash;</p>
+        <div class="flex items-center justify-between gap-space-md mt-space-sm">
+          <p class="font-body-md text-body-md text-on-surface" id="b-login">&mdash;</p>
+          <!-- Whether the next machine restores the saved login or asks: decided
+               here, where the build is, not on a settings page. -->
+          <select id="b-login-choice" hidden
+                  class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-sm text-code-sm text-on-surface"></select>
+        </div>
         <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-login-note"></p>
       </div>
 
@@ -330,36 +320,34 @@
 
   <!-- Library -->
   <section data-view="library" hidden>
-    <!-- Three cards: what is saved and what it costs, the games one by one,
-         and the Steam login - a different thing, with its own Forget. Every
-         action here stays here: its progress is the popup, not the Build page. -->
+    <!-- Two cards: every saved game wherever it is kept, and the Steam login.
+         Each row says where the game is, what it costs and when it is deleted,
+         and every action stays here: its progress is the popup. -->
     <div class="fit-view flex flex-col gap-space-md">
       <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Your saved games</span>
-        <p class="font-headline-md text-headline-md mt-space-sm" id="lib-total">&mdash;</p>
-        <p class="font-code-sm text-code-sm text-on-surface-variant mt-0.5">
-          <span id="lib-cost">&mdash;</span><span id="lib-count"></span>
-        </p>
-        <p class="font-code-sm text-code-sm mt-space-xs" id="lib-keep"></p>
+        <div class="flex items-center justify-between gap-space-md">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Games</span>
+          <label class="flex items-center gap-space-sm font-code-sm text-code-sm text-outline" id="lib-keepfor-row" hidden>
+            Keep for
+            <select id="lib-keepfor" class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-sm text-code-sm text-on-surface"></select>
+          </label>
+        </div>
         <p class="font-code-sm text-code-sm text-error mt-space-sm" id="lib-error" hidden></p>
-      </div>
-
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Games</span>
         <table class="w-full font-code-sm text-code-sm mt-space-sm">
           <thead class="text-outline">
             <tr class="text-left border-b border-surface-variant">
               <th class="py-space-xs pr-space-md font-normal">GAME</th>
+              <th class="py-space-xs px-space-md font-normal">PLACE</th>
               <th class="py-space-xs px-space-md font-normal text-right">SIZE</th>
-              <th class="py-space-xs px-space-md font-normal text-right">COSTS</th>
-              <th class="py-space-xs px-space-md font-normal text-right">SAVED</th>
+              <th class="py-space-xs px-space-md font-normal text-right">PER MONTH</th>
+              <th class="py-space-xs px-space-md font-normal text-right">DELETED ON</th>
               <th class="py-space-xs pl-space-md font-normal w-0"></th>
             </tr>
           </thead>
-          <tbody id="lib-rows"><tr><td class="py-space-sm text-outline" colspan="5">reading&hellip;</td></tr></tbody>
+          <tbody id="lib-rows"><tr><td class="py-space-sm text-outline" colspan="6">reading&hellip;</td></tr></tbody>
           <tfoot id="lib-foot" class="border-t border-surface-variant"></tfoot>
         </table>
-        <p class="font-code-sm text-code-sm text-outline mt-space-md" id="lib-fit"></p>
+        <p class="font-code-sm text-code-sm text-outline mt-space-md" id="lib-keep"></p>
         <!-- Left behind by a save that never finished: billed, and no use. -->
         <div class="flex items-center justify-between gap-space-md mt-space-md pt-space-md border-t border-surface-variant" id="lib-orphan-box" hidden>
           <p class="font-code-sm text-code-sm text-tertiary" id="lib-orphans"></p>
@@ -367,18 +355,25 @@
         </div>
       </div>
 
-      <!-- The saved Steam login: a ~22 KB file, separate from the games and from
-           any machine, and the reason a new machine comes up signed in. -->
+      <!-- The saved Steam login, a ~22 KB file per place: the one beside the
+           machine is what a new machine signs in as; a copy a region move
+           left elsewhere is used by nothing. A row each, like the games. -->
       <div class="p-space-lg rounded-lg bg-surface-container-low" id="lib-login-box">
         <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Steam login</span>
-        <div class="flex items-start justify-between gap-space-md mt-space-sm">
-          <div class="min-w-0">
-            <p class="font-body-md text-body-md text-on-surface" id="lib-login-head">&mdash;</p>
-            <p class="font-code-sm text-code-sm text-outline mt-0.5" id="lib-login-sub"></p>
-            <div class="font-code-sm text-code-sm text-outline mt-space-xs" id="lib-login-accounts"></div>
-          </div>
-          <button class="btn btn-danger shrink-0" id="lib-login-forget" hidden>Forget</button>
-        </div>
+        <table class="w-full font-code-sm text-code-sm mt-space-sm">
+          <thead class="text-outline">
+            <tr class="text-left border-b border-surface-variant">
+              <th class="py-space-xs pr-space-md font-normal">ACCOUNT</th>
+              <th class="py-space-xs px-space-md font-normal">PLACE</th>
+              <th class="py-space-xs px-space-md font-normal text-right">SIZE</th>
+              <th class="py-space-xs px-space-md font-normal text-right">SAVED</th>
+              <th class="py-space-xs px-space-md font-normal"></th>
+              <th class="py-space-xs pl-space-md font-normal w-0"></th>
+            </tr>
+          </thead>
+          <tbody id="lib-login-rows"><tr><td class="py-space-sm text-outline" colspan="6">reading&hellip;</td></tr></tbody>
+        </table>
+        <p class="font-code-sm text-code-sm text-outline mt-space-md" id="lib-login-note"></p>
       </div>
     </div>
   </section>
@@ -490,45 +485,16 @@
 
   <!-- Settings -->
   <section data-view="settings" hidden>
-    <div class="flex flex-wrap items-center gap-space-sm mb-space-lg font-code-sm text-code-sm">
-      <span class="pill" id="s-count">—</span>
-      <span class="text-outline">
-        Editing one here runs <span class="text-secondary">cg config set</span>, which checks it and writes
-        <span class="text-secondary">.env</span>. The app never touches the file itself.
-      </span>
-      <span class="text-outline ml-auto" id="s-age"></span>
-    </div>
+    <!-- What only this page sets: how the stream looks, the machine's disk, and
+         the two accounts. Everything else has one home elsewhere - the machine
+         on Build, the guards and alerts on Guards, how long games are kept on
+         Library - and is not repeated here. -->
+    <div class="flex flex-col gap-space-md" id="s-groups"></div>
 
-    <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop" id="s-machine-card">
-      <div class="flex flex-wrap items-baseline justify-between gap-space-md pb-space-md">
-        <div>
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Machine</span>
-          <!-- One table, not three dropdowns. Region, instance type and purchase
-               model are not three decisions - they are one, and the whole point
-               is comparing the combinations. Picking a PRICE picks all three. -->
-          <p class="font-code-sm text-code-sm text-outline mt-0.5">
-            Pick a price: that chooses the region, the machine and spot or on demand together.
-          </p>
-        </div>
-        <div class="flex items-center gap-space-sm shrink-0">
-          <span class="font-code-sm text-code-sm text-outline" id="s-sweep-age"></span>
-          <button class="btn shrink-0" id="s-sweep">
-            <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Scan all regions
-          </button>
-        </div>
-      </div>
-      <div class="overflow-x-auto"><table class="chooser" id="s-chooser"></table></div>
-      <!-- Why a price is greyed out, said once here instead of as a sentence in
-           every cell - half a column of repeated "no quota" read as broken. -->
-      <div class="chooser-legend" id="s-chooser-legend"></div>
-      <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="s-type-note"></p>
-    </div>
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-gutter-desktop" id="s-groups"></div>
-
-    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop" id="s-creds-card">
+    <div class="p-space-lg rounded-lg bg-surface-container-low mt-space-md" id="s-creds-card">
       <div class="flex items-start justify-between gap-space-md">
         <div class="min-w-0 flex-1">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">AWS credentials</span>
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Amazon</span>
           <p class="font-code-sm text-code-sm text-outline mt-0.5">
             The one thing cg cannot install for you. Saved to ~/.aws/credentials, never to .env.
           </p>
@@ -541,7 +507,7 @@
       </div>
     </div>
 
-    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop" id="s-tskey-card">
+    <div class="p-space-lg rounded-lg bg-surface-container-low mt-space-md" id="s-tskey-card">
       <div class="flex items-start justify-between gap-space-md">
         <div class="min-w-0 flex-1">
           <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Tailscale</span>
@@ -567,60 +533,6 @@
           <button id="tskey-authkey" class="btn" hidden>Set auth key</button>
         </div>
       </div>
-    </div>
-
-    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop">
-      <div class="flex items-center justify-between gap-space-md">
-        <div>
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Preflight</span>
-          <p class="font-code-sm text-code-sm text-outline mt-0.5">
-            Checks every prerequisite - account, quota, key pair, laptop tools - and creates nothing.
-          </p>
-        </div>
-        <button id="check" class="btn shrink-0">
-          <span class="material-symbols-outlined text-[16px]" data-icon="check_circle">&#xf0be;</span>Run check
-        </button>
-      </div>
-      <pre class="font-code-sm text-code-sm whitespace-pre-wrap mt-space-md max-h-[40vh] overflow-auto text-on-surface-variant" id="s-check" hidden></pre>
-    </div>
-  </section>
-
-  <!-- Dependencies: what this laptop needs before cg can do anything -->
-  <section data-view="deps" hidden>
-    <div class="flex flex-wrap items-center gap-space-sm mb-space-lg font-code-sm text-code-sm">
-      <span class="pill" id="d-ready">—</span>
-      <span class="text-outline" id="d-pm"></span>
-      <span class="text-outline ml-auto" id="age-deps"></span>
-    </div>
-
-    <div class="p-space-lg rounded-lg bg-surface-container-low">
-      <div class="flex items-start justify-between gap-space-md pb-space-md">
-        <div class="min-w-0 flex-1">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">What cg needs here</span>
-          <p class="font-code-sm text-code-sm text-outline mt-0.5">
-            Six tools, and cg needs all of them. Installing uses your package manager.
-          </p>
-        </div>
-        <button id="d-install-all" class="btn btn-primary shrink-0" hidden>
-          <span class="material-symbols-outlined text-[16px]" data-icon="build_circle">&#xef48;</span><span id="d-install-all-label">Install what is missing</span>
-        </button>
-      </div>
-      <!-- How this window would become root, said out loud: a button that
-           cannot work is worse than no button. -->
-      <p class="font-code-sm text-code-sm text-outline pb-space-sm" id="d-root"></p>
-      <div class="overflow-x-auto"><table class="chooser" id="d-rows"></table></div>
-    </div>
-
-    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop">
-      <div class="pb-space-md">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Keys and sign-ins</span>
-        <p class="font-code-sm text-code-sm text-outline mt-0.5">
-          Installed tools are not enough: these are the two things only you can give cg.
-          Each one is set in Settings, so there is exactly one place it lives - and every row
-          here leads to that place.
-        </p>
-      </div>
-      <div id="d-keys"></div>
     </div>
 
   </section>
@@ -824,6 +736,39 @@
      undo, which is why it is a dialog and not a toggle in a table. -->
 <!-- Where it runs. A popup rather than a panel, because changing it later is
      this same question asked again - and the measuring behind it is free. -->
+<!-- Choose a machine: the one place region, machine and spot or on demand are
+     picked, together. Opened from Build, the Dashboard and a failed launch, so
+     the choice is made where it is needed rather than three screens away. -->
+<dialog id="machdlg" class="rounded-lg bg-surface-container-low text-on-surface border border-surface-variant p-space-lg w-[min(64rem,92vw)]">
+    <div id="s-machine-card">
+      <div class="flex flex-wrap items-baseline justify-between gap-space-md pb-space-md">
+        <div>
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Machine</span>
+          <!-- One table, not three dropdowns. Region, instance type and purchase
+               model are not three decisions - they are one, and the whole point
+               is comparing the combinations. Picking a PRICE picks all three. -->
+          <p class="font-code-sm text-code-sm text-outline mt-0.5">
+            Pick a price: that chooses the region, the machine and spot or on demand together.
+          </p>
+        </div>
+        <div class="flex items-center gap-space-sm shrink-0">
+          <span class="font-code-sm text-code-sm text-outline" id="s-sweep-age"></span>
+          <button class="btn shrink-0" id="s-sweep">
+            <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Scan all regions
+          </button>
+        </div>
+      </div>
+      <div class="overflow-x-auto"><table class="chooser" id="s-chooser"></table></div>
+      <!-- Why a price is greyed out, said once here instead of as a sentence in
+           every cell - half a column of repeated "no quota" read as broken. -->
+      <div class="chooser-legend" id="s-chooser-legend"></div>
+      <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="s-type-note"></p>
+    </div>
+  <div class="flex justify-end mt-space-md">
+    <button class="btn" id="machdlg-close">Done</button>
+  </div>
+</dialog>
+
 <dialog id="whereto" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[560px] max-w-[48rem]">
   <p class="font-code-md text-code-md">Where should it run?</p>
   <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md" id="whereto-sub">

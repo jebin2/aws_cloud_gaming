@@ -102,8 +102,8 @@ const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
 
 // A read that failed, keyed by the read, so a later success for the same read
-// clears it. The screens show their own unknowns; this is what the pipeline and
-// the banner read to say WHY something is unknown.
+// clears it. The screens show their own unknowns; this is what the pipeline
+// reads to say WHY something is unknown.
 const readFailures = new Map();
 
 function updateHeader() {
@@ -133,7 +133,6 @@ function updateHeader() {
   $('refresh').hidden = (!NEEDS[view] && view !== 'cost') || !!mine.length;
   $('refresh').disabled = busy;                    // only a build or destroy blocks a read
   $('refresh-cost').hidden = view !== 'cost' || !$('refresh-cost').textContent;
-  $('check').disabled = busy || runningHere('check');
   // These change something, so they wait for whatever else is running.
   for (const b of ['b-build', 'b-open', 'b-destroy', 'd-open', 'd-destroy', 'd-build'])
     $(b).disabled = jobs.size > 0;
@@ -224,7 +223,9 @@ function askConfirm({ title, body, yes = 'Continue', no = 'Cancel', danger = fal
   return new Promise(resolve => {
     $('confirm-title').textContent = title;
     $('confirm-body').textContent = body;
-    $('confirm-no').textContent = no;
+    // No Cancel when there is nothing to decline - a dialog that only informs.
+    $('confirm-no').hidden = no === null;
+    $('confirm-no').textContent = no || '';
     const btn = $('confirm-yes');
     btn.textContent = yes;
     btn.className = 'btn ' + (danger ? 'btn-danger' : 'btn-primary');
@@ -374,7 +375,7 @@ function paintStatus(s) {
   paintSpec(s);
   statusNow = s;
   askPing(s);
-  paintBanner();
+  paintOnboardSoon();
   statusBudget = s.budget || null;
   // What the app may do with the box that exists. A stream can be running that
   // this window never started - closing the app does not end it - so Play asks
@@ -471,7 +472,7 @@ function paintDash() {
   let title, sub, note = '';
   if (credErr) {
     title = 'Status unknown';
-    sub = 'AWS could not be reached, so nothing below is known. The banner says why.';
+    sub = 'AWS could not be reached, so nothing below is known.';
   } else if (building) {
     title = 'Building your machine';
     sub = box && box.launched ? `Started ${uptime(box.launched)} ago · usually 10–20 minutes`
@@ -719,6 +720,13 @@ function paintSpend(d) {
 
 function paintCost(d) {
   paintSpend(d);
+  paintCostPage();
+}
+// Redrawn from the last paid answer when a free one lands - the games found in
+// other places explain storage the bill charges for - so it never asks again.
+function paintCostPage() {
+  const d = costNow;
+  if (!d) return;
   const m = d.month || {};
   // Every rate on this screen comes from cg, and one rupee rate converts all
   // of it - cg's own, so the rows add up to the total under them.
@@ -764,7 +772,7 @@ function paintCost(d) {
       + (projected ? ` · about ${Math.round(credits / projected)} months at this pace.` : '.');
 
   // ── day by day: what you played, the machine, storage, and the rest ──
-  const asked = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const asked = (costNowAt || now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   $('c-days-note').textContent = 'Days with nothing billed are left out. AWS\'s bill runs about a day behind. '
     + `Asked at ${asked}` + (inr ? ` · ₹${inr} to the dollar` : '')
     + (rate.ce_call_usd ? ` · each Refresh costs ${r(rate.ce_call_usd)}.` : '.');
@@ -800,11 +808,16 @@ function paintCost(d) {
   const standby = d.standby || {};
   const res = d.resources || {};
   const arch = d.archive || {};
+  // Games cg found in other places explain some or all of what the bill says
+  // beyond the archive in use; only what is left after them is a mystery.
   const unknown = (d.storage || {}).unknown_usd_month || 0;
+  const away = elsewherePlaces().filter(p => p.usd_month);
+  const awayUsd = away.reduce((a, p) => a + p.usd_month, 0);
+  const left = Math.max(0, unknown - awayUsd);
   // Under Rs 10 a month is requests and rounding, not something left behind.
-  const strayed = inr && unknown * inr >= 10;
+  const strayed = inr && left * inr >= 10;
   $('c-standby').textContent = standby.usd_month != null
-    ? `${r(standby.usd_month + (strayed ? unknown : 0))} a month` : '—';
+    ? `${r(standby.usd_month + awayUsd + (strayed ? left : 0))} a month` : '—';
   $('c-standby-sub').textContent = res.instance
     ? 'A machine is running now - its hourly rate is on top of this.'
     : 'What AWS bills while nothing is running.';
@@ -822,9 +835,12 @@ function paintCost(d) {
   line('Leftover disks', res.volumes_gb
     ? `${res.volumes_gb} GB · ${r(standby.volumes_usd_month)} a month` : 'none');
   if (res.snapshots_gb) line('Disk copies', `${res.snapshots_gb} GB · ${r(standby.snapshots_usd_month)} a month`);
+  for (const p of away)
+    line(`Saved in ${p.region ? placeName(p.region) : 'another place'}`,
+         `${GB(p.bytes)} · ${r(p.usd_month)} a month - not used, see Library`);
   $('c-unknown').hidden = !strayed;
   $('c-unknown').textContent = strayed
-    ? `AWS bills ${r(unknown)} a month more storage than your saved games explain. `
+    ? `AWS bills ${r(left)} a month more storage than your saved games explain. `
       + 'It is somewhere cg is not looking - most likely games left behind in an earlier region.'
     : '';
 
@@ -847,6 +863,17 @@ function paintCost(d) {
       : `The free 100 GB is used - streaming now costs ${after}.`;
   }
 }
+// Games cg saved in a region the machine is no longer built in. They bill like
+// any others; they are rows of the one Games table, with their place beside them.
+let elsewhereNow = null;
+function paintElsewhere(d) {
+  elsewhereNow = d;
+  paintLibraryPage();
+  if (costNow) paintCostPage();
+}
+// The places worth a line: anything holding something, or that could not be read.
+const elsewherePlaces = () => ((elsewhereNow && elsewhereNow.places) || []).filter(p => p.bytes || p.error);
+
 function paintLibrary(d) {
   paintPicker(d);
   paintArchiveCard(d);
@@ -862,75 +889,99 @@ let libNow = null;   // the last `cg library list`, for repainting when status l
 // where the games are kept and for how long - which come from `cg status`, so
 // this repaints when either answer lands.
 function paintLibraryPage() {
+  paintLoginTable();        // its other places arrive with the games' read
   const d = libNow;
   if (!d || !$('lib-rows')) return;
-  const s = statusNow || {};
-  const inr = inrRate();
+  const e = elsewhereNow || {};
+  // cg's own rate and place ride in these answers, so this never waits for
+  // another read - it did, and drew "another place" and "— a month".
+  const inr = d.inr_per_usd || e.inr_per_usd || inrRate();
   const r = usd => (usd == null || !isFinite(inr) ? '—' : rs(usd * inr));
+  const here = d.region || e.region || (statusNow && statusNow.region) || null;
+  const rows = $('lib-rows'), foot = $('lib-foot');
+  rows.textContent = ''; foot.textContent = '';
   $('lib-error').hidden = !d.error;
   if (d.error) {
-    $('lib-error').textContent = `Your saved games could not be read: ${d.error}`;
-    $('lib-total').textContent = 'Unknown';
-    $('lib-cost').textContent = 'This is not the same as having none.';
-    $('lib-count').textContent = '';
+    $('lib-error').textContent = `Your saved games could not be read: ${d.error}. `
+      + 'This is not the same as having none.';
     $('lib-keep').textContent = '';
-    $('lib-rows').textContent = '';
-    $('lib-foot').textContent = '';
-    $('lib-fit').textContent = '';
+    $('lib-keepfor-row').hidden = true;
     $('lib-orphan-box').hidden = true;
     return;
   }
-  const games = d.games || [];
-  const cap = d.selectable_gb || null;
-  const gb = (d.total_bytes || 0) / 1073741824;
-  $('lib-total').textContent = games.length
-    ? `${games.length} game${games.length === 1 ? '' : 's'} · ${GB(d.total_bytes)}` : 'No games saved yet';
-  $('lib-cost').textContent = games.length ? `${r(d.usd_month ?? 0)} a month` : '';
-  $('lib-count').textContent = games.length && s.region ? ` · saved in ${placeName(s.region)}` : '';
-  const days = (s.archive || {}).expiry_days;
-  $('lib-keep').textContent = !games.length ? 'A game is saved here when its machine is deleted.'
-    : days ? `Deleted after ${days} days with no machine.` : 'Kept until you delete them.';
-  $('lib-keep').className = 'font-code-sm text-code-sm mt-space-xs '
-    + (!games.length ? 'text-outline' : days ? 'text-tertiary' : 'text-primary');
+  // Every game, wherever it is kept: the machine's place first, then the rest.
+  const games = (d.games || []).map(g => ({ ...g, region: here, bucket: null }));
+  for (const p of e.places || []) {
+    if (p.error) continue;
+    for (const g of p.games || []) games.push({ ...g, region: p.region, bucket: p.bucket });
+  }
+  games.sort((a, b) => (a.bucket ? 1 : 0) - (b.bucket ? 1 : 0) || (b.bytes || 0) - (a.bytes || 0));
 
-  const rows = $('lib-rows');
-  rows.textContent = '';
+  const days = d.expiry_days ?? e.expiry_days;
+  const seen = d.last_seen || e.last_seen || null;
+  const marks = d.marks_read !== false;
   if (!games.length) {
     const tr = document.createElement('tr');
-    cell(tr, 'Nothing saved yet.', 'py-space-sm text-outline').colSpan = 5;
+    cell(tr, 'No games saved. A game is saved when its machine is deleted.', 'py-space-sm text-outline').colSpan = 6;
     rows.append(tr);
   }
   for (const g of games) {
     const tr = document.createElement('tr');
     tr.className = 'border-b border-surface-variant/40';
     cell(tr, g.name || g.installdir || g.appid, 'py-space-sm pr-space-md text-on-surface');
-    cell(tr, GB(g.bytes), 'text-right px-space-md text-on-surface-variant');
-    cell(tr, `${r(g.usd_month)} a month`, 'text-right px-space-md text-on-surface-variant');
-    cell(tr, daysAgo(g.pushed), 'text-right px-space-md text-outline');
-    const act = cell(tr, '', 'text-right pl-space-md');
-    const forget = document.createElement('button');
-    forget.className = 'btn';
-    forget.textContent = 'Forget';
-    forget.onclick = () => forgetGame(g);
-    act.append(forget);
+    cell(tr, g.region ? placeName(g.region) : '—', 'px-space-md text-on-surface-variant');
+    cell(tr, GB(g.bytes), 'text-right px-space-md text-on-surface-variant whitespace-nowrap');
+    cell(tr, r(g.usd_month), 'text-right px-space-md text-on-surface-variant');
+    cell(tr, deleteOn(g, days, seen, marks), 'text-right px-space-md text-on-surface-variant whitespace-nowrap');
+    const act = cell(tr, '', 'text-right pl-space-md whitespace-nowrap');
+    act.className += ' space-x-space-xs';
+    // A game found only by its folder has no id, and cg acts on ids.
+    if (g.appid) {
+      const btn = (label, fn) => {
+        const b = document.createElement('button');
+        b.className = 'btn'; b.textContent = label; b.onclick = fn;
+        act.append(b);
+      };
+      if (days) btn('Reset', () => resetGame(g));
+      if (g.bucket) btn('Move', () => moveGame(g, here, inr));
+      btn('Forget', () => forgetGame(g));
+    }
     rows.append(tr);
   }
-  const foot = $('lib-foot');
-  foot.textContent = '';
-  if (games.length > 1) {
+  for (const p of e.places || []) {
+    if (!p.error) continue;
     const tr = document.createElement('tr');
+    cell(tr, `What is saved in ${p.region ? placeName(p.region) : 'another place'} could not be read: ${p.error}`,
+         'py-space-sm text-error').colSpan = 6;
+    rows.append(tr);
+  }
+  if (games.length) {
+    const tr = document.createElement('tr');
+    const usd = games.reduce((a, g) => a + (g.usd_month || 0), 0);
     cell(tr, 'Total', 'py-space-sm pr-space-md text-outline');
-    cell(tr, GB(d.total_bytes), 'text-right px-space-md');
-    cell(tr, `${r(d.usd_month ?? 0)} a month`, 'text-right px-space-md');
+    cell(tr, '', '');
+    cell(tr, GB(games.reduce((a, g) => a + (g.bytes || 0), 0)), 'text-right px-space-md whitespace-nowrap');
+    cell(tr, `${r(usd)} a month`, 'text-right px-space-md whitespace-nowrap');
     cell(tr, '', ''); cell(tr, '', '');
     foot.append(tr);
   }
-  // How much a machine holds is cg's number. When it could not say, this says
-  // so - a plausible-looking 209 GB is a wrong answer that reads like a right one.
-  $('lib-fit').textContent = !games.length ? ''
-    : cap == null ? 'How much a machine holds is not known yet.'
-    : gb > cap ? `A machine holds ${cap} GB, so a build lets you pick which to download.`
-    : `All of them fit on a machine, which holds ${cap} GB.`;
+
+  // How long: one setting, chosen here and applied at once (cg library keep-for).
+  const sel = $('lib-keepfor');
+  $('lib-keepfor-row').hidden = days == null;
+  if (days != null) {
+    const opts = [7, 14, 30, 60, 0];
+    if (!opts.includes(days)) opts.splice(-1, 0, days);
+    sel.textContent = '';
+    for (const n of opts) {
+      sel.append(Object.assign(document.createElement('option'),
+        { value: String(n), textContent: n ? `${n} days` : 'Forever' }));
+    }
+    sel.value = String(days);
+  }
+  $('lib-keep').textContent = !games.length ? ''
+    : !days ? 'Kept until you forget them.'
+    : `Deleted ${days} days after a machine was last running. Reset counts one game from today.`;
 
   $('lib-orphan-box').hidden = !d.orphan_bytes;
   if (d.orphan_bytes) {
@@ -938,6 +989,43 @@ function paintLibraryPage() {
       `${(d.orphan_bytes / 1073741824).toFixed(1)} GB left over from a save that did not finish`
       + ` · ${r(d.orphan_usd_month)} a month, and no use to any game.`;
   }
+}
+
+// When the cloud watchdog deletes a game: N days after the later of the last
+// machine and the game's own Reset. A machine that exists keeps everything.
+function deleteOn(g, days, seen, marks) {
+  if (days === 0) return 'never';
+  if (days == null || !marks) return '—';
+  if (boxNow) return 'kept while a machine runs';
+  if (!seen) return '—';
+  const from = Math.max(Date.parse(seen), g.kept ? Date.parse(g.kept) : 0);
+  const when = new Date(from + days * 86400000);
+  return when <= new Date() ? 'today'
+    : when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
+// --from names the place for a game kept outside the machine's own; cg checks
+// it is one of this rig's before it touches anything.
+const fromArgs = g => (g.bucket ? ['--from', g.bucket] : []);
+
+async function resetGame(g) {
+  const name = g.name || g.appid;
+  await libraryRun(['library', 'reset', String(g.appid), ...fromArgs(g)], `Keeping ${name} from today`);
+}
+
+async function moveGame(g, here, inr) {
+  const name = g.name || g.appid;
+  const to = here ? placeName(here) : 'where your machine is built';
+  const rate = (elsewhereNow || {}).xregion_usd_gb;
+  const cost = rate && isFinite(inr) ? rs((g.bytes / 1073741824) * rate * inr) : null;
+  const ok = await askConfirm({
+    title: `Move ${name} to ${to}?`,
+    body: `${GB(g.bytes)} is copied from ${placeName(g.region)} to ${to}, checked, then deleted from ${placeName(g.region)}.\n\n`
+        + (cost ? `Costs about ${cost} once (AWS charges to copy between regions). ` : '')
+        + 'After that your builds download it free. Keeping it costs the same as now.',
+    yes: 'Move',
+  });
+  if (ok) await libraryRun(['library', 'move', String(g.appid), ...fromArgs(g)], `Moving ${name} to ${to}`, 'move-game', 'MOVE');
 }
 
 const ago = s => s == null ? '' : s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)}m ago`
@@ -959,7 +1047,7 @@ async function forgetGame(g) {
         + 'Playing it again means Steam downloads it onto a new machine.',
     yes: 'Forget', danger: true, word: 'FORGET',
   });
-  if (ok) await libraryRun(['library', 'forget', String(g.appid)], `Forgetting ${name}`, 'forget-game', 'FORGET');
+  if (ok) await libraryRun(['library', 'forget', String(g.appid), ...fromArgs(g)], `Forgetting ${name}`, 'forget-game', 'FORGET');
 }
 
 // The word typed in the app's own dialog, handed to cg when it asks for it.
@@ -976,15 +1064,31 @@ async function libraryRun(args, doing, askId, word) {
   $('refdlg-title').textContent = doing;
   $('refdlg-sub').textContent = '';
   $('refdlg-menu').hidden = true;
+  // Under the title, what cg is doing - its own steps as they arrive, each
+  // ticked when the next begins. It used to repeat the title, word for word.
   const list = $('refdlg-list');
   list.textContent = '';
-  const row = document.createElement('div');
-  row.className = 'flex items-start gap-space-sm font-body-md text-body-md';
-  row.append(Object.assign(document.createElement('span'), { className: 'spinner mt-0.5' }),
-             Object.assign(document.createElement('div'), { textContent: doing }));
-  list.append(row);
+  let current = null;
+  const step = text => {
+    if (current) current.firstChild.replaceWith(Object.assign(document.createElement('span'),
+      { className: 'w-4 text-center font-code-md text-code-md text-primary', textContent: '✓' }));
+    current = document.createElement('div');
+    current.className = 'flex items-start gap-space-sm font-body-md text-body-md';
+    current.dataset.step = text;
+    current.append(Object.assign(document.createElement('span'), { className: 'spinner mt-0.5' }),
+                   Object.assign(document.createElement('div'), { textContent: text }));
+    list.append(current);
+  };
+  step('Working…');
+  let first = true;
+  const onStep = text => {
+    const said = text.charAt(0).toUpperCase() + text.slice(1);
+    // The placeholder gives way to cg's first real step rather than being ticked.
+    if (first) { first = false; list.textContent = ''; current = null; }
+    step(said);
+  };
   if (!dlg.open) dlg.showModal();
-  const { rc, err } = await runCg(args, { wantRc: true });
+  const { rc, err } = await runCg(args, { wantRc: true, onStep });
   typedPending = null;
   if (rc === 0) return;
   const why = (err || '').trim().split('\n').filter(Boolean).slice(-2).join(' ')
@@ -1022,11 +1126,22 @@ function paintBuildLogin() {
     note.textContent = '';
     return;
   }
+  // The choice is only worth offering when there is a saved login to use.
+  const sel = $('b-login-choice');
+  sel.hidden = !loginNow.present;
+  if (loginNow.present) {
+    const acct = ((loginNow.accounts || []).find(a => a.most_recent) || (loginNow.accounts || [])[0]);
+    const name = acct ? (acct.account || acct.steamid) : 'the saved account';
+    sel.textContent = '';
+    sel.append(Object.assign(document.createElement('option'), { value: 'use', textContent: `Sign in as ${name}` }),
+               Object.assign(document.createElement('option'), { value: 'fresh', textContent: 'Ask me to sign in' }));
+    sel.value = fresh ? 'fresh' : 'use';
+  }
   if (fresh) {
-    line.textContent = 'sign in on the box';
+    line.textContent = 'sign in on the machine';
     note.textContent = loginNow.present
-      ? 'the archived login is kept, and not used - Settings > Steam sign-in'
-      : 'nothing is archived to restore - Settings > Steam sign-in';
+      ? 'the saved login is kept, and not used this time'
+      : 'nothing is saved to restore';
     return;
   }
   if (!loginNow.present) {
@@ -1046,57 +1161,76 @@ function paintBuildLogin() {
 function paintLogin(l) {
   loginNow = l === undefined ? null : l;
   paintBuildLogin();
-  const head = $('lib-login-head'), sub = $('lib-login-sub');
-  const accts = $('lib-login-accounts'), btn = $('lib-login-forget');
-  if (!head) return;
-  accts.textContent = '';
-  if (!l) {
-    head.textContent = 'Steam login';
-    sub.textContent = 'could not read it - this says nothing about whether one is saved';
-    btn.hidden = true;
-    return;
-  }
-  if (!l.present) {
-    head.textContent = 'No Steam login saved';
-    sub.textContent = 'A new machine will ask you to sign in. The login is saved by itself when a machine shuts down.';
-    btn.hidden = true;
-    return;
-  }
-  head.textContent = 'Steam login saved';
-  const kb = (l.bytes || 0) / 1024;
-  // The cost is stated and then dismissed on purpose: it is the reason NOT to
-  // treat Forget as a saving.
-  sub.textContent = `${kb.toFixed(1)} KB${l.modified ? `, saved ${daysAgo(l.modified)}` : ''}`
-    + ' · a new machine starts already signed in. Forgetting it saves nothing; it only changes which account a new machine uses.';
-  const rows = l.accounts;
-  if (rows === null || rows === undefined) {
-    accts.textContent = 'the account names could not be read';
-  } else {
-    for (const r of rows) {
-      const line = document.createElement('div');
-      const who = r.account || r.persona || r.steamid || '?';
-      line.textContent = r.most_recent
-        ? `${who} - a new machine signs in as this one`
-        : who;
-      if (r.most_recent) line.className = 'text-on-surface-variant';
-      accts.append(line);
-    }
-    if (rows.length > 1) {
-      const note = document.createElement('div');
-      note.className = 'text-tertiary mt-space-xs';
-      note.textContent = `${rows.length} accounts are saved together and come back together, `
-        + 'so a new machine gets all of them. To keep only one: sign in as it on the machine, and it is saved when the machine shuts down.';
-      accts.append(note);
-    }
-  }
-  btn.hidden = false;
-  btn.onclick = () => forgetLogin(l);
+  paintLoginTable();
 }
 
-async function forgetLogin(l) {
+// One row per saved login: the one beside the machine, which a new machine
+// signs in as, and any copy a region move left beside games elsewhere.
+function paintLoginTable() {
+  const rows = $('lib-login-rows'), note = $('lib-login-note');
+  if (!rows) return;
+  rows.textContent = '';
+  note.textContent = '';
+  const l = loginNow;
+  const here = (libNow && libNow.region) || (elsewhereNow && elsewhereNow.region)
+    || (statusNow && statusNow.region) || null;
+  const saved = iso => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toDateString() === new Date().toDateString() ? 'today'
+      : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  };
+  const who = a => (a === null || a === undefined ? 'names unreadable'
+    : a.map(r => r.account || r.persona || r.steamid || '?').join(', '));
+  const line = (detail, place, status, bucket) => {
+    const tr = document.createElement('tr');
+    tr.className = 'border-b border-surface-variant/40';
+    cell(tr, who(detail.accounts), 'py-space-sm pr-space-md text-on-surface');
+    cell(tr, place ? placeName(place) : '—', 'px-space-md text-on-surface-variant');
+    cell(tr, `${((detail.bytes || 0) / 1024).toFixed(1)} KB`, 'text-right px-space-md text-on-surface-variant whitespace-nowrap');
+    cell(tr, saved(detail.modified), 'text-right px-space-md text-on-surface-variant whitespace-nowrap');
+    cell(tr, status, 'px-space-md ' + (bucket ? 'text-outline' : 'text-primary'));
+    const act = cell(tr, '', 'text-right pl-space-md');
+    const b = document.createElement('button');
+    // The one in use is red: forgetting it is what changes the next machine.
+    b.className = bucket ? 'btn' : 'btn btn-danger';
+    b.textContent = 'Forget';
+    b.onclick = () => forgetLogin(detail, bucket, place);
+    act.append(b);
+    rows.append(tr);
+  };
+  const say = (text, cls) => {
+    const tr = document.createElement('tr');
+    cell(tr, text, 'py-space-sm ' + (cls || 'text-outline')).colSpan = 6;
+    rows.append(tr);
+  };
+  if (!l) say('Could not read the saved login - this is not the same as none.', 'text-error');
+  else if (!l.present) say('No Steam login saved. The next machine asks you to sign in once.');
+  else line(l, here, 'signs in', null);
+  for (const p of (elsewhereNow && elsewhereNow.places) || []) {
+    if (p.error || !p.login_detail || !p.login_detail.present) continue;
+    line(p.login_detail, p.region, 'not used', p.bucket);
+  }
+  if (l && l.present) {
+    const accts = l.accounts || [];
+    const next = accts.find(r => r.most_recent) || accts[0];
+    note.textContent = (next ? `A new machine signs in as ${next.account || next.persona || next.steamid}. ` : '')
+      + 'Forgetting it costs nothing and saves nothing - the next machine just asks you to sign in.'
+      + (accts.length > 1 ? ` ${accts.length} accounts are saved together and come back together; to keep `
+        + 'only one, sign in as it on the machine and it is saved when the machine shuts down.' : '');
+  }
+}
+
+async function forgetLogin(l, bucket, place) {
   const rows = l.accounts || [];
   const who = rows.length ? rows.map(r => r.account || r.steamid || '?').join(', ') : 'the saved account';
-  const ok = await askConfirm({
+  const where = place ? placeName(place) : '';
+  const ok = await askConfirm(bucket ? {
+    title: `Forget the Steam login saved in ${where}?`,
+    body: `An old copy for ${who} that no machine uses. There is no undo.\n\n`
+        + 'The login a new machine signs in as is not affected, and neither are your games.',
+    yes: 'Forget', word: 'FORGET',
+  } : {
     title: 'Forget the saved Steam login?',
     body: `This deletes the saved login for ${who}. There is no undo.\n\n`
         + 'Your games are not affected. What you lose is being signed in: the next machine '
@@ -1104,7 +1238,9 @@ async function forgetLogin(l) {
         + 'It is 22 KB, so this saves no money. Do it to change which account a new machine uses.',
     yes: 'Forget', danger: true, word: 'FORGET',
   });
-  if (ok) await libraryRun(['library', 'account', 'forget'], 'Forgetting the Steam login', 'forget-login', 'FORGET');
+  if (ok) await libraryRun(['library', 'account', 'forget', ...(bucket ? ['--from', bucket] : [])],
+                          bucket ? `Forgetting the Steam login saved in ${where}` : 'Forgetting the Steam login',
+                          'forget-login', 'FORGET');
 }
 
 function paintArchiveCard() { paintDash(); }
@@ -1202,6 +1338,7 @@ function paintGuards(d) {
     if (!r) continue;
     const row = document.createElement('div');
     row.className = 'row border-b border-surface-variant/40 last:border-b-0 items-start';
+    row.dataset.key = key;          // so anything can send you to this one row
     const left = document.createElement('div');
     const n = document.createElement('p');
     n.className = 'font-code-md text-code-md';
@@ -1239,160 +1376,36 @@ function paintGuards(d) {
 // in the window as a raw GAME_SHOUTING_KEY until someone added it here too.
 const label = r => r.label || r.key;
 
-// --- Dependencies -----------------------------------------------------------
-// The tools cg needs on this laptop. It exists because a new laptop reports
-// UNKNOWN everywhere and the reason is six lines down in a preflight report:
-// the AWS CLI is not installed, so nothing can be read, so every screen says
-// nothing. This page says which tool, what it is for, and installs it.
+// --- Tools on this laptop ---------------------------------------------------
+// What cg needs here. There is no page for it: setup lists what is missing and
+// installs it in place, and anything that goes missing later is offered as an
+// Install button where it is noticed. A page of green ticks was all that was
+// left of it once setup could do its job.
 let depsNow = null, credsNow = null, tskeyNow = null;
 function paintDeps(d) {
   paintOnboardSoon();
   depsNow = d;
-  paintKeys();
-  paintBanner();
-  const tools = d.tools || [];
-  const missing = tools.filter(x => !x.present);
-  const signedOut = d.tailscale_signed_in === false;
-
-  const ready = $('d-ready');
-  if (!missing.length && !signedOut) {
-    ready.className = 'pill pill-ok';
-    ready.textContent = 'everything cg needs is here';
-  } else {
-    ready.className = 'pill pill-bad';
-    ready.textContent = missing.length
-      ? `${missing.length} of ${tools.length} missing`
-      : 'Tailscale is not signed in';
-  }
-  $('d-pm').textContent = d.package_manager
-    ? `installs with ${d.package_manager}`
-    : 'no supported package manager - these go in by hand';
-
-  // Say whether an Install button can do anything BEFORE it is pressed.
-  $('d-root').textContent = d.root === 'sudo'
-    ? 'installing uses sudo in this terminal'
-    : d.root === 'pkexec'
-    ? 'installing asks for your password in a desktop dialog (polkit)'
-    : `installing is not possible from here: ${d.root_blocked || 'no way to become root'}`;
-
-  const canInstall = Boolean(d.package_manager && d.root);
-  $('d-install-all').hidden = !missing.length || !canInstall;
-  $('d-install-all-label').textContent = `Install ${missing.length} missing`;
-
-  const table = $('d-rows');
-  table.textContent = '';
-  const head = table.insertRow();
-  for (const h of ['TOOL', 'WHAT IT IS FOR', 'STATE', '']) {
-    const th = document.createElement('th');
-    th.textContent = h;
-    head.append(th);
-  }
-  for (const x of tools) {
-    const tr = table.insertRow();
-    tr.className = 'group';
-    tr.insertCell().textContent = x.label;
-    const why = tr.insertCell();
-    why.className = 'city whitespace-normal';
-    why.textContent = x.why || '';
-    const st = tr.insertCell();
-    st.textContent = x.present ? 'installed' : 'missing';
-    st.className = x.present ? 'city' : 'text-error';
-    const act = tr.insertCell();
-    if (!x.present) {
-      if (canInstall) {
-        const b = document.createElement('button');
-        b.className = 'btn';
-        b.textContent = 'Install';
-        b.onclick = () => installDeps([x.tool]);
-        act.append(b);
-      } else {
-        // Nothing can be pressed, so hand over the command instead.
-        act.className = 'city whitespace-normal';
-        act.textContent = x.manual || '';
-      }
-    }
-  }
+  paintOnboardSoon();
 }
 
-// The two things no package manager can install. Each row says where it stands
-// and sends you to the one place it is set - the same rule as the machine
-// chooser, which shows region and instance type here and lets you change them
-// in exactly one place.
-const signedAs = () =>
-  (tskeyNow && tskeyNow.node) ? `signed in as ${tskeyNow.node}` : 'signed in';
-
-function paintKeys() {
-  const wrap = $('d-keys');
-  if (!wrap) return;
-  const c = credsNow;
-  const rows = [
-    { name: 'AWS access key',
-      why: 'every call to AWS; without it nothing can be read',
-      // null until the read lands: "not set" would be a guess, and a wrong one
-      // on a laptop where the key is fine.
-      state: !c ? ['reading…', 'wait']
-        : !c.cli ? ['the AWS CLI is not installed', 'bad']
-        : c.valid ? [`${c.key_id || 'a key'} works`, 'ok']
-        : c.key_id ? [`${c.key_id} was rejected`, 'bad']
-        : ['not set', 'bad'],
-      to: () => goSetting($('s-creds-card')) },
-    // One row per card in Settings, and no row without somewhere to go. The
-    // sign-in used to have a row of its own here, saying "in a terminal: sudo
-    // tailscale up" with no button - a dead end next to two rows that lead
-    // somewhere, and the Tailscale card says the same thing with the token
-    // beside it.
-    { name: 'Tailscale',
-      why: 'the private network the box joins; there is no public SSH port',
-      // The sign-in comes first when it is missing: a token cannot help a
-      // laptop that is not on the tailnet.
-      state: !depsNow || !tskeyNow ? ['reading…', 'wait']
-        : depsNow.tailscale_signed_in === false
-          ? [depsNow.root ? 'not signed in - Settings has a Sign in button'
-                          : 'not signed in - in a terminal:  sudo tailscale up', 'bad']
-        : depsNow.tailscale_signed_in === null ? ['not installed', 'bad']
-        // Signed in: then the token is what is left to say, and it is CHECKED,
-        // not counted - .env cannot tell a good token from a refused one.
-        : !tskeyNow.present
-          ? [`${signedAs()} · no API token, cg goes without`, 'warn']
-        : tskeyNow.valid
-          ? [`${signedAs()} · API token works`, 'ok']
-        : tskeyNow.valid === false
-          ? [`${signedAs()} · API token rejected${tskeyNow.detail ? ' (' + tskeyNow.detail + ')' : ''}`, 'bad']
-          : [`${signedAs()} · API token set, api.tailscale.com did not answer`, 'warn'],
-      to: () => goSetting($('s-tskey-card')) },
-  ];
-  wrap.textContent = '';
-  for (const r of rows) {
-    const row = document.createElement('div');
-    row.className = 'row border-b border-surface-variant/40 items-start';
-    row.dataset.key = r.name;
-    const left = document.createElement('div');
-    left.className = 'min-w-0 flex-1';
-    const n = document.createElement('p');
-    n.className = 'font-code-md text-code-md';
-    n.textContent = r.name;
-    const why = document.createElement('p');
-    why.className = 'font-code-sm text-code-sm text-outline mt-0.5';
-    why.textContent = r.why;
-    left.append(n, why);
-    const right = document.createElement('div');
-    right.className = 'flex items-center gap-space-sm shrink-0';
-    const [text, tone] = r.state;
-    const val = document.createElement('span');
-    val.className = 'font-code-sm text-code-sm text-right max-w-[18rem] break-words '
-      + (tone === 'ok' ? 'text-on-surface-variant' : tone === 'bad' ? 'text-error' : 'text-outline');
-    val.textContent = text;
-    right.append(val);
-    if (r.to) {
-      const b = document.createElement('button');
-      b.className = 'btn';
-      b.textContent = 'Set in Settings';
-      b.onclick = r.to;
-      right.append(b);
-    }
-    row.append(left, right);
-    wrap.append(row);
+// The button for tools that are missing: Install, when this laptop can install
+// at all - and otherwise the command to run by hand, because an Install button
+// that cannot install anything is worse than none.
+function toolAction(tools) {
+  const all = (depsNow && depsNow.tools) || [];
+  const rows = tools.map(t => all.find(x => x.tool === t) || { tool: t, label: t === 'aws' ? 'the AWS CLI' : t });
+  const names = rows.map(x => x.label || x.tool).join(', ');
+  // Not read yet: offer it, and cg says so if it cannot.
+  if (!depsNow || (depsNow.package_manager && depsNow.root)) {
+    return { label: `Install ${names}`, go: () => installDeps(tools) };
   }
+  return { label: `How to install ${names}`, go: () => askConfirm({
+    title: `Install ${names} by hand`,
+    body: (depsNow && !depsNow.package_manager ? 'This laptop has no package manager cg can use. '
+           : `This window cannot become root here${depsNow && depsNow.root_blocked ? ` (${depsNow.root_blocked})` : ''}. `)
+      + 'Run this, then press Refresh:\n\n' + rows.map(x => x.manual || x.plan || x.tool).join('\n'),
+    yes: 'OK', no: null,
+  }) };
 }
 
 function installDeps(tools) {
@@ -1405,24 +1418,23 @@ function installDeps(tools) {
     fail: rc => `the install did not finish (exit ${rc})`,
   });
 }
-$('d-install-all').onclick = () => installDeps([]);
 
 // The AWS access key: three states, and the third is why this card exists at
 // all. No CLI is not a rejected key, and a rejected key is not an absent one -
 // a new laptop hits the first and used to be told the second.
 function paintCreds(c) {
   credsNow = c;
-  paintKeys();
-  paintBanner();
+  paintOnboardSoon();
   const state = $('creds-state'), detail = $('creds-detail'), btn = $('creds-set');
   btn.hidden = false;
   if (!c.cli) {
     state.textContent = 'the AWS CLI is not installed';
     state.className = 'font-code-md text-code-md text-error mt-space-sm';
-    detail.textContent = 'Nothing can be read from AWS until it is. The Dependencies page '
-      + 'installs it; then this card can take a key.';
-    btn.textContent = 'Open Dependencies';
-    btn.onclick = () => goView('deps');
+    detail.textContent = 'Nothing can be read from AWS until it is. Install it, '
+      + 'then this card can take a key.';
+    const act = toolAction(['aws']);
+    btn.textContent = act.label;
+    btn.onclick = act.go;
     return;
   }
   btn.textContent = 'Set access key';
@@ -1450,9 +1462,8 @@ function paintCreds(c) {
 function paintTskey(ts) {
   paintOnboardSoon();
   tskeyNow = ts;
-  paintKeys();
   paintDash();
-  paintBanner();
+  paintOnboardSoon();
   const state = $('tskey-state'), detail = $('tskey-detail'), btn = $('tskey-set');
   const canRootNow = Boolean(depsNow && depsNow.root);
   const signed = ts.signed_in === true ? `signed in${ts.node ? ' as ' + ts.node : ''}`
@@ -1944,7 +1955,7 @@ function optinBlocker(code) {
     + `  on demand  ${q.ondemand_vcpu ?? '?'} vCPU\n`
     + `  spot       ${q.spot_vcpu ?? '?'} vCPU\n`
     + 'A region starts at 0 and the opt-in carries nothing across, so this needs\n'
-    + 'its own request - "Ask AWS for GPU quota" on Settings, which is free.';
+    + 'its own request - "Ask AWS for GPU quota" under Choose a machine, which is free.';
 }
 
 function optinRender() {
@@ -2228,68 +2239,67 @@ function settingValue(r) {
   return 'not set';
 }
 
-// Settings, grouped the way the rig is actually thought about: what the box is,
-// what stops it costing money, how the stream looks, and who gets told. The
-// order and the groups are the app's; every row, rule and value is cg's.
-// The cards, in order, and the sentence under each heading. WHICH settings land
-// on which card is cg's answer - every row carries its own `group` - and this
-// is the layout around them.
-const GROUP_NOTE = {
-  'The box': 'Applies at the next build. A disk cannot be shrunk later.',
-  'The guards': 'What the watchdogs wait for, and what the archive costs you to keep.',
-  'The stream': 'Passed to Moonlight as flags, so your saved settings stay untouched.',
-  'Notifications': 'Where cg reaches you.',
-};
-const GROUP_ORDER = ['The box', 'The guards', 'The stream', 'Notifications'];
-
+// Settings: only what this page sets (SETTINGS_CARDS). Every rule and value is
+// cg's; the names and the cards are the app's.
 function paintConfig(rows) {
   paintOnboardSoon();
   config = rows;
-  paintKeys();
   paintBuildLogin();
   if (watcher) paintGuards(watcher);
   const wrap = $('s-groups');
+  if (!wrap) return;
   wrap.textContent = '';
-  const set = rows.filter(r => r.is_set).length;
-  $('s-count').textContent = `${set} of ${rows.length} set`;
-  $('s-age').textContent = new Date().toLocaleTimeString();
-
-  const seen = new Set();
-  // Built from what cg said. A setting with no group has a card of its own and
-  // is deliberately absent from this list; one in a group this file has never
-  // heard of still gets a card, because cg knowing about it is what matters.
-  const byGroup = new Map();
-  for (const r of rows) {
-    if (!r.group) continue;
-    if (!byGroup.has(r.group)) byGroup.set(r.group, []);
-    byGroup.get(r.group).push(r.key);
-  }
-  const groups = [];
-  for (const name of GROUP_ORDER) {
-    if (byGroup.has(name)) groups.push([name, GROUP_NOTE[name] || '', byGroup.get(name)]);
-  }
-  for (const [name, keys] of byGroup) {
-    if (!GROUP_ORDER.includes(name)) groups.push([name, GROUP_NOTE[name] || '', keys]);
-  }
-
-  for (const [title, note, keys] of groups) {
+  for (const [title, note, keys] of SETTINGS_CARDS) {
     const present = keys.map(k => rows.find(r => r.key === k)).filter(Boolean);
     if (!present.length) continue;
     const card = document.createElement('div');
     card.className = 'p-space-lg rounded-lg bg-surface-container-low';
     const head = document.createElement('div');
-    head.className = 'pb-space-md';
+    head.className = 'pb-space-sm';
     const h = document.createElement('span');
     h.className = 'font-label-caps text-label-caps uppercase tracking-wider text-outline';
     h.textContent = title;
-    const p = document.createElement('p');
-    p.className = 'font-code-sm text-code-sm text-outline mt-0.5';
-    p.textContent = note;
-    head.append(h, p);
+    head.append(h);
+    if (note) head.append(Object.assign(document.createElement('p'),
+      { className: 'font-code-sm text-code-sm text-outline mt-0.5', textContent: note }));
     card.append(head);
-    for (const r of present) { seen.add(r.key); card.append(settingRow(r)); }
+    for (const r of present) card.append(settingRow(r));
     wrap.append(card);
   }
+}
+
+// What only Settings sets. The rest of cg's settings each have one home on the
+// page they are about - the machine on Build, the guards and alerts on Guards,
+// how long games are kept on Library - and three copies of one setting is how
+// this page used to read.
+const SETTINGS_CARDS = [
+  ['Stream', 'Passed to Moonlight when you play, so its own saved settings stay as they are.',
+   ['GAME_RES', 'GAME_FPS', 'GAME_BITRATE_KBPS']],
+  ['Machine disk', '', ['GAME_DISK_GB']],
+];
+// The names a person uses; cg's own labels are for the terminal.
+const PLAIN = { GAME_RES: 'Resolution', GAME_FPS: 'Frame rate', GAME_BITRATE_KBPS: 'Quality',
+                GAME_DISK_GB: 'System disk' };
+const PLAIN_NOTE = {
+  GAME_RES: 'e.g. 1920x1080. Empty leaves Moonlight to decide.',
+  GAME_DISK_GB: 'Applies at the next build, and cannot be shrunk later.',
+};
+// The value, said the way the row means it.
+function plainValue(r) {
+  const v = r.value != null ? r.value : r.default;
+  if (r.key === 'GAME_RES') return v || "Moonlight's own";
+  if (r.key === 'GAME_FPS') return v ? `${v} fps` : '—';
+  if (r.key === 'GAME_DISK_GB') return v ? `${v} GB` : '—';
+  if (r.key === 'GAME_BITRATE_KBPS') {
+    if (!v) return '—';
+    const gbHour = (Number(v) * 3600) / 8 / 1e6;
+    const rate = (statusNow && statusNow.rates) || {};
+    const inr = inrRate();
+    const after = rate.egress_gb && isFinite(inr) ? `, then ${rs(gbHour * rate.egress_gb * inr)} an hour` : '';
+    return `${(Number(v) / 1000).toFixed(0)} Mbps · about ${gbHour.toFixed(1)} GB an hour`
+      + (rate.egress_free_gb ? ` · the first ${rate.egress_free_gb} GB a month free${after}` : '');
+  }
+  return settingValue(r);
 }
 
 // The three settings the chooser table owns. They are one decision, so they
@@ -2306,18 +2316,18 @@ function settingRow(r) {
   left.className = 'min-w-0 flex-1';
   const name = document.createElement('p');
   name.className = 'font-code-md text-code-md';
-  name.textContent = label(r);
+  name.textContent = PLAIN[r.key] || label(r);
   const note = document.createElement('p');
   note.className = 'font-code-sm text-code-sm text-outline mt-0.5';
-  note.textContent = r.note;
+  note.textContent = PLAIN[r.key] ? (PLAIN_NOTE[r.key] || '') : r.note;
   left.append(name, note);
 
   const right = document.createElement('div');
   right.className = 'flex items-center gap-space-sm shrink-0';
   const val = document.createElement('span');
-  val.className = 'font-code-md text-code-md text-right max-w-[13rem] break-words '
+  val.className = 'font-code-md text-code-md text-right max-w-[22rem] break-words '
     + (r.is_set ? 'text-on-surface-variant' : 'text-outline');
-  val.textContent = settingValue(r);
+  val.textContent = plainValue(r);
 
   // Region, machine and purchase model are chosen in the table above, together.
   // Editing them one at a time is what made this confusing: three controls for
@@ -2423,19 +2433,16 @@ function editSetting(r, row) {
     // cg's answer goes where the row is: Settings has its panel for it, and
     // anywhere else it goes under the row - a refusal sent to another page
     // read as a save that did nothing.
-    const here = view === 'settings';
-    let reply = here ? null : row.querySelector('.edit-reply');
-    if (!here && !reply) {
+    let reply = row.querySelector('.edit-reply');
+    if (!reply) {
       reply = document.createElement('pre');
       reply.id = 'edit-reply';
       reply.className = 'edit-reply font-code-sm text-code-sm whitespace-pre-wrap text-error mt-space-xs';
       row.firstElementChild.append(reply);
     }
-    if (reply) reply.textContent = '';
-    const { rc } = await runCg(['config', 'set', r.key, value],
-                               { collect: here ? 's-check' : 'edit-reply', wantRc: true });
-    if (here) $('s-check').hidden = false;
-    if (rc !== 0 && !here) { save.disabled = false; input.focus(); return; }
+    reply.textContent = '';
+    const { rc } = await runCg(['config', 'set', r.key, value], { collect: 'edit-reply', wantRc: true });
+    if (rc !== 0) { save.disabled = false; input.focus(); return; }
     // refresh() re-reads config, machines AND regions for this screen, so a new
     // region repaints the Build picker too - different regions rent different
     // machines, and the type in force may not exist in the one just chosen.
@@ -2571,6 +2578,12 @@ let sweepNow = null;
 // A scan in flight. The table shows one region until it lands, and saying why
 // is the difference between "still working" and "the other regions are gone".
 let sweeping = false;
+// A picked price being saved: three settings written, then read back.
+let choosing = false;
+// While either runs, the chooser is locked - nothing in it can be picked,
+// pressed or closed until the answer is in, or a choice could land on a table
+// that is about to change under it.
+const machBusy = () => sweeping || choosing;
 let sweepAnswered = false;
 function paintSweep(d) { sweepNow = d; sweepAnswered = true; paintChooser(); paintOnboardSoon(); paintDash(); paintLibraryPage(); }
 
@@ -2688,7 +2701,7 @@ function priceCell(tr, mount, row, spot, inr, cur) {
   radio.type = 'radio';
   radio.name = mount.name;
   radio.value = `${row.region}|${row.type}|${spot ? '1' : '0'}`;
-  radio.disabled = !usable;
+  radio.disabled = !usable || machBusy();
   radio.checked = row.region === cur.region && row.type === cur.type && spot === cur.spot;
   if (radio.checked) label.classList.add('on');
   radio.onchange = () => { if (radio.checked) chooseMachine(row, spot); };
@@ -2831,6 +2844,16 @@ function paintChooser() {
     const legend = $(mount.legend);
     if (legend) {
       legend.textContent = '';
+      // Nothing at all fits the quota: asking for more is the way on, and it was
+      // offered only beside a greyed-out price - so an empty table, where it is
+      // needed most, had no button.
+      if (!rows.length && machinesAnswered && !(machinesNow && machinesNow.error)) {
+        const b = document.createElement('button');
+        b.className = 'btn mt-space-xs';
+        b.textContent = 'Ask AWS for GPU quota';
+        b.onclick = () => openQuota(null, machinesNow ? machinesNow.region : undefined);
+        legend.append(b);
+      }
       // Why the table is short. Rows that no quota can launch are left out -
       // picking one would only fail at launch - but a region offering sixteen
       // machines and showing two looks broken without a word about it.
@@ -2905,6 +2928,53 @@ function paintChooser() {
       ? `scanned ${ago(sweepNow.age_seconds)}` : '';
   }
   paintBuildPick(rows, cur);
+  lockMachines();
+}
+
+// What the chooser is waiting for, said in a popup over it - the same one
+// Refresh uses: a backdrop over everything, Esc does nothing, it closes itself
+// when done and stays with the reason and a Close when not. Without it the
+// table under a scan looked live, and Esc closed the chooser mid-scan.
+function busyPopup(title, sub, step) {
+  const dlg = $('refdlg');
+  $('refdlg-title').textContent = title;
+  $('refdlg-sub').textContent = sub;
+  $('refdlg-menu').hidden = true;
+  const list = $('refdlg-list');
+  list.textContent = '';
+  const row = document.createElement('div');
+  row.className = 'flex items-start gap-space-sm font-body-md text-body-md';
+  row.dataset.step = step;
+  row.append(Object.assign(document.createElement('span'), { className: 'spinner mt-0.5' }),
+             Object.assign(document.createElement('div'), { textContent: step }));
+  list.append(row);
+  if (!dlg.open) dlg.showModal();
+  return {
+    done() { dlg.close(); },
+    fail(why) {
+      $('refdlg-title').textContent = `${title} - not done`;
+      list.textContent = '';
+      const bad = document.createElement('div');
+      bad.className = 'flex items-start gap-space-sm font-body-md text-body-md';
+      bad.dataset.state = 'failed';
+      bad.append(Object.assign(document.createElement('span'), { className: 'w-4 text-center text-error', textContent: '✗' }),
+                 Object.assign(document.createElement('div'), { className: 'font-code-sm text-code-sm text-on-surface-variant break-words', textContent: why }));
+      list.append(bad);
+      $('refdlg-menu').hidden = false;
+      $('refdlg-close').focus();
+    },
+  };
+}
+
+// Every button in the popup, the legend's included - they are redrawn each
+// paint, so this runs after it.
+function lockMachines() {
+  const dlg = $('machdlg');
+  if (!dlg) return;
+  const busy = machBusy();
+  for (const b of dlg.querySelectorAll('button')) b.disabled = busy;
+  $('s-chooser').classList.toggle('busy', busy);
+  $('machdlg-close').textContent = choosing ? 'Saving…' : 'Done';
 }
 
 // Build shows the one line that matters: what is about to be built, and what it
@@ -3457,7 +3527,7 @@ const FAIL_ACTS = {
   // offered here, and three ways out of one failure was more confusing than
   // helpful: the machine picker shows price and place together, so it is the
   // one choice. Try again sits beside it, for capacity that comes back.
-  InsufficientInstanceCapacity: () => [['Pick another machine', () => goSetting($('s-machine-card'))]],
+  InsufficientInstanceCapacity: () => [['Pick another machine', () => openMachines()]],
   SpotMaxPriceTooLow: (spot) => FAIL_ACTS.InsufficientInstanceCapacity(spot),
   // Try again is already beside the step; nothing more to offer.
   MaxSpotInstanceCountExceeded: () => [],
@@ -3466,7 +3536,9 @@ const FAIL_ACTS = {
   'InvalidKeyPair.NotFound': () => [
     ['Run the preflight fix', () => runCg(['check', '--fix'])],
   ],
-  OptInRequired: () => [['Open Dependencies', () => goView('deps')]],
+  // The region is not switched on for this account: another location is the
+  // answer, and it is picked where the machine is.
+  OptInRequired: () => [['Choose another location', () => openMachines()]],
   AuthFailure: () => [['Connect Amazon again', () => openAwsKey()]],
   UnauthorizedOperation: () => [['Connect Amazon again', () => openAwsKey()]],
 };
@@ -3586,6 +3658,7 @@ window.cg.onEvent(({ id, event }) => {
         buildFail(`cg ${job.cmd.join(' ')} exited ${event.rc} without saying why - the log above is all there is.`);
     }
   }
+  if (event.t === 'step' && job.onStep) job.onStep(event.text);
   if (event.t === 'ask') {
     // The key dialog asked already: cg's two questions are answered from what
     // is in it, rather than putting two more modals on top of the one the
@@ -3634,7 +3707,7 @@ window.cg.onEvent(({ id, event }) => {
         const paint = { cost: paintCost, library: paintLibrary, guards: paintGuards,
                         config: paintConfig, status: paintStatus, machines: paintMachines,
                         sweep: paintSweep, creds: paintCreds, deps: paintDeps,
-                        tskey: paintTskey, ping: paintPing }[job.json];
+                        tskey: paintTskey, ping: paintPing, elsewhere: paintElsewhere }[job.json];
         if (!paint) throw new Error(`no painter for ${job.json}`);
         paint(data);
       } catch (err) {
@@ -3689,7 +3762,7 @@ window.cg.onEvent(({ id, event }) => {
 // `group` names a run by what started it rather than by what it is: one click on
 // Refresh is several reads, and naming them each made the Build screen offer to
 // "Stop 2 runs" for a click that was one.
-function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart, group } = {}) {
+function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart, onStep, group } = {}) {
   return new Promise(async resolve => {
     const res = await window.cg.run(args, env);
     if (!res.ok) {
@@ -3698,7 +3771,7 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart,
       if (panel) $(panel).textContent = why;
       return resolve(wantRc ? { rc: null, err: why } : undefined);
     }
-    jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, wantRc, group,
+    jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, wantRc, onStep, group,
                       // cg's verdict, not a second guess at it.
                       write: !!res.write,
                       out: [], collected: '', resolve });
@@ -3722,14 +3795,11 @@ const NEEDS = {
   // and its own Refresh must be able to find that out.
   build:     [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status'],
               [['machines', '--json'], 'machines'], [['sweep', '--cached', '--json'], 'sweep']],
-  library:   [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status']],
+  library:   [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status'],
+              [['library', 'elsewhere', '--json'], 'elsewhere']],
   // config too: the settings card is edited here, and a save has to come back
   // as the new value - the watcher alone left the old one showing.
   guards:    [[['watcher', '--json'], 'guards'], [['config', '--json'], 'config']],
-  // creds and config too: the page shows the two keys, and neither is in
-  // `cg deps` - they belong to AWS and to .env.
-  deps:      [[['deps', '--json'], 'deps'], [['creds', '--json'], 'creds'],
-              [['creds', 'tailscale', '--json'], 'tskey']],
 };
 const loaded = new Set();
 
@@ -3746,6 +3816,7 @@ async function refresh(each, need = readsFor(view)) {
 // Each read, in the words the page uses for what it shows.
 const READ_NAME = {
   status: 'Your machine and the bill', guards: 'Protection', library: 'Your saved games',
+  elsewhere: 'Games saved in other places',
   machines: 'Machines and prices', sweep: 'Locations', config: 'Settings',
   creds: 'Amazon key', tskey: 'Tailscale', deps: 'Tools on this laptop', cost: 'Exact cost this month',
 };
@@ -3760,7 +3831,7 @@ async function refreshShown(reads = readsFor(view), read = each => refresh(each,
   const price = $('d-cost-price').textContent;
   $('refdlg-sub').textContent = view === 'cost'
     ? `One Cost Explorer call${price ? `, ${price}` : ''}.`
-    : 'Reading the latest from AWS and this laptop. This costs nothing.';
+    : 'Reading the latest from AWS and this laptop.';
   $('refdlg-menu').hidden = true;
   const paint = () => {
     const list = $('refdlg-list');
@@ -3808,8 +3879,16 @@ function afterWrite(job, rc) {
   // A refused change to the saved games keeps its own popup, saying why.
   if (!SHOWN_AFTER.has(job.cmd[0]) || (run && run.cancelling)
       || (job.cmd[0] === 'library' && rc !== 0)) return refreshAll();
+  // A change to the saved games touches the saved games, and nothing else -
+  // not the tools on this laptop, the keys or the locations, which it used to
+  // read all over again. Keep for also rewrites a setting and the watchdog.
+  if (job.cmd[0] === 'library')
+    return refreshShown(job.cmd[1] === 'keep-for' ? KEEP_FOR_READS : LIBRARY_READS);
   return refreshShown([...GATE_READS, ...ALL_READS], each => refreshAll(each));
 }
+const LIBRARY_READS = [[['library', 'list', '--json'], 'library'],
+                       [['library', 'elsewhere', '--json'], 'elsewhere']];
+const KEEP_FOR_READS = [...LIBRARY_READS, [['config', '--json'], 'config'], [['watcher', '--json'], 'guards']];
 $('refdlg-close').onclick = e => { e.preventDefault(); $('refdlg').close(); };
 // Esc does not close it: it closes itself when the page is redrawn, and a
 // failure is closed with its button. Both, because Chromium honours a
@@ -3839,6 +3918,9 @@ const ALL_READS = [
   [['status', '--json'], 'status'],
   [['watcher', '--json'], 'guards'],
   [['library', 'list', '--json'], 'library'],
+  // Its own read: finding cg's other buckets takes seconds, and the archive
+  // in use must not wait for it.
+  [['library', 'elsewhere', '--json'], 'elsewhere'],
   [['machines', '--json'], 'machines'],
   // The REMEMBERED scan, never a fresh one: a scan takes 90 seconds and an
   // opening window must not wait on it. Rescanning is a button.
@@ -3849,18 +3931,16 @@ const ALL_READS = [
 // with the one button that meets it.
 //
 // This used to be a ladder of `if`s that returned the first problem and nothing
-// else, because the banner only ever shows one. That is right for a problem
-// that turns up mid-session and wrong on a fresh laptop, where it means finding
-// out about four jobs one at a time, each after finishing the last. So the list
-// is a list, with a verdict for every rung: the banner takes the first unmet
-// one, the opening popup shows the whole thing.
+// else. On a fresh laptop that means finding out about four jobs one at a time,
+// each after finishing the last. So the list is a list, with a verdict for
+// every rung, and setup shows the whole thing.
 //
 // `ok` is three-valued. true met, false not met, and null NOT KNOWN - the read
 // behind it has not come back, or came back broken, or the rung above it has to
 // be dealt with before this one can be judged at all. A rung whose read failed
 // must never read as met.
 //
-// One sentence each. The old banner ran to three - cg's own sentence, then "Your
+// One sentence each. An old warning strip ran to three - cg's own sentence, then "Your
 // games are in S3; nothing here can see them until this is fixed", then where
 // the button was - which is a paragraph to say "the key does not work".
 // What is wrong with the key, which is cg's answer and not a guess from an
@@ -3915,7 +3995,7 @@ function prereqs() {
       problem: { blocking: true,
                  title: `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not installed`,
                  body: 'Nothing here can run without them.',
-                 label: 'Open Dependencies', go: () => goView('deps') } },
+                 ...toolAction(missing) } },
     { key: 'cli', reads: 'creds', name: 'The AWS CLI is installed',
       // Shown only when the tools stage is happy: when it is not, this is the
       // same missing package and the same button, one row further down.
@@ -3923,7 +4003,7 @@ function prereqs() {
       ok: credsNow ? !!credsNow.cli : null,
       problem: { blocking: true, title: 'The AWS CLI is not installed',
                  body: 'Everything below is unknown, not empty.',
-                 label: 'Open Dependencies', go: () => goView('deps') } },
+                 ...toolAction(['aws']) } },
     // Judged only once there is a CLI to ask with: "AWS rejected this key" is a
     // lie about a laptop that could not ask AWS anything.
     { key: 'key', reads: 'creds', name: 'Amazon accepts this access key',
@@ -3977,20 +4057,6 @@ function prereqs() {
                 + 'about 90 seconds.',
             label: 'Choose where', go: openWhereTo } },
   ];
-}
-
-function bannerProblem() {
-  const unmet = prereqs().find(r => r.ok === false);
-  if (unmet) return unmet.problem;
-  // Not blocking: the token is optional, and everything else works without it.
-  // It is not a rung either - nothing waits for it - so it never joins the
-  // ladder, only the banner.
-  if (tskeyNow && tskeyNow.present && tskeyNow.valid === false) {
-    return { blocking: false, title: 'Tailscale rejected this API token',
-             body: 'Dead nodes will not be pruned and key expiry stays on.',
-             label: 'Set API token', go: () => goSetting($('s-tskey-card')) };
-  }
-  return null;
 }
 
 // Where it runs. A dialog, because changing it later is this same question
@@ -4144,8 +4210,7 @@ $('whereto-use').onclick = async e => {
 // blocking. All three were ways of avoiding the fact that a new laptop has no
 // screen of its own.
 //
-// What is on each stage comes from prereqs(), which the banner also reads, so
-// the two cannot disagree. What cg is doing comes from cg.
+// What is on each stage comes from prereqs(). What cg is doing comes from cg.
 
 // Which of three things the dashboard is doing:
 //   setup      something is unmet, or not yet known - the pipeline is the screen
@@ -4153,9 +4218,10 @@ $('whereto-use').onclick = async e => {
 //              a beat so you see it finish rather than having it vanish
 //   dashboard  the cards
 //
-// It only ever moves forwards. A prerequisite that breaks later in the session
-// is the banner's to report: dropping back into a setup flow out from under
-// someone who is using the app would be worse than the problem.
+// It only ever moves forwards: dropping back into a setup flow out from under
+// someone who is using the app would be worse than the problem. A prerequisite
+// that breaks later is not announced - setup made sure of it once, and a strip
+// above every page for a rare breakage was judged not worth its place.
 let onbPhase = 'setup';
 // How many sets of the reads behind the gate are in flight. The pipeline's
 // stages are judged on the fast ones, so it used to finish and hand over while
@@ -4370,9 +4436,9 @@ function onbSignIn() {
 }
 
 // What each step is called, in the words of someone who has never used AWS.
-// The banner keeps prereqs()' own sentences, which are for someone mid-session
-// who already knows what a key is; these are for the first run, and nothing in
-// them names a command, a flag or an AWS service without saying what it is.
+// prereqs() keeps short sentences of its own; these are for the first run, and
+// nothing in them names a command, a flag or an AWS service without saying
+// what it is.
 //
 //   name  the step, short - what the dim list of steps still to come shows
 //   done  what is now true, said once it is
@@ -4831,31 +4897,13 @@ function paintOnboard() {
 }
 
 // Setup is over: the sidebar slides in, the header drops in, the cards come up.
-// Only ever forwards - a prerequisite that breaks later is the banner's.
+// Only ever forwards.
 function enterDashboard() {
   if (onbPhase === 'dashboard') return;
   onbPhase = 'dashboard';
   document.body.classList.remove('setup');
   document.body.classList.add('arriving');
   paintOnboard();
-  paintBanner();
-}
-
-function paintBanner() {
-  const p = bannerProblem();
-  paintOnboard();
-  // Out of the way on the dashboard, where the pipeline is already saying this
-  // in order and with the button for it - two copies of one problem is what the
-  // banner plus the popup had become. It stays on every OTHER screen, because
-  // it sits above all of them and the pipeline does not.
-  $('banner').hidden = !p || (view === 'dashboard' && !$('onb').hidden);
-  if (!p) return null;
-  $('banner-title').textContent = p.title;
-  $('banner-body').textContent = p.body;
-  $('banner-fix').hidden = false;
-  $('banner-fix-label').textContent = p.label;
-  $('banner-fix').onclick = p.go;
-  return p;
 }
 
 // What cg is doing, for the pipeline's log pane and for the refusal when
@@ -4913,7 +4961,7 @@ async function refreshAll(each) {
   gateShut = false;
   await Promise.all(GATE_READS.map(([args, json]) =>
     runCg(args, { json, group: 'refresh' }).then(() => each && each(json))));
-  paintBanner();
+  paintOnboardSoon();
   // A prerequisite is missing. The reads that need AWS or a tailnet would
   // every one come back unknown, and the pipeline is already showing the one
   // thing to do about it.
@@ -4964,8 +5012,6 @@ async function firstScan() {
 }
 
 $('refresh').onclick = () => refreshShown();
-$('check').onclick = () => { $('s-check').hidden = false; $('s-check').textContent = 'running…';
-                             runCg(['check'], { collect: 's-check' }); };
 // What Stop costs depends on what is running, so say it before doing it.
 const STOP_WARNING = {
   init: 'The box may already exist and be billing. If it is, destroy it from the Dashboard - '
@@ -4979,8 +5025,21 @@ const STOP_WARNING = {
 // because it was below the fold. So anything that sends you to a setting
 // scrolls to it and flashes it, and that is the ONLY way a key is set - one
 // place per thing, the same rule the machine chooser follows.
+function openMachines() {
+  paintChooser();
+  if (!$('machdlg').open) $('machdlg').showModal();
+}
+$('machdlg-close').onclick = () => { if (!machBusy()) $('machdlg').close(); };
+// Esc closes it, except mid-scan or mid-save. Both, because Chromium honours a
+// prevented cancel only once per user activation; a prevented keydown never
+// becomes a close request at all.
+$('machdlg').oncancel = e => { if (machBusy()) e.preventDefault(); };
+$('machdlg').addEventListener('keydown', e => { if (e.key === 'Escape' && machBusy()) e.preventDefault(); });
+
 function goSetting(el) {
-  goView('settings');
+  // The page the row is on: a setting has one home, and it is not always here.
+  const sec = el && el.closest('section[data-view]');
+  goView(sec ? sec.dataset.view : 'settings');
   if (!el) return;
   el.scrollIntoView({ block: 'center', behavior: 'smooth' });
   // Restarting a running animation needs the class off, a reflow, then on.
@@ -4991,7 +5050,7 @@ function goSetting(el) {
   el.classList.add('flash-attn');
 }
 // A settings row, by the key cg calls it.
-const settingEl = key => document.querySelector(`#s-groups .row[data-key="${key}"]`);
+const settingEl = key => document.querySelector(`.row[data-key="${key}"]`);
 
 function goView(v) {
   const link = document.querySelector(`.nav-item[data-view="${v}"]`);
@@ -5016,7 +5075,7 @@ $('cancel').onclick = async () => {
 };
 $('d-build').onclick = () => goView('build');
 $('d-watch').onclick = () => goView('build');
-$('d-change').onclick = () => goSetting($('s-machine-card'));
+$('d-change').onclick = () => openMachines();
 $('d-ts-signin').onclick = signInTailscale;
 $('d-library').onclick = () => goView('library');
 for (const b of document.querySelectorAll('[data-filter]')) {
@@ -5045,6 +5104,13 @@ $('log-cloud').onclick = async () => {
 };
 // Both of these delete things in S3 for good. The app asks once, then cg asks
 // for the word typed out - CLEAN, FORGET - which the ask dialog renders.
+// Keep for: the one rule for every saved game, saved and applied in one go
+// (cg library keep-for), so the dates in the table are the ones AWS acts on.
+$('lib-keepfor').onchange = async ev => {
+  const n = Number(ev.target.value);
+  await libraryRun(['library', 'keep-for', String(n)],
+                   n ? `Keeping saved games for ${n} days` : 'Keeping saved games until you forget them');
+};
 $('lib-clean').onclick = async () => {
   const ok = await askConfirm({
     title: 'Clean up the leftover files?',
@@ -5087,6 +5153,13 @@ async function chooseMachine(row, spot) {
     body, yes: moving ? 'Move' : 'Use it', danger: moving,
   });
   if (!ok) { paintChooser(); return; }            // put the old choice back
+  choosing = true;
+  paintChooser();
+  const pop = busyPopup('Saving your choice',
+    `${row.type}, ${spot ? 'spot' : 'on demand'}, in ${placeName(row.region)}. Applies to the next build.`,
+    'Saving it');
+  let saved = false;
+  try {
   // Type and model first, then the region. A half-applied change is possible
   // whatever the order, so the order is chosen to leave the least wrong state:
   // the wrong type in the right region is a refused launch with a clear reason,
@@ -5098,6 +5171,12 @@ async function chooseMachine(row, spot) {
   await Promise.all([runCg(['config', '--json'], { json: 'config' }),
                      runCg(['machines', '--json'], { json: 'machines' }),
                      runCg(['status', '--json'], { json: 'status' })]);
+  saved = currentPick().type === row.type && currentPick().region === row.region;
+  } finally {
+    choosing = false;
+    paintChooser();
+    saved ? pop.done() : pop.fail('cg did not take the new choice - it is as it was. Logs has what cg said.');
+  }
 }
 
 // Scanning every region takes about 90 seconds, so nothing waits on it: the
@@ -5110,22 +5189,32 @@ async function scanRegions(btn) {
   sweeping = true;
   paintChooser();                 // the table says what it is waiting for
   repaintWhereTo();
+  const pop = $('machdlg').open
+    ? busyPopup('Scanning every region', 'Measuring the distance and prices from here - about 90 seconds, and free.',
+                'Scanning all regions')
+    : null;
   try {
     await runCg(['sweep', '--json'], { json: 'sweep' });
   } finally {
     sweeping = false;
-    if (btn) { btn.disabled = false; btn.textContent = was; }
+    if (btn) btn.textContent = was;
     paintChooser();
     repaintWhereTo();
+    if (pop) readFailures.has('sweep') ? pop.fail(readFailures.get('sweep')) : pop.done();
   }
 }
 const sweepBtn = $('s-sweep');
 if (sweepBtn) sweepBtn.onclick = () => scanRegions(sweepBtn);
 
-// Build's "Change setup". Settings is a long screen and the table is at the
-// top of it, so arriving there is not enough - the first instance-type picker
-// went unnoticed for exactly this reason. Scroll to it and flash it.
-$('b-setup').onclick = () => goSetting($('s-machine-card'));
+// Build's "Change": the chooser opens over the page you are on, so the choice
+// is made where the build is - it used to send you to the top of Settings.
+$('b-setup').onclick = () => openMachines();
+$('b-login-choice').onchange = async ev => {
+  ev.target.disabled = true;
+  await runCg(['config', 'set', 'GAME_STEAM_LOGIN', ev.target.value]);
+  await runCg(['config', '--json'], { json: 'config' });
+  ev.target.disabled = false;
+};
 
 $('d-guards').onclick = () => goView('guards');
 $('g-settings').onclick = () => goView('settings');
@@ -5206,14 +5295,12 @@ for (const link of document.querySelectorAll('.nav-item')) {
     for (const sec of document.querySelectorAll('main section[data-view]'))
       sec.hidden = sec.dataset.view !== view;
     updateHeader();
-    paintBanner();          // the pipeline only covers for it on the dashboard
     // Reads run in parallel, so an open tab loads even while others are in flight.
     if (NEEDS[view] && !loaded.has(view)) refresh();
   };
 }
 // Drawn once before anything has been read, so the card has its rows and they
 // say "reading…", rather than being blank until two reads land.
-paintKeys();
 checkAsks();
 // Is there an engine? Then what does it say. In that order: without cg the
 // reads cannot even be started, and nine spawn errors describe one problem

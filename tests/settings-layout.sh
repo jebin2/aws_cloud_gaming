@@ -47,51 +47,56 @@ window.cg = {
 STUB
 
 # The registry as cg reports it. EMAIL_ALERTS carries the shape that broke the
-# layout: two addresses, which is what the setting's own note invites.
+# layout - two addresses, which its own note invites - and lives on Guards now;
+# the bitrate's value on Settings says what an hour of streaming costs, which
+# makes it the longest value on that page.
 cat > "$T/r/probe.js" <<'PROBE'
 (() => {
   const R = [
-    { key:'GAME_INSTANCE_TYPE', kind:'text', value:'g4dn.xlarge', default:'g4dn.xlarge',
-      is_set:true, secret:false, note:'The GPU box.', label:'instance type', group:'The box' },
+    { key:'GAME_RES', kind:'text', value:'1920x1080', default:null, is_set:true, secret:false,
+      note:'Moonlight resolution.', label:'stream resolution', group:'The stream' },
+    { key:'GAME_FPS', kind:'number', value:null, default:'60', rule:'24', is_set:false, secret:false,
+      note:'Moonlight frame rate.', label:'stream fps', group:'The stream' },
+    { key:'GAME_BITRATE_KBPS', kind:'number', value:'20000', default:'20000', rule:'500', is_set:true, secret:false,
+      note:'Moonlight bitrate.', label:'stream bitrate (kbps)', group:'The stream' },
     { key:'GAME_DISK_GB', kind:'number', value:'80', default:'50', rule:'30',
       is_set:true, secret:false, note:'Root disk. Cannot be shrunk later.', label:'root disk (GB)', group:'The box' },
-    { key:'GAME_STEAM_LOGIN', kind:'choice', value:null, default:'use', rule:'use,fresh',
-      is_set:false, secret:false,
-      note:'Whether a new box restores the archived Steam login, or asks you to sign in.', label:'Steam sign-in', group:'The box' },
-    { key:'GAME_NTFY_URL', kind:'text', value:null, default:null, is_set:true, secret:true,
+    { key:'GAME_NTFY_URL', kind:'ntfy', value:'my-topic', default:null, is_set:true, secret:false,
       note:'Phone notifications: an ntfy topic or full URL. Empty turns them off.', label:'phone notifications', group:'Notifications' },
     { key:'EMAIL_ALERTS', kind:'text', is_set:true, secret:false, default:null,
       value:'someone@example.com,someone.else.with.a.long.address@example.com',
       note:'Where budget alerts are sent. Comma separated for several.', label:'billing alerts to', group:'Notifications' },
-    { key:'TAILSCALE_API_KEY', kind:'text', value:null, default:null, is_set:false, secret:true,
-      note:'Tailscale API token. Prunes old nodes and turns off key expiry. Empty goes without.', label:'Tailscale API token', group:null },
+    { key:'GAME_REGION', kind:'region', value:'ap-south-1', default:'ap-south-2', is_set:true, secret:false,
+      note:'Region.', label:'region', group:'The box' },
   ];
   const out = [];
   const R2 = e => Math.round(e.getBoundingClientRect().right);
-  try {
-    paintConfig(R);
+  const measure = (page) => {
     for (const sec of document.querySelectorAll('main section[data-view]'))
-      sec.hidden = sec.dataset.view !== 'settings';
+      sec.hidden = sec.dataset.view !== page;
     for (const r of R) {
-      const row = [...document.querySelectorAll('#s-groups .row')]
-        .find(el => el.textContent.includes(r.label || r.key));
-      // A setting with a card of its own has no row in the list - see OWN_CARD.
-      if (!row) { out.push(r.key + ' | NOROW'); continue; }
+      const row = document.querySelector(`section[data-view="${page}"] .row[data-key="${r.key}"]`);
+      if (!row) { out.push(page + ' ' + r.key + ' | NOROW'); continue; }
       const card = row.closest('.rounded-lg');
       const right = row.lastElementChild;
       const val = right.querySelector('span');
       const btns = [...right.querySelectorAll('button')];
       const cardRight = R2(card) - 24;   // the card's padding (p-space-lg)
       out.push([
-        r.key,
-        'card=' + card.firstElementChild.textContent.split(/[A-Z]/)[0].trim(),
-        'group=' + card.querySelector('.uppercase').textContent.trim(),
+        page + ' ' + r.key,
         'valueFits=' + (val ? (R2(val) <= cardRight ? 'yes' : 'no (' + (R2(val) - cardRight) + 'px over)') : 'none'),
         'btnRight=' + (btns.length ? btns.map(b => R2(b)).join('/') : 'none'),
         'btnFits=' + (btns.every(b => R2(b) <= cardRight) ? 'yes' : 'no'),
         'labelW=' + Math.round(row.firstElementChild.getBoundingClientRect().width),
       ].join(' | '));
     }
+  };
+  try {
+    statusNow = { rates: { egress_gb: 0.1093, egress_free_gb: 100, inr_per_usd: 94.95 } };
+    paintConfig(R);
+    paintGuards({ instance_state: 'none', guards: [], budget: { usd: 57 }, shutdown_action: {} });
+    measure('settings');
+    measure('guards');
   } catch (e) { out.push('THREW | ' + e.message); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -134,36 +139,30 @@ for W in 1000 1280; do
   [[ $GEO == *"NO PROBE OUTPUT"* ]] && { echo "  FAIL the page did not render"; fail=$((fail+1)); continue; }
 
   # The one that broke. 60 characters of value must stay inside its own card.
-  check "  a two-address value stays in its card" "$(field EMAIL_ALERTS valueFits)" "yes"
-  check "    and its button too"                  "$(field EMAIL_ALERTS btnFits)"   "yes"
+  check "  a two-address value stays in its card" "$(field 'guards EMAIL_ALERTS' valueFits)" "yes"
+  check "    and its button too"                  "$(field 'guards EMAIL_ALERTS' btnFits)"   "yes"
   # Zero is what the label column was: the name and note had nowhere to go.
-  if (( $(field EMAIL_ALERTS labelW) > 100 )); then
+  if (( $(field 'guards EMAIL_ALERTS' labelW) > 100 )); then
     echo "  ok     leaving the name and note room to read"; pass=$((pass+1))
-  else echo "  FAIL   the label column is $(field EMAIL_ALERTS labelW)px wide"; fail=$((fail+1)); fi
-
-  # Alignment is one number: every button in a card ends at the same x.
-  check "  Edit lines up with the secret row's Replace" \
-        "$(field EMAIL_ALERTS btnRight)" "$(field GAME_NTFY_URL btnRight | cut -d/ -f2)"
-  check "  a long note does not push a value out" "$(field GAME_NTFY_URL valueFits)" "yes"
-  check "  nor a choice's label"                  "$(field GAME_STEAM_LOGIN valueFits)" "yes"
+  else echo "  FAIL   the label column is $(field 'guards EMAIL_ALERTS' labelW)px wide"; fail=$((fail+1)); fi
+  check "  the topic's Edit lines up with it" \
+        "$(field 'guards EMAIL_ALERTS' btnRight)" "$(field 'guards GAME_NTFY_URL' btnRight)"
+  # Settings' longest value: the bitrate, with what an hour of it costs.
+  check "  the bitrate's cost stays in its card"  "$(field 'settings GAME_BITRATE_KBPS' valueFits)" "yes"
+  check "    and its Edit lines up with the rest" \
+        "$(field 'settings GAME_BITRATE_KBPS' btnRight)" "$(field 'settings GAME_FPS' btnRight)"
+  if (( $(field 'settings GAME_BITRATE_KBPS' labelW) > 100 )); then
+    echo "  ok     its name keeps room too"; pass=$((pass+1))
+  else echo "  FAIL   the bitrate's label column is $(field 'settings GAME_BITRATE_KBPS' labelW)px wide"; fail=$((fail+1)); fi
   check "  and nothing threw"                     "$(sed -n 's/^ERRS | //p' <<<"$GEO")" ""
 done
 
-echo "a setting with its own card has no row here"
-# Two places to set one thing is exactly the drift this app keeps removing:
-# the API token is shown and set on the Tailscale card, which can also say
-# whether Tailscale accepts it.
+echo "each setting is on one page"
+# Three copies of one setting is what Settings used to be.
 GEO=$(geo 1280)
-check "the Tailscale token has no row"  "$(field TAILSCALE_API_KEY card)" ""
-contains "  and it is not filed as unknown" "$GEO" "TAILSCALE_API_KEY | NOROW"
-contains "notifications is its own group"   "$(row GAME_NTFY_URL)" "group=Notifications"
-
-echo "the Steam sign-in is filed with the build settings"
-# Not in "Everything else", which is where a setting the app has never heard of
-# lands - correct for a new key, wrong for one with a label and a home.
-GEO=$(geo 1280)
-check "  it is in The box"       "$(field GAME_STEAM_LOGIN group)" "Thebox"
-contains "  and named for people" "$(row GAME_STEAM_LOGIN)" "GAME_STEAM_LOGIN"
+contains "the alerts are not on Settings"   "$GEO" "settings EMAIL_ALERTS | NOROW"
+contains "  nor the region"                 "$GEO" "settings GAME_REGION | NOROW"
+contains "  and the stream is not on Guards" "$GEO" "guards GAME_BITRATE_KBPS | NOROW"
 
 echo ""
 echo "settings-layout: $pass passed, $fail failed"

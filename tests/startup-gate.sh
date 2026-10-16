@@ -55,7 +55,10 @@ window.cg = {
       }, 0);
       return Promise.resolve({ ok: true, id });
     }
-    const reply = window.__answers[line];
+    // Games in other places: no case here is about them, so the answer is
+    // "none" unless a case says otherwise - an unanswered read holds the gate.
+    const reply = window.__answers[line]
+      ?? (line === 'library elsewhere --json' ? { error: null, places: [] } : undefined);
     if (reply !== undefined) {
       // Answer on a later turn, the way a real run does - or slowly, for a case
       // that needs the window caught mid-read.
@@ -134,17 +137,14 @@ JS
              .filter(p => p.textContent.trim())
              .map(p => p.id.slice(8) + ':' + p.textContent.replace(/\s+/g, ' ').trim()).join(' ;; '));
   // There is no splash any more: the steps are what every open shows.
+  // What is on screen, not just the class: a CSS edit once left the class on
+  // and the sidebar showing, and the class check passed.
+  const shown = sel => { const el = document.querySelector(sel); return el ? getComputedStyle(el).display !== 'none' : 'gone'; };
   out.push('MODE | ' + (document.getElementById('onb-steps').hidden ? 'none' : 'steps')
-           + ' setup=' + document.body.classList.contains('setup'));
+           + ' setup=' + document.body.classList.contains('setup')
+           + ' sidebar=' + shown('body > aside') + ' header=' + shown('body > header') + ' viewbar=' + shown('#viewbar'));
   out.push('AFTER | ' + (window.__after ? await window.__after() : 'none'));
-  out.push('BANNER | ' + (document.getElementById('banner').hidden ? 'hidden' : 'shown'));
-  out.push('TITLE | ' + document.getElementById('banner-title').textContent.trim());
-  out.push('BODY | ' + document.getElementById('banner-body').textContent.replace(/\s+/g, ' ').trim());
-  out.push('FIX | ' + (document.getElementById('banner-fix').hidden ? 'hidden'
-           : document.getElementById('banner-fix-label').textContent.trim()));
-  window.__ran = [];
-  if (!document.getElementById('banner-fix').hidden) document.getElementById('banner-fix').click();
-  out.push('WENT | ' + (document.querySelector('.nav-item.on') || {}).dataset?.view);
+  out.push('BANNER | ' + (document.getElementById('banner') ? 'exists' : 'none'));
   out.push('LEGEND | ' + document.getElementById('s-chooser-legend').innerText
                           .replace(/\s+/g, ' ').trim());
   out.push('SCANBTN | ' + (document.getElementById('s-sweep')
@@ -255,6 +255,7 @@ contains "the pipeline is up"          "$(row ONB)" "ONB | shown"
 # Six setup steps and the Dashboard: seven.
 contains "  counting the steps"        "$(row COUNT)" "of 7 done"
 contains "it shows the steps, not the splash" "$(row MODE)" "MODE | steps setup=true"
+contains "  the whole window: no sidebar, header or title bar" "$(row MODE)" "sidebar=false header=false viewbar=false"
 # The tools themselves, not a sentence about them: present in green, missing
 # in red, and the count as the only heading.
 contains "  each tool shown"           "$(row TOOLS)" "python3:yes"
@@ -272,9 +273,9 @@ contains "  and an unjudgeable one asks"  "$(row STAGES)" "key=unknown"
 # are one job with one button, and used to be two rows saying it.
 lacks    "the same fix is not listed twice" "$(row STAGES)" "cli="
 lacks    "  no chatty notes"              "$(row STAGETEXT)" "asks for your password once"
-# The banner is for a problem that turns up mid-session. The pipeline has this
-# one, in order, with the button - two copies of it is what this replaced.
-check    "the banner stays out of it"  "$(row BANNER)" "BANNER | hidden"
+# The pipeline has this one, in order, with the button - and there is no
+# warning strip above the pages to say it a second time.
+check    "no strip says it again"      "$(row BANNER)" "BANNER | none"
 check    "and no step has a log yet"   "$(row LOG)" "LOG | "
 # A box, an archive and a bill are not worth showing to someone who cannot
 # build one yet - and they sat under the pipeline saying "No box" as though
@@ -1293,7 +1294,7 @@ contains "stopping it opens the popup"     "$(row AFTER)" "popup=open=true title
 contains "  which leaves it ready to play" "$(row AFTER)" "after=run:Ready to play closed=true"
 contains "  and calls nothing a failure"   "$(row AFTER)" "fail=false"
 # One round of reads, under the popup: not the page's, then all of them again.
-contains "  read once, all under the popup" "$(row AFTER)" "statusReads=1 stillReading=0 rows=9"
+contains "  read once, all under the popup" "$(row AFTER)" "statusReads=1 stillReading=0 rows=10"
 ENGINE=""
 
 echo "7i. after a session, the machine is still the build: its steps and its log"
@@ -1352,7 +1353,8 @@ B10="window.__after = async () => {
     + ' popup=' + document.getElementById('refdlg').open + ':' + document.getElementById('refdlg-title').textContent
     + ' answered=' + answered.join(',') + ' askdlg=' + document.getElementById('ask').open;
   window.__emit(id, { t: 'exit', rc: 0 });
-  const reading = document.getElementById('refdlg-title').textContent;
+  const reading = document.getElementById('refdlg-title').textContent
+    + ' reads=' + [...document.querySelectorAll('#refdlg-list [data-read]')].map(r => r.dataset.read).join(',');
   await wait(); await wait();
   const after = 'view=' + view() + ' popup=' + document.getElementById('refdlg').open;
   [...document.querySelectorAll('#lib-rows button')].find(b => b.textContent === 'Forget').click();
@@ -1376,10 +1378,103 @@ contains "  runs cg's forget"                "$(row AFTER)" "ran=library forget 
 contains "  with the popup saying so"        "$(row AFTER)" "popup=true:Forgetting Diablo IV"
 contains "  and cg gets the word, no second dialog" "$(row AFTER)" "answered=FORGET askdlg=false"
 contains "done: the popup reads the page again" "$(row AFTER)" "reading=Refreshing Library"
+contains "  only the saved games, nothing else" "$(row AFTER)" "reads=library,elsewhere |"
 contains "  and closes, still on Library"    "$(row AFTER)" "after=view=library popup=false"
 contains "refused: the popup stays"          "$(row AFTER)" "refused=popup=true title=Forgetting Diablo IV - not done"
 contains "  with cg's reason"                "$(row AFTER)" "aborted - nothing was deleted"
 contains "  a Close, and still on Library"   "$(row AFTER)" "close=true view=library"
+ENGINE=""
+
+echo "7k. one Games table: every game with its place and date; Reset, Move, Keep for"
+# A region move left Diablo IV in Hyderabad, billing, with nothing pointing at
+# it. It is a row like any other now: where it is, what it costs, when the
+# watchdog deletes it - and Reset, Move and Forget, each through the popup.
+B11="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  const wait = () => new Promise(r => setTimeout(r, 30));
+  const view = () => document.querySelector('.nav-item.on').dataset.view;
+  document.querySelector('.nav-item[data-view=library]').click();
+  await wait();
+  const rowText = () => [...document.querySelectorAll('#lib-rows tr')].map(tr => [...tr.children].map(td => td.textContent.trim()).join(' / ')).join(' || ');
+  const table = 'rows=' + rowText() + ' foot=' + document.getElementById('lib-foot').textContent.replace(/\\s+/g, ' ')
+    + ' keepfor=' + document.getElementById('lib-keepfor').value + ' note=' + document.getElementById('lib-keep').textContent;
+  let asked = null;
+  window.askConfirm = async o => { asked = o; return true; };
+  const answered = [];
+  window.cg.answer = (id, v) => { answered.push(v); return Promise.resolve(true); };
+  const btn = (row, label) => [...document.querySelectorAll('#lib-rows tr')][row].querySelector('td:last-child')
+    .querySelectorAll('button').values().find(b => b.textContent === label);
+  btn(1, 'Move').click();
+  await wait();
+  let id = window.__lastId;
+  window.__emit(id, { t: 'ask', id: 'move-game', prompt: 'type MOVE to confirm: ' });
+  const move = 'title=' + asked.title + ' body=' + asked.body.replace(/\\n/g, ' ') + ' ran=' + window.__ran.slice(-1)[0]
+    + ' popup=' + document.getElementById('refdlg-title').textContent + ' answered=' + answered.join(',');
+  window.__emit(id, { t: 'exit', rc: 0 });
+  await wait(); await wait();
+  const after = 'view=' + view() + ' popup=' + document.getElementById('refdlg').open;
+  btn(1, 'Reset').click();
+  await wait();
+  id = window.__lastId;
+  const reset = 'ran=' + window.__ran.slice(-1)[0] + ' popup=' + document.getElementById('refdlg-title').textContent;
+  window.__emit(id, { t: 'exit', rc: 0 });
+  await wait(); await wait();
+  const sel = document.getElementById('lib-keepfor');
+  sel.value = '30'; sel.dispatchEvent(new Event('change'));
+  await wait();
+  const keep = 'ran=' + window.__ran.slice(-1)[0] + ' popup=' + document.getElementById('refdlg-title').textContent;
+  const steps = () => [...document.querySelectorAll('#refdlg-list [data-step]')]
+    .map(r => (r.querySelector('.spinner') ? '● ' : '✓ ') + r.dataset.step).join(', ');
+  const before = steps();
+  id = window.__lastId;
+  window.__emit(id, { t: 'step', text: 'saving the setting' });
+  window.__emit(id, { t: 'step', text: 'updating the cloud watchdog' });
+  const during = steps();
+  window.__emit(id, { t: 'exit', rc: 0 });
+  const reads = [...document.querySelectorAll('#refdlg-list [data-read]')].map(r => r.dataset.read).join(',');
+  return 'table=' + table + ' | move=' + move + ' | after=' + after + ' | reset=' + reset + ' | keep=' + keep
+    + ' | steps=before:' + before + ' during:' + during + ' | reads=' + reads;
+};"
+ENGINE="$B11"
+SEEN=$(date -u -d '-1 day' +%Y-%m-%dT%H:%M:%SZ); KEPT=$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)
+D13=$(date -d '+13 day' '+%-d %b'); D14=$(date -d '+14 day' '+%-d %b')
+LIB2="{\"games\": [{\"appid\": \"1174180\", \"name\": \"Red Dead 2\", \"installdir\": \"RDR2\", \"bytes\": 128849018880, \"usd_month\": 3.0, \"pushed\": \"2026-10-12T00:00:00Z\", \"kept\": null}],
+      \"total_bytes\": 128849018880, \"usd_month\": 3.0, \"selectable_gb\": 209, \"bucket\": \"b\", \"login\": {\"present\": false},
+      \"region\": \"ap-south-1\", \"inr_per_usd\": 94.95, \"expiry_days\": 14, \"last_seen\": \"$SEEN\", \"marks_read\": true}"
+ELSE="{\"error\": null, \"region\": \"ap-south-1\", \"inr_per_usd\": 94.95, \"xregion_usd_gb\": 0.086, \"expiry_days\": 14,
+  \"last_seen\": \"$SEEN\", \"marks_read\": true, \"bytes\": 174813455930, \"usd_month\": 4.07, \"places\": [
+  {\"bucket\": \"cg-library-old\", \"region\": \"ap-south-2\", \"error\": null, \"bytes\": 174813455930, \"games_bytes\": 174813206488,
+   \"usd_month\": 4.07, \"login\": true, \"games\": [{\"appid\": \"2344520\", \"name\": \"Diablo IV\", \"installdir\": \"Diablo IV\",
+   \"bytes\": 174813206488, \"usd_month\": 4.07, \"pushed\": \"2026-09-26T10:38:58Z\", \"kept\": \"$KEPT\"}]},
+  {\"bucket\": \"cg-library-empty\", \"region\": \"ap-south-2\", \"error\": null, \"bytes\": 0, \"games_bytes\": 0,
+   \"usd_month\": 0, \"games\": [], \"login\": false}]}"
+TWO_SWEEP='{"cached": true, "age_seconds": 90, "too_far": [], "unreachable": [],
+  "regions": [{"region": "ap-south-2", "city": "Asia Pacific (Hyderabad)", "rtt_ms": 19, "enabled": true, "machines": []},
+              {"region": "ap-south-1", "city": "Asia Pacific (Mumbai)", "rtt_ms": 12, "enabled": true, "machines": []}]}'
+OUT=$(probe "{$READY, \"sweep --cached --json\": $TWO_SWEEP, \"library list --json\": $LIB2,
+  \"library elsewhere --json\": $ELSE,
+  \"status --json\": $(st null '{"bytes": 128849018880}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "the machine's place first"         "$(row AFTER)" "rows=Red Dead 2 / Mumbai / 120.0 GB / ₹285 / $D13 / ResetForget"
+contains "  then the other place's, with Move" "$(row AFTER)" "Diablo IV / Hyderabad / 162.8 GB / ₹386 / $D14 / ResetMoveForget"
+contains "  its Reset counts from the Reset" "$(row AFTER)" "/ $D14 /"
+contains "  one total"                       "$(row AFTER)" "foot=Total282.8 GB₹671 a month"
+contains "  and how long, as set"            "$(row AFTER)" "keepfor=14 note=Deleted 14 days after a machine was last running."
+lacks    "  an empty place is not a row"     "$(row AFTER)" "cg-library-empty"
+c=$(row AFTER); lacks "  nor any bucket name on the page" "${c%% | move=*}" "cg-library"
+contains "Move asks first, with the price"   "$(row AFTER)" "title=Move Diablo IV to Mumbai? body=162.8 GB is copied from Hyderabad to Mumbai"
+contains "  about the one-time cost"         "$(row AFTER)" "Costs about ₹1,329 once"
+contains "  runs cg's move from that place"  "$(row AFTER)" "ran=library move 2344520 --from cg-library-old"
+contains "  in the popup, answered for cg"   "$(row AFTER)" "popup=Moving Diablo IV to Mumbai answered=MOVE"
+contains "  and stays on Library"            "$(row AFTER)" "after=view=library popup=false"
+contains "Reset needs no confirm"            "$(row AFTER)" "reset=ran=library reset 2344520 --from cg-library-old popup=Keeping Diablo IV from today"
+contains "Keep for applies at once"          "$(row AFTER)" "keep=ran=library keep-for 30 popup=Keeping saved games for 30 days"
+# The popup said "Keeping saved games for 14 days" twice - title and step.
+contains "  under the title, a placeholder until cg speaks" "$(row AFTER)" "steps=before:● Working…"
+contains "  then cg's own steps, each ticked as the next begins" "$(row AFTER)" "during:✓ Saving the setting, ● Updating the cloud watchdog"
+lacks    "  never the title again"           "$(row AFTER)" "during:● Keeping"
+# And afterwards, only what Keep for can change - not the tools, the keys,
+# Tailscale or the locations, which it used to read all over again.
+contains "  then reads only what it changed" "$(row AFTER)" "reads=library,elsewhere,config,guards"
 ENGINE=""
 
 echo "7c. a line that sounds like failure does not fail a healthy build"

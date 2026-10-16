@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# The Dependencies page, rendered.
+# Tools that are missing, installed where they are noticed.
 #
-# Its whole job is to be useful on a laptop where nothing works yet, so the two
-# things it must never do are: draw an Install button that cannot install
-# anything, and call a laptop ready when Tailscale is installed but signed out.
-# Neither is visible in the source - both depend on which branch the painter
-# takes - so this loads the real page and reads it back.
+# There was a Dependencies page; setup now installs what is missing in place,
+# so the page was only ever a row of ticks. What survives it is the rule it was
+# built on: never draw an Install button that cannot install anything. When the
+# laptop has no package manager cg can use, or no way to become root, the
+# button says how to do it by hand instead - and runs nothing.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 T=$(mktemp -d); pass=0; fail=0
@@ -49,119 +49,62 @@ cat > "$T/r/probe.js" <<'PROBE'
 (async () => {
   const out = [];
   const sleep = () => new Promise(r => setTimeout(r, 0));
-  const g = id => {
-    const el = document.getElementById(id);
-    return el ? el.textContent.replace(/\s+/g, ' ').trim() : '(missing)';
-  };
   const tool = (name, present) => ({
     tool: name, label: name === 'aws' ? 'AWS CLI v2' : name, present,
     why: name + ' is for something', plan: 'sudo pacman -S ' + name,
-    manual: 'https://example.invalid/' + name,
+    manual: 'sudo pacman -S ' + name + ' (by hand)',
   });
   const payload = (missing, extra) => Object.assign({
-    tools: ['python3', 'ssh', 'curl', 'aws', 'tailscale', 'moonlight']
-             .map(n => tool(n, !missing.includes(n))),
-    package_manager: 'pacman', root: 'pkexec', root_blocked: null,
-    tailscale_signed_in: true,
+    tools: ['aws', 'tailscale', 'moonlight', 'python3'].map(n => tool(n, !missing.includes(n))),
+    package_manager: 'pacman', root: 'pkexec', root_blocked: null, tailscale_signed_in: true,
   }, extra || {});
-  const keys = label => {
-    out.push(label + ' KEYS | ' + [...document.querySelectorAll('#d-keys .row')]
-      .map(r => r.dataset.key + '=' + r.lastElementChild.firstElementChild.textContent.trim()
-                + (r.querySelector('button') ? '[' + r.querySelector('button').textContent.trim() + ']' : ''))
-      .join(' || '));
-  };
-  const read = label => {
-    out.push(label + ' READY | ' + g('d-ready'));
-    out.push(label + ' PM | ' + g('d-pm'));
-    out.push(label + ' ROOT | ' + g('d-root'));
-    out.push(label + ' ALL | ' + (document.getElementById('d-install-all').hidden
-      ? 'hidden' : g('d-install-all-label')));
-    out.push(label + ' ROWS | ' + [...document.querySelectorAll('#d-rows tr')]
-      .map(r => [...r.cells].map(c => c.textContent.trim()).join('/')).join(' || '));
-  };
   try {
-    // Before any read has landed. "Not set" here would be a guess, and a wrong
-    // one on a laptop whose key is fine.
-    keys('NOREADS');
-    paintDeps(payload(['aws', 'moonlight']));
-    read('MISSING');
+    out.push('NAV | ' + !!document.querySelector('.nav-item[data-view="deps"]'));
+    out.push('PAGE | ' + !!document.querySelector('section[data-view="deps"]'));
+
+    // A tool missing on a laptop that can install: Install, through the run dialog.
+    paintDeps(payload(['moonlight']));
+    let a = toolAction(['moonlight']);
+    out.push('CAN LABEL | ' + a.label);
     window.__ran = [];
-    document.getElementById('d-install-all').click();
-    out.push('ALL RAN | ' + window.__ran.join(' ;; '));
-    window.__ran = [];
-    // The per-row button: the first Install in the table is the AWS CLI's.
-    [...document.querySelectorAll('#d-rows button')][0].click();
-    out.push('ROW RAN | ' + window.__ran.join(' ;; '));
+    a.go();
     await sleep();
-    out.push('ROW DIALOG | ' + document.getElementById('rundlg').open
-             + ' title=' + document.getElementById('rundlg-title').textContent.trim());
-    out.push('ROW STATUS | ' + document.getElementById('rundlg-status').textContent.replace(/\s+/g, ' ').trim());
-    out.push('ROW BUTTONS | cancel=' + document.getElementById('rundlg-cancel').hidden
-             + ' done=' + document.getElementById('rundlg-done').hidden);
-    // What pacman says, as it says it - including its own stderr, which is not
-    // a cg event.
-    window.__emit(window.__lastId, { t: 'line', kind: 'info', text: 'installing AWS CLI v2' });
-    window.__emit(window.__lastId, { t: 'raw', stream: 'stderr', text: 'warning: aws-cli-v2 is up to date' });
+    out.push('CAN RAN | ' + window.__ran.join(' ;; '));
+    out.push('CAN DIALOG | ' + document.getElementById('rundlg').open + ' ' + document.getElementById('rundlg-title').textContent);
     window.__emit(window.__lastId, { t: 'exit', rc: 0 });
     await sleep(); await sleep();
-    out.push('ROW DONE | status=' + document.getElementById('rundlg-status').textContent.trim()
-             + ' cancel=' + document.getElementById('rundlg-cancel').hidden
-             + ' done=' + document.getElementById('rundlg-done').hidden
-             + ' label=' + document.getElementById('rundlg-done').textContent.trim());
-    out.push('ROW LOG | ' + document.getElementById('rundlg-log').textContent.replace(/\s+/g, ' ').trim());
-    document.getElementById('rundlg-done').click();
-    out.push('ROW CLOSED | ' + document.getElementById('rundlg').open);
+    document.getElementById('rundlg').close();
 
-    paintDeps(payload([]));
-    read('ALLHERE');
-
-    // Nothing can be root: no button may be drawn at all.
-    paintDeps(payload(['aws'], { root: null,
-      root_blocked: 'no terminal, and no desktop session for polkit to show a password prompt on' }));
-    read('NOROOT');
-    out.push('NOROOT BUTTONS | ' + document.querySelectorAll('#d-rows button').length);
-
-    // No package manager: same, plus the manual link in the row.
-    paintDeps(payload(['aws'], { package_manager: null }));
-    read('NOPM');
-
-    // Installed but signed out: nothing to install, and nothing works.
-    paintTskey({ present: true, valid: true, state: 'ok', detail: null,
-                 signed_in: false, node: null });
-    paintDeps(payload([], { tailscale_signed_in: false }));
-    read('SIGNEDOUT');
-    keys('SIGNEDOUT');
-    // No polkit and no terminal: there is no button to point at, so the row
-    // has to hand over the command instead.
-    paintDeps(payload([], { tailscale_signed_in: false, root: null,
-                            root_blocked: 'no terminal, and polkit (pkexec) is not installed' }));
-    keys('NOROOTSIGNIN');
-
-    paintConfig([{ key: 'TAILSCALE_API_KEY', kind: 'text', secret: true, is_set: false,
-                   value: null, default: null, note: 'Tailscale API token.' },
-                 { key: 'GAME_DISK_GB', kind: 'number', secret: false, is_set: true,
-                   value: '80', default: '50', rule: '30', note: 'Root disk.' }]);
-    // The token's state comes from Tailscale, not from .env: "set" and
-    // "set and refused" look identical in a settings file.
-    paintTskey({ present: false, valid: null, state: 'absent', detail: null,
-                 signed_in: true, node: 'laptop' });
-    paintCreds({ cli: true, source: '~/.aws/credentials', key_id: '****1234',
-                 account: null, arn: null, valid: false, error: 'rejected' });
-    paintDeps(payload([], { tailscale_signed_in: true }));
-    keys('READ');
+    // No way to become root: no Install - the command, and nothing run.
+    paintDeps(payload(['moonlight'], { root: null, root_blocked: 'no terminal, and polkit is not installed' }));
+    a = toolAction(['moonlight']);
+    out.push('NOROOT LABEL | ' + a.label);
     window.__ran = [];
-    // Each key's button goes to the ONE place that key is set.
-    document.querySelectorAll('#d-keys button')[0].click();
-    out.push('KEY1 VIEW | ' + (document.querySelector('.nav-item.on') || {}).dataset?.view);
-    out.push('KEY1 FLASH | ' + document.getElementById('s-creds-card').className);
-    document.querySelectorAll('#d-keys button')[1].click();
-    out.push('KEY2 FLASH | ' + document.getElementById('s-tskey-card').className);
+    let asked = null;
+    window.askConfirm = async o => { asked = o; return true; };
+    a.go();
+    await sleep();
+    out.push('NOROOT RAN | ' + window.__ran.join(' ;; '));
+    out.push('NOROOT SAYS | ' + (asked ? asked.title + ' :: ' + asked.body.replace(/\n/g, ' ') + ' :: no=' + asked.no : 'nothing'));
 
-    // A token that is set and refused: .env cannot tell this from a good one.
-    paintTskey({ present: true, valid: false, state: 'rejected', detail: '401',
-                 signed_in: true, node: 'laptop' });
-    keys('BADTOKEN');
-    out.push('KEYS RAN | ' + window.__ran.join(' ;; '));
+    // No package manager: the same.
+    paintDeps(payload(['aws'], { package_manager: null }));
+    a = toolAction(['aws']);
+    out.push('NOPM LABEL | ' + a.label);
+    asked = null; a.go(); await sleep();
+    out.push('NOPM SAYS | ' + (asked ? asked.body.replace(/\n/g, ' ') : 'nothing'));
+
+    // Not read yet: offer it; cg says so if it cannot.
+    depsNow = null;
+    out.push('UNREAD LABEL | ' + toolAction(['aws']).label);
+
+    // The setup step for missing tools carries the same button.
+    paintDeps(payload(['moonlight']));
+    const step = prereqs().find(r => r.key === 'tools');
+    out.push('STEP | ' + step.problem.label);
+
+    // A region not switched on is not a tool: it is a place to pick.
+    out.push('OPTIN | ' + FAIL_ACTS.OptInRequired().map(x => x[0]).join(','));
   } catch (e) { out.push('THREW | ' + e.message); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -194,85 +137,32 @@ print(html.unescape(m.group(1)) if m else "NO PROBE OUTPUT")')
 [[ $OUT == *"NO PROBE OUTPUT"* ]] && { echo "  FAIL the page did not render"; echo "deps-dom: 0 passed, 1 failed"; exit 1; }
 row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
-echo "1. two tools missing"
-contains "it counts them"             "$(row 'MISSING READY')" "2 of 6 missing"
-contains "  and names the manager"    "$(row 'MISSING PM')"    "installs with pacman"
-contains "the table lists every tool" "$(row 'MISSING ROWS')"  "TOOL/WHAT IT IS FOR/STATE"
-contains "  what is installed"        "$(row 'MISSING ROWS')"  "python3/python3 is for something/installed"
-contains "  and what is missing"      "$(row 'MISSING ROWS')"  "AWS CLI v2/aws is for something/missing/Install"
-contains "the button says how many"   "$(row 'MISSING ALL')"   "Install 2 missing"
-check    "  and installs them"        "$(row 'ALL RAN')"       "ALL RAN | deps install"
-check    "a row installs just that one" "$(row 'ROW RAN')"     "ROW RAN | deps install aws"
-# Installing is a thing happening - polkit asks for a password, the package
-# manager takes its time - so it runs in front of you, like the sign-in.
-contains "  in a dialog that names it" "$(row 'ROW DIALOG')"   "true title=Installing aws"
-contains "  warning about the prompt"  "$(row 'ROW STATUS')"   "password"
-contains "  with only Cancel while it runs" "$(row 'ROW BUTTONS')" "cancel=false done=true"
-contains "what it said is shown"       "$(row 'ROW LOG')"      "installing AWS CLI v2"
-contains "  including plain stderr"    "$(row 'ROW LOG')"      "warning: aws-cli-v2 is up to date"
-contains "when it ends it says so"     "$(row 'ROW DONE')"     "status=installed"
-contains "  Cancel goes"               "$(row 'ROW DONE')"     "cancel=true"
-contains "  and Done appears"          "$(row 'ROW DONE')"     "done=false label=Done"
-check    "Done closes it"              "$(row 'ROW CLOSED')"   "ROW CLOSED | false"
+echo "1. no page"
+check    "no Dependencies tab"          "$(row NAV)"  "NAV | false"
+check    "  and no page"                "$(row PAGE)" "PAGE | false"
 
-echo "2. everything is here"
-contains "it says so"                 "$(row 'ALLHERE READY')" "everything cg needs is here"
-check    "  and offers nothing"       "$(row 'ALLHERE ALL')"   "ALLHERE ALL | hidden"
+echo "2. a laptop that can install: Install, here"
+check    "the button names the tool"    "$(row 'CAN LABEL')" "CAN LABEL | Install moonlight"
+check    "  pressed, it installs that one" "$(row 'CAN RAN')" "CAN RAN | deps install moonlight"
+contains "  in the run dialog"          "$(row 'CAN DIALOG')" "true Installing moonlight"
 
-echo "3. how it would become root, said before anything is pressed"
-contains "polkit is named"            "$(row 'MISSING ROOT')"  "desktop dialog (polkit)"
-contains "no root: it says why"       "$(row 'NOROOT ROOT')"   "not possible from here"
-contains "  quoting the reason"       "$(row 'NOROOT ROOT')"   "no desktop session"
-# A button that cannot work is worse than no button: it fails inside pacman,
-# where the reason is hardest to see.
-check    "  and draws no button"      "$(row 'NOROOT BUTTONS')" "NOROOT BUTTONS | 0"
-check    "  not even Install all"     "$(row 'NOROOT ALL')"    "NOROOT ALL | hidden"
-contains "  handing over the link"    "$(row 'NOROOT ROWS')"   "https://example.invalid/aws"
+echo "3. a laptop that cannot: the command, and nothing run"
+check    "no Install when it cannot become root" "$(row 'NOROOT LABEL')" "NOROOT LABEL | How to install moonlight"
+check    "  pressed, it runs nothing"   "$(row 'NOROOT RAN')" "NOROOT RAN | "
+contains "  it says why"                "$(row 'NOROOT SAYS')" "cannot become root here (no terminal, and polkit is not installed)"
+contains "  and the command to run"     "$(row 'NOROOT SAYS')" "sudo pacman -S moonlight (by hand)"
+contains "  with nothing to cancel"     "$(row 'NOROOT SAYS')" "no=null"
+check    "no package manager: the same" "$(row 'NOPM LABEL')" "NOPM LABEL | How to install AWS CLI v2"
+contains "  and says so"                "$(row 'NOPM SAYS')" "no package manager cg can use"
+check    "not read yet: offered"        "$(row 'UNREAD LABEL')" "UNREAD LABEL | Install the AWS CLI"
 
-echo "4. no package manager"
-contains "it says there is none"      "$(row 'NOPM PM')"       "by hand"
-check    "  and offers no button"     "$(row 'NOPM ALL')"      "NOPM ALL | hidden"
-contains "  giving the link instead"  "$(row 'NOPM ROWS')"     "https://example.invalid/aws"
+echo "4. the places that sent you to the page"
+check    "setup's missing-tools step installs" "$(row STEP)" "STEP | Install moonlight"
+check    "a region not switched on picks another" "$(row OPTIN)" "OPTIN | Choose another location"
 
-echo "5. installed, but signed out"
-# Every tool present, and the laptop still cannot reach the box.
-contains "it is not called ready"     "$(row 'SIGNEDOUT READY')" "Tailscale is not signed in"
-lacks    "  not 'everything is here'" "$(row 'SIGNEDOUT READY')" "everything cg needs"
-
-echo "6. the keys nobody can install"
-# A tool is installed or it is not; a key is yours, and the page has to say
-# where it stands without ever being a second place to type it.
-contains "the AWS key is listed"      "$(row 'NOREADS KEYS')"  "AWS access key=reading"
-contains "  and Tailscale"            "$(row 'NOREADS KEYS')"  "Tailscale=reading"
-# "not set" before the read lands is a guess, and a wrong one on a laptop whose
-# key is fine.
-lacks    "  neither guesses"          "$(row 'NOREADS KEYS')"  "not set"
-contains "a rejected key says so"     "$(row 'READ KEYS')"     "AWS access key=****1234 was rejected"
-contains "  with a way to the setting" "$(row 'READ KEYS')"    "rejected[Set in Settings]"
-contains "no token says what is given up" "$(row 'READ KEYS')"  "no API token, cg goes without"
-contains "  beside the sign-in"       "$(row 'READ KEYS')"     "Tailscale=signed in as laptop"
-contains "a rejected token says so"  "$(row 'BADTOKEN KEYS')" "API token rejected (401)"
-# Two rows, two cards in Settings, and no row without somewhere to go: the
-# sign-in used to have a row of its own that said "in a terminal: sudo
-# tailscale up" and had no button at all.
-check    "there are two rows, not three" "$(grep -c 'Tailscale sign-in=' <<<"$(row 'READ KEYS')")" "0"
-contains "  and both lead somewhere"   "$(row 'READ KEYS')"     "[Set in Settings]"
-contains "signed out comes first"      "$(row 'SIGNEDOUT KEYS')" "not signed in"
-contains "  pointing at the button"    "$(row 'SIGNEDOUT KEYS')" "Settings has a Sign in button"
-contains "  or the command, with no way to be root" "$(row 'NOROOTSIGNIN KEYS')" "sudo tailscale up"
-
-echo "7. a key is set in exactly one place"
-check    "the AWS key goes to Settings" "$(row 'KEY1 VIEW')"   "KEY1 VIEW | settings"
-contains "  flashing the card"          "$(row 'KEY1 FLASH')"  "flash-attn"
-contains "  and the token its own card" "$(row 'KEY2 FLASH')"  "flash-attn"
-# The page points at the setting; it does not set it. Arriving on Settings
-# loads Settings, which is navigation rather than this row acting.
-lacks    "  setting nothing itself"     "$(row 'KEYS RAN')"    "creds set"
-lacks    "  and installing nothing"     "$(row 'KEYS RAN')"    "deps install"
-
-echo "8. nothing threw"
-check "no painter threw"              "$(grep -c '^THREW' <<<"$OUT")" "0"
-check "  and the page logged no errors" "$(row 'ERRS')"        "ERRS | "
+echo "5. nothing threw"
+check "no painter threw"                "$(grep -c '^THREW' <<<"$OUT")" "0"
+check "  and the page logged no errors" "$(row ERRS)" "ERRS | "
 
 echo ""
 echo "deps-dom: $pass passed, $fail failed"

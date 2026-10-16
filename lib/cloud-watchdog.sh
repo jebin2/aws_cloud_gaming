@@ -65,8 +65,10 @@ cw_env() { # cw_env <account>
   stuck=$(cw_int "${GAME_WATCHDOG_STUCK_MIN:-}" 60); (( stuck < 40 )) && stuck=40
   # CG_NTFY_URL only when set: an unset notification URL is simply absent.
   local ntfy; ntfy=$(cg_ntfy_url)
-  printf 'Variables={CG_TS_HOST=%s,CG_IDLE_MINUTES=%s,CG_BOOT_GRACE_MINUTES=20,CG_STUCK_MINUTES=%s,CG_BUCKET=%s,CG_ARCHIVE_EXPIRY_DAYS=%s%s}' \
-    "$TS_HOST" "$idle" "$stuck" "$(cw_bucket "$1")" "$(cw_expiry_days)" "${ntfy:+,CG_NTFY_URL=$ntfy}"
+  # CG_ACCOUNT lets it recognise this host's buckets in other regions by the
+  # name cg gives them, so games a region move left behind expire too.
+  printf 'Variables={CG_TS_HOST=%s,CG_IDLE_MINUTES=%s,CG_BOOT_GRACE_MINUTES=20,CG_STUCK_MINUTES=%s,CG_BUCKET=%s,CG_ACCOUNT=%s,CG_ARCHIVE_EXPIRY_DAYS=%s%s}' \
+    "$TS_HOST" "$idle" "$stuck" "$(cw_bucket "$1")" "$1" "$(cw_expiry_days)" "${ntfy:+,CG_NTFY_URL=$ntfy}"
 }
 
 # Describe and read metrics anywhere; stop, terminate and tag ONLY the instance
@@ -74,9 +76,16 @@ cw_env() { # cw_env <account>
 # uses; write only its own log group. It cannot launch anything, read the game
 # archive beyond expiring it, or touch IAM.
 #
-# Archive expiry adds CloudTrail lookups, its own free SSM marks, and list/delete on
-# the ONE archive bucket - and only while expiry is on. With GAME_ARCHIVE_EXPIRY_DAYS=0 the role
-# cannot delete a single game.
+# Archive expiry adds CloudTrail lookups, its own free SSM marks, and list/read/
+# delete on cg's archive buckets - and only while expiry is on. With
+# GAME_ARCHIVE_EXPIRY_DAYS=0 the role cannot delete a single game.
+#
+# cg-library-*, not one bucket: games are kept one by one now, and a region
+# move leaves games in a bucket of this host's that the old policy could not
+# see - 162.8 GB billed for weeks. IAM cannot express "this host's", so the
+# function does: it acts only on a bucket whose name is the one cg derives for
+# this account, host and the bucket's own region (own_buckets in the function).
+# Listing the account's buckets needs "*"; that is a list of names, nothing more.
 # The SSM resource's region is a WILDCARD, deliberately. An IAM role is GLOBAL
 # while this policy was pinned to $REGION, so the moment a second region had a
 # watchdog the one installed last rewrote the shared policy and revoked the
@@ -86,18 +95,20 @@ cw_env() { # cw_env <account>
 # scopes this is the account and the parameter PATH - /cloud-gaming/<host>/* in
 # this account only - and both of those stay exact.
 cw_policy() { # cw_policy <account>
-  local b extra=""
-  b=$(cw_bucket "$1")
+  local extra=""
   if (( $(cw_expiry_days) > 0 )); then
     extra=$(cat <<JSON
 ,
  {"Sid":"ArchiveExpiryLookups","Effect":"Allow","Action":"cloudtrail:LookupEvents","Resource":"*"},
+ {"Sid":"ArchiveExpiryFindBuckets","Effect":"Allow","Action":"s3:ListAllMyBuckets","Resource":"*"},
  {"Sid":"ArchiveExpiryBucket","Effect":"Allow",
-  "Action":["s3:ListBucket","s3:ListBucketMultipartUploads","s3:DeleteBucket"],
-  "Resource":"arn:aws:s3:::$b"},
- {"Sid":"ArchiveExpiryObjects","Effect":"Allow","Action":["s3:DeleteObject","s3:AbortMultipartUpload"],
-  "Resource":"arn:aws:s3:::$b/*"},
- {"Sid":"ArchiveExpiryMarks","Effect":"Allow","Action":["ssm:GetParameter","ssm:PutParameter"],
+  "Action":["s3:ListBucket","s3:ListBucketMultipartUploads","s3:DeleteBucket","s3:GetBucketLocation"],
+  "Resource":"arn:aws:s3:::cg-library-*"},
+ {"Sid":"ArchiveExpiryObjects","Effect":"Allow",
+  "Action":["s3:GetObject","s3:PutObject","s3:DeleteObject","s3:AbortMultipartUpload"],
+  "Resource":"arn:aws:s3:::cg-library-*/*"},
+ {"Sid":"ArchiveExpiryMarks","Effect":"Allow",
+  "Action":["ssm:GetParameter","ssm:PutParameter","ssm:GetParametersByPath","ssm:DeleteParameter"],
   "Resource":"arn:aws:ssm:*:$1:parameter/cloud-gaming/$TS_HOST/*"}
 JSON
 )

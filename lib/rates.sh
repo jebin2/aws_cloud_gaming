@@ -14,6 +14,10 @@ CG_SNAPSHOT_USD_GB_MONTH="${CG_SNAPSHOT_USD_GB_MONTH:-0.0125}"
 CG_EGRESS_USD_GB="${CG_EGRESS_USD_GB:-0.1093}"           # after the free 100 GB
 CG_EGRESS_FREE_GB="${CG_EGRESS_FREE_GB:-100}"
 CG_CE_CALL_USD="${CG_CE_CALL_USD:-0.01}"                 # one Cost Explorer call
+# Copying between regions: "InterRegion Outbound", Hyderabad -> Mumbai, from the
+# Pricing API on 2026-10-16. What moving saved games to the machine's region costs,
+# once, and what a build pays every time it pulls them across instead.
+CG_XREGION_USD_GB="${CG_XREGION_USD_GB:-0.086}"
 # The rupee rate: today's, not a number written down once. Fetched at most
 # once a day from an exchange-rate endpoint and kept in a cache file; if the
 # fetch fails, the last good rate stands, and 88 only if there has never been
@@ -45,7 +49,8 @@ print(f"{v:.2f}")' 2>/dev/null) || v=""
 # box's own, and an Elastic IP left behind with no box at all.
 CG_IPV4_USD_HOUR="${CG_IPV4_USD_HOUR:-0.005}"
 export CG_S3_USD_GB_MONTH CG_EBS_USD_GB_MONTH CG_SNAPSHOT_USD_GB_MONTH \
-       CG_EGRESS_USD_GB CG_EGRESS_FREE_GB CG_CE_CALL_USD CG_INR_PER_USD CG_IPV4_USD_HOUR
+       CG_EGRESS_USD_GB CG_EGRESS_FREE_GB CG_CE_CALL_USD CG_INR_PER_USD CG_IPV4_USD_HOUR \
+       CG_XREGION_USD_GB
 
 # rates_json - the table itself, for a program that must show a price without
 # inventing one.
@@ -62,5 +67,6 @@ print(json.dumps({
   "ce_call_usd":       float(g("CG_CE_CALL_USD")),
   "inr_per_usd":       float(g("CG_INR_PER_USD")),
   "ipv4_hour":         float(g("CG_IPV4_USD_HOUR")),
+  "xregion_gb":        float(g("CG_XREGION_USD_GB")),
 }))'
 }

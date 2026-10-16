@@ -311,7 +311,7 @@ echo "5b. the build screen, as the design draws it"
 # mockup has; each is fed by a field from cg, never by a number typed in here.
 contains "an archive table"              "$html" 'id="b-games"'
 lacks    "  by name, not by Steam's id"   "$js" 'appid ${g.appid}'
-contains "  and when it was archived"    "$js" "daysAgo(g.pushed)"
+contains "  and when each is deleted"    "$js" "deleteOn(g, days, seen, marks)"
 contains "the allocation bar"            "$html" 'id="b-bar"'
 contains "  says what is left, plainly"  "$js" "Too big by"
 contains "the machine comes from cg"     "$js" "const spec = s.spec || {}"
@@ -327,7 +327,7 @@ contains "  the live line shows in the strip" "$js" "\$('b-prog-step').textConte
 contains "a running box replaces the build button" "$js" '$('"'"'b-build'"'"').hidden = up'
 contains "  with play and destroy"       "$js" '$('"'"'b-destroy'"'"').hidden = !up'
 contains "  and the picker goes read-only" "$js" "box.disabled = up"
-contains "  build re-reads the box state" "$js" "[['status', '--json'], 'status']],"
+contains "  build re-reads the box state" "$js" "build:     [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status'],"
 # The panel sits in a content-sized grid row, so flex-1 had no height to divide
 # and the log grew forever instead of scrolling. It is bounded.
 contains "the log is bounded and scrolls" "$html" 'max-h-[46vh] overflow-y-auto'
@@ -426,7 +426,9 @@ lacks    "no picker on the Build screen"  "$html" 'id="b-type"'
 lacks    "  and no table either"          "$html" 'id="b-chooser"'
 contains "Build names the chosen machine" "$html" 'id="b-pick"'
 contains "  and offers a way to change it" "$html" 'id="b-setup"'
-contains "  which goes to Settings"       "$js" "goSetting(\$('s-machine-card'))"
+# ...as a dialog over Build, not a trip to the top of Settings.
+contains "  which opens the chooser here"  "$js" '$('"'"'b-setup'"'"').onclick = () => openMachines();'
+contains "  the one table, in a dialog"    "$html" '<dialog id="machdlg"'
 # Settings is a long screen. Arriving is not enough - the first picker went
 # unnoticed because it was below the fold - so whatever you came for is
 # scrolled to and flashed. Three screens do this now, through one helper.
@@ -447,16 +449,19 @@ check    "  and still no machine is named here" \
          "$(grep -cE 'g6\.|g6e\.|L40S|L4 ' app/renderer/app.js)" "0"
 
 echo "5c. the library and cost screens, in the same language"
-contains "the library leads with what it costs" "$html" 'id="lib-cost"'
-contains "  what each game costs, in rupees" "$js" 'cell(tr, `${r(g.usd_month)} a month`'
+# One Games table: every game, its place, what it costs and when it goes.
+contains "the library is one table of games" "$html" 'id="lib-rows"'
+contains "  each with its place"          "$html" '>PLACE</th>'
+contains "  and when it is deleted"       "$html" '>DELETED ON</th>'
+contains "  what each game costs, in rupees" "$js" 'cell(tr, r(g.usd_month)'
 contains "  and a total row"              "$html" 'id="lib-foot"'
-contains "  over capacity says a build picks" "$js" "so a build lets you pick which to download"
+contains "  kept for: one setting, applied at once" "$js" "['library', 'keep-for', String(n)]"
 contains "  the Steam login is a card of its own" "$html" 'id="lib-login-box"'
 # A fallback that looks like an answer is worse than no answer: the app used to
 # print 209 GB of box disk and a rupee rate of 88 when cg had told it neither.
 check    "no disk size is guessed"        "$(grep -c '|| 209' app/renderer/app.js)" "0"
 check    "  nor a starting value for one"  "$(grep -c 'selectable_gb: 209' app/renderer/app.js)" "0"
-contains "  it says it does not know"     "$js" "How much a machine holds is not known yet"
+contains "  it says it does not know"     "$js" "the machine's space is not known yet"
 check    "no exchange rate is guessed"    "$(grep -c 'inr_per_usd || 88' app/renderer/app.js)" "0"
 contains "cost projects the month"       "$js" "m.projected_usd"
 contains "  against the budget you set, in rupees" "$js" "Number(setting('GAME_BUDGET_INR', NaN))"
@@ -588,12 +593,12 @@ contains "  and reading it is free"      "$html" "costs nothing to read"
 # ORDER of the cards and the sentence under each heading, which is layout.
 contains "the registry carries the grouping" "$(./cg config --json)" '"group"'
 contains "  and the name to show"            "$(./cg config --json)" '"label"'
-contains "the app keeps only the order"      "$js" "const GROUP_ORDER = ["
-# A setting cg grows appears without touching this file at all - and one with
-# no group is on a card of its own, deliberately absent from the list.
-contains "  grouped by what cg said"     "$js" "byGroup.get(r.group).push(r.key)"
-contains "  including a group it has never heard of" "$js" "!GROUP_ORDER.includes(name)"
-contains "  and the screen says how it saves" "$html" "cg config set"
+# Settings shows only what nothing else sets: the stream, the disk and the two
+# accounts. Each other setting has one home on the page it is about.
+contains "Settings is the stream and the disk" "$js" "['GAME_RES', 'GAME_FPS', 'GAME_BITRATE_KBPS']"
+contains "  and the disk"                "$js" "['Machine disk', '', ['GAME_DISK_GB']]"
+lacks    "  not the guards' settings again" "$js" "'The guards': "
+lacks    "  nor the jargon line"          "$html" "Editing one here runs"
 lacks    "  not by editing the file"     "$html" "or by editing the file"
 # The archive's destructive actions were unreachable: the orphan line said
 # "remove with: cg library clean" and there was no button.

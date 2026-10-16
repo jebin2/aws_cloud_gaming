@@ -28,6 +28,7 @@ the check fails closed: two independent records must both say "unused" - the
 last-seen mark - a free SSM parameter - refreshed while a box exists, and CloudTrail's
 RunInstances history - and any error, gap or unreadable answer keeps it.
 """
+import hashlib
 import json
 import os
 import re
@@ -55,6 +56,10 @@ SPOT_EVENT = "EC2 Spot Instance Interruption Warning"
 
 # Archive expiry, in days with no box. 0 turns it off.
 BUCKET = os.environ.get("CG_BUCKET", "")
+# The account, so this host's OTHER buckets can be recognised by name: a region
+# move leaves games in a bucket nothing points at, billing until someone looks.
+# Unset, only BUCKET is ever touched - which is how it worked before.
+ACCOUNT = os.environ.get("CG_ACCOUNT", "")
 EXPIRY_DAYS = int(os.environ.get("CG_ARCHIVE_EXPIRY_DAYS", "0") or 0)
 # The expiry check's marks are SSM Parameter Store standard parameters - which cost
 # nothing - under /cloud-gaming/<host>/, not bucket tags, which are billed S3
@@ -96,6 +101,13 @@ def notify(title, message, priority="default", tags=""):
 
 def handler(event, context):
     import boto3  # in the Lambda runtime; the tests pass fakes instead
+    clients = {}
+
+    def s3_for(region):
+        # A bucket answers only in its own region's endpoint.
+        if region not in clients:
+            clients[region] = boto3.client("s3", region_name=region)
+        return clients[region]
     # EC2's own state-change events, from the second EventBridge rule. Nothing
     # else runs for these: they answer "is the box really gone", not "is it idle".
     if isinstance(event, dict) and event.get("detail-type") in (STATE_EVENT, SPOT_EVENT):
@@ -103,7 +115,8 @@ def handler(event, context):
                              datetime.now(timezone.utc), boto3.client("ssm"))
     dry = isinstance(event, dict) and bool(event.get("dry_run"))
     return run_all(boto3.client("ec2"), boto3.client("cloudwatch"), boto3.client("s3"),
-                   boto3.client("ssm"), boto3.client("cloudtrail"), datetime.now(timezone.utc), dry)
+                   boto3.client("ssm"), boto3.client("cloudtrail"), datetime.now(timezone.utc), dry,
+                   s3_for)
 
 
 def state_changed(ec2, event, cw=None, now=None, ssm=None):
@@ -148,7 +161,7 @@ def state_changed(ec2, event, cw=None, now=None, ssm=None):
     return {"state": state, "instance": iid}
 
 
-def run_all(ec2, cw, s3, ssm, trail, now, dry=False):
+def run_all(ec2, cw, s3, ssm, trail, now, dry=False, s3_for=None):
     """The idle check, then the archive check. The second runs even when the
     first fails, and the invocation still counts as an error afterwards."""
     failure = None
@@ -157,7 +170,7 @@ def run_all(ec2, cw, s3, ssm, trail, now, dry=False):
     except Exception as exc:
         failure, result = exc, {"decisions": []}
     try:
-        result["archive"] = expire_archive(ec2, s3, ssm, cw, trail, now, dry)
+        result["archive"] = expire_archive(ec2, s3, ssm, cw, trail, now, dry, s3_for)
     except Exception as exc:
         say("archive: check FAILED - nothing deleted: %s" % exc)
         failure = failure or exc
@@ -554,14 +567,15 @@ def last_launch(trail, since, now):
     raise RuntimeError("CloudTrail launch history longer than %d pages" % TRAIL_PAGES)
 
 
-def empty_and_delete(s3):
+def empty_and_delete(s3, bucket=None):
+    bucket = bucket or BUCKET
     removed = 0
     for _ in range(DELETE_ROUNDS):
-        page = s3.list_objects_v2(Bucket=BUCKET, MaxKeys=1000)
+        page = s3.list_objects_v2(Bucket=bucket, MaxKeys=1000)
         keys = [{"Key": o["Key"]} for o in page.get("Contents", [])]
         if not keys:
             break
-        out = s3.delete_objects(Bucket=BUCKET, Delete={"Objects": keys, "Quiet": True})
+        out = s3.delete_objects(Bucket=bucket, Delete={"Objects": keys, "Quiet": True})
         if out.get("Errors"):
             raise RuntimeError("S3 refused to delete %d objects" % len(out["Errors"]))
         removed += len(keys)
@@ -569,16 +583,171 @@ def empty_and_delete(s3):
         raise RuntimeError("bucket still not empty after %d rounds" % DELETE_ROUNDS)
     # Incomplete multipart uploads appear in no listing and block the delete.
     for _ in range(DELETE_ROUNDS):
-        uploads = s3.list_multipart_uploads(Bucket=BUCKET).get("Uploads", [])
+        uploads = s3.list_multipart_uploads(Bucket=bucket).get("Uploads", [])
         if not uploads:
             break
         for up in uploads:
-            s3.abort_multipart_upload(Bucket=BUCKET, Key=up["Key"], UploadId=up["UploadId"])
-    s3.delete_bucket(Bucket=BUCKET)
+            s3.abort_multipart_upload(Bucket=bucket, Key=up["Key"], UploadId=up["UploadId"])
+    s3.delete_bucket(Bucket=bucket)
     return removed
 
 
-def expire_archive(ec2, s3, ssm, cw, trail, now, dry=False):
+# --- one game at a time, wherever it is saved --------------------------------
+# The rule is the same for every game - N days after a machine was last seen -
+# but each game can be kept longer from the app ("Reset"), which writes
+# /cloud-gaming/<host>/kept/<bucket>/<appid>. A game goes when the later of the
+# two is N days old. Nothing here decides whether the games are in use; that is
+# expire_archive's job, and it only calls this once both records say unused.
+
+KEPT_PATH = "kept"
+
+
+def bucket_name(*parts):
+    """lib/s3-region.sh's cg_bucket_name, and the name it used before the region
+    went into the hash. Both are this host's; nothing else is."""
+    return "cg-library-" + hashlib.sha256("-".join(parts).encode()).hexdigest()[:12]
+
+
+def own_buckets(s3):
+    """[(name, region)] for every bucket this host owns. A bucket is ours when its
+    name is the one cg derives for this account, host and ITS region - or the old
+    form without a region - never merely because it starts with cg-library-."""
+    if not ACCOUNT:
+        return [(BUCKET, None)] if BUCKET else []
+    legacy = bucket_name(ACCOUNT, TS_HOST)
+    out = []
+    for b in s3.list_buckets().get("Buckets", []):
+        name = b.get("Name", "")
+        if not name.startswith("cg-library-"):
+            continue
+        loc = s3.get_bucket_location(Bucket=name).get("LocationConstraint") or "us-east-1"
+        if name in (BUCKET, legacy, bucket_name(ACCOUNT, TS_HOST, loc)):
+            out.append((name, loc))
+    return out
+
+
+def kept_marks(ssm):
+    """{(bucket, appid): time} from the Reset marks. Unreadable is not "none": raise."""
+    out, kwargs = {}, {"Path": mark_name(KEPT_PATH), "Recursive": True}
+    for _ in range(TRAIL_PAGES):
+        resp = ssm.get_parameters_by_path(**kwargs)
+        for p in resp.get("Parameters", []):
+            parts = p["Name"].rsplit("/", 2)
+            try:
+                when = datetime.strptime(p["Value"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                raise RuntimeError("unreadable kept mark %r" % p["Name"])
+            out[(parts[-2], parts[-1])] = when
+        if not resp.get("NextToken"):
+            return out
+        kwargs["NextToken"] = resp["NextToken"]
+    raise RuntimeError("too many kept marks")
+
+
+def read_index(c, bucket):
+    """The games a bucket holds, from its index. No index is no games; an index
+    that cannot be read is an error, never an empty list."""
+    try:
+        body = c.get_object(Bucket=bucket, Key="steam/index.json")["Body"].read()
+    except Exception as exc:
+        if error_code(exc) in ("NoSuchKey", "404", "NotFound"):
+            return []
+        raise
+    apps = json.loads(body).get("apps", [])
+    if not isinstance(apps, list):
+        raise RuntimeError("unreadable index in s3://%s" % bucket)
+    return apps
+
+
+def game_dir(app):
+    d = str(app.get("installdir") or "")
+    # The folder is deleted recursively: an empty or climbing name would take
+    # every game in the bucket with it.
+    if not d or "/" in d or d in (".", ".."):
+        raise RuntimeError("refusing to delete a game with install folder %r" % d)
+    return d
+
+
+def delete_game(c, bucket, app):
+    """What library_forget removes: the game's three folders and its two files."""
+    appid = str(app.get("appid"))
+    if not appid.isdigit():
+        raise RuntimeError("refusing to delete a game with appid %r" % appid)
+    removed = 0
+    for prefix in ("steam/steamapps/common/%s/" % game_dir(app),
+                   "steam/steamapps/compatdata/%s/" % appid,
+                   "steam/steamapps/shadercache/%s/" % appid):
+        for _ in range(DELETE_ROUNDS):
+            page = c.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1000)
+            keys = [{"Key": o["Key"]} for o in page.get("Contents", [])]
+            if not keys:
+                break
+            out = c.delete_objects(Bucket=bucket, Delete={"Objects": keys, "Quiet": True})
+            if out.get("Errors"):
+                raise RuntimeError("S3 refused to delete %d objects" % len(out["Errors"]))
+            removed += len(keys)
+        else:
+            raise RuntimeError("%s still not empty after %d rounds" % (prefix, DELETE_ROUNDS))
+    c.delete_objects(Bucket=bucket, Delete={"Quiet": True, "Objects": [
+        {"Key": "steam/steamapps/appmanifest_%s.acf" % appid},
+        {"Key": "steam/meta/symlinks-%s.tsv" % appid}]})
+    return removed
+
+
+def expire_games(s3, s3_for, ssm, now, seen, window, dry):
+    """Each game past its own deadline goes; the rest stay. A bucket left with no
+    games goes whole - its Steam login with it - which is what happened to the
+    one bucket before games could be kept one by one."""
+    kept = kept_marks(ssm)
+    deleted_games, deleted_buckets, keeping, gone = [], [], [], set()
+    for bucket, region in own_buckets(s3):
+        c = s3_for(region) if (s3_for and region) else s3
+        apps = read_index(c, bucket)
+        due = [a for a in apps if now - max(seen, kept.get((bucket, str(a.get("appid"))), seen)) >= window]
+        stay = [a for a in apps if a not in due]
+        for a in stay:
+            keeping.append("%s (kept until %s)" % (a.get("name") or a.get("appid"),
+                           iso(max(seen, kept.get((bucket, str(a.get("appid"))), seen)) + window)))
+        if dry:
+            for a in due:
+                say("archive: unused for %s - WOULD DELETE %s from s3://%s (dry run)"
+                    % (span(now - seen), a.get("name") or a.get("appid"), bucket))
+            if not stay:
+                say("archive: WOULD DELETE s3://%s (dry run)" % bucket)
+            deleted_games += due
+            continue
+        if not stay:
+            removed = empty_and_delete(c, bucket)
+            deleted_buckets.append(bucket)
+            deleted_games += due
+            gone.update((bucket, str(a.get("appid"))) for a in apps)
+            say("archive: unused for %s - DELETED s3://%s (%d objects)" % (span(now - seen), bucket, removed))
+            if bucket == BUCKET:
+                mark_put(ssm, "archive-deleted", iso(now))
+            continue
+        for a in due:
+            n = delete_game(c, bucket, a)
+            deleted_games.append(a)
+            gone.add((bucket, str(a.get("appid"))))
+            say("archive: unused for %s - DELETED %s from s3://%s (%d objects)"
+                % (span(now - seen), a.get("name") or a.get("appid"), bucket, n))
+        if due:
+            c.put_object(Bucket=bucket, Key="steam/index.json", ContentType="application/json",
+                         Body=json.dumps({"apps": stay}, indent=1).encode())
+    # A mark for a game that is gone would keep nothing; drop it so the next
+    # copy of that game starts on the ordinary rule.
+    for (bucket, appid) in list(kept):
+        if (bucket, appid) in gone or bucket in deleted_buckets:
+            try:
+                ssm.delete_parameter(Name=mark_name("%s/%s/%s" % (KEPT_PATH, bucket, appid)))
+            except Exception as exc:
+                say("could not drop the kept mark for %s (ignored): %s" % (appid, exc))
+    if keeping:
+        say("archive: kept - %s" % ", ".join(keeping))
+    return deleted_games, deleted_buckets
+
+
+def expire_archive(ec2, s3, ssm, cw, trail, now, dry=False, s3_for=None):
     if EXPIRY_DAYS <= 0 or not BUCKET:
         return None
     # Hourly: one invocation in twelve lands in the first 5 minutes of an hour.
@@ -601,8 +770,13 @@ def expire_archive(ec2, s3, ssm, cw, trail, now, dry=False):
     size, day = archive_size(cw, now)
     deleted = mark_time(ssm, "archive-deleted")
     if not size or (deleted is not None and day <= deleted):
-        say("archive: none measured in s3://%s - nothing to expire" % BUCKET)
-        return "absent"
+        # The metric is regional and covers one bucket; games this host left in
+        # another region are only found by asking for its buckets. Asked only
+        # here, where the answer would otherwise be "nothing to expire".
+        others = [b for b, _ in own_buckets(s3)] if ACCOUNT else []
+        if not [b for b in others if b != BUCKET]:
+            say("archive: none measured in s3://%s - nothing to expire" % BUCKET)
+            return "absent"
 
     seen = mark_time(ssm, "archive-last-seen")
     if seen is None:
@@ -629,21 +803,34 @@ def expire_archive(ec2, s3, ssm, cw, trail, now, dry=False):
     if boxes(ec2):
         say("archive: kept - a box appeared during the check")
         return "in-use"
+    if not ACCOUNT:
+        # The one bucket, whole: how this worked before games could be kept one by
+        # one, and still how it works when cg did not say whose account this is.
+        if dry:
+            say("archive: unused for %s - WOULD DELETE s3://%s (dry run)" % (span(now - seen), BUCKET))
+            return "would-delete"
+        # The only S3 requests this check ever makes are these, once, when it deletes.
+        try:
+            removed = empty_and_delete(s3)
+        except Exception as exc:
+            if error_code(exc) in ("NoSuchBucket", "404", "NotFound"):
+                mark_put(ssm, "archive-deleted", iso(now))
+                say("archive: s3://%s is already gone - nothing to expire" % BUCKET)
+                return "absent"
+            raise
+        mark_put(ssm, "archive-deleted", iso(now))
+        say("archive: unused for %s - DELETED s3://%s (%d objects)" % (span(now - seen), BUCKET, removed))
+        notify("game archive deleted",
+               "Unused for %s: %d objects removed from S3. The next cg init starts empty, and Steam "
+               "downloads the games again." % (span(now - seen), removed), "high", "wastebasket")
+        return "deleted"
+    games, buckets = expire_games(s3, s3_for, ssm, now, seen, window, dry)
     if dry:
-        say("archive: unused for %s - WOULD DELETE s3://%s (dry run)" % (span(now - seen), BUCKET))
-        return "would-delete"
-    # The only S3 requests this check ever makes are these, once, when it deletes.
-    try:
-        removed = empty_and_delete(s3)
-    except Exception as exc:
-        if error_code(exc) in ("NoSuchBucket", "404", "NotFound"):
-            mark_put(ssm, "archive-deleted", iso(now))
-            say("archive: s3://%s is already gone - nothing to expire" % BUCKET)
-            return "absent"
-        raise
-    mark_put(ssm, "archive-deleted", iso(now))
-    say("archive: unused for %s - DELETED s3://%s (%d objects)" % (span(now - seen), BUCKET, removed))
-    notify("game archive deleted",
-           "Unused for %s: %d objects removed from S3. The next cg init starts empty, and Steam "
-           "downloads the games again." % (span(now - seen), removed), "high", "wastebasket")
+        return "would-delete" if games or buckets else "kept"
+    if not games and not buckets:
+        return "kept"
+    names = ", ".join(str(a.get("name") or a.get("appid")) for a in games) or "nothing but leftovers"
+    notify("saved games deleted",
+           "Unused for %s: %s. Steam downloads them again on the next build." % (span(now - seen), names),
+           "high", "wastebasket")
     return "deleted"

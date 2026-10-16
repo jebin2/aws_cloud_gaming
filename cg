@@ -35,7 +35,8 @@ while [[ ${1:-} == -* ]]; do
   "runs_alone": [
     ["init"], ["destroy"], ["open"],
     ["library", "push"], ["library", "pull"], ["library", "forget"],
-    ["library", "clean"], ["library", "account"],
+    ["library", "clean"], ["library", "account"], ["library", "move"],
+    ["library", "reset"], ["library", "keep-for"],
     ["creds", "set"],
     ["creds", "tailscale", "signin"],
     ["creds", "tailscale", "authkey"],
@@ -45,7 +46,8 @@ while [[ ${1:-} == -* ]]; do
     "aws-access-key-id", "aws-secret-access-key",
     "tailscale-api-token", "tailscale-auth-key",
     "alert-email", "session-end", "fix-go-ahead", "steam-login",
-    "clean-orphans", "delete-volume", "destroy-all", "forget-game", "forget-login"
+    "clean-orphans", "delete-volume", "destroy-all", "forget-game", "forget-login",
+    "move-game"
   ]
 }
 JSON
@@ -414,7 +416,10 @@ print(json.dumps({"bucket": os.environ.get("BUCKET") or None,
   # game. account_json caches the 22 KB fetch against the object's ETag, so the
   # cost here is one head-object.
   local login; login=$(account_json 2>/dev/null) || login=""
-  printf '%s' "$idx" | ORPHANS="$orph" LOGIN="$login" BUCKET="$(cg_bucket || true)" python3 -c '
+  # The dates: when a machine was last seen, and each game's Reset - free reads.
+  local marks; marks=$(library_marks_json 2>/dev/null) || marks="null"
+  printf '%s' "$idx" | ORPHANS="$orph" LOGIN="$login" BUCKET="$(cg_bucket || true)" MARKS="$marks" \
+    HERE="$REGION" DAYS="$(cw_expiry_days)" python3 -c '
 import json, os, sys
 try:    apps = json.load(sys.stdin).get("apps", [])
 except Exception: apps = []
@@ -422,9 +427,15 @@ GB = 1073741824.0
 S3 = float(os.environ["CG_S3_USD_GB_MONTH"])
 # Per game, not just the total: a screen that lists them must be able to say
 # what each one costs without knowing the price of S3.
+marks = json.loads(os.environ.get("MARKS") or "null")
+kept = (marks or {}).get("kept") or {}
+bucket = os.environ.get("BUCKET") or ""
 games = [{"appid": a.get("appid"), "name": a.get("name"), "installdir": a.get("installdir"),
           "bytes": a.get("bytes", 0), "pushed": a.get("pushed"),
-          "usd_month": round(a.get("bytes", 0) / GB * S3, 2)} for a in apps]
+          "usd_month": round(a.get("bytes", 0) / GB * S3, 2),
+          # The Reset mark, if any: the watchdog counts from the later of this
+          # and the last machine.
+          "kept": kept.get("%s/%s" % (bucket, a.get("appid")))} for a in apps]
 total = sum(g["bytes"] for g in games)
 orphan_bytes = 0
 for line in (os.environ.get("ORPHANS") or "").splitlines():
@@ -442,6 +453,13 @@ print(json.dumps({
   # What the box can hold at once, and what cg init offers after its reserve.
   "disk_gb": 229, "selectable_gb": 209,
   "usd_per_gb_month": S3,
+  # Where these are, and how long they are kept: N days after the later of the
+  # last machine and the Reset of each game. null when the marks are unreadable.
+  "region": os.environ.get("HERE") or None,
+  "inr_per_usd": float(os.environ["CG_INR_PER_USD"]),
+  "expiry_days": int(os.environ.get("DAYS") or 0),
+  "last_seen": (marks or {}).get("last_seen"),
+  "marks_read": marks is not None,
 }, indent=2))'
 }
 
@@ -544,6 +562,189 @@ for k, v in sorted(size.items(), key=lambda kv: -kv[1]):
     print("%d\t%s" % (v, k))' || true
 }
 
+# The marks the cloud watchdog keeps, in one free call: when a machine was last
+# seen, and each game's Reset. null when they could not be read - which is not
+# "no marks", and the app says it does not know the dates rather than invent them.
+library_marks_json() {
+  local out
+  out=$(cw_aws ssm get-parameters-by-path --path "/cloud-gaming/$TS_HOST/" --recursive \
+          --query 'Parameters[].[Name,Value]' --output json 2>/dev/null) || out=""
+  OUT="$out" HOSTP="/cloud-gaming/$TS_HOST/" python3 -c '
+import json, os
+raw = os.environ.get("OUT") or ""
+if not raw.strip():
+    print("null"); raise SystemExit
+p, seen, kept = os.environ["HOSTP"], None, {}
+for name, value in json.loads(raw) or []:
+    rest = name[len(p):]
+    if rest == "archive-last-seen": seen = value
+    elif rest.startswith("kept/"): kept[rest[5:]] = value
+print(json.dumps({"last_seen": seen, "kept": kept}))'
+}
+
+# library_place [bucket] -> "<bucket>\t<region>": the bucket in use when none is
+# named, else the named one - only if cg made it for this account and host. A
+# name typed or passed in is checked here, once, for every command that writes.
+library_place() {
+  local b="${1:-}" r acct
+  if [[ -z $b ]]; then
+    b=$(cg_bucket) || { echo "could not work out the archive bucket - AWS did not answer" >&2; return 1; }
+  elif [[ $b != "$(cg_bucket 2>/dev/null)" ]]; then
+    acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) \
+      || { echo "AWS did not answer - could not check that bucket is cg's" >&2; return 1; }
+    r=$(s3_bucket_region "$b") || { echo "no such bucket, or AWS did not answer: $b" >&2; return 1; }
+    cg_bucket_ours "$b" "$r" "$acct" "$TS_HOST" \
+      || { echo "not one of this rig's buckets: $b (see: cg library elsewhere)" >&2; return 1; }
+    printf '%s\t%s\n' "$b" "$r"; return 0
+  fi
+  r=$(s3_bucket_region "$b" 2>/dev/null) || r="$REGION"
+  printf '%s\t%s\n' "$b" "$r"
+}
+
+# The games in one bucket, from its index - as library_index, for any of cg's.
+library_index_at() { # library_index_at <bucket> <region>
+  local out err rc reason
+  err=$(mktemp)
+  out=$(aws s3 cp "s3://$1/steam/index.json" - --region "$2" 2>"$err") && rc=0 || rc=$?
+  if (( rc == 0 )); then rm -f "$err"; printf '%s' "$out"; return 0; fi
+  reason=$(library_reason "$(cat "$err")"); rm -f "$err"
+  [[ $reason == missing ]] && { echo '{"apps":[]}'; return 0; }
+  printf '%s\n' "$reason" >&2
+  return 1
+}
+
+# Games saved somewhere cg is not looking.
+#
+# Every other read here uses ONE bucket, the one .env names. A region move made
+# a new one and left 162.8 GB of Diablo IV in the old region, billing Rs 386 a
+# month with nothing pointing at it: Library said no games, a build offered
+# none. AWS lists every bucket in the account in one call; cg keeps the ones it
+# made for this account and host (cg_bucket_ours) - never anything merely named
+# like them. Region lookups are free; reading inside is a handful of LIST
+# requests, about Rs 0.003 for 6,000 files.
+library_elsewhere_json() {
+  local cur names b r work i=0 acct
+  cur=$(cg_bucket 2>/dev/null) || cur=""
+  acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || acct=""
+  names=$(aws s3api list-buckets --query 'Buckets[].Name' --output text 2>/dev/null) || names=""
+  if [[ -z $acct || -z $names ]]; then
+    printf '{"error": "could not list your buckets - AWS did not answer", "places": null}\n'
+    return 0
+  fi
+  work=$(mktemp -d)
+  library_marks_json > "$work/marks"
+  for b in $names; do
+    [[ $b == cg-library-* && $b != "$cur" ]] || continue
+    r=$(s3_bucket_region "$b" 2>/dev/null) || continue
+    cg_bucket_ours "$b" "$r" "$acct" "$TS_HOST" || continue
+    i=$((i + 1))
+    printf '%s\t%s\n' "$b" "$r" > "$work/$i.meta"
+    # An empty prefix exits 1 with nothing on stderr: that is an empty bucket.
+    # Anything said on stderr is a listing that failed, which is not.
+    aws s3 ls "s3://$b/steam/" --recursive --region "$r" > "$work/$i.ls" 2> "$work/$i.err" || true
+    aws s3 cp "s3://$b/steam/index.json" - --region "$r" > "$work/$i.idx" 2>/dev/null || true
+    # A login copy beside them: who it signs in as, and when it was saved -
+    # one 22 KB read, cached against its ETag like the one in use.
+    if grep -q ' steam/account/' "$work/$i.ls"; then
+      CG_ACCOUNT_BUCKET="$b" account_json > "$work/$i.login" 2>/dev/null || true
+    fi
+  done
+  WORK="$work" N="$i" HERE="$REGION" DAYS="$(cw_expiry_days)" python3 -c '
+import json, os, re
+w, n = os.environ["WORK"], int(os.environ["N"])
+GB = 1073741824.0
+S3 = float(os.environ["CG_S3_USD_GB_MONTH"])
+read = lambda f: open(os.path.join(w, f)).read() if os.path.exists(os.path.join(w, f)) else ""
+marks = json.loads(read("marks") or "null")
+kept = (marks or {}).get("kept") or {}
+places = []
+for i in range(1, n + 1):
+    bucket, region = (read("%d.meta" % i).rstrip("\n").split("\t") + [""])[:2]
+    err = read("%d.err" % i).strip().splitlines()
+    games_b = login_b = other_b = 0
+    dirs = {}
+    for line in read("%d.ls" % i).splitlines():
+        m = re.match(r"\S+\s+\S+\s+(\d+)\s+(.*)$", line)
+        if not m: continue
+        size, key = int(m.group(1)), m.group(2)
+        if key.startswith("steam/steamapps/"):
+            games_b += size
+            parts = key.split("/")
+            if len(parts) > 4 and parts[2] == "common":
+                dirs[parts[3]] = dirs.get(parts[3], 0) + size
+        elif key.startswith("steam/account/"): login_b += size
+        else: other_b += size
+    try:    apps = json.loads(read("%d.idx" % i) or "{}").get("apps", [])
+    except Exception: apps = []
+    # The index names the games; without one, the folders they were saved in do.
+    games = ([{"appid": str(a.get("appid")), "name": a.get("name") or a.get("installdir"),
+               "installdir": a.get("installdir"), "bytes": a.get("bytes", 0), "pushed": a.get("pushed"),
+               "usd_month": round(a.get("bytes", 0) / GB * S3, 2),
+               "kept": kept.get("%s/%s" % (bucket, a.get("appid")))} for a in apps]
+             or [{"appid": None, "name": d, "installdir": d, "bytes": s, "pushed": None,
+                  "usd_month": round(s / GB * S3, 2), "kept": None} for d, s in dirs.items()])
+    total = games_b + login_b + other_b
+    places.append({
+        "bucket": bucket, "region": region or None,
+        "error": err[0] if err else None,
+        "bytes": None if err else total, "games_bytes": None if err else games_b,
+        "usd_month": None if err else round(total / GB * S3, 2),
+        "games": sorted(games, key=lambda g: -(g["bytes"] or 0)),
+        "login": login_b > 0,
+        # The same shape as library list --json gives for the one in use.
+        "login_detail": (lambda s: json.loads(s) if s.strip() else None)(read("%d.login" % i)),
+    })
+known = [p for p in places if p["bytes"] is not None]
+print(json.dumps({"error": None, "places": places,
+                  # Where the machine is built, and what it costs to bring a
+                  # game here - the app must not need another read for either.
+                  "region": os.environ["HERE"],
+                  "inr_per_usd": float(os.environ["CG_INR_PER_USD"]),
+                  "xregion_usd_gb": float(os.environ["CG_XREGION_USD_GB"]),
+                  "expiry_days": int(os.environ["DAYS"]),
+                  "last_seen": (marks or {}).get("last_seen"),
+                  "marks_read": marks is not None,
+                  "bytes": sum(p["bytes"] for p in known),
+                  "usd_month": round(sum(p["usd_month"] for p in known), 2)}, indent=2))'
+  rm -rf "$work"
+}
+
+library_elsewhere_show() {
+  library_elsewhere_json | python3 -c '
+import json, os, sys
+d = json.load(sys.stdin)
+if d.get("error"): print("  " + d["error"]); sys.exit(1)
+INR = float(os.environ["CG_INR_PER_USD"])
+places = [p for p in d["places"] if p["bytes"] or p["error"]]
+if not places: print("  nothing saved anywhere else - every game is in the archive cg uses"); sys.exit()
+for p in places:
+    if p["error"]:
+        print("  %-14s could not be read: %s" % (p["region"] or "?", p["error"])); continue
+    print("  %-14s %6.1f GB   INR %.0f a month   s3://%s"
+          % (p["region"] or "?", p["bytes"] / 1073741824, p["usd_month"] * INR, p["bucket"]))
+    for g in p["games"]: print("      %-10s %s" % (g["appid"] or "", g["name"]))
+    if p["login"]: print("      (and a Steam login)")
+print()
+print("  cg does not use these. Bring one here: cg library move <appid> --from <bucket>")
+print("  or stop paying for it:                 cg library forget <appid> --from <bucket>")'
+}
+
+# cg library reset <appid> [--from <bucket>] - start a game's countdown again
+# today. The watchdog deletes a game N days after the later of "a machine was
+# last seen" and this mark; it is an SSM parameter, which costs nothing.
+library_reset() {
+  local id="" from="" place bucket region
+  while (( $# )); do case $1 in --from) from=${2:-}; shift 2 ;; -*) shift ;; *) id=$1; shift ;; esac; done
+  [[ $id =~ ^[0-9]+$ ]] || die "which game? see: cg library list"
+  place=$(library_place "$from") || die "$(library_place "$from" 2>&1 >/dev/null)"
+  IFS=$'\t' read -r bucket region <<<"$place"
+  say "counting it from today"
+  cw_aws ssm put-parameter --name "/cloud-gaming/$TS_HOST/kept/$bucket/$id" --type String --overwrite \
+    --value "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >/dev/null 2>&1 \
+    || die "could not save the new date - AWS did not answer"
+  log "kept: $id is counted from today - $(cw_expiry_days) days with no machine before it is deleted"
+}
+
 library_clean() {
   [[ -n ${GAME_S3_BUCKET:-} ]] || die "no bucket configured"
   local rows; rows=$(library_orphans)
@@ -588,9 +789,11 @@ library_clean() {
 CG_ACCOUNT_KEY="steam/account/steam-account.tgz"
 
 # bytes <TAB> modified <TAB> etag, or non-zero when there is no archived login.
+# CG_ACCOUNT_BUCKET names another of this rig's buckets to read instead of the
+# one in use - a region move leaves a login copy beside the games it left.
 account_head() {
   local bucket region
-  bucket=$(cg_bucket) || return 2
+  bucket=${CG_ACCOUNT_BUCKET:-$(cg_bucket)} || return 2
   region=$(s3_bucket_region "$bucket" 2>/dev/null) || region="$REGION"
   aws s3api head-object --bucket "$bucket" --key "$CG_ACCOUNT_KEY" \
       --region "$region" --query '[ContentLength,LastModified,ETag]' \
@@ -605,7 +808,7 @@ account_names() { # account_names <etag> -> steamid<TAB>account<TAB>persona<TAB>
   local tag="${1:-none}" cache="account-${1:-none}.tsv"
   cg_cache_read "$cache" 2>/dev/null && return 0
   local bucket region tmp out
-  bucket=$(cg_bucket) || return 1
+  bucket=${CG_ACCOUNT_BUCKET:-$(cg_bucket)} || return 1
   region=$(s3_bucket_region "$bucket" 2>/dev/null) || region="$REGION"
   tmp=$(mktemp -d) || return 1
   out=""
@@ -649,7 +852,7 @@ PYEOF
 # The whole thing as data, for the app and for account_show.
 account_json() {
   local head bytes modified etag names bucket
-  bucket=$(cg_bucket 2>/dev/null) || bucket=""
+  bucket=${CG_ACCOUNT_BUCKET:-$(cg_bucket 2>/dev/null)} || bucket=""
   if ! head=$(account_head) || [[ -z ${head//[[:space:]]/} ]]; then
     BUCKET="$bucket" python3 -I -c '
 import json, os
@@ -736,6 +939,11 @@ if len(rows) > 1:
 # miss produces an archive that restores a BROKEN login, which is worse than
 # having none. Replacing the blob is the supported way to change accounts.
 account_forget() {
+  local from="" place bucket region
+  while (( $# )); do case $1 in --from) from=${2:-}; shift 2 ;; *) shift ;; esac; done
+  place=$(library_place "$from") || die "$(library_place "$from" 2>&1 >/dev/null)"
+  IFS=$'\t' read -r bucket region <<<"$place"
+  [[ -n $from ]] && export CG_ACCOUNT_BUCKET="$bucket"
   local j; j=$(account_json)
   python3 -I -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("present") else 1)' <<<"$j" \
     || { echo "there is no archived Steam login - nothing to delete"; return 0; }
@@ -756,22 +964,77 @@ print("  It saves $%.6f a month, which is to say nothing. Delete it to change" %
 print("  which account a new box uses, not to save money.")'
   cg_ask_typed forget-login "type FORGET to confirm: " FORGET \
     || { echo "aborted - nothing was deleted"; return 1; }
-  local bucket region
-  bucket=$(cg_bucket) || die "could not work out the archive bucket - AWS did not answer"
-  region=$(s3_bucket_region "$bucket" 2>/dev/null) || region="$REGION"
+  say "deleting the Steam login saved in $region"
   aws s3 rm "s3://$bucket/$CG_ACCOUNT_KEY" --region "$region" >/dev/null 2>&1 \
     || die "could not delete s3://$bucket/$CG_ACCOUNT_KEY"
   log "deleted the archived Steam login"
-  log "the next box will ask you to sign in; it is re-archived on shutdown"
+  if [[ -z $from ]]; then
+    log "the next box will ask you to sign in; it is re-archived on shutdown"
+    return 0
+  fi
+  # A copy beside games left in another region: if nothing else is saved
+  # there now, the bucket goes too - nothing points at it.
+  local idx left
+  idx=$(library_index_at "$bucket" "$region" 2>/dev/null) || return 0
+  left=$(printf '%s' "$idx" | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("apps",[])))' 2>/dev/null)
+  if [[ $left == 0 ]]; then
+    aws s3 rb "s3://$bucket" --force --region "$region" >/dev/null 2>&1 \
+      && log "nothing else was saved in $region - removed it, so nothing bills there"
+  fi
+}
+
+# library_forget_at <bucket> <region> <appid> <idx> - remove one game from one
+# bucket, no questions: the asking is library_forget's, and a move calls this
+# once the copy is verified. A bucket that is not the one in use and holds no
+# game afterwards is removed too - nothing points at it, and it only bills.
+library_forget_at() {
+  local bucket=$1 region=$2 id=$3 idx=$4 dir pair tmp left
+  dir=$(printf '%s' "$idx" | python3 -c '
+import json,sys
+for a in json.load(sys.stdin).get("apps",[]):
+    if str(a.get("appid"))==sys.argv[1]: print(a.get("installdir","")); break' "$id")
+  # The folder is deleted recursively: an empty or climbing name would take
+  # every game in the bucket with it.
+  [[ -n $dir && $dir != *"/"* && $dir != "." && $dir != ".." ]] \
+    || die "refusing to delete $id: its install folder is '${dir}'"
+  for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
+    # The trailing slash is the boundary: without it "common/Diablo IV" is a
+    # prefix of "common/Diablo IV Expansion" too, and --recursive deletes both.
+    aws s3 rm "s3://$bucket/steam/steamapps/$pair/" --recursive --region "$region" >/dev/null 2>&1 || true
+  done
+  aws s3 rm "s3://$bucket/steam/steamapps/appmanifest_$id.acf" --region "$region" >/dev/null 2>&1 || true
+  aws s3 rm "s3://$bucket/steam/meta/symlinks-$id.tsv" --region "$region" >/dev/null 2>&1 || true
+  # Drop it from the index too, or cg init keeps offering a game that is gone.
+  tmp=$(mktemp)
+  printf '%s' "$idx" | python3 -c '
+import json,sys
+appid=sys.argv[1]
+try:    d=json.load(sys.stdin)
+except Exception: d={"apps":[]}
+print(json.dumps({"apps":[a for a in d.get("apps",[]) if str(a.get("appid"))!=appid]},indent=1))' "$id" > "$tmp"
+  left=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["apps"]))' "$tmp")
+  aws s3 cp "$tmp" "s3://$bucket/steam/index.json" --region "$region" >/dev/null 2>&1 \
+    || log "could not update the index"
+  rm -f "$tmp"
+  cw_aws ssm delete-parameter --name "/cloud-gaming/$TS_HOST/kept/$bucket/$id" >/dev/null 2>&1 || true
+  if [[ $left == 0 && $bucket != "$(cg_bucket 2>/dev/null)" ]]; then
+    aws s3 rb "s3://$bucket" --force --region "$region" >/dev/null 2>&1 \
+      && log "nothing else was saved in $region - removed it, so nothing bills there" \
+      || log "nothing else is saved in $region, but it could not be removed: cg library elsewhere"
+  fi
 }
 
 library_forget() {
-  local id="${1:-}"
+  local id="" from="" place bucket region idx err row name bytes gb
+  while (( $# )); do case $1 in --from) from=${2:-}; shift 2 ;; -*) shift ;; *) id=$1; shift ;; esac; done
   [[ -n $id ]] || die "which game? see: cg library list"
-  [[ -n ${GAME_S3_BUCKET:-} ]] || die "no bucket configured"
-  local row idx err
+  # The bucket in use must be named in .env to be deleted from - a derived name
+  # is fine to read, not to delete in. Another bucket is checked as cg's instead.
+  [[ -n $from || -n ${GAME_S3_BUCKET:-} ]] || die "no bucket configured"
+  place=$(library_place "$from") || die "$(library_place "$from" 2>&1 >/dev/null)"
+  IFS=$'\t' read -r bucket region <<<"$place"
   err=$(mktemp)
-  idx=$(library_index 2>"$err") || { local why; why=$(cat "$err"); rm -f "$err"
+  idx=$(library_index_at "$bucket" "$region" 2>"$err") || { local why; why=$(cat "$err"); rm -f "$err"
     die "cannot read the archive: $why"; }
   rm -f "$err"
   row=$(printf '%s' "$idx" | python3 -c '
@@ -781,34 +1044,104 @@ try:    apps=json.load(sys.stdin).get("apps",[])
 except Exception: apps=[]
 for a in apps:
     if str(a.get("appid"))==appid:
-        print("%s\t%s\t%s" % (a.get("name","?"), a.get("installdir",""), a.get("bytes",0))); break' "$id")
+        print("%s\t%s" % (a.get("name","?"), a.get("bytes",0))); break' "$id")
   [[ -n ${row//[[:space:]]/} ]] || die "appid $id is not in the archive (see: cg library list)"
-  local name dir bytes; IFS=$'\t' read -r name dir bytes <<<"$row"
-  local gb; gb=$(awk -v b="$bytes" 'BEGIN{printf "%.1f", b/1073741824}')
-  echo "This permanently deletes $name ($id, ${gb} GB) from the archive."
+  IFS=$'\t' read -r name bytes <<<"$row"
+  gb=$(awk -v b="$bytes" 'BEGIN{printf "%.1f", b/1073741824}')
+  echo "This permanently deletes $name ($id, ${gb} GB) from the archive in $region."
   echo "No undo, no versioning. Playing it again means downloading it from Steam."
   echo "At Steam speeds that is roughly $(awk -v b="$bytes" 'BEGIN{printf "%.1f", b/12582912/3600}') hours."
   cg_ask_typed forget-game "type FORGET to confirm: " FORGET \
     || { echo "aborted - nothing was deleted"; return 1; }
-  local pair
-  for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
-    # The trailing slash is the boundary: without it "common/Diablo IV" is a
-    # prefix of "common/Diablo IV Expansion" too, and --recursive deletes both.
-    aws s3 rm "s3://$GAME_S3_BUCKET/steam/steamapps/$pair/" --recursive >/dev/null 2>&1 || true
-  done
-  aws s3 rm "s3://$GAME_S3_BUCKET/steam/steamapps/appmanifest_$id.acf" >/dev/null 2>&1 || true
-  aws s3 rm "s3://$GAME_S3_BUCKET/steam/meta/symlinks-$id.tsv" >/dev/null 2>&1 || true
-  # Drop it from the index too, or cg init keeps offering a game that is gone.
-  local tmp; tmp=$(mktemp)
-  printf '%s' "$idx" | python3 -c '
+  say "deleting $name from $region"
+  library_forget_at "$bucket" "$region" "$id" "$idx"
+  log "forgot $name ($id) - ${gb} GB stops billing"
+}
+
+# cg library keep-for <days> - how long saved games are kept with no machine,
+# applied now. The setting alone changes nothing until the cloud watchdog is
+# redeployed with it - the Guards page says so for the others - so this does
+# both, and the date the app shows is the date AWS will act on.
+library_keep_for() {
+  local d="${1:-}"
+  case $d in forever|never) d=0 ;; esac
+  [[ $d =~ ^[0-9]+$ ]] || die "how many days? e.g. cg library keep-for 14 (0 keeps them until you forget them)"
+  say "saving the setting"
+  config_set GAME_ARCHIVE_EXPIRY_DAYS "$d"
+  export GAME_ARCHIVE_EXPIRY_DAYS="$d"
+  say "updating the cloud watchdog"
+  cw_adopt_ntfy
+  cw_install || die "saved, but the cloud watchdog still counts the old days - run: cg watchdog install"
+  if (( d == 0 )); then log "saved games are kept until you forget them"
+  else log "saved games are deleted $d days after a machine was last running"; fi
+}
+
+# cg library move <appid> --from <bucket> - bring a game left in another region
+# to the one the machine is built in. Copied server to server, checked file for
+# file, and only then deleted at the source: a copy that does not match leaves
+# both where they were. AWS bills the copy once, between regions; after it a
+# build downloads the game in its own region, which is free.
+library_move() {
+  local id="" from="" place sb sr db dr sidx didx row name dir bytes gb usd pair a b tmp
+  while (( $# )); do case $1 in --from) from=${2:-}; shift 2 ;; -*) shift ;; *) id=$1; shift ;; esac; done
+  [[ $id =~ ^[0-9]+$ && -n $from ]] || die "usage: cg library move <appid> --from <bucket>"
+  place=$(library_place "$from") || die "$(library_place "$from" 2>&1 >/dev/null)"
+  IFS=$'\t' read -r sb sr <<<"$place"
+  db=$(cg_bucket) || die "could not work out where your machine's games are kept - AWS did not answer"
+  [[ $sb != "$db" ]] || die "that game is already where your machine is built"
+  aws s3api head-bucket --bucket "$db" >/dev/null 2>&1 \
+    || die "nothing is saved where your machine is built yet - build once, then move"
+  dr=$(s3_bucket_region "$db") || dr="$REGION"
+  sidx=$(library_index_at "$sb" "$sr") || die "cannot read the games in $sr"
+  didx=$(library_index_at "$db" "$dr") || die "cannot read the games in $dr"
+  row=$(printf '%s' "$sidx" | python3 -c '
 import json,sys
+for a in json.load(sys.stdin).get("apps",[]):
+    if str(a.get("appid"))==sys.argv[1]:
+        print("%s\t%s\t%s" % (a.get("name","?"), a.get("installdir",""), a.get("bytes",0))); break' "$id")
+  [[ -n ${row//[[:space:]]/} ]] || die "appid $id is not saved in $sr (see: cg library elsewhere)"
+  IFS=$'\t' read -r name dir bytes <<<"$row"
+  [[ -n $dir && $dir != *"/"* && $dir != "." && $dir != ".." ]] || die "refusing to move $id: its install folder is '${dir}'"
+  gb=$(awk -v b="$bytes" 'BEGIN{printf "%.1f", b/1073741824}')
+  usd=$(awk -v b="$bytes" -v r="$CG_XREGION_USD_GB" 'BEGIN{printf "%.2f", b/1073741824*r}')
+  echo "This copies $name (${gb} GB) from $sr to $dr, checks every file, then deletes it from $sr."
+  echo "AWS charges about INR $(awk -v u="$usd" -v i="$CG_INR_PER_USD" 'BEGIN{printf "%.0f", u*i}') once to copy between regions."
+  cg_ask_typed move-game "type MOVE to confirm: " MOVE || { echo "aborted - nothing was copied"; return 1; }
+  for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
+    say "copying $name: $pair"
+    aws s3 sync "s3://$sb/steam/steamapps/$pair/" "s3://$db/steam/steamapps/$pair/" \
+      --source-region "$sr" --region "$dr" --only-show-errors \
+      || die "the copy stopped - nothing was deleted from $sr; run the move again to finish it"
+  done
+  for a in "steamapps/appmanifest_$id.acf" "meta/symlinks-$id.tsv"; do
+    aws s3 cp "s3://$sb/steam/$a" "s3://$db/steam/$a" --source-region "$sr" --region "$dr" \
+      --only-show-errors >/dev/null 2>&1 || true
+  done
+  say "checking the copy"
+  for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
+    a=$(aws s3 ls "s3://$sb/steam/steamapps/$pair/" --recursive --summarize --region "$sr" 2>/dev/null \
+        | awk '/Total Objects:/{o=$3} /Total Size:/{s=$3} END{print o+0, s+0}') || a="? ?"
+    b=$(aws s3 ls "s3://$db/steam/steamapps/$pair/" --recursive --summarize --region "$dr" 2>/dev/null \
+        | awk '/Total Objects:/{o=$3} /Total Size:/{s=$3} END{print o+0, s+0}') || b="?? ??"
+    [[ $a == "$b" ]] || die "the copy of $pair does not match ($a here, $b there) - nothing was deleted from $sr; run the move again"
+  done
+  # In the machine's index before it leaves the old one: at no moment is the
+  # game in neither.
+  tmp=$(mktemp)
+  printf '%s' "$didx" | SRC="$sidx" python3 -c '
+import json,os,sys
 appid=sys.argv[1]
 try:    d=json.load(sys.stdin)
 except Exception: d={"apps":[]}
-print(json.dumps({"apps":[a for a in d.get("apps",[]) if str(a.get("appid"))!=appid]},indent=1))' "$id" > "$tmp"
-  aws s3 cp "$tmp" "s3://$GAME_S3_BUCKET/steam/index.json" >/dev/null 2>&1 || log "could not update the index"
+src=[a for a in json.loads(os.environ["SRC"]).get("apps",[]) if str(a.get("appid"))==appid]
+d["apps"]=[a for a in d.get("apps",[]) if str(a.get("appid"))!=appid]+src
+print(json.dumps(d,indent=1))' "$id" > "$tmp"
+  aws s3 cp "$tmp" "s3://$db/steam/index.json" --region "$dr" >/dev/null 2>&1 \
+    || { rm -f "$tmp"; die "copied, but the index in $dr could not be written - nothing was deleted from $sr"; }
   rm -f "$tmp"
-  log "forgot $name ($id) - ${gb} GB stops billing"
+  say "deleting it from $sr"
+  library_forget_at "$sb" "$sr" "$id" "$sidx"
+  log "moved $name to $dr - a build there downloads it free"
 }
 
 # Re-run the Moonlight/Sunshine handshake without rebuilding the box.
@@ -877,7 +1210,7 @@ cmd_library() {
       # account would a new box use" has to be answerable when there is none.
       case "${1:-status}" in
         status|"")         account_show ;;
-        forget|delete|rm)  account_forget ;;
+        forget|delete|rm)  shift; account_forget "$@" ;;
         push|pull|restore) need_node; box "/usr/local/bin/cg-library account ${1/restore/pull}" ;;
         *) die "usage: cg library account [status|push|pull|forget]" ;;
       esac ;;
@@ -885,11 +1218,20 @@ cmd_library() {
       shift; library_forget "$@" ;;
     clean)
       library_clean ;;
+    elsewhere)
+      if (( JSON )); then library_elsewhere_json
+      else library_elsewhere_show | cg_report "📦" "Saved somewhere else"; fi ;;
+    reset|keep)
+      shift; library_reset "$@" ;;
+    keep-for)
+      shift; library_keep_for "$@" ;;
+    move)
+      shift; library_move "$@" ;;
     --bucket|bucket)
       # Answerable without the box, which matters when it is gone: this is where
       # the games are, and the one thing worth knowing then.
       cg_bucket || echo "(unknown - AWS did not answer)"; echo ;;
-    *) die "usage: cg library [list|status|push|pull [--apps <csv>]|account [status|push|pull|forget]|check|forget <appid>|clean|--bucket]" ;;
+    *) die "usage: cg library [list|status|push|pull [--apps <csv>]|account [status|push|pull|forget]|check|forget <appid> [--from <bucket>]|reset <appid> [--from <bucket>]|keep-for <days>|move <appid> --from <bucket>|elsewhere|clean|--bucket]" ;;
   esac
 }
 

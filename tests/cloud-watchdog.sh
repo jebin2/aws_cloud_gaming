@@ -472,7 +472,14 @@ check    "no other statement went wildcard" \
          "$(python3 -c '
 import json,sys
 d=json.load(sys.stdin)
-print(sum(1 for s in d["Statement"] if s.get("Resource")=="*"))' <<<"$pol")" "2"
+print(sum(1 for s in d["Statement"] if s.get("Resource")=="*"))' <<<"$pol")" "3"
+# The third is s3:ListAllMyBuckets - a list of names, which IAM cannot scope -
+# and nothing else rides on it.
+check    "  and the third only lists bucket names" \
+         "$(python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+print([s["Action"] for s in d["Statement"] if s.get("Resource")=="*" and "s3" in str(s["Action"])])' <<<"$pol")" "['s3:ListAllMyBuckets']"
 
 echo "32. the watchdog names the archive bucket exactly as library-aws.sh creates it"
 # This WAS two copies of one formula, guarded by this check. The check earned
@@ -506,7 +513,12 @@ check "unset is 14"         "$(days '')" "14"
 pol() { TS_HOST=gamevps REGION=ap-south-2 GAME_S3_BUCKET=b GAME_ARCHIVE_EXPIRY_DAYS="$1" \
           bash -c 'source lib/s3-region.sh; source lib/cloud-watchdog.sh; cw_policy 123456789012'; }
 check "off: the role cannot delete a thing" "$(pol 0 | grep -cE 'DeleteBucket|DeleteObject|cloudtrail' || true)" "0"
-check "on: delete is scoped to that bucket" "$(pol 14 | grep -c '"Resource":"arn:aws:s3:::b/\*"')" "1"
+# Games are kept one by one now, in whichever of this host's buckets they sit,
+# so delete reaches cg's buckets - and the function decides which are this
+# host's by the name cg derives (case 51), never by the prefix alone.
+check "on: delete is scoped to cg's buckets" "$(pol 14 | grep -c '"Resource":"arn:aws:s3:::cg-library-\*/\*"')" "1"
+check "  and to nothing wider"               "$(pol 14 | grep -c '"Resource":"arn:aws:s3:::\*' || true)" "0"
+check "the account goes to the function"     "$(TS_HOST=gamevps GAME_S3_BUCKET=b bash -c 'source lib/s3-region.sh; source lib/cloud-watchdog.sh; cg_ntfy_url() { :; }; cw_env 123456789012' | grep -c 'CG_ACCOUNT=123456789012')" "1"
 check "on: no bucket tagging - the marks are SSM parameters" "$(pol 14 | grep -c 'BucketTagging' || true)" "0"
 # The region is a wildcard on purpose - see 31b - so the scope that matters is
 # the account and the host's parameter path, and those must stay exact.
@@ -704,5 +716,173 @@ r=$(case_ "w.NTFY_URL = 'u'; NOW = NOW + timedelta(minutes=30); ec2 = EC2([$FD])
 check "still stuck half an hour later: silent" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown"
 r=$(case_ "w.NTFY_URL = 'u'; NOW = NOW + timedelta(minutes=60); ec2 = EC2([$FD]); cw = CW()")
 check "an hour after forcing: the hourly reminder" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown,notify:gamevps: box still stuck after forcing"
+
+# --- one game at a time, wherever it is saved ---------------------------------
+# A region move left 162.8 GB of Diablo IV in a bucket nothing pointed at. With
+# the account known, the watchdog finds this host's buckets by the name cg
+# derives - never just by the cg-library- prefix - and expires each game on the
+# later of "a machine was last seen" and that game's Reset mark. Default: no box,
+# last seen 20 days ago, CloudTrail empty, the 14-day rule.
+games_() {
+  PYTHONDONTWRITEBYTECODE=1 python3 - "$1" <<'PY2' 2>&1
+import sys, io, json, hashlib, contextlib
+from datetime import datetime, timedelta, timezone
+sys.path.insert(0, "lambda")
+import cloud_watchdog as w
+ACCT = "123456789012"
+def name(*p): return "cg-library-" + hashlib.sha256("-".join(p).encode()).hexdigest()[:12]
+NOW_B, OLD_B, FOREIGN = name(ACCT, "gamevps", "ap-south-1"), name(ACCT, "gamevps"), name("999999999999", "gamevps", "ap-south-2")
+w.TS_HOST, w.BUCKET, w.EXPIRY_DAYS, w.TRAIL_PAGES, w.ACCOUNT = "gamevps", NOW_B, 14, 3, ACCT
+w.NTFY_URL = ""
+NOW = datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc)
+def ago(days=0, hours=0): return NOW - timedelta(days=days, hours=hours)
+def iso(t): return t.strftime("%Y-%m-%dT%H:%M:%SZ")
+class AwsError(Exception):
+    def __init__(s, code):
+        super().__init__(code); s.response = {"Error": {"Code": code}}
+calls = []; requests = []
+def game(appid, n, d=None): return {"appid": appid, "name": n, "installdir": d if d is not None else n, "bytes": 1}
+def files(bucket_games, login=True):
+    keys = {}
+    for g in bucket_games:
+        for k in ("steam/steamapps/common/%s/a.pak" % g["installdir"], "steam/steamapps/common/%s/b.pak" % g["installdir"],
+                  "steam/steamapps/compatdata/%s/x" % g["appid"], "steam/steamapps/appmanifest_%s.acf" % g["appid"]):
+            keys[k] = 1
+    if login: keys["steam/account/local.vdf"] = 1
+    keys["steam/index.json"] = json.dumps({"apps": bucket_games})
+    return keys
+class Body:
+    def __init__(s, b): s.b = b
+    def read(s): return s.b.encode() if isinstance(s.b, str) else s.b
+class S3:
+    def __init__(s, buckets, bad_index=()):
+        s.b, s.bad_index = buckets, bad_index          # {name: (region, {key: value})}
+    def list_buckets(s):
+        requests.append("list-buckets"); return {"Buckets": [{"Name": n} for n in s.b]}
+    def get_bucket_location(s, Bucket):
+        return {"LocationConstraint": s.b[Bucket][0]}
+    def get_object(s, Bucket, Key):
+        requests.append("get:" + Bucket[-4:])
+        if Bucket in s.bad_index: return {"Body": Body("{not json")}
+        if Key not in s.b[Bucket][1]: raise AwsError("NoSuchKey")
+        return {"Body": Body(s.b[Bucket][1][Key])}
+    def list_objects_v2(s, Bucket, MaxKeys=1000, Prefix=""):
+        requests.append("list")
+        ks = [k for k in s.b[Bucket][1] if k.startswith(Prefix)][:MaxKeys]
+        return {"Contents": [{"Key": k} for k in ks]} if ks else {}
+    def delete_objects(s, Bucket, Delete):
+        for o in Delete["Objects"]: s.b[Bucket][1].pop(o["Key"], None)
+        calls.append("del:%s:%d" % (Bucket[-4:], len(Delete["Objects"]))); return {}
+    def put_object(s, Bucket, Key, Body, ContentType):
+        s.b[Bucket][1][Key] = Body.decode(); calls.append("index:%s=%s" % (Bucket[-4:],
+            ",".join(a["name"] for a in json.loads(Body)["apps"])))
+    def list_multipart_uploads(s, Bucket): return {}
+    def delete_bucket(s, Bucket):
+        calls.append("delete-bucket:" + Bucket[-4:]); del s.b[Bucket]
+class SSM:
+    def __init__(s, kept=None, last_seen=None, fails=False):
+        s.p, s.fails = {}, fails
+        if last_seen: s.p["/cloud-gaming/gamevps/archive-last-seen"] = iso(last_seen)
+        for (b, a), t in (kept or {}).items(): s.p["/cloud-gaming/gamevps/kept/%s/%s" % (b, a)] = t if isinstance(t, str) else iso(t)
+    def get_parameter(s, Name):
+        if Name not in s.p: raise AwsError("ParameterNotFound")
+        return {"Parameter": {"Value": s.p[Name]}}
+    def put_parameter(s, Name, Value, Type, Overwrite):
+        s.p[Name] = Value; calls.append("%s=%s" % (Name.rsplit("/", 1)[1].replace("archive-", ""), Value))
+    def get_parameters_by_path(s, Path, Recursive):
+        if s.fails: raise AwsError("AccessDeniedException")
+        return {"Parameters": [{"Name": k, "Value": v} for k, v in s.p.items() if k.startswith(Path + "/")]}
+    def delete_parameter(s, Name):
+        del s.p[Name]; calls.append("unmark:" + Name.rsplit("/", 1)[1])
+class EC2:
+    def describe_instances(s, Filters): return {"Reservations": []}
+class CW:
+    def __init__(s, gb=160.0): s.gb = gb
+    def get_metric_statistics(s, Namespace=None, **kw):
+        if s.gb is None: return {"Datapoints": []}
+        return {"Datapoints": [{"Timestamp": NOW - timedelta(days=1), "Average": s.gb * 1073741824}]}
+class Trail:
+    def lookup_events(s, **kw): return {"Events": []}
+RDR, D4, CP = game("1174180", "RDR2"), game("2344520", "Diablo IV"), game("1091500", "Cyberpunk")
+s3 = S3({NOW_B: ("ap-south-1", files([RDR])), OLD_B: ("ap-south-2", files([D4])),
+         FOREIGN: ("ap-south-2", files([CP])), "someone-elses": ("ap-south-1", {})})
+ssm = SSM(last_seen=ago(days=20)); cw = CW(); dry = False; now = NOW
+exec(sys.argv[1])
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    try: res = w.expire_archive(EC2(), s3, ssm, cw, Trail(), now, dry, lambda r: s3)
+    except Exception as e:
+        res = "RAISED"; print("error: %s" % e)
+print("%s | %s | %s | s3:%s | left:%s" % (res, ",".join(calls) or "-", buf.getvalue().replace("\n", " / ").strip(),
+      ",".join(requests) or "none", ";".join("%s=%s" % (n[-4:], ",".join(a["name"] for a in json.loads(v[1].get("steam/index.json", '{"apps":[]}'))["apps"]))
+                                            for n, v in sorted(s3.b.items()) if n.startswith("cg-"))))
+PY2
+}
+nm() { python3 -c 'import hashlib,sys; print(("cg-library-" + hashlib.sha256("-".join(sys.argv[1:]).encode()).hexdigest()[:12])[-4:])' "$@"; }
+NOWB=$(nm 123456789012 gamevps ap-south-1); OLDB=$(nm 123456789012 gamevps); FOR=$(nm 999999999999 gamevps ap-south-2)
+
+echo "50. the name formula is cg's own"
+check "the watchdog derives what lib/s3-region.sh derives" \
+  "$(PYTHONDONTWRITEBYTECODE=1 python3 -c 'import sys; sys.path.insert(0,"lambda"); import cloud_watchdog as w; print(w.bucket_name("123456789012","gamevps","ap-south-1"))')" \
+  "$(bash -c 'source lib/s3-region.sh; cg_bucket_name 123456789012 gamevps ap-south-1')"
+
+echo "51. nothing reset: every game of this host goes, wherever it is, and nothing else"
+r=$(games_ '')
+check "deleted" "$(field 1 "$r")" "deleted"
+contains "the bucket in use, emptied and removed" "$(field 2 "$r")" "delete-bucket:$NOWB"
+contains "  and remembered as deleted"           "$(field 2 "$r")" "deleted=2026-09-15T12:00:00Z"
+contains "the one an old region left, too"       "$(field 2 "$r")" "delete-bucket:$OLDB"
+contains "  named in the log"                    "$r" "DELETED s3://"
+check    "another account's look-alike is untouched" "$(field 5 "$r")" "left:$FOR=Cyberpunk"
+
+echo "52. a game Reset 2 days ago stays; the rest go"
+r=$(games_ 'ssm = SSM(last_seen=ago(days=20), kept={(OLD_B, "2344520"): ago(days=2)})')
+check "deleted" "$(field 1 "$r")" "deleted"
+contains "Diablo IV is kept, until 14 days after its Reset" "$r" "Diablo IV (kept until 2026-09-27T12:00:00Z)"
+lacks    "  its bucket is not touched"           "$(field 2 "$r")" "$OLDB"
+check    "what is left" "$(field 5 "$r")" "left:$FOR=Cyberpunk;$OLDB=Diablo IV"
+r=$(games_ 'ssm = SSM(last_seen=ago(days=20), kept={(OLD_B, "2344520"): ago(days=15)})')
+contains "a Reset older than the rule does not keep it" "$(field 2 "$r")" "delete-bucket:$OLDB"
+contains "  and its mark is dropped with it"     "$(field 2 "$r")" "unmark:2344520"
+
+echo "53. two games in one bucket, one Reset: only the other goes, and the index says so"
+r=$(games_ 's3.b[OLD_B] = ("ap-south-2", files([D4, CP])); ssm = SSM(last_seen=ago(days=20), kept={(OLD_B, "2344520"): ago(days=1)})')
+contains "only Cyberpunk's files go" "$(field 2 "$r")" "del:$OLDB"
+contains "the index keeps Diablo IV" "$(field 2 "$r")" "index:$OLDB=Diablo IV"
+lacks    "the bucket stays"          "$(field 2 "$r")" "delete-bucket:$OLDB"
+check    "and its login with it"     "$(python3 -c 'print(1)')" "1"
+contains "named in the log"          "$r" "DELETED Cyberpunk from s3://"
+
+echo "54. anything uncertain deletes NOTHING"
+for spec in 'ssm = SSM(last_seen=ago(days=20), fails=True)' \
+            's3.bad_index = (OLD_B,)' \
+            'KEEP; s3.b[OLD_B] = ("ap-south-2", files([D4, game("1091500", "Cyberpunk", "")]))' \
+            'KEEP; s3.b[OLD_B] = ("ap-south-2", files([D4, game("1091500", "Cyberpunk", "..")]))'; do
+  # One game kept and one due, so the due one is removed by its folder - the
+  # only path where a bad folder name could take the whole bucket with it.
+  KEEP='ssm = SSM(last_seen=ago(days=20), kept={(OLD_B, "2344520"): ago(days=1)});'
+  spec=${spec/KEEP;/$KEEP}
+  r=$(games_ "$spec")
+  check "raised: $spec" "$(field 1 "$r")" "RAISED"
+  lacks "  and the old region's games are all there" "$(field 2 "$r")" "$OLDB"
+done
+r=$(games_ 'ssm = SSM(last_seen=ago(days=20), kept={(OLD_B, "2344520"): "not a time"})' 2>&1 || true)
+check "an unreadable Reset mark raises" "$(field 1 "$r")" "RAISED"
+
+echo "55. a dry run says what would go, and changes nothing"
+r=$(games_ 'dry = True; ssm = SSM(last_seen=ago(days=20), kept={(OLD_B, "2344520"): ago(days=2)})')
+check "would delete, no writes" "$(field 1 "$r")|$(field 2 "$r")" "would-delete|-"
+contains "names the game"       "$r" "WOULD DELETE RDR2 from s3://"
+contains "and what it keeps"    "$r" "Diablo IV (kept until"
+
+echo "56. still costs nothing until the rule is up"
+r=$(games_ 'ssm = SSM(last_seen=ago(days=3))')
+check "inside 14 days: kept, no S3 request" "$(field 1 "$r")|$(field 4 "$r")" "kept|s3:none"
+
+echo "57. the one bucket measured empty does not hide games left in another region"
+r=$(games_ 'cw = CW(gb=None)')
+contains "the other region's games are still expired" "$(field 2 "$r")" "delete-bucket:$OLDB"
+r=$(games_ 'cw = CW(gb=None); del s3.b[OLD_B]; del s3.b[NOW_B]')
+check "and with no other bucket of ours, nothing to expire" "$(field 1 "$r")" "absent"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

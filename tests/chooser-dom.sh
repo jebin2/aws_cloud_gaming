@@ -208,6 +208,8 @@ cat > "$T/r/probe.js" <<'PROBE'
   // the column aligned - which is exactly how the first version of this passed
   // while the radios were visibly ragged.
   document.querySelector('.nav-item[data-view="settings"]').click();
+  // The chooser is a dialog now, opened over whatever page you are on.
+  openMachines();
   await new Promise(r => setTimeout(r, 600));
   // The header's running/failure line is gone - the first-run pipeline carries
   // that in words now - so a failed read is read where it is kept.
@@ -246,14 +248,49 @@ cat > "$T/r/probe.js" <<'PROBE'
                           .replace(/\s+/g, ' ').trim());
   out.push('NOSWEEP BTN | ' + [...document.querySelectorAll('#s-chooser-legend button')]
              .filter(b => b.textContent.trim() === 'Scan all regions').length);
+  // Nothing this quota can launch, anywhere: the table is empty, and asking AWS
+  // for more is the way on - it used to be offered only beside a greyed price.
+  const keepMachines = machinesNow;
+  paintMachines({ region: 'ap-south-1', inr_per_usd: 88, machines: (keepMachines.machines || [])
+    .map(m => ({ ...m, fits_spot: false, fits_ondemand: false })) });
+  out.push('EMPTY ROWS | ' + document.querySelectorAll('#s-chooser tbody tr').length
+           + ' ' + document.getElementById('s-chooser').textContent.trim().slice(0, 60));
+  out.push('EMPTY BTN | ' + [...document.querySelectorAll('#s-chooser-legend button')]
+             .map(b => b.textContent.trim()).join(','));
+  paintMachines(keepMachines);
   paintSweep(DATA.sweep);
+  // Mid-scan the popup is locked: no price, no button, no Esc. It used to stay
+  // live, so a choice could land on a table about to be replaced.
+  const dlgEl = document.getElementById('machdlg');
+  const lockState = () => {
+    const radios = [...document.querySelectorAll('#s-chooser input[type=radio]')];
+    const btns = [...dlgEl.querySelectorAll('button')];
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    dlgEl.dispatchEvent(esc);
+    const cancel = new Event('cancel', { cancelable: true });
+    dlgEl.dispatchEvent(cancel);
+    return 'radios=' + radios.filter(r => !r.disabled).length + '/' + radios.length
+      + ' buttons=' + btns.filter(b => !b.disabled).length + '/' + btns.length
+      + ' esc=' + (esc.defaultPrevented || cancel.defaultPrevented ? 'blocked' : 'closes')
+      // How a price looks under the pointer: a highlight on one that cannot
+      // change is what made a locked table look live.
+      + ' cursor=' + (radios[0] ? getComputedStyle(radios[0].closest('label')).cursor : 'none')
+      + ' popup=' + document.getElementById('refdlg').open + ':' + document.getElementById('refdlg-title').textContent;
+  };
+  scanRegions(document.getElementById('s-sweep'));
+  out.push('SCANNING | ' + lockState());
+  const popEsc = new Event('cancel', { cancelable: true });
+  document.getElementById('refdlg').dispatchEvent(popEsc);
+  out.push('POPESC | ' + popEsc.defaultPrevented);
+  await new Promise(r => setTimeout(r, 300));
+  out.push('SCANNED | ' + lockState());
   out.push('LEGEND | ' + document.getElementById('s-chooser-legend').innerText
                           .replace(/\s+/g, ' ').trim());
   // One line per painter, naming a DOM effect only that painter produces.
   // The machine on one line - there is no spec card any more.
   out.push('PAINTED | status/spec | ' + document.getElementById('b-pick').textContent.trim());
   out.push('PAINTED | status/chip | ' + document.getElementById('b-chip').textContent.trim());
-  out.push('PAINTED | config | ' + document.getElementById('s-count').textContent.trim());
+  out.push('PAINTED | config | ' + document.querySelectorAll('#s-groups .row').length);
   out.push('PAINTED | guards | ' + document.getElementById('g-nets').children.length);
   out.push('PAINTED | library | ' + document.getElementById('b-fit').textContent.trim());
   // The same payload with the box's disk left out, which is what a failed or
@@ -264,7 +301,6 @@ cat > "$T/r/probe.js" <<'PROBE'
                             usd_month: 1.25, pushed: '2026-10-01T00:00:00Z' }],
                   total_bytes: 53687091200 };
   paintLibrary(noCap);
-  out.push('NOCAP | lib | ' + document.getElementById('lib-fit').textContent.trim());
   document.querySelector('#b-games input[type=checkbox]').click();
   out.push('NOCAP | fit | ' + document.getElementById('b-fit').textContent.trim());
   out.push('NOCAP | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
@@ -350,12 +386,13 @@ contains "and no read failed at all" "$OUT" "FAILURES: "
 # Named effects, because "no error" is what passed while paintSpec was missing.
 contains "the machine is one line"         "$OUT" "PAINTED | status/spec | g4dn.xlarge"
 contains "  and the chip says what Build bills" "$OUT" "PAINTED | status/chip | Billing starts when the machine launches"
-contains "paintConfig counted the settings" "$OUT" "PAINTED | config | 4 of 4 set"
+# Of the four, only the disk is Settings' own: region, machine and purchase
+# model are the chooser's, and nothing else repeats them.
+contains "paintConfig drew Settings' own rows" "$OUT" "PAINTED | config | 1"
 contains "paintGuards drew a net"           "$OUT" "PAINTED | guards | 1"
 contains "paintLibrary sized the disk"      "$OUT" "PAINTED | library | "
 
 echo "1b. a disk size cg did not give is not guessed"
-contains "the library says it cannot tell" "$OUT" "NOCAP | lib | How much a machine holds is not known yet."
 contains "the meter is labelled plainly"   "$OUT" "NOCAP | fit | Space on the machine"
 contains "  and counts what is picked, with no fraction of an unknown" \
          "$OUT" "NOCAP | pct | 50.0 GB - the machine's space is not known yet"
@@ -411,12 +448,11 @@ contains "the age of the scan is shown"   "$OUT" "scanned 5m ago"
 contains "and what was left out"          "$OUT" "2 regions are too far"
 
 echo "7. the three settings it owns have no second editor"
-contains "the region row points at the table" "$OUT" "set in Machine, above"
-reg_row=$(grep '^SETTING | ' <<<"$OUT" | grep -i 'region' | head -1)
-contains "  the region row still shows its value" "$reg_row" "ap-south-1"
-lacks    "  but offers no Edit button"            "$reg_row" "Edit"
+# Not even a pointer: Settings does not list region, machine or purchase model.
+check    "no region row on Settings"            "$(grep '^SETTING | ' <<<"$OUT" | grep -ci 'region' || true)" "0"
 disk_row=$(grep '^SETTING | ' <<<"$OUT" | grep -iE 'disk' | head -1)
-contains "an unrelated setting keeps its editor" "$disk_row" "Edit"
+contains "the disk keeps its editor"            "$disk_row" "Edit"
+contains "  in plain words"                     "$disk_row" "System disk"
 
 echo "8. the radios line up, and look like the rest of the window"
 contains "Settings is actually visible when measured" "$OUT" "VISIBLE | true"
@@ -460,6 +496,20 @@ contains "  and what compares them all"   "$(row 'NOSWEEP LEGEND')" "Scan all re
 # The button is IN that line, not named by it: the real one is at the top of a
 # long screen, which is where "how do I see the others" went unanswered.
 contains "  as a button in the line"      "$(row 'NOSWEEP BTN')" "NOSWEEP BTN | 1"
+echo "6c. mid-scan, the popup is locked"
+contains "no price can be picked"          "$(row SCANNING)" "radios=0/"
+contains "  no button pressed"             "$(row SCANNING)" "buttons=0/"
+contains "  and Esc does not close it"     "$(row SCANNING)" "esc=blocked"
+contains "  and nothing looks pickable"    "$(row SCANNING)" "cursor=wait"
+# A popup over it says what it is waiting for, with a backdrop over the rest.
+contains "a popup says what is happening" "$(row SCANNING)" "popup=true:Scanning every region"
+check    "  and Esc does not close it"     "$(row POPESC)" "POPESC | true"
+contains "  gone once the scan is in"     "$(row SCANNED)" "popup=false"
+lacks    "after it, they look pickable again" "$(row SCANNED)" "cursor=wait"
+contains "after it, Esc closes it again"   "$(row SCANNED)" "esc=closes"
+lacks    "  and the buttons are back"      "$(row SCANNED)" "buttons=0/"
+contains "an empty table says why"        "$(row 'EMPTY ROWS')" "no machine here fits your quota"
+contains "  and offers to ask AWS for more" "$(row 'EMPTY BTN')" "Ask AWS for GPU quota"
 contains "  with the price of asking"     "$(row 'NOSWEEP LEGEND')" "90 seconds, and free"
 lacks    "  not said after a scan"        "$(row 'LEGEND')" "only. Scan all regions"
 contains "  and the legend says why"      "$(row 'NOSWEEP LEGEND')" "2 more GPU machines are offered here"

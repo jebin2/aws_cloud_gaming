@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The credentials card and the banner, actually rendered.
+# The credentials card, actually rendered.
 #
-# The banner is what a new laptop reads first, and it used to say "AWS rejected
+# A warning strip above every page used to say "AWS rejected
 # these credentials - ... Settings - or cg check --fix - takes a new key" on a
 # laptop that had no AWS CLI to reject anything, pointing at a Settings screen
 # with no field for a key. Three claims, none true.
@@ -65,13 +65,6 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push(label + ' DETAIL | ' + g('creds-detail'));
     out.push(label + ' BTN | ' + g('creds-set'));
   };
-  const bannerRead = label => {
-    out.push(label + ' TITLE | ' + g('banner-title'));
-    out.push(label + ' BODY | ' + g('banner-body'));
-    out.push(label + ' FIXBTN | ' + (document.getElementById('banner-fix').hidden
-      ? 'hidden' : g('banner-fix-label')));
-    out.push(label + ' BANNER | ' + (document.getElementById('banner').hidden ? 'hidden' : 'shown'));
-  };
   // A status payload with only what paintStatus needs to reach the banner.
   const status = cause => ({
     host: 'gamevps', region: 'ap-south-1', instance_type: 'g4dn.xlarge',
@@ -88,7 +81,12 @@ cat > "$T/r/probe.js" <<'PROBE'
     read('NOCLI');
     window.__ran = [];
     document.getElementById('creds-set').click();
+    await new Promise(r => setTimeout(r, 0));
     out.push('NOCLI RAN | ' + window.__ran.join(' ;; '));
+    // It installs in the run dialog; finish it, so the page behind is usable.
+    window.__emit(window.__lastId, { t: 'exit', rc: 0 });
+    await new Promise(r => setTimeout(r, 0));
+    document.getElementById('rundlg').close();
 
     window.__ran = [];
     paintCreds({ cli: true, source: '~/.aws/credentials, profile default', key_id: '****1234',
@@ -294,11 +292,13 @@ cat > "$T/r/probe.js" <<'PROBE'
     document.getElementById('rundlg-done').click();
 
     // And a run that was refused because something else holds the lock.
+    const realRun = window.cg.run;
     window.cg.run = () => Promise.resolve({ ok: false, reason: 'busy', args: ['init'] });
     document.getElementById('tskey-signin-go').click();
     await sleep(); await sleep();
     out.push('SIGNIN BUSY | ' + document.getElementById('rundlg-log').textContent.replace(/\s+/g, ' ').trim());
     out.push('SIGNIN BUSYBTN | ' + document.getElementById('tskey-signin-go').disabled);
+    window.cg.run = realRun;
 
     paintDeps({ tools: [], package_manager: 'pacman', root: 'pkexec', root_blocked: null,
                 tailscale_signed_in: true });
@@ -307,23 +307,16 @@ cat > "$T/r/probe.js" <<'PROBE'
     paintCreds({ cli: false, source: null, key_id: null, account: null, arn: null,
                  valid: null, error: 'the AWS CLI is not installed' });
     paintStatus(status('no-cli'));
-    // On a screen other than the dashboard, where the first-run pipeline is
-    // what says this - the banner sits above every screen and covers the rest.
-    document.querySelector('.nav-item[data-view="deps"]').click();
-    bannerRead('NOCLI');
-    window.__ran = [];
-    document.getElementById('banner-fix').click();
-    out.push('NOCLI BANNERRAN | ' + window.__ran.join(' ;; '));
-
+    // On a screen other than the dashboard, with the CLI gone and then the key
+    // rejected: no strip appears above the page - setup checked these once.
+    document.querySelector('.nav-item[data-view="logs"]').click();
+    out.push('NOCLI STRIP | ' + !!document.getElementById('banner')
+             + ' ' + document.querySelector('main').innerText.includes('The AWS CLI is not installed'));
     paintCreds({ cli: true, source: 's', key_id: '****1234', account: null, arn: null,
                  valid: false, error: 'InvalidClientTokenId' });
     paintStatus(status('rejected'));
-    bannerRead('BAD');
-    window.__ran = [];
-    document.getElementById('banner-fix').click();
-    out.push('BAD BANNERRAN | ' + window.__ran.join(' ;; '));
-    out.push('BAD BANNERVIEW | ' + (document.querySelector('.nav-item.on') || {}).dataset?.view);
-    out.push('BAD BANNERFLASH | ' + document.getElementById('s-creds-card').className);
+    out.push('BAD STRIP | ' + !!document.getElementById('banner')
+             + ' ' + document.querySelector('main').innerText.includes('AWS rejected this access key'));
   } catch (e) { out.push('THREW | ' + e.message); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -358,11 +351,11 @@ row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
 echo "1. no AWS CLI: the card says so, and offers the install"
 contains "the state names the CLI"      "$(row 'NOCLI STATE')" "the AWS CLI is not installed"
-contains "  and where it is installed" "$(row 'NOCLI DETAIL')" "Dependencies page"
-contains "the button goes there"       "$(row 'NOCLI BTN')"    "Open Dependencies"
-# Switching to the page that CAN install needs no root, while a button here
-# that shelled out to sudo had nowhere to ask for a password. Arriving loads
-# that page's own reads; nothing it runs changes anything.
+contains "  and that it is installed here" "$(row 'NOCLI DETAIL')" "Install it, then this card can take a key"
+# Installed right here, through the same password dialog setup uses - there is
+# no Dependencies page to send anyone to any more. Drawing the card runs nothing.
+contains "the button installs it"      "$(row 'NOCLI BTN')"    "Install "
+check    "  and pressed, runs the install" "$(row 'NOCLI RAN')" "NOCLI RAN | deps install aws"
 lacks    "  it installs nothing itself" "$(row 'NOCLI RAN')"   "check --fix"
 lacks    "  and sets no key"            "$(row 'NOCLI RAN')"   "creds set"
 # Nothing was rejected: there was nothing to reject it with.
@@ -385,23 +378,11 @@ contains "  and for which account"     "$(row 'OK DETAIL')"   "account 123456789
 contains "  with the identity"         "$(row 'OK DETAIL')"   "user/example"
 contains "  and where it came from"    "$(row 'OK DETAIL')"   "from ~/.aws/credentials"
 
-echo "4. the banner names the right cause"
-check    "it is shown"                 "$(row 'NOCLI BANNER')" "NOCLI BANNER | shown"
-contains "no CLI is not a bad key"     "$(row 'NOCLI TITLE')"  "The AWS CLI is not installed"
-contains "  and what that costs"       "$(row 'NOCLI BODY')"   "unknown, not empty"
-lacks    "  and does not say rejected" "$(row 'NOCLI TITLE')"  "rejected"
-contains "  its button goes to the page" "$(row 'NOCLI FIXBTN')" "Open Dependencies"
-check    "  and runs no command"       "$(row 'NOCLI BANNERRAN')" "NOCLI BANNERRAN | "
-contains "a rejected key says so"      "$(row 'BAD TITLE')"    "AWS rejected this access key"
-# One sentence each. This was three: cg's own, then "Your games are in S3;
-# nothing here can see them until this is fixed", then where the button was.
-check    "  in one short line"         "$(row 'BAD BODY')"     "BAD BODY | Everything below is unknown, not empty."
-contains "  its button sets a key"     "$(row 'BAD FIXBTN')"   "Add your key"
-# It goes to the card rather than opening a dialog over whatever screen you
-# were on: a key has one place, the same rule the machine chooser follows.
-check    "  and runs no command"       "$(row 'BAD BANNERRAN')" "BAD BANNERRAN | "
-check    "  landing on Settings"       "$(row 'BAD BANNERVIEW')" "BAD BANNERVIEW | settings"
-contains "  with the card flashed"     "$(row 'BAD BANNERFLASH')" "flash-attn"
+echo "4. no warning strip above the pages"
+# There was one; setup checks all of this before the app is usable, and a
+# strip for a breakage that rarely comes was judged not worth its place.
+check    "a missing CLI shows none"    "$(row 'NOCLI STRIP')" "NOCLI STRIP | false false"
+check    "  nor a rejected key"        "$(row 'BAD STRIP')"   "BAD STRIP | false false"
 
 echo "4b. the key is one form, and it says what happened"
 # It used to be two prompts in a row with the failure landing in the log pane

@@ -190,7 +190,9 @@ alone=$(./cg --contract | python3 -I -c 'import json,sys
 print(" ".join(" ".join(p) for p in json.load(sys.stdin)["runs_alone"]))')
 contains "  installing runs alone"    "$alone" "deps install"
 lacks    "  and listing does not"     "$alone" "deps --json"
-contains "the nav has a tab"           "$(cat app/renderer/index.html)" 'data-view="deps"'
+# No page of its own: setup installs what is missing in place, and a tool that
+# goes missing later is offered as an Install button where it is noticed.
+lacks    "there is no Dependencies tab" "$(cat app/renderer/index.html)" 'data-view="deps"'
 
 echo ""
 echo "deps: $pass passed, $fail failed"

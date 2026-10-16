@@ -36,6 +36,15 @@ s3_bucket_region() {
 # The region is in the hash because a bucket IS regional. Hashed rather than
 # spelling out the account number, which ends up in URLs and logs. Names are
 # globally unique, so it cannot just be "cg-library".
+# cg_bucket_ours <bucket> <region> <account> <host> - 0 when cg made it for this
+# account and host: the name it derives for the bucket's own region, or the form
+# from before the region went into the hash. The cg-library- prefix alone is
+# anyone's; the watchdog applies the same rule (own_buckets).
+cg_bucket_ours() {
+  [[ $1 == "$(cg_bucket_name "$3" "$4" "$2")" ]] && return 0
+  [[ $1 == "cg-library-$(printf '%s' "$3-$4" | sha256sum | cut -c1-12)" ]]
+}
+
 cg_bucket_name() {
   printf 'cg-library-%s' "$(printf '%s' "$1-$2-$3" | sha256sum | cut -c1-12)"
 }

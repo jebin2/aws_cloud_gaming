@@ -56,11 +56,13 @@ cat > "$T/r/probe.js" <<'PROBE'
       const el = document.getElementById(id);
       return el ? el.textContent.replace(/\s+/g, ' ').trim() : '(missing)';
     };
-    const btn = document.getElementById('lib-login-forget');
-    out.push(label + ' HEAD | ' + g('lib-login-head'));
-    out.push(label + ' SUB | ' + g('lib-login-sub'));
-    out.push(label + ' ACCTS | ' + g('lib-login-accounts'));
-    out.push(label + ' BTN | ' + (btn ? (btn.hidden ? 'hidden' : 'shown') : '(missing)'));
+    const trs = [...document.querySelectorAll('#lib-login-rows tr')];
+    out.push(label + ' ROWS | ' + trs.map(tr => [...tr.children].map(td => td.textContent.trim()).join(' / ')).join(' || '));
+    out.push(label + ' NOTE | ' + g('lib-login-note'));
+    out.push(label + ' BTN | ' + [...document.querySelectorAll('#lib-login-rows button')].map(b => b.className).join(','));
+    const sel = document.getElementById('b-login-choice');
+    out.push(label + ' BUILD | ' + g('b-login') + ' / ' + (sel.hidden ? 'no choice'
+      : [...sel.options].map(o => (o.selected ? '*' : '') + o.textContent).join(', ')));
   };
   const call = (label, arg) => {
     try { paintLogin(arg); read(label); }
@@ -76,9 +78,28 @@ cat > "$T/r/probe.js" <<'PROBE'
                 accounts: [{ steamid: '1', account: 'alice', most_recent: false, last_used: 1 },
                            { steamid: '2', account: 'bob', most_recent: true, last_used: 2 }] });
   call('ABSENT', { present: false, accounts: [] });
+  // The choice, on Build: picking "ask me" saves it through cg.
+  const ran = [];
+  window.cg.run = args => { ran.push(args.join(' ')); return Promise.resolve({ ok: true, id: 99 }); };
+  paintLogin({ present: true, bytes: 22458, modified: null, usd_month: 0.000001,
+               accounts: [{ steamid: '1', account: 'alice', most_recent: true }] });
+  const sel = document.getElementById('b-login-choice');
+  sel.value = 'fresh'; sel.dispatchEvent(new Event('change'));
+  out.push('PICK RAN | ' + ran.join(' ;; '));
+  config = [{ key: 'GAME_STEAM_LOGIN', kind: 'choice', value: 'fresh', default: 'use', rule: 'use,fresh' }];
+  paintBuildLogin();
+  read('FRESH');
+  config = [];
   call('UNKNOWN', null);
   call('NONAMES', { present: true, bytes: 22458, modified: null, usd_month: 0.000001,
                     accounts: null });
+  // A copy a region move left beside games elsewhere: its own row, used by nothing.
+  elsewhereNow = { region: 'ap-south-1', places: [{ bucket: 'cg-library-old', region: 'ap-south-2', error: null,
+    bytes: 1, login: true, games: [], login_detail: { present: true, bytes: 22290, modified: '2026-09-26T12:20:10+00:00',
+      accounts: [{ steamid: '1', account: 'alice', most_recent: true }] } }] };
+  call('ELSE', { present: true, bytes: 22458, modified: '2026-10-10T16:30:03+00:00', usd_month: 0.000001,
+                 accounts: [{ steamid: '1', account: 'alice', persona: 'Alice', most_recent: true, last_used: 1 }] });
+  elsewhereNow = null;
 
   // The build-time prompt, as the app actually shows it. cg sends the answers
   // it accepts in the event; the dialog used to ignore them and render a text
@@ -165,42 +186,50 @@ if [[ $OUT == "PROBE DID NOT RUN" || -z $OUT ]]; then
 fi
 row() { grep "^$1 " <<<"$OUT" | head -1; }
 
-echo "1. a login is archived"
-contains "the heading says so"        "$(row 'PRESENT HEAD')" "Steam login saved"
-contains "  the size is shown"        "$(row 'PRESENT SUB')"  "21.9 KB"
-contains "  and when it was saved"    "$(row 'PRESENT SUB')"  "saved "
-contains "  the account is named"     "$(row 'PRESENT ACCTS')" "alice"
-contains "  and marked as the one used" "$(row 'PRESENT ACCTS')" "a new machine signs in as this one"
+echo "1. a login is archived: one row"
+contains "the account, its size and date" "$(row 'PRESENT ROWS')" "alice / "
+contains "  the size is shown"        "$(row 'PRESENT ROWS')" "/ 21.9 KB / 10 Oct /"
+contains "  and it is the one used"   "$(row 'PRESENT ROWS')" "/ signs in / Forget"
+contains "  said once, below"         "$(row 'PRESENT NOTE')" "A new machine signs in as alice."
 # Stated and dismissed in the same breath: 22 KB is not a saving, and offering a
 # delete button next to a cost invites reading it as one.
-contains "deleting is not sold as a saving" "$(row 'PRESENT SUB')" "saves nothing"
-contains "  Forget is offered"        "$(row 'PRESENT BTN')"  "shown"
+contains "deleting is not sold as a saving" "$(row 'PRESENT NOTE')" "saves nothing"
+contains "  Forget is offered, in red" "$(row 'PRESENT BTN')" "btn btn-danger"
 
 echo "2. several accounts in one tarball"
-contains "both are listed"            "$(row 'TWO ACCTS')" "alice"
-contains "  including the other"      "$(row 'TWO ACCTS')" "bob"
-contains "  only the recent one is marked" "$(row 'TWO ACCTS')" "bob - a new machine signs in as this one"
-contains "  and the whole-tarball caveat is said" "$(row 'TWO ACCTS')" "come back together"
-contains "  with how to keep one"     "$(row 'TWO ACCTS')" "sign in as it on the machine"
+contains "both are listed, in one row" "$(row 'TWO ROWS')" "alice, bob / "
+contains "  the recent one is who signs in" "$(row 'TWO NOTE')" "A new machine signs in as bob."
+contains "  and the whole-tarball caveat is said" "$(row 'TWO NOTE')" "come back together"
+contains "  with how to keep one"     "$(row 'TWO NOTE')" "sign in as it on the machine"
 
 echo "3. nothing archived"
-contains "it says none"               "$(row 'ABSENT HEAD')" "No Steam login saved"
-contains "  and what that means"      "$(row 'ABSENT SUB')"  "will ask you to sign in"
-check    "  Forget is not offered"    "$(row 'ABSENT BTN')"  "ABSENT BTN | hidden"
+contains "it says none"               "$(row 'ABSENT ROWS')" "No Steam login saved"
+contains "  and what that means"      "$(row 'ABSENT ROWS')" "asks you to sign in"
+check    "  Forget is not offered"    "$(row 'ABSENT BTN')"  "ABSENT BTN | "
 
 echo "4. UNKNOWN is the one that must not read as 'none'"
 # The whole reason this file is rendered rather than grepped.
-contains "it admits it could not look" "$(row 'UNKNOWN SUB')" "could not read it"
-lacks    "  and never claims none"     "$(row 'UNKNOWN HEAD')" "No Steam login saved"
-lacks    "  nor that one is archived"  "$(row 'UNKNOWN HEAD')" "Steam login saved"
-lacks    "  nor invites a sign-in"     "$(row 'UNKNOWN SUB')" "will ask you to sign in"
+contains "it admits it could not look" "$(row 'UNKNOWN ROWS')" "Could not read the saved login"
+lacks    "  and never claims none"     "$(row 'UNKNOWN ROWS')" "No Steam login saved"
+lacks    "  nor invites a sign-in"     "$(row 'UNKNOWN NOTE')" "asks you to sign in"
 # No delete button for a state nobody can vouch for.
-check    "  Forget is not offered"     "$(row 'UNKNOWN BTN')" "UNKNOWN BTN | hidden"
+check    "  Forget is not offered"     "$(row 'UNKNOWN BTN')" "UNKNOWN BTN | "
 
 echo "5. present, but the names could not be read"
-contains "the login is still reported" "$(row 'NONAMES HEAD')" "Steam login saved"
-contains "  and the gap is named"      "$(row 'NONAMES ACCTS')" "could not be read"
-lacks    "  not as zero accounts"      "$(row 'NONAMES ACCTS')" "0 accounts"
+contains "the login is still a row"    "$(row 'NONAMES ROWS')" "names unreadable / "
+lacks    "  not as zero accounts"      "$(row 'NONAMES ROWS')" "0 accounts"
+
+echo "5c. Steam sign-in is chosen on Build"
+contains "the saved login is the default"  "$(row 'PRESENT BUILD')" "signed in as alice / *Sign in as alice, Ask me to sign in"
+contains "with nothing saved there is no choice" "$(row 'ABSENT BUILD')" "/ no choice"
+contains "picking 'ask me' saves it through cg" "$(row 'PICK RAN')" "config set GAME_STEAM_LOGIN fresh"
+contains "  and Build then says so"        "$(row 'FRESH BUILD')" "sign in on the machine / Sign in as alice, *Ask me to sign in"
+
+echo "5b. a copy left in another place"
+contains "its own row, by its place"   "$(row 'ELSE ROWS')" "|| alice / ap-south-2 / 21.8 KB / 26 Sep"
+contains "  used by nothing"           "$(row 'ELSE ROWS')" "/ not used / Forget"
+contains "  after the one that signs in" "$(row 'ELSE ROWS')" "/ signs in / Forget ||"
+check    "  its Forget is not red"     "$(row 'ELSE BTN')" "ELSE BTN | btn btn-danger,btn"
 
 echo "6. a numbered prompt is a choice, not a text box"
 contains "the question stands alone"   "$(row 'CHOICE PROMPT')" "leave it running"

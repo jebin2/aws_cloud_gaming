@@ -496,7 +496,9 @@ g = os.environ.get
 out["rates"] = {k: float(g(v) or 0) for k, v in {
   "s3_gb_month": "CG_S3_USD_GB_MONTH", "ebs_gb_month": "CG_EBS_USD_GB_MONTH",
   "snapshot_gb_month": "CG_SNAPSHOT_USD_GB_MONTH", "ipv4_hour": "CG_IPV4_USD_HOUR",
-  "inr_per_usd": "CG_INR_PER_USD", "ce_call_usd": "CG_CE_CALL_USD"}.items()}
+  "inr_per_usd": "CG_INR_PER_USD", "ce_call_usd": "CG_CE_CALL_USD",
+  # Streaming out of AWS, for what a bitrate costs an hour on Settings.
+  "egress_gb": "CG_EGRESS_USD_GB", "egress_free_gb": "CG_EGRESS_FREE_GB"}.items()}
 print(json.dumps(out, indent=2, sort_keys=True))
 ' "$TS_HOST" "$REGION" "$TYPE"
 }
