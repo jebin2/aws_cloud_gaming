@@ -265,7 +265,6 @@ cat > "$T/r/probe.js" <<'PROBE'
                   total_bytes: 53687091200 };
   paintLibrary(noCap);
   out.push('NOCAP | lib | ' + document.getElementById('lib-fit').textContent.trim());
-  out.push('NOCAP | libnum | ' + document.getElementById('lib-fit-num').textContent.trim());
   document.querySelector('#b-games input[type=checkbox]').click();
   out.push('NOCAP | fit | ' + document.getElementById('b-fit').textContent.trim());
   out.push('NOCAP | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
@@ -356,8 +355,7 @@ contains "paintGuards drew a card"          "$OUT" "PAINTED | guards | 1"
 contains "paintLibrary sized the disk"      "$OUT" "PAINTED | library | "
 
 echo "1b. a disk size cg did not give is not guessed"
-contains "the library says it cannot tell" "$OUT" "NOCAP | lib | 50.0 GB archived - how much a box offers is not known yet"
-contains "  and shows no percentage"       "$OUT" "NOCAP | libnum | —"
+contains "the library says it cannot tell" "$OUT" "NOCAP | lib | How much a machine holds is not known yet."
 contains "the meter is labelled plainly"   "$OUT" "NOCAP | fit | Space on the machine"
 contains "  and counts what is picked, with no fraction of an unknown" \
          "$OUT" "NOCAP | pct | 50.0 GB - the machine's space is not known yet"

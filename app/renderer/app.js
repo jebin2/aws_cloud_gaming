@@ -219,7 +219,8 @@ function applyLogFilter(which) {
 
 // The app's own confirmation. window.confirm draws a native alert box that
 // belongs to no design and says the app's name in its title bar.
-function askConfirm({ title, body, yes = 'Continue', no = 'Cancel', danger = false }) {
+// word: what cannot be undone asks for a word typed out; Yes waits for it.
+function askConfirm({ title, body, yes = 'Continue', no = 'Cancel', danger = false, word = null }) {
   return new Promise(resolve => {
     $('confirm-title').textContent = title;
     $('confirm-body').textContent = body;
@@ -227,9 +228,20 @@ function askConfirm({ title, body, yes = 'Continue', no = 'Cancel', danger = fal
     const btn = $('confirm-yes');
     btn.textContent = yes;
     btn.className = 'btn ' + (danger ? 'btn-danger' : 'btn-primary');
+    const input = $('confirm-word');
+    $('confirm-word-row').hidden = !word;
+    input.value = '';
+    btn.disabled = !!word;
+    if (word) {
+      $('confirm-word-label').textContent = `Type ${word} to confirm`;
+      input.oninput = () => { btn.disabled = input.value.trim() !== word; };
+      // Enter would submit the form's first button, which is Cancel.
+      input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); if (!btn.disabled) btn.click(); } };
+    }
     const dlg = $('confirm');
     dlg.onclose = () => resolve(dlg.returnValue === 'yes');
     dlg.showModal();
+    if (word) input.focus();
   });
 }
 
@@ -855,115 +867,91 @@ function paintLibrary(d) {
   // cg says which it is; the app must never turn "I could not look" into
   // "there is nothing there".
   paintLogin(d.login);
+  libNow = d;
+  paintLibraryPage();
+}
+let libNow = null;   // the last `cg library list`, for repainting when status lands
+
+// The Library page: in rupees, in the words the rest of the app uses, and with
+// where the games are kept and for how long - which come from `cg status`, so
+// this repaints when either answer lands.
+function paintLibraryPage() {
+  const d = libNow;
+  if (!d || !$('lib-rows')) return;
+  const s = statusNow || {};
+  const inr = inrRate();
+  const r = usd => (usd == null || !isFinite(inr) ? '—' : rs(usd * inr));
   $('lib-error').hidden = !d.error;
   if (d.error) {
-    $('lib-error').textContent = `cannot read the archive: ${d.error}`;
-    $('lib-total').textContent = 'unknown';
-    $('lib-count').textContent = 'the archive could not be read';
-    $('lib-cost').textContent = '—';
+    $('lib-error').textContent = `Your saved games could not be read: ${d.error}`;
+    $('lib-total').textContent = 'Unknown';
+    $('lib-cost').textContent = 'This is not the same as having none.';
+    $('lib-count').textContent = '';
+    $('lib-keep').textContent = '';
     $('lib-rows').textContent = '';
     $('lib-foot').textContent = '';
-    $('lib-fit-num').textContent = '—';
-    $('lib-fit').textContent = 'unknown until the archive can be read';
-    $('lib-fit-chip').hidden = true;
-    $('lib-bar').style.width = '0%';
+    $('lib-fit').textContent = '';
+    $('lib-orphan-box').hidden = true;
     return;
   }
-  const gb = (d.total_bytes || 0) / 1073741824;
-  // How much a box offers is cg's number. When the read could not say,
-  // the screen says it could not - a plausible-looking 209 GB is a wrong
-  // answer that reads like a right one.
-  const cap = d.selectable_gb || null;
   const games = d.games || [];
-  $('lib-bucket').textContent = d.bucket ? `s3://${d.bucket}` : 'no bucket yet';
-  $('lib-total').textContent = `${gb.toFixed(1)} GB`;
-  $('lib-count').textContent = games.length
-    ? `${games.length} game${games.length > 1 ? 's' : ''} in the archive`
-    : 'the archive is empty';
-  $('lib-cost').textContent = `${money(d.usd_month ?? 0)}/mo`;
-  $('lib-rate').textContent = d.usd_per_gb_month
-    ? `S3 standard, ${money(d.usd_per_gb_month)} per GB-month` : 'S3 standard';
-  // A box is up: what is here is the last push, not what is on the box now.
-  $('lib-note').textContent = boxNow
-    ? 'A box is running - this is the last push. The next one runs before the box is destroyed.'
-    : 'Written by the push that runs before every destroy.';
+  const cap = d.selectable_gb || null;
+  const gb = (d.total_bytes || 0) / 1073741824;
+  $('lib-total').textContent = games.length
+    ? `${games.length} game${games.length === 1 ? '' : 's'} · ${GB(d.total_bytes)}` : 'No games saved yet';
+  $('lib-cost').textContent = games.length ? `${r(d.usd_month ?? 0)} a month` : '';
+  $('lib-count').textContent = games.length && s.region ? ` · saved in ${placeName(s.region)}` : '';
+  const days = (s.archive || {}).expiry_days;
+  $('lib-keep').textContent = !games.length ? 'A game is saved here when its machine is deleted.'
+    : days ? `Deleted after ${days} days with no machine.` : 'Kept until you delete them.';
+  $('lib-keep').className = 'font-code-sm text-code-sm mt-space-xs '
+    + (!games.length ? 'text-outline' : days ? 'text-tertiary' : 'text-primary');
 
   const rows = $('lib-rows');
   rows.textContent = '';
   if (!games.length) {
     const tr = document.createElement('tr');
-    cell(tr, 'the archive is empty', 'py-space-sm text-outline').colSpan = 5;
+    cell(tr, 'Nothing saved yet.', 'py-space-sm text-outline').colSpan = 5;
     rows.append(tr);
   }
   for (const g of games) {
     const tr = document.createElement('tr');
     tr.className = 'border-b border-surface-variant/40';
-    const name = cell(tr, '', 'py-space-sm pr-space-md');
-    const n = document.createElement('div'); n.textContent = g.name || g.installdir || g.appid;
-    const id = document.createElement('div'); id.className = 'text-outline'; id.textContent = `appid ${g.appid}`;
-    name.append(n, id);
+    cell(tr, g.name || g.installdir || g.appid, 'py-space-sm pr-space-md text-on-surface');
     cell(tr, GB(g.bytes), 'text-right px-space-md text-on-surface-variant');
-
-    // Share of the archive, so the one worth deleting is obvious at a glance.
-    const share = cell(tr, '', 'px-space-md w-32');
-    const track = document.createElement('div');
-    track.className = 'h-1.5 rounded-full bg-surface-container overflow-hidden';
-    const fill = document.createElement('div');
-    fill.className = 'h-full bg-secondary';
-    fill.style.width = (d.total_bytes ? (g.bytes / d.total_bytes) * 100 : 0) + '%';
-    track.append(fill); share.append(track);
-
-    cell(tr, `${money(g.usd_month)}/mo`, 'text-right px-space-md text-tertiary');
-    const last = cell(tr, '', 'text-right pl-space-md');
-    const when = document.createElement('span');
-    when.className = 'text-outline';
-    when.textContent = daysAgo(g.pushed);
+    cell(tr, `${r(g.usd_month)} a month`, 'text-right px-space-md text-on-surface-variant');
+    cell(tr, daysAgo(g.pushed), 'text-right px-space-md text-outline');
+    const act = cell(tr, '', 'text-right pl-space-md');
     const forget = document.createElement('button');
-    forget.className = 'btn btn-danger ml-space-sm';
+    forget.className = 'btn';
     forget.textContent = 'Forget';
     forget.onclick = () => forgetGame(g);
-    last.append(when, forget);
+    act.append(forget);
     rows.append(tr);
   }
   const foot = $('lib-foot');
   foot.textContent = '';
-  if (games.length) {
+  if (games.length > 1) {
     const tr = document.createElement('tr');
-    cell(tr, `TOTAL (${games.length})`, 'py-space-sm pr-space-md');
+    cell(tr, 'Total', 'py-space-sm pr-space-md text-outline');
     cell(tr, GB(d.total_bytes), 'text-right px-space-md');
-    cell(tr, '', 'px-space-md');
-    cell(tr, `${money(d.usd_month ?? 0)}/mo`, 'text-right px-space-md text-tertiary');
-    cell(tr, '', '');
+    cell(tr, `${r(d.usd_month ?? 0)} a month`, 'text-right px-space-md');
+    cell(tr, '', ''); cell(tr, '', '');
     foot.append(tr);
   }
+  // How much a machine holds is cg's number. When it could not say, this says
+  // so - a plausible-looking 209 GB is a wrong answer that reads like a right one.
+  $('lib-fit').textContent = !games.length ? ''
+    : cap == null ? 'How much a machine holds is not known yet.'
+    : gb > cap ? `A machine holds ${cap} GB, so a build lets you pick which to download.`
+    : `All of them fit on a machine, which holds ${cap} GB.`;
 
   $('lib-orphan-box').hidden = !d.orphan_bytes;
   if (d.orphan_bytes) {
     $('lib-orphans').textContent =
-      `plus ${(d.orphan_bytes / 1073741824).toFixed(1)} GB orphaned by an unfinished push, `
-      + `costing ${money(d.orphan_usd_month)} a month and unusable. Nothing indexed is touched.`;
+      `${(d.orphan_bytes / 1073741824).toFixed(1)} GB left over from a save that did not finish`
+      + ` · ${r(d.orphan_usd_month)} a month, and no use to any game.`;
   }
-
-  if (cap == null) {
-    $('lib-fit-num').textContent = '—';
-    $('lib-bar').style.width = '0%';
-    $('lib-fit-chip').hidden = true;
-    $('lib-fit').textContent =
-      `${gb.toFixed(1)} GB archived - how much a box offers is not known yet`;
-    return;
-  }
-  const over = gb > cap;
-  // The number is the true ratio - 138% says something 100% would hide - while
-  // the bar stops at full.
-  $('lib-fit-num').textContent = `${Math.round((gb / cap) * 100)}%`;
-  $('lib-bar').style.width = Math.min(100, (gb / cap) * 100) + '%';
-  $('lib-bar').className = 'h-full ' + (over ? 'bg-tertiary' : 'bg-secondary');
-  $('lib-fit-chip').hidden = false;
-  $('lib-fit-chip').textContent = over ? 'pick some' : 'all of it fits';
-  $('lib-fit-chip').className = 'pill ' + (over ? '' : 'pill-ok');
-  $('lib-fit').textContent = over
-    ? `${gb.toFixed(1)} GB archived - more than the ${cap} GB a box offers, so a build asks which to restore`
-    : `${gb.toFixed(1)} GB of the ${cap} GB a box offers after its reserve`;
 }
 
 const ago = s => s == null ? '' : s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)}m ago`
@@ -978,14 +966,55 @@ const ago = s => s == null ? '' : s < 90 ? `${s}s ago` : s < 5400 ? `${Math.roun
 // what it costs to re-download and demands the word FORGET - so the app's own
 // dialog only has to be honest about which game is going.
 async function forgetGame(g) {
+  const name = g.name || g.appid;
   const ok = await askConfirm({
-    title: `Forget ${g.name || g.appid}?`,
-    body: `${GB(g.bytes)} is deleted from the archive permanently. No undo, no versioning.\n\n`
-        + 'Playing it again means downloading it from Steam onto a new box. '
-        + 'cg will ask you to type FORGET.',
-    yes: 'Forget', danger: true,
+    title: `Forget ${name}?`,
+    body: `Its ${GB(g.bytes)} saved copy is deleted for good. There is no undo.\n\n`
+        + 'Playing it again means Steam downloads it onto a new machine.',
+    yes: 'Forget', danger: true, word: 'FORGET',
   });
-  if (ok) await startRun(['library', 'forget', String(g.appid)]);
+  if (ok) await libraryRun(['library', 'forget', String(g.appid)], `Forgetting ${name}`, 'forget-game', 'FORGET');
+}
+
+// The word typed in the app's own dialog, handed to cg when it asks for it.
+let typedPending = null;
+const typedAnswer = askId => (typedPending && typedPending.askId === askId ? typedPending.word : null);
+
+// A change to the saved games, run where you asked for it. The popup says what
+// is happening; when cg is done the same popup reads everything again and
+// closes (afterWrite), and you are still on Library. Only a refusal keeps it
+// open, with cg's reason.
+async function libraryRun(args, doing, askId, word) {
+  typedPending = askId ? { askId, word } : null;
+  const dlg = $('refdlg');
+  $('refdlg-title').textContent = doing;
+  $('refdlg-sub').textContent = '';
+  $('refdlg-menu').hidden = true;
+  const list = $('refdlg-list');
+  list.textContent = '';
+  const row = document.createElement('div');
+  row.className = 'flex items-start gap-space-sm font-body-md text-body-md';
+  row.append(Object.assign(document.createElement('span'), { className: 'spinner mt-0.5' }),
+             Object.assign(document.createElement('div'), { textContent: doing }));
+  list.append(row);
+  if (!dlg.open) dlg.showModal();
+  const { rc, err } = await runCg(args, { wantRc: true });
+  typedPending = null;
+  if (rc === 0) return;
+  const why = (err || '').trim().split('\n').filter(Boolean).slice(-2).join(' ')
+    || `cg ${args.join(' ')} stopped (exit ${rc})`;
+  $('refdlg-title').textContent = `${doing} - not done`;
+  $('refdlg-sub').textContent = 'Nothing was changed.';
+  list.textContent = '';
+  const bad = document.createElement('div');
+  bad.className = 'flex items-start gap-space-sm font-body-md text-body-md';
+  bad.dataset.state = 'failed';
+  bad.append(Object.assign(document.createElement('span'), { className: 'w-4 text-center text-error', textContent: '✗' }),
+             Object.assign(document.createElement('div'), { className: 'font-code-sm text-code-sm text-on-surface-variant break-words', textContent: why }));
+  list.append(bad);
+  $('refdlg-menu').hidden = false;
+  if (!dlg.open) dlg.showModal();
+  $('refdlg-close').focus();
 }
 
 // The archived Steam login. Three states, and the third is the one that matters:
@@ -1037,31 +1066,31 @@ function paintLogin(l) {
   accts.textContent = '';
   if (!l) {
     head.textContent = 'Steam login';
-    sub.textContent = 'could not read it - this says nothing about whether one is archived';
+    sub.textContent = 'could not read it - this says nothing about whether one is saved';
     btn.hidden = true;
     return;
   }
   if (!l.present) {
-    head.textContent = 'No Steam login archived';
-    sub.textContent = 'A new box will ask you to sign in. One is pushed automatically when a box shuts down.';
+    head.textContent = 'No Steam login saved';
+    sub.textContent = 'A new machine will ask you to sign in. The login is saved by itself when a machine shuts down.';
     btn.hidden = true;
     return;
   }
-  head.textContent = 'Steam login archived';
+  head.textContent = 'Steam login saved';
   const kb = (l.bytes || 0) / 1024;
   // The cost is stated and then dismissed on purpose: it is the reason NOT to
   // treat Forget as a saving.
-  sub.textContent = `${kb.toFixed(1)} KB${l.modified ? `, pushed ${daysAgo(l.modified)}` : ''}`
-    + ' - a new box comes up already signed in. Deleting it saves nothing; it changes which account a new box uses.';
+  sub.textContent = `${kb.toFixed(1)} KB${l.modified ? `, saved ${daysAgo(l.modified)}` : ''}`
+    + ' · a new machine starts already signed in. Forgetting it saves nothing; it only changes which account a new machine uses.';
   const rows = l.accounts;
   if (rows === null || rows === undefined) {
-    accts.textContent = 'the account names could not be read from the archive';
+    accts.textContent = 'the account names could not be read';
   } else {
     for (const r of rows) {
       const line = document.createElement('div');
       const who = r.account || r.persona || r.steamid || '?';
       line.textContent = r.most_recent
-        ? `${who} - a new box signs in as this one`
+        ? `${who} - a new machine signs in as this one`
         : who;
       if (r.most_recent) line.className = 'text-on-surface-variant';
       accts.append(line);
@@ -1069,8 +1098,8 @@ function paintLogin(l) {
     if (rows.length > 1) {
       const note = document.createElement('div');
       note.className = 'text-tertiary mt-space-xs';
-      note.textContent = `${rows.length} accounts are archived together. The tarball restores whole, `
-        + 'so a new box gets all of them. To keep one: sign in as it on the box, then push.';
+      note.textContent = `${rows.length} accounts are saved together and come back together, `
+        + 'so a new machine gets all of them. To keep only one: sign in as it on the machine, and it is saved when the machine shuts down.';
       accts.append(note);
     }
   }
@@ -1080,17 +1109,16 @@ function paintLogin(l) {
 
 async function forgetLogin(l) {
   const rows = l.accounts || [];
-  const who = rows.length ? rows.map(r => r.account || r.steamid || '?').join(', ') : 'the archived account';
+  const who = rows.length ? rows.map(r => r.account || r.steamid || '?').join(', ') : 'the saved account';
   const ok = await askConfirm({
-    title: 'Forget the archived Steam login?',
-    body: `This deletes the archived login for ${who}. No undo, no versioning.\n\n`
-        + 'Your games are NOT affected - they are a separate archive. What you lose is '
-        + 'the signed-in state: the next box will ask for your password and Steam Guard code.\n\n'
-        + 'It is 22 KB, so this saves no money. Do it to change which account a new box '
-        + 'uses. cg will ask you to type FORGET.',
-    yes: 'Forget', danger: true,
+    title: 'Forget the saved Steam login?',
+    body: `This deletes the saved login for ${who}. There is no undo.\n\n`
+        + 'Your games are not affected. What you lose is being signed in: the next machine '
+        + 'asks for your password and Steam Guard code.\n\n'
+        + 'It is 22 KB, so this saves no money. Do it to change which account a new machine uses.',
+    yes: 'Forget', danger: true, word: 'FORGET',
   });
-  if (ok) await startRun(['library', 'account', 'forget']);
+  if (ok) await libraryRun(['library', 'account', 'forget'], 'Forgetting the Steam login', 'forget-login', 'FORGET');
 }
 
 function paintArchiveCard() { paintDash(); }
@@ -2554,7 +2582,7 @@ let sweepNow = null;
 // is the difference between "still working" and "the other regions are gone".
 let sweeping = false;
 let sweepAnswered = false;
-function paintSweep(d) { sweepNow = d; sweepAnswered = true; paintChooser(); paintOnboardSoon(); paintDash(); }
+function paintSweep(d) { sweepNow = d; sweepAnswered = true; paintChooser(); paintOnboardSoon(); paintDash(); paintLibraryPage(); }
 
 // The settings rows defer to the table - but they are painted by whichever read
 // lands first, and `cg config` usually beats `cg machines` and `cg sweep`. So
@@ -2937,6 +2965,7 @@ function paintSpec(s) {
   paintChooser();
   paintFit();
   paintRun();
+  paintLibraryPage();       // where the games are kept, and for how long
 }
 
 // Numbered steps, the way cg reports them: the one running is marked, the ones
@@ -3548,7 +3577,9 @@ window.cg.onEvent(({ id, event }) => {
   const job = jobs.get(id);
   if (!job) return;
   logLine(event);
-  if (job.write) {
+  // The Build card's run: a build, a delete, a session. A change to the saved
+  // games is reported by its own popup, on its own page.
+  if (job.write && job.cmd[0] !== 'library') {
     if (event.t === 'step') buildStep(event.text);
     if (event.t === 'step_end') buildStepEnd(event);
     if (event.t === 'line' || (event.t === 'raw' && event.stream === 'stdout')) buildLine(event);
@@ -3569,7 +3600,7 @@ window.cg.onEvent(({ id, event }) => {
     // The key dialog asked already: cg's two questions are answered from what
     // is in it, rather than putting two more modals on top of the one the
     // person is looking at.
-    const pre = awsKeyAnswer(event.id) ?? oneFieldAnswer(event.id);
+    const pre = awsKeyAnswer(event.id) ?? oneFieldAnswer(event.id) ?? typedAnswer(event.id);
     if (pre !== null) window.cg.answer(id, pre);
     else ask(id, event);
   }
@@ -3658,7 +3689,7 @@ window.cg.onEvent(({ id, event }) => {
     if (job.write) {
       note(`${cgName(job.cmd)} ${event.rc === 0 ? 'finished' : `stopped (exit ${event.rc})`}`,
            event.rc === 0 ? 'text-primary' : 'text-error');
-      afterWrite(job);
+      afterWrite(job, event.rc);
     }
     if (job.resolve) job.resolve(job.wantRc ? { rc: event.rc, err: job.collected || '' }
                                  : job.capture ? job.out.join('\n') : undefined);
@@ -3780,9 +3811,11 @@ async function refreshShown(reads = readsFor(view), read = each => refresh(each,
 const SHOWN_AFTER = new Set(['init', 'destroy', 'open', 'library']);
 // One round of reads, all of them, with the popup up until the last has landed -
 // not the page's reads under the popup and then the rest after it had gone.
-function afterWrite(job) {
+function afterWrite(job, rc) {
   // A cancelled build goes straight on to its delete; the read waits for that.
-  if (!SHOWN_AFTER.has(job.cmd[0]) || (run && run.cancelling)) return refreshAll();
+  // A refused change to the saved games keeps its own popup, saying why.
+  if (!SHOWN_AFTER.has(job.cmd[0]) || (run && run.cancelling)
+      || (job.cmd[0] === 'library' && rc !== 0)) return refreshAll();
   return refreshShown([...GATE_READS, ...ALL_READS], each => refreshAll(each));
 }
 $('refdlg-close').onclick = e => { e.preventDefault(); $('refdlg').close(); };
@@ -5022,13 +5055,12 @@ $('log-cloud').onclick = async () => {
 // for the word typed out - CLEAN, FORGET - which the ask dialog renders.
 $('lib-clean').onclick = async () => {
   const ok = await askConfirm({
-    title: 'Delete the orphaned objects?',
-    body: 'These belong to no archived game - a push that never finished. They cannot be '
-        + 'restored: with no manifest, Steam cannot see them.\n\n'
-        + 'Nothing that is indexed is touched. cg will ask you to type CLEAN.',
-    yes: 'Clean', danger: true,
+    title: 'Clean up the leftover files?',
+    body: 'They belong to no saved game - a save that never finished - and no game can use them.\n\n'
+        + 'Your saved games are not touched.',
+    yes: 'Clean up', danger: true, word: 'CLEAN',
   });
-  if (ok) await startRun(['library', 'clean']);
+  if (ok) await libraryRun(['library', 'clean'], 'Cleaning up leftover files', 'clean-orphans', 'CLEAN');
 };
 // Changing the machine is a `config set` - .env is where cg keeps it, and the
 // next build reads it from there. Re-read afterwards rather than assuming the

@@ -1333,6 +1333,55 @@ contains "  and the build's own log"       "$(row AFTER)" "buildlog=true session
 contains "  shown"                         "$(row AFTER)" "logbox=true"
 ENGINE=""
 
+echo "7j. forgetting a game: one typed confirm, and it all happens on Library"
+B10="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  const wait = () => new Promise(r => setTimeout(r, 30));
+  const view = () => document.querySelector('.nav-item.on').dataset.view;
+  document.querySelector('.nav-item[data-view=library]').click();
+  await wait();
+  let asked = null;
+  window.askConfirm = async o => { asked = o; return true; };
+  const answered = [];
+  window.cg.answer = (id, v) => { answered.push(v); return Promise.resolve(true); };
+  [...document.querySelectorAll('#lib-rows button')].find(b => b.textContent === 'Forget').click();
+  await wait();
+  const id = window.__lastId;
+  window.__emit(id, { t: 'ask', id: 'forget-game', prompt: 'type FORGET to confirm: ' });
+  const during = 'view=' + view() + ' word=' + (asked && asked.word) + ' ran=' + window.__ran.slice(-1)[0]
+    + ' popup=' + document.getElementById('refdlg').open + ':' + document.getElementById('refdlg-title').textContent
+    + ' answered=' + answered.join(',') + ' askdlg=' + document.getElementById('ask').open;
+  window.__emit(id, { t: 'exit', rc: 0 });
+  const reading = document.getElementById('refdlg-title').textContent;
+  await wait(); await wait();
+  const after = 'view=' + view() + ' popup=' + document.getElementById('refdlg').open;
+  [...document.querySelectorAll('#lib-rows button')].find(b => b.textContent === 'Forget').click();
+  await wait();
+  const id2 = window.__lastId;
+  window.__emit(id2, { t: 'line', text: 'aborted - nothing was deleted' });
+  window.__emit(id2, { t: 'exit', rc: 1 });
+  await wait(); await wait();
+  const refused = 'popup=' + document.getElementById('refdlg').open + ' title=' + document.getElementById('refdlg-title').textContent
+    + ' why=' + document.getElementById('refdlg-list').innerText.replace(/\\s+/g, ' ')
+    + ' close=' + !document.getElementById('refdlg-menu').hidden + ' view=' + view();
+  return 'during=' + during + ' | reading=' + reading + ' | after=' + after + ' | refused=' + refused;
+};"
+ENGINE="$B10"
+LIB='{"games": [{"appid": "2344520", "name": "Diablo IV", "bytes": 96636764160, "usd_month": 2.21, "pushed": "2026-10-12T00:00:00Z"}],
+      "total_bytes": 96636764160, "usd_month": 2.21, "selectable_gb": 209, "bucket": "b", "login": {"present": false}}'
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP, \"library list --json\": $LIB,
+  \"status --json\": $(st null '{"bytes": 96636764160}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "forget stays on Library"           "$(row AFTER)" "during=view=library word=FORGET"
+contains "  runs cg's forget"                "$(row AFTER)" "ran=library forget 2344520"
+contains "  with the popup saying so"        "$(row AFTER)" "popup=true:Forgetting Diablo IV"
+contains "  and cg gets the word, no second dialog" "$(row AFTER)" "answered=FORGET askdlg=false"
+contains "done: the popup reads the page again" "$(row AFTER)" "reading=Refreshing Library"
+contains "  and closes, still on Library"    "$(row AFTER)" "after=view=library popup=false"
+contains "refused: the popup stays"          "$(row AFTER)" "refused=popup=true title=Forgetting Diablo IV - not done"
+contains "  with cg's reason"                "$(row AFTER)" "aborted - nothing was deleted"
+contains "  a Close, and still on Library"   "$(row AFTER)" "close=true view=library"
+ENGINE=""
+
 echo "7c. a line that sounds like failure does not fail a healthy build"
 # What happened on a real build: the box's progress said "NvFBC cannot capture
 # with it on", cg reads "cannot" as a failure, and the driver step went red

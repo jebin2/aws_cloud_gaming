@@ -330,78 +330,55 @@
 
   <!-- Library -->
   <section data-view="library" hidden>
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter-desktop mb-space-xl">
+    <!-- Three cards: what is saved and what it costs, the games one by one,
+         and the Steam login - a different thing, with its own Forget. Every
+         action here stays here: its progress is the popup, not the Build page. -->
+    <div class="fit-view flex flex-col gap-space-md">
       <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Archived</span>
-        <p class="font-headline-xl text-headline-xl mt-space-sm" id="lib-total">—</p>
-        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="lib-count">press Refresh</p>
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Your saved games</span>
+        <p class="font-headline-md text-headline-md mt-space-sm" id="lib-total">&mdash;</p>
+        <p class="font-code-sm text-code-sm text-on-surface-variant mt-0.5">
+          <span id="lib-cost">&mdash;</span><span id="lib-count"></span>
+        </p>
+        <p class="font-code-sm text-code-sm mt-space-xs" id="lib-keep"></p>
+        <p class="font-code-sm text-code-sm text-error mt-space-sm" id="lib-error" hidden></p>
       </div>
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Costs you</span>
-        <p class="font-headline-xl text-headline-xl mt-space-sm text-tertiary" id="lib-cost">—</p>
-        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="lib-rate">S3 standard</p>
-      </div>
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <div class="flex items-center justify-between">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Fits on the box</span>
-          <span class="pill" id="lib-fit-chip" hidden>—</span>
-        </div>
-        <p class="font-headline-xl text-headline-xl mt-space-sm" id="lib-fit-num">—</p>
-        <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden">
-          <div class="h-full bg-secondary" id="lib-bar" style="width:0%"></div>
-        </div>
-        <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="lib-fit">—</p>
-      </div>
-    </div>
 
-    <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop">
-      <p class="font-code-sm text-code-sm text-error pb-space-sm" id="lib-error" hidden></p>
-      <div class="flex items-start justify-between pb-space-md">
-        <div>
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Archived games</span>
-          <p class="font-code-sm text-code-sm text-outline mt-0.5" id="lib-note">
-            Written by the push that runs before every destroy.
-          </p>
-        </div>
-        <span class="font-code-sm text-code-sm text-outline whitespace-nowrap" id="lib-bucket">—</span>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="w-full font-code-sm text-code-sm">
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Games</span>
+        <table class="w-full font-code-sm text-code-sm mt-space-sm">
           <thead class="text-outline">
             <tr class="text-left border-b border-surface-variant">
               <th class="py-space-xs pr-space-md font-normal">GAME</th>
               <th class="py-space-xs px-space-md font-normal text-right">SIZE</th>
-              <th class="py-space-xs px-space-md font-normal">SHARE</th>
               <th class="py-space-xs px-space-md font-normal text-right">COSTS</th>
-              <th class="py-space-xs pl-space-md font-normal text-right">ARCHIVED</th>
+              <th class="py-space-xs px-space-md font-normal text-right">SAVED</th>
+              <th class="py-space-xs pl-space-md font-normal w-0"></th>
             </tr>
           </thead>
-          <tbody id="lib-rows"><tr><td class="py-space-sm text-outline" colspan="5">Press Refresh.</td></tr></tbody>
+          <tbody id="lib-rows"><tr><td class="py-space-sm text-outline" colspan="5">reading&hellip;</td></tr></tbody>
           <tfoot id="lib-foot" class="border-t border-surface-variant"></tfoot>
         </table>
-      </div>
-      <!-- The archived Steam login: a ~22 KB tarball, separate from the games and
-           separate from any box, and the reason a rebuilt box comes up signed in.
-           It was invisible on every screen while being counted as an archived
-           game, so an archive with no games reported 22 KB of games. -->
-      <div class="flex items-start justify-between gap-space-md mt-space-md p-space-md rounded bg-surface-container" id="lib-login-box">
-        <div class="min-w-0">
-          <p class="row font-code-sm text-code-sm text-on-surface">
-            <span class="material-symbols-outlined text-[16px]" data-icon="person">&#xe7fd;</span>
-            <span id="lib-login-head">Steam login</span>
-          </p>
-          <p class="font-code-sm text-code-sm text-outline mt-space-xs" id="lib-login-sub"></p>
-          <p class="font-code-sm text-code-sm text-outline" id="lib-login-accounts"></p>
+        <p class="font-code-sm text-code-sm text-outline mt-space-md" id="lib-fit"></p>
+        <!-- Left behind by a save that never finished: billed, and no use. -->
+        <div class="flex items-center justify-between gap-space-md mt-space-md pt-space-md border-t border-surface-variant" id="lib-orphan-box" hidden>
+          <p class="font-code-sm text-code-sm text-tertiary" id="lib-orphans"></p>
+          <button class="btn shrink-0" id="lib-clean">Clean up</button>
         </div>
-        <button class="btn btn-danger shrink-0" id="lib-login-forget" hidden>
-          <span class="material-symbols-outlined text-[16px]" data-icon="delete">&#xe92e;</span>Forget
-        </button>
       </div>
-      <div class="flex items-start justify-between gap-space-md mt-space-md p-space-md rounded bg-surface-container" id="lib-orphan-box" hidden>
-        <p class="font-code-sm text-code-sm text-tertiary" id="lib-orphans"></p>
-        <button class="btn btn-danger shrink-0" id="lib-clean">
-          <span class="material-symbols-outlined text-[16px]" data-icon="delete">&#xe92e;</span>Clean
-        </button>
+
+      <!-- The saved Steam login: a ~22 KB file, separate from the games and from
+           any machine, and the reason a new machine comes up signed in. -->
+      <div class="p-space-lg rounded-lg bg-surface-container-low" id="lib-login-box">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Steam login</span>
+        <div class="flex items-start justify-between gap-space-md mt-space-sm">
+          <div class="min-w-0">
+            <p class="font-body-md text-body-md text-on-surface" id="lib-login-head">&mdash;</p>
+            <p class="font-code-sm text-code-sm text-outline mt-0.5" id="lib-login-sub"></p>
+            <div class="font-code-sm text-code-sm text-outline mt-space-xs" id="lib-login-accounts"></div>
+          </div>
+          <button class="btn btn-danger shrink-0" id="lib-login-forget" hidden>Forget</button>
+        </div>
       </div>
     </div>
   </section>
@@ -788,6 +765,12 @@
   <form method="dialog">
     <p class="font-headline-md text-headline-md" id="confirm-title"></p>
     <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm whitespace-pre-line" id="confirm-body"></p>
+    <!-- For what cannot be undone: the word cg would ask for, typed here once -
+         and handed to cg, so there is one question and not two. -->
+    <label class="block mt-space-md" id="confirm-word-row" hidden>
+      <span class="font-code-sm text-code-sm text-outline" id="confirm-word-label"></span>
+      <input class="mt-space-xs w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface" id="confirm-word" autocomplete="off" spellcheck="false">
+    </label>
     <menu class="flex justify-end gap-space-sm mt-space-lg p-0">
       <button value="no" class="btn" id="confirm-no">Cancel</button>
       <button value="yes" class="btn btn-primary" id="confirm-yes">Continue</button>

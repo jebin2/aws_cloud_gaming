@@ -166,11 +166,11 @@ fi
 row() { grep "^$1 " <<<"$OUT" | head -1; }
 
 echo "1. a login is archived"
-contains "the heading says so"        "$(row 'PRESENT HEAD')" "Steam login archived"
+contains "the heading says so"        "$(row 'PRESENT HEAD')" "Steam login saved"
 contains "  the size is shown"        "$(row 'PRESENT SUB')"  "21.9 KB"
-contains "  and when it was pushed"   "$(row 'PRESENT SUB')"  "pushed"
+contains "  and when it was saved"    "$(row 'PRESENT SUB')"  "saved "
 contains "  the account is named"     "$(row 'PRESENT ACCTS')" "alice"
-contains "  and marked as the one used" "$(row 'PRESENT ACCTS')" "a new box signs in as this one"
+contains "  and marked as the one used" "$(row 'PRESENT ACCTS')" "a new machine signs in as this one"
 # Stated and dismissed in the same breath: 22 KB is not a saving, and offering a
 # delete button next to a cost invites reading it as one.
 contains "deleting is not sold as a saving" "$(row 'PRESENT SUB')" "saves nothing"
@@ -179,26 +179,26 @@ contains "  Forget is offered"        "$(row 'PRESENT BTN')"  "shown"
 echo "2. several accounts in one tarball"
 contains "both are listed"            "$(row 'TWO ACCTS')" "alice"
 contains "  including the other"      "$(row 'TWO ACCTS')" "bob"
-contains "  only the recent one is marked" "$(row 'TWO ACCTS')" "bob - a new box signs in as this one"
-contains "  and the whole-tarball caveat is said" "$(row 'TWO ACCTS')" "restores whole"
-contains "  with how to keep one"     "$(row 'TWO ACCTS')" "sign in as it on the box"
+contains "  only the recent one is marked" "$(row 'TWO ACCTS')" "bob - a new machine signs in as this one"
+contains "  and the whole-tarball caveat is said" "$(row 'TWO ACCTS')" "come back together"
+contains "  with how to keep one"     "$(row 'TWO ACCTS')" "sign in as it on the machine"
 
 echo "3. nothing archived"
-contains "it says none"               "$(row 'ABSENT HEAD')" "No Steam login archived"
+contains "it says none"               "$(row 'ABSENT HEAD')" "No Steam login saved"
 contains "  and what that means"      "$(row 'ABSENT SUB')"  "will ask you to sign in"
 check    "  Forget is not offered"    "$(row 'ABSENT BTN')"  "ABSENT BTN | hidden"
 
 echo "4. UNKNOWN is the one that must not read as 'none'"
 # The whole reason this file is rendered rather than grepped.
 contains "it admits it could not look" "$(row 'UNKNOWN SUB')" "could not read it"
-lacks    "  and never claims none"     "$(row 'UNKNOWN HEAD')" "No Steam login archived"
-lacks    "  nor that one is archived"  "$(row 'UNKNOWN HEAD')" "Steam login archived"
+lacks    "  and never claims none"     "$(row 'UNKNOWN HEAD')" "No Steam login saved"
+lacks    "  nor that one is archived"  "$(row 'UNKNOWN HEAD')" "Steam login saved"
 lacks    "  nor invites a sign-in"     "$(row 'UNKNOWN SUB')" "will ask you to sign in"
 # No delete button for a state nobody can vouch for.
 check    "  Forget is not offered"     "$(row 'UNKNOWN BTN')" "UNKNOWN BTN | hidden"
 
 echo "5. present, but the names could not be read"
-contains "the login is still reported" "$(row 'NONAMES HEAD')" "Steam login archived"
+contains "the login is still reported" "$(row 'NONAMES HEAD')" "Steam login saved"
 contains "  and the gap is named"      "$(row 'NONAMES ACCTS')" "could not be read"
 lacks    "  not as zero accounts"      "$(row 'NONAMES ACCTS')" "0 accounts"
 

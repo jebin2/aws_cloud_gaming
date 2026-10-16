@@ -310,7 +310,7 @@ echo "5b. the build screen, as the design draws it"
 # The archive table, the allocation bar and the machine strip are the parts the
 # mockup has; each is fed by a field from cg, never by a number typed in here.
 contains "an archive table"              "$html" 'id="b-games"'
-contains "  with the appid"              "$js" 'appid ${g.appid}' 
+lacks    "  by name, not by Steam's id"   "$js" 'appid ${g.appid}'
 contains "  and when it was archived"    "$js" "daysAgo(g.pushed)"
 contains "the allocation bar"            "$html" 'id="b-bar"'
 contains "  says what is left, plainly"  "$js" "Too big by"
@@ -447,17 +447,16 @@ check    "  and still no machine is named here" \
          "$(grep -cE 'g6\.|g6e\.|L40S|L4 ' app/renderer/app.js)" "0"
 
 echo "5c. the library and cost screens, in the same language"
-contains "the library leads with three numbers" "$html" 'id="lib-cost"'
-contains "  a share bar per game"         "$js" "g.bytes / d.total_bytes"
-contains "  what each game costs"         "$js" "money(g.usd_month)"
+contains "the library leads with what it costs" "$html" 'id="lib-cost"'
+contains "  what each game costs, in rupees" "$js" 'cell(tr, `${r(g.usd_month)} a month`'
 contains "  and a total row"              "$html" 'id="lib-foot"'
-contains "  over capacity is not capped at 100%" "$js" '$('"'"'lib-fit-num'"'"').textContent = `${Math.round((gb / cap) * 100)}%`'
-contains "  it says what a running box means" "$js" "this is the last push"
+contains "  over capacity says a build picks" "$js" "so a build lets you pick which to download"
+contains "  the Steam login is a card of its own" "$html" 'id="lib-login-box"'
 # A fallback that looks like an answer is worse than no answer: the app used to
 # print 209 GB of box disk and a rupee rate of 88 when cg had told it neither.
 check    "no disk size is guessed"        "$(grep -c '|| 209' app/renderer/app.js)" "0"
 check    "  nor a starting value for one"  "$(grep -c 'selectable_gb: 209' app/renderer/app.js)" "0"
-contains "  it says it does not know"     "$js" "how much a box offers is not known yet"
+contains "  it says it does not know"     "$js" "How much a machine holds is not known yet"
 check    "no exchange rate is guessed"    "$(grep -c 'inr_per_usd || 88' app/renderer/app.js)" "0"
 contains "cost shows the billing cycle"   "$html" 'id="c-cycle"'
 contains "  the month projected against the budget" "$js" "m.projected_usd"
@@ -505,7 +504,7 @@ contains "  which is what Refresh costs" "$html" 'id="refresh-cost"'
 contains "  and cg overwrites it"        "$js" "money(rate.ce_call_usd)"
 contains "rates come from cg"            "$js" "const rate = d.rates || {}"
 contains "  the standby burn too"        "$js" "const standby = d.standby || {}"
-contains "  and each game's monthly cost" "$js" "money(g.usd_month)"
+contains "  and each game's monthly cost" "$js" "r(g.usd_month)"
 # Twice: `cg cost --json` and `cg status --json` both carry it, each read from
 # the one variable rates.sh sets.
 check    "cg publishes the table"        "$(grep -c 'ce_call_usd' lib/setup)" "2"
@@ -594,9 +593,11 @@ contains "  and the screen says how it saves" "$html" "cg config set"
 lacks    "  not by editing the file"     "$html" "or by editing the file"
 # The archive's destructive actions were unreachable: the orphan line said
 # "remove with: cg library clean" and there was no button.
-contains "orphans can be cleaned"        "$js" "startRun(['library', 'clean'])"
-contains "  a game can be forgotten"     "$js" "startRun(['library', 'forget'"
-contains "  both warn first"             "$js" "cg will ask you to type FORGET"
+contains "orphans can be cleaned"        "$js" "libraryRun(['library', 'clean']"
+contains "  a game can be forgotten"     "$js" "libraryRun(['library', 'forget'"
+contains "  both ask for the word, once"  "$js" "word: 'FORGET'"
+# They stay on Library: the Build page is for builds, deletes and sessions.
+lacks    "  and never go to the Build page" "$js" "startRun(['library'"
 # The line that used to be drawn in both processes - and drifted - is drawn by
 # cg now, once, and the app is told the verdict with the job.
 contains "  and both count as writes"    "$(./cg --contract | tr -d ' \n')" '["library","forget"]'
