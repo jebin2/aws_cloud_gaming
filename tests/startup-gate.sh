@@ -714,10 +714,11 @@ contains "then the dashboard arrives"       "$(row AFTER)" "after: onb=hidden ca
 contains "  with nothing left running"      "$(row AFTER)" "stop=hidden"
 ENGINE=""
 
-echo "4c3. one click on Refresh is one run to stop"
-# The Build screen's Refresh is four reads. Named each by what it is, two of
-# them were "refresh" and one was "machines" - and the button offered to
-# "Stop 2 runs" for a single click.
+echo "4c3. a Refresh offers no Stop"
+# The Build screen's Refresh is four reads. Named each by what it is, the
+# button once offered to "Stop 2 runs" for a single click; now a read offers no
+# Stop at all - the Refresh popup says what it is reading, and it is over in
+# seconds. Stop is for what changes something.
 ENGINE="window.__after = async () => {
   await new Promise(r => setTimeout(r, 400));
   document.querySelector('.nav-item[data-view=\"build\"]').click();
@@ -725,10 +726,15 @@ ENGINE="window.__after = async () => {
   window.__slowMs = 800;
   document.getElementById('refresh').click();
   await new Promise(r => setTimeout(r, 50));
-  return 'stop=' + document.getElementById('cancel-label').textContent.trim();
+  const reads = 'stop=' + (document.getElementById('cancel').hidden ? 'none' : document.getElementById('cancel-label').textContent.trim());
+  // Something that changes something still gets its Stop, named.
+  runCg(['library', 'clean']);
+  await new Promise(r => setTimeout(r, 50));
+  return reads + ' | write=' + (document.getElementById('cancel').hidden ? 'none' : document.getElementById('cancel-label').textContent.trim());
 };"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP}")
-check "it is one refresh" "$(row AFTER)" "AFTER | stop=Stop refresh"
+check "no Stop for reads" "$(row AFTER | cut -d'|' -f1-2 | sed 's/ $//')" "AFTER | stop=none"
+contains "  but a change still has one" "$(row AFTER)" "write=Stop "
 ENGINE=""
 
 echo "4d. a region that cannot rent the machine is not 'ready'"

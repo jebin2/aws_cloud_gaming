@@ -111,9 +111,13 @@ function updateHeader() {
   const busy = writing();
   // The dashboard's refresh is two commands - status and the watcher - but one
   // action to you, so count what they are called, not how many there are.
-  const hereNames = [...new Set(mine.map(j => j.group || runName(j.cmd)))];
-  $('cancel').hidden = !mine.length;
-  if (mine.length) $('cancel-label').textContent =
+  // Stop is for what changes something - a build, a delete, a session, an
+  // install. A read finishes in seconds and says so where it was asked (the
+  // Refresh popup, a Fetch button); a Stop appearing for it was noise.
+  const stoppable = mine.filter(j => j.write);
+  const hereNames = [...new Set(stoppable.map(j => j.group || runName(j.cmd)))];
+  $('cancel').hidden = !stoppable.length;
+  if (stoppable.length) $('cancel-label').textContent =
     hereNames.length === 1 ? `Stop ${hereNames[0]}` : `Stop ${hereNames.length} runs`;
 
   // Point at a run only when it is worth watching: a build or a destroy takes
@@ -178,7 +182,6 @@ let logFilter = 'all';
 let logCount = 0;
 
 function logKind(event) {
-  if (event.t === 'raw') return 'raw';
   if (event.t === 'error' || event.kind === 'fail') return 'problems';
   if (event.t === 'step' || event.t === 'step_end') return 'steps';
   return 'other';
@@ -5078,6 +5081,7 @@ $('d-watch').onclick = () => goView('build');
 $('d-change').onclick = () => openMachines();
 $('d-ts-signin').onclick = signInTailscale;
 $('d-library').onclick = () => goView('library');
+applyLogFilter('all');           // the default is shown as chosen, not just in force
 for (const b of document.querySelectorAll('[data-filter]')) {
   b.onclick = () => applyLogFilter(b.dataset.filter);
 }
@@ -5097,11 +5101,44 @@ $('log-copy').onclick = async () => {
 // Reading CloudWatch logs is free; it is manual only because it is rarely the
 // thing you want, not because it costs anything.
 $('log-cloud').onclick = async () => {
+  const btn = $('log-cloud');
+  btn.disabled = true;
+  $('log-cloud-label').textContent = 'Fetching…';
   $('log-cloud-out').textContent = 'fetching…';
   const out = await runCg(['watchdog', 'logs'], { capture: true });
-  $('log-cloud-out').textContent = (out || '').trim()
+  btn.disabled = false;
+  $('log-cloud-label').textContent = 'Fetch';
+  $('log-cloud-out').textContent = watchdogDigest(out || '')
     || 'nothing in the last three hours - it writes a line when it decides something';
 };
+// The watchdog writes a line every 5 minutes, so three hours is ~40 copies of
+// "nothing to do" around the three hourly lines that say anything. A line seen
+// more than twice is said once, with how often and over what span; the rest
+// are kept as written. Times are this laptop's, not UTC.
+function watchdogDigest(text) {
+  const rows = [];
+  for (const line of text.split('\n')) {
+    const m = line.match(/^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)\S*\s+(?:cg-watchdog:\s*)?(.*)$/);
+    if (m) rows.push({ at: new Date(m[1] + 'Z'), msg: m[2] });
+    else if (line.trim()) rows.push({ at: null, msg: line.trim() });
+  }
+  const hm = d => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const seen = new Map();
+  for (const r of rows) seen.set(r.msg, (seen.get(r.msg) || []).concat(r));
+  const out = [], done = new Set();
+  for (const r of rows) {
+    const all = seen.get(r.msg);
+    if (all.length > 2) {
+      if (done.has(r.msg)) continue;
+      done.add(r.msg);
+      const first = all[0].at, last = all[all.length - 1].at;
+      out.push({ at: last, text: `${first && last ? `${hm(first)}–${hm(last)}` : ''}  ${r.msg}  (${all.length} checks)` });
+    } else {
+      out.push({ at: r.at, text: `${r.at ? hm(r.at) : ''}  ${r.msg}` });
+    }
+  }
+  return out.map(o => o.text.trim()).join('\n');
+}
 // Both of these delete things in S3 for good. The app asks once, then cg asks
 // for the word typed out - CLEAN, FORGET - which the ask dialog renders.
 // Keep for: the one rule for every saved game, saved and applied in one go

@@ -557,7 +557,6 @@
           <button class="btn" data-filter="all">All</button>
           <button class="btn" data-filter="steps">Steps</button>
           <button class="btn" data-filter="problems">Problems</button>
-          <button class="btn" data-filter="raw">Raw</button>
           <label class="font-code-sm text-code-sm text-outline flex items-center gap-space-xs ml-auto">
             <input type="checkbox" id="log-follow" class="accent-primary" checked>auto-scroll
           </label>
@@ -576,12 +575,12 @@
           <div>
             <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Cloud watchdog log</span>
             <p class="font-code-sm text-code-sm text-outline mt-0.5">
-              The Lambda's own decisions, from CloudWatch - the last three hours. It survives this window,
-              and costs nothing to read.
+              What the watchdog in AWS decided over the last three hours. Kept by AWS, so it is
+              there after this window closes, and it costs nothing to read.
             </p>
           </div>
           <button class="btn shrink-0" id="log-cloud">
-            <span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span>Fetch
+            <span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span><span id="log-cloud-label">Fetch</span>
           </button>
         </div>
         <pre class="font-code-sm text-code-sm whitespace-pre-wrap flex-1 min-h-[200px] max-h-[62vh] overflow-auto rounded bg-surface-container-lowest p-space-md" id="log-cloud-out">Not fetched. It runs every 5 minutes and writes a line when it decides something.</pre>
