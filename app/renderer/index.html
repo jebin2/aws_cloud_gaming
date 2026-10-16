@@ -261,8 +261,10 @@
       </details>
     </div>
 
-    <!-- Mode A: what will be built. -->
-    <div class="p-space-lg rounded-lg bg-surface-container-low fit-view" id="b-plan">
+    <!-- Mode A: what will be built - a card each for the machine, the games and
+         Steam, and the bill and the button under them. -->
+    <div class="fit-view flex flex-col gap-space-md" id="b-plan">
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
       <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Machine</span>
       <div class="flex flex-wrap items-start justify-between gap-space-md mt-space-sm">
         <div class="min-w-0">
@@ -272,8 +274,9 @@
         <button class="btn shrink-0" id="b-setup">Change</button>
       </div>
       <p class="font-code-sm text-code-sm text-tertiary mt-space-xs" id="b-type-note"></p>
+      </div>
 
-      <div class="mt-space-xl">
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
         <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Games to install</span>
         <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-hint">
           Downloaded from your archive while the machine starts.
@@ -300,14 +303,14 @@
         </div>
       </div>
 
-      <div class="mt-space-xl">
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
         <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Steam</span>
         <p class="font-body-md text-body-md text-on-surface mt-space-sm" id="b-login">&mdash;</p>
         <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-login-note"></p>
       </div>
 
-      <p class="font-code-sm text-code-sm text-tertiary mt-space-md" id="b-session" hidden></p>
-      <div class="flex flex-wrap items-center justify-between gap-space-md mt-space-xl pt-space-md border-t border-surface-variant">
+      <p class="font-code-sm text-code-sm text-tertiary" id="b-session" hidden></p>
+      <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-wrap items-center justify-between gap-space-md">
         <p class="font-code-sm text-code-sm text-on-surface-variant" id="b-chip">&mdash;</p>
         <div class="flex items-center gap-space-sm">
           <button class="btn btn-primary" id="b-build">
