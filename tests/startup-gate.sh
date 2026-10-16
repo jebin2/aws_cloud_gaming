@@ -1262,6 +1262,77 @@ contains "  with a way to close it"        "$(row AFTER)" "close=true"
 contains "  and the reason"                "$(row AFTER)" "could not reach AWS"
 ENGINE=""
 
+echo "7h. stopping a session: the popup reads the page again, and it is ready to play"
+B8="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  document.querySelector('.nav-item[data-view=build]').click();
+  const wait = () => new Promise(r => setTimeout(r, 30));
+  const card = () => (document.getElementById('b-plan').hidden ? '' : 'plan')
+    + (document.getElementById('b-strip').hidden ? '' : 'run:' + document.getElementById('b-strip-title').textContent);
+  [...document.querySelectorAll('#b-run-acts button')].find(b => b.textContent.includes('Play')).click();
+  await wait();
+  const id = window.__lastId;
+  for (const l of ['instance already running', 'waiting for sunshine ok', 'disk:']) window.__emit(id, { t: 'line', text: l });
+  await wait();
+  const playing = card();
+  window.__ran = [];
+  window.__emit(id, { t: 'exit', rc: 130 });
+  const popup = 'open=' + document.getElementById('refdlg').open + ' title=' + document.getElementById('refdlg-title').textContent;
+  await wait(); await wait();
+  return 'playing=' + playing + ' | popup=' + popup + ' | after=' + card() + ' closed=' + !document.getElementById('refdlg').open
+    + ' fail=' + !document.getElementById('b-fail').classList.contains('hidden')
+    + ' | statusReads=' + window.__ran.filter(l => l === 'status --json').length + ' stillReading=' + jobs.size
+    + ' rows=' + document.querySelectorAll('#refdlg-list [data-read]').length;
+};"
+ENGINE="$B8"
+BOX='{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle": "spot", "launched": "2026-01-01T00:00:00Z"}'
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st "$BOX" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "a session is playing"            "$(row AFTER)" "playing=run:Playing"
+contains "stopping it opens the popup"     "$(row AFTER)" "popup=open=true title=Refreshing Build"
+contains "  which leaves it ready to play" "$(row AFTER)" "after=run:Ready to play closed=true"
+contains "  and calls nothing a failure"   "$(row AFTER)" "fail=false"
+# One round of reads, under the popup: not the page's, then all of them again.
+contains "  read once, all under the popup" "$(row AFTER)" "statusReads=1 stillReading=0 rows=9"
+ENGINE=""
+
+echo "7i. after a session, the machine is still the build: its steps and its log"
+B9="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  document.querySelector('.nav-item[data-view=build]').click();
+  window.askConfirm = async () => true;
+  const wait = () => new Promise(r => setTimeout(r, 30));
+  document.getElementById('b-build').click();
+  await wait();
+  let id = window.__lastId;
+  for (const t of ['preflight', 'arming the budget', 'provisioning instance', 'waiting for the box to join the tailnet',
+                   'building the box', 'finishing up', 'moonlight pairing', 'waiting for Steam to finish installing'])
+    window.__emit(id, { t: 'step', text: t });
+  window.__answers['status --json'].box = { id: 'i-1', state: 'running', type: 'g6.xlarge', lifecycle: 'spot',
+                                            launched: new Date().toISOString() };
+  window.__emit(id, { t: 'exit', rc: 0 });
+  await wait(); await wait();
+  [...document.querySelectorAll('#b-run-acts button')].find(b => b.textContent.includes('Play')).click();
+  await wait();
+  id = window.__lastId;
+  window.__emit(id, { t: 'line', text: 'session-only line' });
+  window.__emit(id, { t: 'exit', rc: 130 });
+  await wait(); await wait();
+  const log = document.getElementById('b-log').textContent;   // folded, so not innerText
+  return 'title=' + document.getElementById('b-strip-title').textContent
+    + ' | built=' + ((document.querySelector('#b-steps details summary') || {}).textContent || 'none')
+    + ' | buildlog=' + log.includes('provisioning instance') + ' sessionlog=' + log.includes('session-only line')
+    + ' | logbox=' + !document.getElementById('b-logbox').hidden;
+};"
+ENGINE="$B9"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "after a session: ready to play"  "$(row AFTER)" "title=Ready to play"
+contains "  with how it was built"         "$(row AFTER)" "built=How it was built"
+contains "  and the build's own log"       "$(row AFTER)" "buildlog=true sessionlog=false"
+contains "  shown"                         "$(row AFTER)" "logbox=true"
+ENGINE=""
+
 echo "7c. a line that sounds like failure does not fail a healthy build"
 # What happened on a real build: the box's progress said "NvFBC cannot capture
 # with it on", cg reads "cannot" as a failure, and the driver step went red

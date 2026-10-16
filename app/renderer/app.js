@@ -3014,7 +3014,11 @@ function partStates(lines, stepDone) {
 // The run on screen: which kind, when it began, its steps and their lines, and
 // how it ended. null while the Build screen is choosing what to build.
 let run = null;
-let builtOpen = false;   // whether "How it was built" is unfolded
+let builtOpen = false;
+// The build that made the machine, and its full log: a session or a refused
+// delete replaces the run, and afterwards the machine is still that build -
+// "How it was built" and its log come back with it.
+let lastBuild = null, lastBuildLog = '';   // whether "How it was built" is unfolded
 const runRow = text => ({ name: text, start: Date.now(), end: null, lines: [], failed: false });
 function runBegin(kind, opts = {}) {
   run = { kind, start: Date.now(), billFrom: null, state: 'running', idx: -1, steps: [],
@@ -3092,6 +3096,7 @@ function runEnd(rc) {
   const now = Date.now();
   run.state = rc === 0 ? 'done' : 'failed';
   run.ended = now;
+  run.rc = rc;
   if (rc === 0) {
     run.steps = run.steps.map(x => x ? { ...x, end: x.end || now } : { ...runRow(''), start: now, end: now });
   } else if (run.idx >= 0) {
@@ -3119,8 +3124,20 @@ const liveBox = () => boxNow && boxNow.state !== 'terminated' ? boxNow : null;
 
 // A finished run that the machine has moved past gives way to it.
 function settleRun() {
+  settleRunOnly();
+  // Back to the machine: if this window built it, it is that build again.
+  if (!run && lastBuild && liveBox()) {
+    run = lastBuild;
+    $('b-log').innerHTML = lastBuildLog;
+    $('b-log-title').textContent = 'cg init';
+  }
+}
+function settleRunOnly() {
+  // A session you stopped is not a failure: it ends where any session does.
+  if (run && run.kind === 'open' && run.rc === 130) { run = null; return; }
   if (!run || run.state !== 'done') return;
   if (run.kind === 'destroy') {
+    lastBuild = null;
     // cg said the machine is gone; the status read that confirms it is still
     // on its way, and the plan should not wait for it.
     run = null;
@@ -3132,6 +3149,7 @@ function settleRun() {
     // Built, and gone since (idle, reclaimed) - by a read taken after the
     // build ended, not one from before the machine existed.
     run = null;
+    lastBuild = null;
   }
 }
 
@@ -3190,7 +3208,7 @@ function paintRun() {
       ? (r.streamEnded ? 'Stream ended' : 'Playing') : head[r.state];
   title.className = 'font-headline-md text-headline-md ' + (r.state === 'failed' ? 'text-error' : '');
   // The bill, in the heading, from the moment the machine is rented.
-  const so = r.billFrom && r.rate != null ? r.rate * (now - r.billFrom) / 3600000 : null;
+  const so = r.billFrom && r.rate != null ? r.rate * ((machine ? Date.now() : now) - r.billFrom) / 3600000 : null;
   $('b-strip-meta').textContent = [
     r.state === 'running' ? mins(now - r.start) : r.kind === 'machine' ? `up ${mins(now - r.start)}`
       : r.state === 'done' && r.kind === 'init' ? `built in ${mins(now - r.start)}` : null,
@@ -3392,6 +3410,7 @@ function paintProgress() { paintRun(); }
 function buildProgressDone(rc) {
   const cancelled = run && run.kind === 'init' && run.cancelling;
   runEnd(rc);
+  if (run && run.kind === 'init' && run.state === 'done') { lastBuild = run; lastBuildLog = $('b-log').innerHTML; }
   paintRun();
   // After the exit has been handled, so the init job is gone when the delete starts.
   if (cancelled) Promise.resolve().then(() => startRun(['destroy', '--no-push']));
@@ -3541,7 +3560,8 @@ window.cg.onEvent(({ id, event }) => {
       buildProgressDone(event.rc);
       // A nonzero exit with nothing marked is still a failure, and saying so
       // beats a bare status label the eye slides over.
-      if (event.rc !== 0 && !buildFailures.length && !(run && run.cancelling))
+      if (event.rc !== 0 && !buildFailures.length && !(run && run.cancelling)
+          && !(job.cmd[0] === 'open' && event.rc === 130))
         buildFail(`cg ${job.cmd.join(' ')} exited ${event.rc} without saying why - the log above is all there is.`);
     }
   }
@@ -3638,7 +3658,7 @@ window.cg.onEvent(({ id, event }) => {
     if (job.write) {
       note(`${cgName(job.cmd)} ${event.rc === 0 ? 'finished' : `stopped (exit ${event.rc})`}`,
            event.rc === 0 ? 'text-primary' : 'text-error');
-      refreshAll();
+      afterWrite(job);
     }
     if (job.resolve) job.resolve(job.wantRc ? { rc: event.rc, err: job.collected || '' }
                                  : job.capture ? job.out.join('\n') : undefined);
@@ -3693,8 +3713,7 @@ const loaded = new Set();
 // What a screen reads when it refreshes. Cost is not in NEEDS, so opening that
 // tab fetches nothing: it bills, and only its Refresh asks.
 const readsFor = v => (v === 'cost' ? [[['cost', '--json'], 'cost']] : NEEDS[v]);
-async function refresh(each) {
-  const need = readsFor(view);
+async function refresh(each, need = readsFor(view)) {
   if (!need) return;               // logs need nothing
   if (view !== 'cost') loaded.add(view);
   await Promise.all(need.map(([args, json]) =>
@@ -3710,8 +3729,7 @@ const READ_NAME = {
 // The top Refresh, as a popup: what is being read, each ticking as it lands,
 // closed once the page has been redrawn. A read that failed keeps it open with
 // the reason, because a popup that vanished would say it all worked.
-async function refreshShown() {
-  const reads = readsFor(view);
+async function refreshShown(reads = readsFor(view), read = each => refresh(each, reads)) {
   if (!reads) return;
   const dlg = $('refdlg');
   const state = new Map(reads.map(([, json]) => [json, 'reading']));
@@ -3746,11 +3764,26 @@ async function refreshShown() {
   };
   paint();
   if (!dlg.open) dlg.showModal();
-  await refresh(json => { state.set(json, readFailures.has(json) ? 'failed' : 'done'); paint(); });
+  await read(json => { state.set(json, readFailures.has(json) ? 'failed' : 'done'); paint(); });
+  // A read the gate held back was never asked: it is not news either way.
+  for (const [json, st] of state) if (st === 'reading') state.delete(json);
+  paint();
   if ([...state.values()].every(s => s === 'done')) { dlg.close(); return; }
   $('refdlg-sub').textContent = 'Some of it could not be read. The page shows what was.';
   $('refdlg-menu').hidden = false;
   $('refdlg-close').focus();
+}
+// A build, a delete, a session or an archive change alters what the page shows,
+// so the page you are on is read again with the popup up - "Stream ended"
+// visibly becoming "Ready to play" - and every other screen quietly behind it.
+// Not a settings save: those happen a field at a time.
+const SHOWN_AFTER = new Set(['init', 'destroy', 'open', 'library']);
+// One round of reads, all of them, with the popup up until the last has landed -
+// not the page's reads under the popup and then the rest after it had gone.
+function afterWrite(job) {
+  // A cancelled build goes straight on to its delete; the read waits for that.
+  if (!SHOWN_AFTER.has(job.cmd[0]) || (run && run.cancelling)) return refreshAll();
+  return refreshShown([...GATE_READS, ...ALL_READS], each => refreshAll(each));
 }
 $('refdlg-close').onclick = e => { e.preventDefault(); $('refdlg').close(); };
 // Esc does not close it: it closes itself when the page is redrawn, and a
@@ -4850,15 +4883,17 @@ async function retryReads() {
 // asks them. Cleared at the start of this function, so the gate reads it
 // makes itself never open it a second time underneath it.
 let gateShut = false;
-async function refreshAll() {
+// each: told as each read lands, so a popup can tick them off.
+async function refreshAll(each) {
   gateShut = false;
-  await Promise.all(GATE_READS.map(([args, json]) => runCg(args, { json, group: 'refresh' })));
+  await Promise.all(GATE_READS.map(([args, json]) =>
+    runCg(args, { json, group: 'refresh' }).then(() => each && each(json))));
   paintBanner();
   // A prerequisite is missing. The reads that need AWS or a tailnet would
   // every one come back unknown, and the pipeline is already showing the one
   // thing to do about it.
   if (gateBlocked()) { gateShut = true; return; }
-  return readBehindGate();
+  return readBehindGate(each);
 }
 // Only a stage judged on a gate read can keep the gate shut. "Where it runs"
 // is judged on `cg machines`, which is BEHIND the gate - letting it shut the
@@ -4871,16 +4906,17 @@ function gateMayOpen() {
   gateShut = false;
   readBehindGate();
 }
-async function readBehindGate() {
+async function readBehindGate(each) {
   for (const v of Object.keys(NEEDS)) loaded.add(v);
   readingBehindGate++;
   // In parallel, because they share nothing and each screen paints when its own
   // answer lands. cg cost is not among them: it bills.
   try {
-    await Promise.all(ALL_READS.map(([args, json]) => runCg(args, { json, group: 'refresh' })));
+    await Promise.all(ALL_READS.map(([args, json]) =>
+      runCg(args, { json, group: 'refresh' }).then(() => each && each(json))));
   } finally { readingBehindGate--; }
   paintOnboard();
-  return firstScan();
+  firstScan();             // not awaited: a first scan takes 90 seconds
 }
 
 // A laptop that has never scanned shows one region - the one .env names - and
@@ -5139,7 +5175,9 @@ for (const link of document.querySelectorAll('.nav-item')) {
   link.onclick = e => {
     e.preventDefault();
     document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('on', n === link));
-    $('view-title').textContent = link.textContent.trim();
+    // The label only: the link's text also holds its icon's glyph, which came
+    // out as an invisible character in "Refreshing <page>".
+    $('view-title').textContent = link.querySelector('span:last-child').textContent.trim();
     view = link.dataset.view;
     for (const sec of document.querySelectorAll('main section[data-view]'))
       sec.hidden = sec.dataset.view !== view;
