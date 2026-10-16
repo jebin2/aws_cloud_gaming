@@ -1441,13 +1441,22 @@ watcher_json() {
 
   W_STATE="$st" W_OHW="$ohw" W_SHUTDOWN="$sb" W_WANT="$want" W_RULE="$rule" \
   W_LAST_MS="${ms:-}" W_LAST_MSG="${msg:-}" W_BUDGET="$budget" W_ALERTS="$alerts" \
-  W_ARCHIVE="$(cw_archive_line)" W_HOST="$TS_HOST" python3 -c '
+  W_ARCHIVE="$(cw_archive_line)" W_HOST="$TS_HOST" \
+  W_IDLE="$(cw_int "${GAME_WATCHDOG_IDLE_MIN:-}" 30)" W_STUCK="$(cw_int "${GAME_WATCHDOG_STUCK_MIN:-}" 60)" \
+  W_HOST_IDLE="$(sed -n 's/^IDLE_LIMIT="${IDLE_LIMIT:-\([0-9]*\)}".*/\1/p' host/idle-watchdog.sh 2>/dev/null)" \
+  python3 -c '
 import json, os, time
 g = os.environ.get
 ms = g("W_LAST_MS")
 age = int(time.time() - int(ms) / 1000) if ms.isdigit() else None
 msg = g("W_LAST_MSG").replace("cg-watchdog: ", "") or None
 budget = g("W_BUDGET")
+# The minutes each watchdog waits, as they are set rather than as they were when
+# this was written: the cloud ones are settings, and the floors are the ones
+# cw_install applies, so this says what the schedule actually does.
+idle = max(int(g("W_IDLE") or 30), 10)
+stuck = max(int(g("W_STUCK") or 60), 40)
+host_idle = int(g("W_HOST_IDLE") or 15)
 print(json.dumps({
   "host": g("W_HOST"),
   "instance_state": g("W_STATE"),
@@ -1459,7 +1468,8 @@ print(json.dumps({
     # It lives ON the box: with no box there is nothing to arm, which is not the
     # same as a guard that should be running and is not.
     {"layer": 2, "name": "on-host watchdog", "dies_with": "the box it protects",
-     "catches": "a forgotten disconnect, a crashed client", "reaction": "15 min idle",
+     "catches": "a forgotten disconnect, a crashed client", "reaction": f"{host_idle} min idle",
+     "idle_min": host_idle,
      "armed": (g("W_OHW") == "active") if g("W_OHW") else None,
      "state": "armed" if g("W_OHW") == "active" else (
               "not armed" if g("W_OHW") else
@@ -1468,7 +1478,8 @@ print(json.dumps({
                             if g("W_STATE") in ("none", "terminated", "") else "box not reachable")},
     {"layer": 3, "name": "cloud watchdog", "dies_with": "a deleted schedule",
      "catches": "a wedged box, one left running, one stuck going down",
-     "reaction": "30 min idle; forced after 1 h stuck",
+     "reaction": f"{idle} min idle; forced after {stuck} min stuck",
+     "idle_min": idle, "stuck_min": stuck,
      "armed": g("W_RULE") == "ENABLED",
      "state": "armed" if g("W_RULE") == "ENABLED" else (g("W_RULE").lower() or "not installed"),
      "note": g("W_RULE") or "not installed",

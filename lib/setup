@@ -517,7 +517,9 @@ cost_json() {
     --query accountPlanRemainingCredits.amount --output text 2>/dev/null || echo "")
   b="${GAME_S3_BUCKET:-}"
   if [[ -n $b ]]; then
-    out=$(aws s3 ls "s3://$b/steam/" --recursive --summarize 2>/dev/null | tail -2) || true
+    # The games only: steam/ also holds the 22 KB Steam login, which made an
+    # archive with no games in it read as "0.0 GB" of saved games.
+    out=$(aws s3 ls "s3://$b/steam/steamapps/" --recursive --summarize 2>/dev/null | tail -2) || true
     n=$(awk '/Total Objects:/{print $3}' <<<"$out"); sz=$(awk '/Total Size:/{print $3}' <<<"$out")
   fi
   # The env prefix belongs on the process that READS it: in `A | B`, an
@@ -573,6 +575,21 @@ snap = num(g("CJ_SNAP")) or 0.0
 standby = (archive_usd
            + vol * float(g("CG_EBS_USD_GB_MONTH") or 0)
            + snap * float(g("CG_SNAPSHOT_USD_GB_MONTH") or 0))
+# Storage as the BILL sees it, beside storage as cg sees it. cg only knows the
+# bucket in .env; a region move left 160 GB of games in another one, billing
+# Rs 385 a month, while this said the archive was empty and standby was Rs 0.
+# The most recent whole day that billed any S3 is the rate: today is partial,
+# and Cost Explorer lags, so the largest of the last three such days.
+import datetime
+today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+days = [d for d in (ce.get("days") or []) if d.get("date", "") < today and (d.get("s3") or 0) > 0]
+recent = [d["s3"] for d in days[-3:]]
+billed = round(max(recent) * 30, 2) if recent else None
+out["storage"] = {
+  "billed_usd_month": billed,
+  "known_usd_month": round(archive_usd, 2),
+  "unknown_usd_month": round(max(0.0, billed - archive_usd), 2) if billed is not None else None,
+}
 out["standby"] = {
   "usd_month": round(standby, 2),
   "usd_day": round(standby / 30.0, 4),

@@ -46,11 +46,13 @@ check    "an unset one falls back"       "$(jq_ GAME_ARCHIVE_EXPIRY_DAYS effecti
 check    "  and is marked unset"         "$(jq_ GAME_ARCHIVE_EXPIRY_DAYS is_set <<<"$j")" "false"
 
 echo "2. secrets are never handed out"
+# The ntfy topic is shown, on purpose: Edit opened on an empty box, asking for
+# a topic nobody could see. The token stays withheld.
 check    "the ntfy topic is set"         "$(jq_ GAME_NTFY_URL is_set <<<"$j")" "true"
-check    "  but its value is withheld"   "$(jq_ GAME_NTFY_URL value <<<"$j")" "null"
-check    "  and it is marked secret"     "$(jq_ GAME_NTFY_URL secret <<<"$j")" "true"
-lacks    "the topic never appears"       "$j" "topic-abc"
-check    "the API token is secret too"   "$(jq_ TAILSCALE_API_KEY secret <<<"$j")" "true"
+contains "  and shown"                   "$(jq_ GAME_NTFY_URL value <<<"$j")" "topic-abc"
+check    "  not marked secret"           "$(jq_ GAME_NTFY_URL secret <<<"$j")" "false"
+check    "the API token is secret"       "$(jq_ TAILSCALE_API_KEY secret <<<"$j")" "true"
+check    "  and its value is withheld"   "$(jq_ TAILSCALE_API_KEY value <<<"$j")" "null"
 
 echo "3. set, with the rules enforced"
 out=$(cg_ config set GAME_DISK_GB 120)
@@ -102,7 +104,11 @@ contains "  and a group"                 "$(cg_ config --json)" '"group"'
 check    "  a card of its own has no group" \
          "$(cg_ config --json | python3 -c 'import json,sys
 print([r["group"] for r in json.load(sys.stdin) if r["key"] == "TAILSCALE_API_KEY"][0])')" "None"
-contains "  secrets as set or not"       "$out" "not set"
+# The table used to stop dead at the first setting with no value and no
+# default - set -e and a false [[ ]] in a substitution - and nothing noticed.
+contains "  every row is there, to the last" "$out" "GAME_BITRATE_KBPS"
+contains "  an unset one with no default is a dash" "$out" "$(printf '%-28s %-12s' GAME_NTFY_URL '–')"
+check    "  secrets as set or not"       "$(grep -o 'TAILSCALE_API_KEY *[a-z ]*set ' <<<"$out" | awk '{print $2}')" "set"
 lacks    "  and never a secret's value"  "$out" "tskey-api-abc123"
 
 echo "6. wired in"

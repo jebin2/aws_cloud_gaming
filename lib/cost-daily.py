@@ -10,9 +10,16 @@
 # mostly empty days, and printing thirty "0.00" rows hides the days that matter.
 import calendar
 import json
+import os
 import sys
 
-INR = 88
+# The rate lib/rates.sh settled on, so this total and every other rupee figure
+# agree. A fixed 88 here put the month at Rs 265 while the rows under it, at
+# today's 94.95, added up to more.
+try:
+    INR = float(os.environ.get("CG_INR_PER_USD") or 88)
+except ValueError:
+    INR = 88.0
 COLS = ["compute", "s3", "disk", "egress", "api", "other"]
 
 

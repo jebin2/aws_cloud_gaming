@@ -132,7 +132,7 @@ function updateHeader() {
   // Explorer call, $0.01. It is never fetched automatically - only this click.
   $('refresh').hidden = (!NEEDS[view] && view !== 'cost') || !!mine.length;
   $('refresh').disabled = busy;                    // only a build or destroy blocks a read
-  $('refresh-cost').hidden = view !== 'cost';
+  $('refresh-cost').hidden = view !== 'cost' || !$('refresh-cost').textContent;
   $('check').disabled = busy || runningHere('check');
   // These change something, so they wait for whatever else is running.
   for (const b of ['b-build', 'b-open', 'b-destroy', 'd-open', 'd-destroy', 'd-build'])
@@ -577,6 +577,8 @@ function paintDash() {
     : b.spent != null ? 'From AWS Budgets - updates a few times a day' : '';
   const call = (s.rates || {}).ce_call_usd;
   $('d-cost-price').textContent = call && isFinite(inr) ? rs(call * inr) : '';
+  // The Cost page's Refresh is the same call, so it carries the same price.
+  $('refresh-cost').textContent = $('d-cost-price').textContent;
 
   // ── your games ──
   const a = s.archive || {};
@@ -692,8 +694,6 @@ function paintSession() {
   }
 }
 
-const INR = n => '₹' + Math.round(n).toLocaleString('en-IN');
-const money = n => (n == null ? '—' : '$' + Number(n).toFixed(2));
 
 function cell(row, text, cls) {
   const td = document.createElement('td');
@@ -720,145 +720,131 @@ function paintSpend(d) {
 function paintCost(d) {
   paintSpend(d);
   const m = d.month || {};
-  // Every rate on this screen comes from cg. The app knows no prices: if a
-  // number is missing here, the fix is a field in `cg cost --json`.
+  // Every rate on this screen comes from cg, and one rupee rate converts all
+  // of it - cg's own, so the rows add up to the total under them.
   const rate = d.rates || {};
   const inr = rate.inr_per_usd || m.inr_per_usd;
+  const r = usd => (usd == null || !isFinite(usd) || !inr ? '—' : rs(usd * inr));
+  const short = dt => dt.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  const day = iso => short(new Date(iso + 'T00:00:00'));
   const now = new Date();
-  const first = new Date(now.getFullYear(), now.getMonth(), 1);
-  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  const fmt = dt => dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  $('c-cycle').textContent = `billing cycle ${fmt(first)} - ${fmt(last)}`;
-  $('c-age').textContent = `fetched ${now.toLocaleTimeString()} - one Cost Explorer call, `
-    + `${money(rate.ce_call_usd)}`;
-  $('c-rate').textContent = `₹${inr} to the dollar`;
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-  $('c-month').textContent = m.total_inr != null ? INR(m.total_inr) : '—';
-  const boxHours = m.hours ? m.hours.on_demand + m.hours.spot : 0;
-  $('c-month-usd').textContent = m.total_usd != null
-    ? `${money(m.total_usd)} · ${boxHours.toFixed(1)} box hours` : '—';
-
-  // The month projected at today's pace, against the budget cg set up. The
-  // budget only emails; saying so is the honest part.
-  const cap = d.resources && d.resources.budget_usd;
+  // ── this month, against the budget you set ──
+  const hours = m.hours ? m.hours.on_demand + m.hours.spot : 0;
   const projected = m.projected_usd ?? null;
-  $('c-cap-wrap').hidden = !cap;
-  $('c-cap-chip').hidden = !cap;
-  if (cap && projected != null) {
-    const pct = Math.min(100, (projected / cap) * 100);
-    $('c-cap-bar').style.width = pct + '%';
-    $('c-cap-bar').className = 'h-full ' + (projected > cap ? 'bg-error' : 'bg-primary');
-    $('c-cap-chip').textContent = projected > cap ? 'over the budget' : 'under the budget';
-    $('c-cap-chip').className = 'pill ' + (projected > cap ? 'pill-bad' : 'pill-ok');
-    $('c-cap-note').textContent =
-      `projected ${INR(projected * inr)} of the ${INR(cap * inr)} budget, which emails you and stops nothing`;
-  } else if (cap) {
-    $('c-cap-note').textContent = `budget ${INR(cap * inr)} a month - nothing fetched to compare it with yet`;
-  } else {
-    $('c-cap-note').textContent = 'no budget set - nothing will warn you';
+  $('c-month').textContent = m.total_usd != null ? r(m.total_usd) : '—';
+  $('c-month-sub').textContent = m.total_usd == null ? 'AWS did not answer.'
+    : `so far · ${hours.toFixed(1)} h played`
+      + (projected != null ? ` · on pace for ${r(projected)} by ${short(monthEnd)}` : '');
+  // Your number, in rupees, as you set it. AWS keeps it in dollars, converted
+  // when it was made; turned back at today's rate it read Rs 5,412 for 5,000.
+  const budget = Number(setting('GAME_BUDGET_INR', NaN));
+  const inAws = (d.resources || {}).budget_usd != null;
+  const showBar = inAws && isFinite(budget) && projected != null && inr;
+  $('c-cap-wrap').hidden = !showBar;
+  $('c-cap-chip').hidden = !showBar;
+  if (showBar) {
+    const over = projected * inr > budget;
+    $('c-cap-bar').style.width = Math.min(100, (projected * inr / budget) * 100) + '%';
+    $('c-cap-bar').className = 'h-full ' + (over ? 'bg-error' : 'bg-primary');
+    $('c-cap-chip').textContent = over ? 'over the budget' : 'under the budget';
+    $('c-cap-chip').className = 'pill ' + (over ? 'pill-bad' : 'pill-ok');
   }
+  $('c-cap-note').textContent = !inAws
+    ? 'No spending alert exists in AWS - nothing will email you.'
+    : isFinite(budget) ? `Budget ${rs(budget)} a month - it emails you, it stops nothing.` : '';
+  $('c-cap-note').className = 'font-code-sm text-code-sm mt-space-sm ' + (inAws ? 'text-outline' : 'text-error');
 
-  $('c-credits').textContent = money(d.credits_usd);
-  $('c-credits-note').textContent = d.credits_usd != null && projected
-    ? `about ${(d.credits_usd / projected).toFixed(1)} months at this month's pace`
-    : '';
+  // ── credits ──
+  const credits = d.credits_usd;
+  $('c-credits').textContent = credits != null ? `${r(credits)} left` : '—';
+  $('c-credits-note').textContent = credits == null ? 'AWS did not say.'
+    : 'Spent before your card is charged'
+      + (projected ? ` · about ${Math.round(credits / projected)} months at this pace.` : '.');
 
-  const today = (m.days || []).at(-1);
-  $('c-today').textContent = today ? INR(today.total * inr) : '—';
-  $('c-today-note').textContent = today ? `${today.date} · ${money(today.total)}` : 'nothing billed yet';
-  $('c-today-chip').hidden = !today;
-  if (today) {
-    $('c-today-chip').textContent = `${(today.hours || 0).toFixed(1)}h box`;
-    $('c-today-chip').className = 'pill ' + (today.hours ? 'pill-ok' : '');
-  }
-  const standby = d.standby || {};
-  $('c-today-base').textContent = standby.usd_day
-    ? `baseline ${INR(standby.usd_day * inr)} a day with no box at all` : '';
-
+  // ── day by day: what you played, the machine, storage, and the rest ──
+  const asked = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  $('c-days-note').textContent = 'Days with nothing billed are left out. AWS\'s bill runs about a day behind. '
+    + `Asked at ${asked}` + (inr ? ` · ₹${inr} to the dollar` : '')
+    + (rate.ce_call_usd ? ` · each Refresh costs ${r(rate.ce_call_usd)}.` : '.');
+  const parts = x => ({ machine: x.compute || 0, storage: (x.s3 || 0) + (x.disk || 0),
+                        other: (x.egress || 0) + (x.api || 0) + (x.other || 0) });
+  const money0 = v => (v ? r(v) : '–');
   const rows = $('c-rows');
   rows.textContent = '';
+  const sum = { machine: 0, storage: 0, other: 0 };
   for (const dayRow of m.days || []) {
+    const p = parts(dayRow);
+    for (const k in sum) sum[k] += p[k];
     const tr = document.createElement('tr');
     tr.className = 'border-b border-surface-variant/40';
-    cell(tr, dayRow.date, 'pr-space-md text-on-surface-variant');
-    for (const k of ['hours', 'compute', 's3', 'disk', 'egress', 'api', 'other']) {
-      const v = dayRow[k];
-      cell(tr, !v ? '–' : (k === 'hours' ? v.toFixed(1) : v.toFixed(2)), 'text-right');
-    }
-    cell(tr, money(dayRow.total), 'text-right px-space-md text-outline');
-    cell(tr, INR(dayRow.total * inr), 'text-right pl-space-md text-primary');
+    cell(tr, day(dayRow.date), 'pr-space-md text-on-surface-variant whitespace-nowrap');
+    cell(tr, dayRow.hours ? `${dayRow.hours.toFixed(1)} h` : '–', 'text-right');
+    for (const k of ['machine', 'storage', 'other']) cell(tr, money0(p[k]), 'text-right');
+    cell(tr, r(dayRow.total), 'text-right pl-space-md text-primary');
     rows.append(tr);
   }
   const foot = $('c-foot');
   foot.textContent = '';
   if (m.total_usd != null) {
     const tr = document.createElement('tr');
-    cell(tr, `MONTH TO DATE (${(m.days || []).length}d)`, 'pr-space-md whitespace-nowrap');
-    cell(tr, boxHours ? boxHours.toFixed(1) : '–', 'text-right');
-    for (let i = 0; i < 6; i++) cell(tr, '', '');
-    cell(tr, money(m.total_usd), 'text-right px-space-md text-outline');
-    cell(tr, INR(m.total_inr), 'text-right pl-space-md text-primary font-medium');
+    cell(tr, 'Month so far', 'pr-space-md whitespace-nowrap');
+    cell(tr, hours ? `${hours.toFixed(1)} h` : '–', 'text-right');
+    for (const k of ['machine', 'storage', 'other']) cell(tr, money0(sum[k]), 'text-right');
+    cell(tr, r(m.total_usd), 'text-right pl-space-md text-primary font-medium');
     foot.append(tr);
   }
 
-  // What bills when nothing is running: the archive, and whatever cg left behind.
+  // ── what bills with no machine: what cg knows, and what the bill says ──
+  const standby = d.standby || {};
+  const res = d.resources || {};
   const arch = d.archive || {};
-  $('c-arch-card').hidden = !arch.bucket;
-  if (arch.bucket) {
-    $('c-arch-size').textContent = arch.bytes ? GB(arch.bytes) : 'empty';
-    $('c-arch-rate').textContent = standby.archive_usd_month
-      ? `${INR((standby.archive_usd_month / 30) * inr)} / day` : 'nothing yet';
-    $('c-arch-note').textContent = arch.usd_month
-      ? `S3 standard at ${money(rate.s3_gb_month)} per GB-month · ${money(arch.usd_month)} a month`
-      : 'nothing archived yet';
-    $('c-arch-decision').textContent = arch.decision || '';
-  }
-
+  const unknown = (d.storage || {}).unknown_usd_month || 0;
+  // Under Rs 10 a month is requests and rounding, not something left behind.
+  const strayed = inr && unknown * inr >= 10;
+  $('c-standby').textContent = standby.usd_month != null
+    ? `${r(standby.usd_month + (strayed ? unknown : 0))} a month` : '—';
+  $('c-standby-sub').textContent = res.instance
+    ? 'A machine is running now - its hourly rate is on top of this.'
+    : 'What AWS bills while nothing is running.';
   const bills = $('c-bills');
   bills.textContent = '';
-  const line = (label, value, tone) => {
+  const line = (label, value) => {
     const div = document.createElement('div');
-    div.className = 'row border-b border-surface-variant/40';
-    const l = document.createElement('span'); l.className = 'font-code-sm text-code-sm text-outline'; l.textContent = label;
-    const v = document.createElement('span'); v.className = 'font-code-sm text-code-sm ' + (tone || ''); v.textContent = value;
-    div.append(l, v); bills.append(div);
+    div.className = 'row border-b border-surface-variant/40 last:border-b-0';
+    const a = document.createElement('span'); a.className = 'font-code-sm text-code-sm text-outline'; a.textContent = label;
+    const b = document.createElement('span'); b.className = 'font-code-sm text-code-sm'; b.textContent = value;
+    div.append(a, b); bills.append(div);
   };
-  const r = d.resources || {};
-  if (r.instance) line('box', `${r.instance.id} · ${r.instance.state} · billing by the hour`, 'text-tertiary');
-  if (r.volumes_gb) line('volumes', `${r.volumes_gb} GB · ${INR(standby.volumes_usd_month * inr)} / mo`, 'text-tertiary');
-  if (r.snapshots_gb) line('snapshots', `${r.snapshots_gb} GB · ${INR(standby.snapshots_usd_month * inr)} / mo`, 'text-tertiary');
-  if (r.images) line('saved images', String(r.images), 'text-tertiary');
-  line('elastic IPs', 'none held - cg releases them with the box', 'text-primary');
-  line('watchdog lambda + logs', 'inside the free tier', 'text-primary');
+  line('Saved games', arch.bytes
+    ? `${GB(arch.bytes)} · ${r(standby.archive_usd_month)} a month` : 'none · ₹0');
+  line('Leftover disks', res.volumes_gb
+    ? `${res.volumes_gb} GB · ${r(standby.volumes_usd_month)} a month` : 'none');
+  if (res.snapshots_gb) line('Disk copies', `${res.snapshots_gb} GB · ${r(standby.snapshots_usd_month)} a month`);
+  $('c-unknown').hidden = !strayed;
+  $('c-unknown').textContent = strayed
+    ? `AWS bills ${r(unknown)} a month more storage than your saved games explain. `
+      + 'It is somewhere cg is not looking - most likely games left behind in an earlier region.'
+    : '';
 
-  $('c-standby').hidden = !!r.instance;
-  $('c-standby').textContent = 'standby';
-  $('c-standby-note').textContent = r.instance
-    ? 'a box is up, so the hourly rate above is on top of all this'
-    : `standby burn ${INR(standby.usd_month * inr)} a month (${money(standby.usd_month)}) with no box at all`;
-
+  // ── free streaming ──
   const e = m.egress || {};
   // Bitrate decides how fast the free 100 GB goes; it is a setting, not a guess.
   const kbps = Number(setting('GAME_BITRATE_KBPS', 20000));
   const gbPerHour = (kbps * 3600) / 8 / 1e6;
-  $('c-egress-burn').textContent = `${gbPerHour.toFixed(1)} GB an hour at ${(kbps / 1000).toFixed(0)} Mbps`;
-  $('c-egress-rate').textContent = `${money(rate.egress_gb)} / GB`;
-  // The one price written into the markup is what pressing Refresh costs, so a
-  // first-time reader is warned before the first call. Once cg has answered, it
-  // is cg's number like everything else.
-  if (rate.ce_call_usd) $('refresh-cost').textContent = money(rate.ce_call_usd);
   if (e.gb_used != null) {
-    $('c-egress').textContent = `${e.gb_used} / ${e.gb_free} GB`;
+    $('c-egress').textContent = `${e.gb_used.toFixed(1)} of ${e.gb_free} GB used this month`;
     const pct = Math.min(100, (e.gb_used / e.gb_free) * 100);
     $('c-egress-pct').hidden = false;
     $('c-egress-pct').textContent = `${pct.toFixed(0)}% used`;
     $('c-egress-pct').className = 'pill ' + (pct > 80 ? 'pill-bad' : 'pill-ok');
     $('c-egress-bar').style.width = pct + '%';
     $('c-egress-bar').className = 'h-full ' + (pct > 80 ? 'bg-tertiary' : 'bg-primary');
+    const after = `${r(rate.egress_gb)} a GB - about ${r(gbPerHour * rate.egress_gb)} an hour at your quality`;
     $('c-egress-note').textContent = e.gb_left > 0
-      ? `about ${(e.gb_left / gbPerHour).toFixed(1)} hours of streaming left before egress costs anything`
-      : `the free allowance is used - streaming now costs about `
-        + `${INR(gbPerHour * rate.egress_gb * inr)} an hour`;
+      ? `About ${Math.floor(e.gb_left / gbPerHour)} h of play left free, then ${after}.`
+      : `The free 100 GB is used - streaming now costs ${after}.`;
   }
 }
 function paintLibrary(d) {
@@ -1123,96 +1109,99 @@ async function forgetLogin(l) {
 
 function paintArchiveCard() { paintDash(); }
 
-// Layer 1 is not armed or unarmed - `cg open` either runs or it does not - so
-// it is not counted. Counting it as unarmed read as a missing guard.
-const guardCount = guards => [
-  guards.filter(g => g.armed === true).length,
-  guards.filter(g => g.armed !== null && g.armed !== undefined).length,
-];
-
 function paintGuardStrip() { paintDash(); }
+
+// The three nets in plain words. The minutes are cg's, read from the settings
+// the watchdogs run with; the wording around them is the page's.
+const NET_NAME = { 1: 'When you quit', 2: 'On the machine', 3: 'In AWS' };
+function netWords(g, d) {
+  if (g.layer === 1) return ['Closing Moonlight ends the session.', 'Needs your laptop.'];
+  if (g.layer === 2) {
+    const sd = d.shutdown_action || {};
+    const end = sd.expected
+      ? ` When it shuts down, the machine is ${sd.value === 'terminate' ? 'deleted' : 'stopped'}.` : '';
+    return [`${g.idle_min || 15} min with nobody connected, and it shuts itself down.${end}`,
+            'Needs the machine running - it lives on it.'];
+  }
+  return [`Every 5 min: ${g.idle_min || 30} min with no stream, or a shutdown stuck for `
+          + `${g.stuck_min || 60} min, and AWS ends the machine.`,
+          'Works with your laptop and the machine both gone.'];
+}
+function netState(g) {
+  if (g.layer === 1) return ['Always on', 'pill-ok'];
+  if (g.armed === true) return ['On', 'pill-ok'];
+  if (g.armed === false) return ['Off', 'pill-bad'];
+  // Layer 2 with no machine to live on is waiting, not failing.
+  return [g.state === 'no box' ? 'Waits for a machine' : "Can't reach the machine", ''];
+}
 
 function paintGuards(d) {
   watcher = d;
   paintGuardStrip();
-  const wrap = $('guard-cards');
-  wrap.textContent = '';
-  for (const g of d.guards || []) {
-    const card = document.createElement('div');
-    card.className = 'p-space-lg rounded-lg bg-surface-container-low';
-    // A guard that lives on the box is not "not armed" when there is no box.
-    const tone = g.armed === true ? 'pill-ok' : g.armed === false ? 'pill-bad' : '';
-    const state = (g.state || (g.armed ? 'armed' : 'unknown')).toUpperCase();
-    card.innerHTML = `
-      <div class="flex items-start justify-between gap-space-md">
-        <div>
-          <div class="flex items-center gap-space-sm">
-            <span class="material-symbols-outlined text-[18px] text-outline" data-icon="shield">&#xe9e0;</span>
-            <span class="font-headline-md text-headline-md"></span>
-            <span class="pill">tier ${g.layer}</span>
-          </div>
-          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs"></p>
-        </div>
-        <div class="flex items-center gap-space-sm shrink-0">
-          <span class="font-code-sm text-code-sm text-outline reaction-top"></span>
-          <span class="pill ${tone}">${state}</span>
-        </div>
+  const guards = d.guards || [];
+  const by = n => guards.find(g => g.layer === n) || {};
+  const running = d.instance_state === 'running';
+  const gone = ['none', 'terminated', '', undefined, null].includes(d.instance_state);
+  const on = guards.filter(g => g.layer === 1 || g.armed === true).length;
+
+  $('g-head').textContent = running
+    ? `Machine running · ${on === guards.length ? `all ${on}` : `${on} of ${guards.length}`} safety nets on`
+    : gone ? 'No machine is running · nothing to stop' : `Machine ${d.instance_state}`;
+  const cloud = by(3);
+  $('g-sub').textContent = cloud.last_decision
+    ? `AWS last checked ${ago(cloud.last_decision_age_s)}: "${cloud.last_decision}"`
+    : cloud.armed ? 'AWS checks every 5 minutes; nothing recorded in the last hour.' : '';
+
+  // What is wrong, in red, on top - not three cards down.
+  const warn = [];
+  if (cloud.armed === false) warn.push(`The AWS check is ${cloud.state || 'off'} - a machine left running is stopped only by itself.`);
+  if (running && by(2).armed === false) warn.push("The machine's own check is off - only AWS will stop it.");
+  const sd = d.shutdown_action || {};
+  if (sd.expected && !sd.ok) warn.push(`When it shuts down AWS will ${sd.value || 'do nothing'} it - it must ${sd.expected} it.`);
+  if ((d.budget || {}).usd == null) warn.push('No spending alert exists in AWS - nothing will email you.');
+  $('g-warn').textContent = '';
+  for (const w of warn) {
+    const el = document.createElement('span');
+    el.textContent = w;
+    $('g-warn').append(el);
+  }
+  $('g-warn').hidden = !warn.length;
+
+  const nets = $('g-nets');
+  nets.textContent = '';
+  for (const g of guards) {
+    const [what, needs] = netWords(g, d);
+    const [state, tone] = netState(g);
+    const row = document.createElement('div');
+    row.className = 'flex items-start gap-space-md py-space-sm border-b border-surface-variant/40 last:border-b-0';
+    row.innerHTML = `
+      <span class="font-code-md text-code-md text-outline w-4 shrink-0"></span>
+      <span class="font-code-md text-code-md w-40 shrink-0"></span>
+      <div class="flex-1 min-w-0">
+        <p class="font-code-sm text-code-sm"></p>
+        <p class="font-code-sm text-code-sm text-outline mt-0.5"></p>
       </div>
-      <dl class="grid grid-cols-1 md:grid-cols-3 gap-space-sm mt-space-md">
-        <div class="p-space-md rounded bg-surface-container">
-          <dt class="font-label-caps text-label-caps uppercase tracking-wider text-outline">catches</dt>
-          <dd class="font-code-sm text-code-sm mt-0.5 catches"></dd></div>
-        <div class="p-space-md rounded bg-surface-container">
-          <dt class="font-label-caps text-label-caps uppercase tracking-wider text-outline">reacts</dt>
-          <dd class="font-code-sm text-code-sm mt-0.5 reaction"></dd></div>
-        <div class="p-space-md rounded bg-surface-container">
-          <dt class="font-label-caps text-label-caps uppercase tracking-wider text-outline">dies with</dt>
-          <dd class="font-code-sm text-code-sm mt-0.5 dies"></dd></div>
-      </dl>
-      <p class="font-code-sm text-code-sm text-outline mt-space-md last"></p>`;
-    card.querySelector('.font-headline-md').textContent = g.name;
-    card.querySelector('p.font-code-sm').textContent = g.note || '';
-    card.querySelector('.catches').textContent = g.catches;
-    card.querySelector('.reaction').textContent = g.reaction;
-    card.querySelector('.reaction-top').textContent = g.reaction || '';
-    card.querySelector('.dies').textContent = g.dies_with;
-    card.querySelector('.last').textContent = g.last_decision
-      ? `last audit ${ago(g.last_decision_age_s)}: ${g.last_decision}` : '';
-    wrap.append(card);
+      <span class="pill shrink-0 ${tone}"></span>`;
+    const [n, name, , pill] = row.children;
+    n.textContent = g.layer;
+    name.textContent = NET_NAME[g.layer] || g.name;
+    row.querySelector('p').textContent = what;
+    row.querySelectorAll('p')[1].textContent = needs;
+    pill.textContent = state;
+    nets.append(row);
   }
 
-  const [armed, armable] = guardCount(d.guards || []);
-  $('g-armed').textContent = `${armed} of ${armable} armed`;
-  $('g-armed').className = 'pill ' + (armed === armable ? 'pill-ok' : 'pill-bad');
-  $('g-policy').textContent = d.instance_state === 'running'
-    ? 'a box is running - these are what end it'
-    : 'no box is running - there is nothing for them to stop';
-
-  const b = d.budget || {};
-  $('g-budget').textContent = b.usd != null ? `$${b.usd} a month` : 'missing';
-  $('g-budget-chip').hidden = false;
-  $('g-budget-chip').textContent = b.usd != null ? 'set' : 'none';
-  $('g-budget-chip').className = 'pill ' + (b.usd != null ? 'pill-ok' : 'pill-bad');
-  $('g-budget-note').textContent = b.usd == null
-    ? 'no budget exists - nothing will warn you'
-    : `${b.alerts} alert address${b.alerts === 1 ? '' : 'es'}. It emails you; it does not stop anything.`;
-  const sd = d.shutdown_action || {};
-  $('g-shutdown').textContent = sd.value || (d.instance_state === 'none' ? 'no box' : 'unknown');
-  $('g-shutdown-note').textContent = sd.expected
-    ? (sd.ok ? `correct for this box (${sd.expected})` : `WRONG - must be ${sd.expected}`)
-    : 'decided at launch; a spot box must terminate';
-
-  // The knobs behind the guards, read from the settings registry and edited
+  // The settings behind them, read from the settings registry and edited
   // through cg like every other setting.
   const knobs = $('g-knobs');
   knobs.textContent = '';
-  const WANT = ['GAME_WATCHDOG_IDLE_MIN', 'GAME_WATCHDOG_STUCK_MIN', 'GAME_ARCHIVE_EXPIRY_DAYS',
-                'GAME_BUDGET_INR', 'GAME_NTFY_URL', 'EMAIL_ALERTS'];
+  const WANT = ['GAME_BUDGET_INR', 'EMAIL_ALERTS', 'GAME_WATCHDOG_IDLE_MIN',
+                'GAME_WATCHDOG_STUCK_MIN', 'GAME_NTFY_URL'];
   for (const key of WANT) {
     const r = config.find(x => x.key === key);
     if (!r) continue;
     const row = document.createElement('div');
-    row.className = 'row border-b border-surface-variant/40 items-start';
+    row.className = 'row border-b border-surface-variant/40 last:border-b-0 items-start';
     const left = document.createElement('div');
     const n = document.createElement('p');
     n.className = 'font-code-md text-code-md';
@@ -1225,7 +1214,12 @@ function paintGuards(d) {
     right.className = 'flex items-center gap-space-sm shrink-0';
     const val = document.createElement('span');
     val.className = 'font-code-md text-code-md text-on-surface-variant';
-    val.textContent = settingValue(r);
+    const v = r.value != null ? r.value : r.default;
+    val.textContent = key === 'GAME_BUDGET_INR' && v != null ? `${rs(Number(v))} a month`
+      : /_MIN$/.test(key) && v != null ? `${v} min${r.value == null ? ' (default)' : ''}`
+      // No topic means your phone hears nothing, which is "off", not "not set".
+      : key === 'GAME_NTFY_URL' && !r.is_set ? 'off'
+      : settingValue(r);
     const edit = document.createElement('button');
     edit.className = 'btn';
     edit.textContent = r.secret && r.is_set ? 'Replace' : 'Edit';
@@ -1234,35 +1228,6 @@ function paintGuards(d) {
     row.append(left, right);
     knobs.append(row);
   }
-
-  // Its last decision, in its own words, with the archive line beside it.
-  const log = $('g-log');
-  log.textContent = '';
-  const lines = [];
-  for (const g of d.guards || []) {
-    if (g.last_decision) lines.push([`${g.name} · ${ago(g.last_decision_age_s)}`, g.last_decision]);
-  }
-  if (d.archive) lines.push(['archive', d.archive]);
-  if (!lines.length) {
-    const el = document.createElement('span');
-    el.className = 'text-outline';
-    el.textContent = 'nothing recorded yet - the cloud watchdog writes a line every hour';
-    log.append(el);
-  }
-  for (const [who, what] of lines) {
-    const row = document.createElement('div');
-    row.className = 'flex gap-space-sm';
-    const a = document.createElement('span');
-    a.className = 'text-outline shrink-0';
-    a.textContent = who;
-    const b2 = document.createElement('span');
-    b2.className = 'text-on-surface-variant';
-    b2.textContent = what;
-    row.append(a, b2);
-    log.append(row);
-  }
-
-  if (d.archive) $('age-watcher').textContent = new Date().toLocaleTimeString();
 }
 
 // --- Settings ----------------------------------------------------------------
@@ -2282,6 +2247,7 @@ function paintConfig(rows) {
   config = rows;
   paintKeys();
   paintBuildLogin();
+  if (watcher) paintGuards(watcher);
   const wrap = $('s-groups');
   wrap.textContent = '';
   const set = rows.filter(r => r.is_set).length;
@@ -2409,6 +2375,9 @@ function settingRow(r) {
 
 function editSetting(r, row) {
   const right = row.lastElementChild;
+  // Kept, so Cancel can put the row back as it was: nothing changed, so
+  // nothing needs reading again.
+  const was = [...right.childNodes];
   right.textContent = '';
   row.classList.add('editing');
   let input;
@@ -2436,7 +2405,13 @@ function editSetting(r, row) {
   save.className = 'btn btn-primary'; save.textContent = 'Save';
   const cancel = document.createElement('button');
   cancel.className = 'btn'; cancel.textContent = 'Cancel';
-  cancel.onclick = () => refresh();
+  cancel.onclick = () => {
+    right.replaceChildren(...was);
+    row.classList.remove('editing');
+    const reply = row.querySelector('.edit-reply');
+    if (reply) reply.remove();
+  };
+  input.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); cancel.click(); } });
   save.onclick = async () => {
     const value = input.value.trim();
     if (r.secret && !value && r.is_set && !(await askConfirm({
@@ -2445,13 +2420,28 @@ function editSetting(r, row) {
           yes: 'Clear', danger: true,
         }))) return;
     save.disabled = true;
-    await runCg(['config', 'set', r.key, value], { collect: 's-check' });
-    $('s-check').hidden = false;
+    // cg's answer goes where the row is: Settings has its panel for it, and
+    // anywhere else it goes under the row - a refusal sent to another page
+    // read as a save that did nothing.
+    const here = view === 'settings';
+    let reply = here ? null : row.querySelector('.edit-reply');
+    if (!here && !reply) {
+      reply = document.createElement('pre');
+      reply.id = 'edit-reply';
+      reply.className = 'edit-reply font-code-sm text-code-sm whitespace-pre-wrap text-error mt-space-xs';
+      row.firstElementChild.append(reply);
+    }
+    if (reply) reply.textContent = '';
+    const { rc } = await runCg(['config', 'set', r.key, value],
+                               { collect: here ? 's-check' : 'edit-reply', wantRc: true });
+    if (here) $('s-check').hidden = false;
+    if (rc !== 0 && !here) { save.disabled = false; input.focus(); return; }
     // refresh() re-reads config, machines AND regions for this screen, so a new
     // region repaints the Build picker too - different regions rent different
     // machines, and the type in force may not exist in the one just chosen.
     await refresh();
   };
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save.click(); } });
   right.append(input, save, cancel);
   input.focus();
 }
@@ -3733,7 +3723,9 @@ const NEEDS = {
   build:     [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status'],
               [['machines', '--json'], 'machines'], [['sweep', '--cached', '--json'], 'sweep']],
   library:   [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status']],
-  guards:    [[['watcher', '--json'], 'guards']],
+  // config too: the settings card is edited here, and a save has to come back
+  // as the new value - the watcher alone left the old one showing.
+  guards:    [[['watcher', '--json'], 'guards'], [['config', '--json'], 'config']],
   // creds and config too: the page shows the two keys, and neither is in
   // `cg deps` - they belong to AWS and to .env.
   deps:      [[['deps', '--json'], 'deps'], [['creds', '--json'], 'creds'],

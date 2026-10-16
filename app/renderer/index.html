@@ -67,7 +67,7 @@
       </div>
     </div>
     <div class="flex items-center gap-space-sm">
-      <button id="refresh" class="btn"><span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span>Refresh<em id="refresh-cost" class="not-italic text-tertiary" hidden>$0.01</em></button>
+      <button id="refresh" class="btn"><span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span>Refresh<em id="refresh-cost" class="not-italic text-tertiary" hidden></em></button>
       <button id="goto" class="btn" hidden><span class="material-symbols-outlined text-[16px]" data-icon="bolt">&#xea0b;</span><span id="goto-label">running</span></button>
       <button id="cancel" class="btn btn-danger" hidden><span class="material-symbols-outlined text-[16px]" data-icon="error">&#xf8b6;</span><span id="cancel-label">Stop</span></button>
     </div>
@@ -385,173 +385,104 @@
 
   <!-- Guards -->
   <section data-view="guards" hidden>
-    <div class="flex flex-wrap items-center gap-space-sm mb-space-lg font-code-sm text-code-sm">
-      <span class="pill" id="g-armed">—</span>
-      <span class="text-outline" id="g-policy">a box that nobody stops bills until someone does</span>
-      <span class="text-outline ml-auto" id="age-watcher"></span>
-    </div>
-
-    <div class="flex items-center justify-between pb-space-md">
-      <div>
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Layered shutdown guards</span>
-        <p class="font-code-sm text-code-sm text-outline mt-0.5">
-          Numbered by independence: each one catches what the one before it cannot.
-        </p>
-      </div>
-    </div>
-    <div class="flex flex-col gap-gutter-desktop" id="guard-cards"></div>
-
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mt-space-xl">
-      <!-- the money limit, which is not a guard: it only writes to you -->
-      <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
-        <div class="flex items-center justify-between pb-space-md">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Budget</span>
-          <span class="pill" id="g-budget-chip" hidden>—</span>
-        </div>
-        <p class="font-headline-md text-headline-md" id="g-budget">—</p>
-        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="g-budget-note">
-          It emails you. It does not stop anything.
-        </p>
-        <div class="mt-space-md pt-space-md border-t border-surface-variant">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Shutdown action</span>
-          <p class="font-code-md text-code-md mt-space-xs" id="g-shutdown">—</p>
-          <p class="font-code-sm text-code-sm text-on-surface-variant mt-0.5" id="g-shutdown-note">
-            decided at launch; a spot box must terminate
-          </p>
-        </div>
-      </div>
-
-      <!-- the settings that decide what the guards do, edited through cg -->
+    <!-- Three cards: whether anything is running and what will stop it, the
+         three safety nets in the order they act, and the settings behind them.
+         Every name, minute and state here is cg's; the markup only has places. -->
+    <div class="fit-view flex flex-col gap-space-md">
       <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <div class="flex items-center justify-between pb-space-md">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">What the guards are set to</span>
-          <button class="btn" id="g-settings">
-            <span class="material-symbols-outlined text-[16px]" data-icon="settings">&#xe8b8;</span>Settings
-          </button>
-        </div>
-        <div class="flex flex-col" id="g-knobs"></div>
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">What stops the machine</span>
+        <p class="font-headline-md text-headline-md mt-space-sm" id="g-head">&mdash;</p>
+        <p class="font-code-sm text-code-sm text-on-surface-variant mt-0.5" id="g-sub"></p>
+        <div class="flex flex-col gap-0.5 mt-space-sm font-code-sm text-code-sm text-error" id="g-warn" hidden></div>
       </div>
-    </div>
 
-    <div class="p-space-lg rounded-lg bg-surface-container-low mt-gutter-desktop">
-      <div class="flex items-center justify-between pb-space-md">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">The watchdog's own words</span>
-        <span class="font-code-sm text-code-sm text-outline">from its log, hourly</span>
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Three safety nets</span>
+        <p class="font-code-sm text-code-sm text-outline mt-0.5">In the order they act. Each one still works when the one before it cannot.</p>
+        <div class="flex flex-col mt-space-sm" id="g-nets"></div>
       </div>
-      <div class="flex flex-col gap-space-xs font-code-sm text-code-sm" id="g-log">
-        <span class="text-outline">nothing recorded yet</span>
+
+      <div class="p-space-lg rounded-lg bg-surface-container-low">
+        <div class="flex items-center justify-between">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Settings</span>
+          <button class="btn" id="g-settings">All settings</button>
+        </div>
+        <div class="flex flex-col mt-space-sm" id="g-knobs"></div>
       </div>
     </div>
   </section>
 
   <!-- Cost -->
   <section data-view="cost" hidden>
-    <div class="flex flex-wrap items-center gap-space-sm mb-space-lg font-code-sm text-code-sm">
-      <span class="pill" id="c-cycle">billing cycle —</span>
-      <span class="text-outline" id="c-age">nothing fetched yet</span>
-      <span class="text-outline ml-auto" id="c-rate">—</span>
-    </div>
-
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter-desktop mb-space-xl">
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <div class="flex items-center justify-between">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">This month</span>
-          <span class="pill" id="c-cap-chip" hidden>—</span>
-        </div>
-        <p class="font-headline-xl text-headline-xl mt-space-sm" id="c-month">—</p>
-        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="c-month-usd">press Fetch</p>
-        <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden" id="c-cap-wrap" hidden>
-          <div class="h-full bg-primary" id="c-cap-bar" style="width:0%"></div>
-        </div>
-        <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="c-cap-note"></p>
-      </div>
-
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Credits left</span>
-        <p class="font-headline-xl text-headline-xl mt-space-sm text-secondary" id="c-credits">—</p>
-        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs">AWS credits, spent before your card</p>
-        <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="c-credits-note"></p>
-      </div>
-
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <div class="flex items-center justify-between">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Latest day</span>
-          <span class="pill" id="c-today-chip" hidden>—</span>
-        </div>
-        <p class="font-headline-xl text-headline-xl mt-space-sm" id="c-today">—</p>
-        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="c-today-note">—</p>
-        <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="c-today-base"></p>
-      </div>
-    </div>
-
-    <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop">
-      <div class="pb-space-md">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Daily usage</span>
-        <p class="font-code-sm text-code-sm text-outline mt-0.5">
-          Days with nothing billed are left out. Cost Explorer lags about a day, and each Refresh
-          here is one call - $0.01 - so this screen never fetches on its own.
-        </p>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="w-full font-code-sm text-code-sm" id="c-table">
-          <thead class="text-outline">
-            <tr class="text-left border-b border-surface-variant">
-              <th class="py-space-xs pr-space-md font-normal">DATE</th>
-              <th class="py-space-xs px-space-md font-normal text-right">HOURS</th>
-              <th class="py-space-xs px-space-md font-normal text-right">COMPUTE</th>
-              <th class="py-space-xs px-space-md font-normal text-right">S3</th>
-              <th class="py-space-xs px-space-md font-normal text-right">DISK</th>
-              <th class="py-space-xs px-space-md font-normal text-right">EGRESS</th>
-              <th class="py-space-xs px-space-md font-normal text-right">API</th>
-              <th class="py-space-xs px-space-md font-normal text-right">OTHER</th>
-              <th class="py-space-xs px-space-md font-normal text-right">TOTAL ($)</th>
-              <th class="py-space-xs pl-space-md font-normal text-right">TOTAL (₹)</th>
-            </tr>
-          </thead>
-          <tbody id="c-rows"><tr><td class="py-space-sm text-outline" colspan="10">Nothing fetched yet - this is the only command here that bills.</td></tr></tbody>
-          <tfoot id="c-foot" class="border-t border-surface-variant"></tfoot>
-        </table>
-      </div>
-    </div>
-
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop">
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <div class="flex items-center justify-between pb-space-md">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">What still bills with no box</span>
-          <span class="pill" id="c-standby" hidden>—</span>
-        </div>
-        <div class="p-space-md rounded bg-surface-container" id="c-arch-card" hidden>
-          <div class="flex items-start justify-between gap-space-md">
-            <div>
-              <span class="font-code text-code">Game archive</span>
-              <span class="pill ml-space-xs" id="c-arch-size">—</span>
-              <p class="font-code-sm text-code-sm text-outline mt-space-xs" id="c-arch-note">—</p>
-            </div>
-            <span class="font-code-sm text-code-sm text-tertiary whitespace-nowrap" id="c-arch-rate">—</span>
+    <!-- In rupees, in the words the rest of the app uses. Every figure is from
+         the one paid call, `cg cost --json`, made only when Refresh is pressed;
+         every rate is cg's. -->
+    <div class="fit-view flex flex-col gap-space-md">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-space-md">
+        <div class="p-space-lg rounded-lg bg-surface-container-low">
+          <div class="flex items-center justify-between">
+            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">This month</span>
+            <span class="pill" id="c-cap-chip" hidden>&mdash;</span>
           </div>
-          <p class="font-code-sm text-code-sm text-tertiary mt-space-sm" id="c-arch-decision"></p>
+          <p class="font-headline-xl text-headline-xl mt-space-sm" id="c-month">&mdash;</p>
+          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="c-month-sub">Press Refresh to ask AWS.</p>
+          <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden" id="c-cap-wrap" hidden>
+            <div class="h-full bg-primary" id="c-cap-bar" style="width:0%"></div>
+          </div>
+          <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="c-cap-note"></p>
         </div>
-        <div class="mt-space-md flex flex-col gap-space-xs" id="c-bills"></div>
-        <p class="font-code-sm text-code-sm text-outline mt-space-md pt-space-md border-t border-surface-variant" id="c-standby-note">—</p>
+
+        <div class="p-space-lg rounded-lg bg-surface-container-low">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">AWS credits</span>
+          <p class="font-headline-xl text-headline-xl mt-space-sm" id="c-credits">&mdash;</p>
+          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="c-credits-note"></p>
+        </div>
       </div>
 
       <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <div class="flex items-center justify-between">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Streaming allowance</span>
-          <span class="pill" id="c-egress-pct" hidden>—</span>
-        </div>
-        <p class="font-headline-xl text-headline-xl mt-space-sm" id="c-egress">—</p>
-        <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden">
-          <div class="h-full bg-primary" id="c-egress-bar" style="width:0%"></div>
-        </div>
-        <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm" id="c-egress-note">
-          the first 100 GB a month is free
+        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Day by day</span>
+        <p class="font-code-sm text-code-sm text-outline mt-0.5" id="c-days-note">
+          Days with nothing billed are left out. AWS's bill runs about a day behind.
         </p>
-        <div class="mt-space-md pt-space-md border-t border-surface-variant flex flex-col gap-space-xs">
-          <div class="row"><span class="font-code-sm text-code-sm text-outline">after the free 100 GB</span>
-            <span class="font-code-sm text-code-sm" id="c-egress-rate">—</span></div>
-          <div class="row"><span class="font-code-sm text-code-sm text-outline">your bitrate spends</span>
-            <span class="font-code-sm text-code-sm" id="c-egress-burn">—</span></div>
+        <div class="overflow-x-auto mt-space-sm">
+          <table class="w-full font-code-sm text-code-sm" id="c-table">
+            <thead class="text-outline">
+              <tr class="text-left border-b border-surface-variant">
+                <th class="py-space-xs pr-space-md font-normal">DAY</th>
+                <th class="py-space-xs px-space-md font-normal text-right">PLAYED</th>
+                <th class="py-space-xs px-space-md font-normal text-right">MACHINE</th>
+                <th class="py-space-xs px-space-md font-normal text-right">STORAGE</th>
+                <th class="py-space-xs px-space-md font-normal text-right">OTHER</th>
+                <th class="py-space-xs pl-space-md font-normal text-right">TOTAL</th>
+              </tr>
+            </thead>
+            <tbody id="c-rows"><tr><td class="py-space-sm text-outline" colspan="6">Nothing asked yet - this is the one page that costs to read.</td></tr></tbody>
+            <tfoot id="c-foot" class="border-t border-surface-variant"></tfoot>
+          </table>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-space-md">
+        <div class="p-space-lg rounded-lg bg-surface-container-low">
+          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">With no machine running</span>
+          <p class="font-headline-md text-headline-md mt-space-sm" id="c-standby">&mdash;</p>
+          <p class="font-code-sm text-code-sm text-on-surface-variant mt-0.5" id="c-standby-sub"></p>
+          <div class="flex flex-col mt-space-sm" id="c-bills"></div>
+          <p class="font-code-sm text-code-sm text-error mt-space-sm" id="c-unknown" hidden></p>
+        </div>
+
+        <div class="p-space-lg rounded-lg bg-surface-container-low">
+          <div class="flex items-center justify-between">
+            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Free streaming</span>
+            <span class="pill" id="c-egress-pct" hidden>&mdash;</span>
+          </div>
+          <p class="font-headline-md text-headline-md mt-space-sm" id="c-egress">&mdash;</p>
+          <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden">
+            <div class="h-full bg-primary" id="c-egress-bar" style="width:0%"></div>
+          </div>
+          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm" id="c-egress-note">
+            The first 100 GB streamed each month is free.
+          </p>
         </div>
       </div>
     </div>

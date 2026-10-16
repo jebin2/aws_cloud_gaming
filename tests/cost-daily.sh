@@ -138,6 +138,35 @@ check "standby is worked out by cg"    "$(jq2 standby.usd_month)" "8.56"
 check "  and per day"                  "$(jq2 standby.usd_day)" "0.2853"
 check "  split by what holds it"       "$(jq2 standby.volumes_usd_month)" "4.56"
 
+echo "4e. storage as the bill sees it"
+# A region move left the games in a bucket cg no longer looks at. The archive
+# read 0 GB and standby Rs 0 while the bill under it charged S3 every day.
+d() { date -u -d "$1" +%Y-%m-%d; }
+cat > "$T/bin/aws" <<FAKE
+#!/usr/bin/env bash
+case "\$*" in
+  *"ce get-cost-and-usage"*) cat <<'J'
+[{"d":"$(d '-3 day')","g":[{"u":"APS2-TimedStorage-ByteHrs","c":"0.12","q":"5"}]},
+ {"d":"$(d '-2 day')","g":[{"u":"APS2-TimedStorage-ByteHrs","c":"0.13","q":"5"}]},
+ {"d":"$(d '-1 day')","g":[{"u":"APS2-TimedStorage-ByteHrs","c":"0.05","q":"2"}]},
+ {"d":"$(d today)","g":[{"u":"APS2-TimedStorage-ByteHrs","c":"0.01","q":"1"}]}]
+J
+  ;;
+  *"s3 ls"*) printf 'Total Objects: 1\n   Total Size: %s\n' "\${SIZE:-22645}" ;;
+  *) echo None ;;
+esac
+FAKE
+chmod +x "$T/bin/aws"
+cj=$( cd "$T/repo" && env -i CG_INR_PER_USD=94.95 PATH="$T/bin:$PATH" HOME="$T/home" CG_COLOR=never \
+        bash lib/setup cost --json 2>/dev/null )
+check "the bill's storage, a month of the busiest recent whole day" "$(jq2 storage.billed_usd_month)" "3.9"
+check "  what cg's own bucket explains"  "$(jq2 storage.known_usd_month)" "0.0"
+check "  and the rest, said out loud"    "$(jq2 storage.unknown_usd_month)" "3.9"
+check "the month in rupees at the one rate" "$(jq2 month.total_inr)" "$(python3 -c 'print(round(0.31*94.95))')"
+cj=$( cd "$T/repo" && env -i CG_INR_PER_USD=94.95 SIZE=171986001052 PATH="$T/bin:$PATH" HOME="$T/home" \
+        CG_COLOR=never bash lib/setup cost --json 2>/dev/null )
+check "a bucket that explains it leaves nothing over" "$(jq2 storage.unknown_usd_month)" "0.0"
+
 echo "5. wired in"
 check "cg passes the flag through"     "$(grep -c 'lib/setup cost "$@"' cg)" "1"
 check "both daily paths ask Cost Explorer the same way" "$(grep -c 'granularity DAILY' lib/setup)" "2"

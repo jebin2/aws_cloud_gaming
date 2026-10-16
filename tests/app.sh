@@ -458,13 +458,14 @@ check    "no disk size is guessed"        "$(grep -c '|| 209' app/renderer/app.j
 check    "  nor a starting value for one"  "$(grep -c 'selectable_gb: 209' app/renderer/app.js)" "0"
 contains "  it says it does not know"     "$js" "How much a machine holds is not known yet"
 check    "no exchange rate is guessed"    "$(grep -c 'inr_per_usd || 88' app/renderer/app.js)" "0"
-contains "cost shows the billing cycle"   "$html" 'id="c-cycle"'
-contains "  the month projected against the budget" "$js" "m.projected_usd"
-contains "  which only emails"            "$js" "emails you and stops nothing"
-contains "  dollars beside rupees"        "$html" "TOTAL ($)"
-contains "  the archive as its own card"  "$html" 'id="c-arch-card"'
-contains "  with the watchdog's countdown" "$js" "arch.decision"
-contains "  the standby burn"             "$js" "standby burn"
+contains "cost projects the month"       "$js" "m.projected_usd"
+contains "  against the budget you set, in rupees" "$js" "Number(setting('GAME_BUDGET_INR', NaN))"
+contains "  which only emails"            "$js" "it emails you, it stops nothing"
+# Rupees only: the Cost page was the last one showing dollars beside them.
+lacks    "  no dollar column"             "$html" "TOTAL ($)"
+check    "  no dollar helper left"        "$(grep -c 'const money = ' app/renderer/app.js)" "0"
+contains "  what bills with nothing running" "$html" 'id="c-standby"'
+contains "  and what the bill says beyond it" "$js" "(d.storage || {}).unknown_usd_month"
 contains "  and the egress hours from your bitrate" "$js" "setting('GAME_BITRATE_KBPS', 20000)"
 check    "  reading the same registry"    "$(grep -c 'function setting(key, fallback)' app/renderer/app.js)" "1"
 
@@ -497,11 +498,11 @@ echo "5f. the app holds no prices"
 # renderer. Every one of them now arrives from cg.
 check "no price literal in the renderer" \
       "$(grep -vE '^\s*(//|\*)' app/renderer/app.js | grep -cE '[^0-9.](0\.[0-9]{2,})')" "0"
-# Two: the Refresh and Fetch buttons on the Cost screen. The dashboard's exact
-# cost button carries no literal - its price comes from status, in rupees.
-check "  nor in the markup, bar the buttons" "$(grep -cE '\$0\.[0-9]+' app/renderer/index.html)" "2"
+# None, buttons included: Refresh on the Cost page takes the dashboard's
+# price, which comes from status, in rupees.
+check "  nor in the markup"              "$(grep -cE '\$0\.[0-9]+' app/renderer/index.html)" "0"
 contains "  which is what Refresh costs" "$html" 'id="refresh-cost"'
-contains "  and cg overwrites it"        "$js" "money(rate.ce_call_usd)"
+contains "  priced from cg, in rupees"   "$js" "\$('refresh-cost').textContent = \$('d-cost-price').textContent"
 contains "rates come from cg"            "$js" "const rate = d.rates || {}"
 contains "  the standby burn too"        "$js" "const standby = d.standby || {}"
 contains "  and each game's monthly cost" "$js" "r(g.usd_month)"
@@ -532,11 +533,14 @@ contains "activity is this window's own" "$js" "function note(text, tone)"
 # command, and the one it named was wrong - see the duplicate key below.
 contains "  recording what happened"     "$js" 'note(`${cgName(args)} started`'
 # Guards: one card per layer cg reports, never a layer the app invented.
-contains "guards come from the watcher"  "$js" "for (const g of d.guards || [])"
-contains "  tier badges"                 "$js" 'tier ${g.layer}'
-contains "  and the audit line"          "$js" 'last audit ${ago(g.last_decision_age_s)}'
-contains "always-on is not counted as unarmed" "$js" "const guardCount = guards =>"
-contains "the knobs are settings rows"   "$js" "const WANT = ['GAME_WATCHDOG_IDLE_MIN'"
+contains "guards come from the watcher"  "$js" "for (const g of guards) {"
+# The minutes are cg's: the page wrote "30 min" and "1 h" whatever was set.
+contains "  with cg's minutes"           "$js" '${g.idle_min || 30} min with no stream'
+contains "  and the last check, aged"    "$js" 'AWS last checked ${ago(cloud.last_decision_age_s)}'
+# Rupees only: the budget read "$57 a month" from AWS's own figure.
+contains "the budget is in rupees"       "$js" '${rs(Number(v))} a month'
+lacks    "  never dollars"               "$js" '`$${b.usd} a month`'
+contains "the knobs are settings rows"   "$js" "const WANT = ['GAME_BUDGET_INR'"
 contains "  edited through cg"           "$js" "editSetting(r, row)"
 # The Logs screen names the cloud watchdog in a heading, which is a label, not
 # a guard definition; no guard's state, timing or existence is in the markup.

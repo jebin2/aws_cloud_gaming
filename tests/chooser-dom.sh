@@ -254,7 +254,7 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('PAINTED | status/spec | ' + document.getElementById('b-pick').textContent.trim());
   out.push('PAINTED | status/chip | ' + document.getElementById('b-chip').textContent.trim());
   out.push('PAINTED | config | ' + document.getElementById('s-count').textContent.trim());
-  out.push('PAINTED | guards | ' + document.getElementById('guard-cards').children.length);
+  out.push('PAINTED | guards | ' + document.getElementById('g-nets').children.length);
   out.push('PAINTED | library | ' + document.getElementById('b-fit').textContent.trim());
   // The same payload with the box's disk left out, which is what a failed or
   // older read gives. Nothing here may invent a number: the app used to fill in
@@ -351,7 +351,7 @@ contains "and no read failed at all" "$OUT" "FAILURES: "
 contains "the machine is one line"         "$OUT" "PAINTED | status/spec | g4dn.xlarge"
 contains "  and the chip says what Build bills" "$OUT" "PAINTED | status/chip | Billing starts when the machine launches"
 contains "paintConfig counted the settings" "$OUT" "PAINTED | config | 4 of 4 set"
-contains "paintGuards drew a card"          "$OUT" "PAINTED | guards | 1"
+contains "paintGuards drew a net"           "$OUT" "PAINTED | guards | 1"
 contains "paintLibrary sized the disk"      "$OUT" "PAINTED | library | "
 
 echo "1b. a disk size cg did not give is not guessed"

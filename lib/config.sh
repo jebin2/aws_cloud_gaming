@@ -82,7 +82,9 @@ for line in sys.stdin:
     if not line.strip(): continue
     key, kind, default, rule, note, label, group = (line.rstrip("\n").split("|") + [""] * 7)[:7]
     raw = os.environ.get(key)
-    secret = kind in ("secret", "ntfy")
+    # The ntfy topic is shown: it is yours, in your own window, and an Edit
+    # that opened on an empty box asked you to type a topic you could not see.
+    secret = kind == "secret"
     out.append({
         "key": key, "kind": kind, "note": note,
         # What to call it, and where it belongs. Both used to live in the app.
@@ -109,8 +111,9 @@ config_set() {
   env_set "$key" "$value" || die "could not write .env"
   export "$key=$value"
   local shown=$value
-  [[ $(config_field "$key" 2) == secret || $(config_field "$key" 2) == ntfy ]] \
+  [[ $(config_field "$key" 2) == secret ]] \
     && shown=$([[ -n $value ]] && echo "set" || echo "cleared")
+  [[ -n $value ]] || shown="cleared"
   log_as ok "$key = $shown"
   case $key in
     GAME_DISK_GB|GAME_INSTANCE_TYPE|GAME_REGION|GAME_SPOT)
@@ -137,10 +140,13 @@ config_show() { # the human view
   while IFS='|' read -r key kind default rule note label group; do
     [[ -n $key ]] || continue
     value=${!key-}
-    if [[ $kind == secret || $kind == ntfy ]]; then
+    if [[ $kind == secret ]]; then
       value=$([[ -n $value ]] && echo set || echo "not set")
     elif [[ -z $value ]]; then
-      value="${default:-–}$([[ -n $default ]] && echo ' (default)')"
+      # `|| true`: with no default the test is false, the substitution exits 1,
+      # and under set -e the assignment ended the whole table at the first
+      # setting with nothing set and nothing to fall back to.
+      value="${default:-–}$([[ -n $default ]] && echo ' (default)' || true)"
     fi
     printf '  %-28s %-12s %s\n' "$key" "$value" "$note"
   done < <(CONFIG_ROWS)

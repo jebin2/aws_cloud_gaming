@@ -64,6 +64,20 @@ check    "layer 1 is always on"         "$(jq_ guards.0.armed)" "null"
 check    "each layer says what it catches" "$(jq_ guards.1.catches)" '"a forgotten disconnect, a crashed client"'
 j=$(RULE=DISABLED CG_COLOR=never cg watcher --json)
 check    "a disabled schedule is not armed" "$(jq_ guards.2.armed)" "false"
+# The minutes are the settings, not words written once: the page said "30 min"
+# and "1 h" whatever the watchdog had been set to.
+check    "the cloud watchdog's minutes default"  "$(jq_ guards.2.idle_min) $(jq_ guards.2.stuck_min)" "30 60"
+check    "  and say so in words"                 "$(jq_ guards.2.reaction)" '"30 min idle; forced after 60 min stuck"'
+printf 'GAME_WATCHDOG_IDLE_MIN=45\nGAME_WATCHDOG_STUCK_MIN=90\n' >> "$T/.env"
+j=$(CG_COLOR=never cg watcher --json)
+check    "  and follow what is set"              "$(jq_ guards.2.idle_min) $(jq_ guards.2.stuck_min)" "45 90"
+check    "  in the words too"                    "$(jq_ guards.2.reaction)" '"45 min idle; forced after 90 min stuck"'
+sed -i '/GAME_WATCHDOG_/d' "$T/.env"
+printf 'GAME_WATCHDOG_IDLE_MIN=5\nGAME_WATCHDOG_STUCK_MIN=20\n' >> "$T/.env"
+j=$(CG_COLOR=never cg watcher --json)
+check    "  with the floors the schedule applies" "$(jq_ guards.2.idle_min) $(jq_ guards.2.stuck_min)" "10 40"
+sed -i '/GAME_WATCHDOG_/d' "$T/.env"
+check    "the machine's own wait is reported"    "$(jq_ guards.1.idle_min)" "15"
 
 echo "1. plain watcher output is exactly what it was before the styling"
 check "byte-identical, timestamps normalised" "$(CG_COLOR=never cg watcher | norm)" "$(cat <<'BASE'
