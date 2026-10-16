@@ -3690,14 +3690,75 @@ const NEEDS = {
 };
 const loaded = new Set();
 
-async function refresh() {
-  // Cost is not in NEEDS, so opening the tab fetches nothing: it bills.
-  if (view === 'cost') return runCg(['cost', '--json'], { json: 'cost' });
-  const need = NEEDS[view];
+// What a screen reads when it refreshes. Cost is not in NEEDS, so opening that
+// tab fetches nothing: it bills, and only its Refresh asks.
+const readsFor = v => (v === 'cost' ? [[['cost', '--json'], 'cost']] : NEEDS[v]);
+async function refresh(each) {
+  const need = readsFor(view);
   if (!need) return;               // logs need nothing
-  loaded.add(view);
-  await Promise.all(need.map(([args, json]) => runCg(args, { json, group: 'refresh' })));
+  if (view !== 'cost') loaded.add(view);
+  await Promise.all(need.map(([args, json]) =>
+    runCg(args, view === 'cost' ? { json } : { json, group: 'refresh' }).then(() => each && each(json))));
 }
+
+// Each read, in the words the page uses for what it shows.
+const READ_NAME = {
+  status: 'Your machine and the bill', guards: 'Protection', library: 'Your saved games',
+  machines: 'Machines and prices', sweep: 'Locations', config: 'Settings',
+  creds: 'Amazon key', tskey: 'Tailscale', deps: 'Tools on this laptop', cost: 'Exact cost this month',
+};
+// The top Refresh, as a popup: what is being read, each ticking as it lands,
+// closed once the page has been redrawn. A read that failed keeps it open with
+// the reason, because a popup that vanished would say it all worked.
+async function refreshShown() {
+  const reads = readsFor(view);
+  if (!reads) return;
+  const dlg = $('refdlg');
+  const state = new Map(reads.map(([, json]) => [json, 'reading']));
+  $('refdlg-title').textContent = `Refreshing ${$('view-title').textContent.trim()}`;
+  const price = $('d-cost-price').textContent;
+  $('refdlg-sub').textContent = view === 'cost'
+    ? `One Cost Explorer call${price ? `, ${price}` : ''}.`
+    : 'Reading the latest from AWS and this laptop. This costs nothing.';
+  $('refdlg-menu').hidden = true;
+  const paint = () => {
+    const list = $('refdlg-list');
+    list.textContent = '';
+    for (const [json, st] of state) {
+      const row = document.createElement('div');
+      row.className = 'flex items-start gap-space-sm font-body-md text-body-md';
+      row.dataset.read = json;
+      row.dataset.state = st;
+      row.append(st === 'reading'
+        ? Object.assign(document.createElement('span'), { className: 'spinner mt-0.5' })
+        : Object.assign(document.createElement('span'), {
+            className: 'w-4 text-center font-code-md text-code-md ' + (st === 'done' ? 'text-primary' : 'text-error'),
+            textContent: st === 'done' ? '✓' : '✗' }));
+      const text = document.createElement('div');
+      text.className = 'min-w-0';
+      text.append(Object.assign(document.createElement('div'), { textContent: READ_NAME[json] || json }));
+      if (st === 'failed') text.append(Object.assign(document.createElement('div'), {
+        className: 'font-code-sm text-code-sm text-on-surface-variant break-words',
+        textContent: readFailures.get(json) || 'could not be read' }));
+      row.append(text);
+      list.append(row);
+    }
+  };
+  paint();
+  if (!dlg.open) dlg.showModal();
+  await refresh(json => { state.set(json, readFailures.has(json) ? 'failed' : 'done'); paint(); });
+  if ([...state.values()].every(s => s === 'done')) { dlg.close(); return; }
+  $('refdlg-sub').textContent = 'Some of it could not be read. The page shows what was.';
+  $('refdlg-menu').hidden = false;
+  $('refdlg-close').focus();
+}
+$('refdlg-close').onclick = e => { e.preventDefault(); $('refdlg').close(); };
+// Esc does not close it: it closes itself when the page is redrawn, and a
+// failure is closed with its button. Both, because Chromium honours a
+// prevented cancel only once per user activation - a second Esc would close it
+// anyway - while a prevented keydown never becomes a close request at all.
+$('refdlg').oncancel = e => e.preventDefault();
+$('refdlg').addEventListener('keydown', e => { if (e.key === 'Escape') e.preventDefault(); });
 
 // On open, every free read goes at once and each screen paints when its own
 // answer lands - they share nothing. cg cost is not among them: it is $0.01 a
@@ -4841,7 +4902,7 @@ async function firstScan() {
   return scanRegions($('s-sweep'));
 }
 
-$('refresh').onclick = refresh;
+$('refresh').onclick = () => refreshShown();
 $('check').onclick = () => { $('s-check').hidden = false; $('s-check').textContent = 'running…';
                              runCg(['check'], { collect: 's-check' }); };
 // What Stop costs depends on what is running, so say it before doing it.

@@ -773,6 +773,17 @@
 </main>
 </div>
 
+<!-- Refresh, said out loud: what this page reads, each read ticking as it
+     lands, and gone once the page has been redrawn. Modal, so the whole window
+     - sidebar too - waits under it rather than being clicked half-updated. -->
+<dialog id="refdlg" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[420px] max-w-[36rem]">
+  <p class="font-headline-md text-headline-md" id="refdlg-title">Refreshing</p>
+  <p class="font-code-sm text-code-sm text-outline mt-0.5" id="refdlg-sub"></p>
+  <div class="flex flex-col gap-space-sm mt-space-md" id="refdlg-list"></div>
+  <menu class="flex justify-end gap-space-sm mt-space-lg p-0" id="refdlg-menu" hidden>
+    <button class="btn btn-primary" id="refdlg-close">Close</button>
+  </menu>
+</dialog>
 <dialog id="confirm" class="rounded-lg bg-surface-container-low text-on-surface border border-surface-variant p-space-lg min-w-[460px] max-w-[560px]">
   <form method="dialog">
     <p class="font-headline-md text-headline-md" id="confirm-title"></p>

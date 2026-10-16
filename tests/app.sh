@@ -194,7 +194,7 @@ contains "a screen's reads go together"  "$js" "await Promise.all(need.map("
 contains "every free read fires on open" "$js" "async function refreshAll() {"
 contains "  and cost is not one of them" "$js" "it waits for its button"
 contains "  and load when it is opened"  "$js" "if (NEEDS[view] && !loaded.has(view)) refresh()"
-contains "refresh is per screen"         "$js" "const need = NEEDS[view]"
+contains "refresh is per screen"         "$js" "const need = readsFor(view)"
 contains "stop belongs to the screen that started the run" "$js" "j.view === view"
 # A tab's button answers for that tab: only a build or destroy, which cg runs
 # alone, disables anything elsewhere.
@@ -523,8 +523,10 @@ contains "  building means a build is running" "$js" "jobsFor('init')"
 contains "the machine strip"             "$js" "GB VRAM"
 contains "the archive repaints the dashboard" "$js" "function paintArchiveCard() { paintDash(); }"
 contains "spend comes from a fetch"      "$js" "function paintSpend(d)"
+# Two places ask for it, both a click: the dashboard button, and the Cost
+# screen's own Refresh.
 check    "  which is the only paid button" \
-         "$(grep -c "runCg(\['cost', '--json'\]" app/renderer/app.js)" "2"
+         "$(grep -c "runCg(\['cost', '--json'\]\|v === 'cost' ? \[\[\['cost', '--json'\]" app/renderer/app.js)" "2"
 contains "  and it carries the price"    "$html" 'id="d-cost-price"'
 contains "activity is this window's own" "$js" "function note(text, tone)"
 # What happened, not which command did it: "cg library push started" named a

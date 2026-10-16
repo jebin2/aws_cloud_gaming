@@ -1227,6 +1227,41 @@ contains "kept: back to the machine"        "$(row AFTER)" "kept=run:Ready to pl
 contains "deleted: the delete is shown"     "$(row AFTER)" "deleting=run:Deleting the machine"
 ENGINE=""
 
+echo "7g. Refresh is a popup over the whole window, gone once the page is redrawn"
+B7="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  const wait = () => new Promise(r => setTimeout(r, 30));
+  const rows = () => [...document.querySelectorAll('#refdlg-list [data-read]')]
+    .map(r => r.dataset.read + ':' + r.dataset.state).join(',');
+  document.getElementById('refresh').click();
+  const dlg = document.getElementById('refdlg');
+  const cancel = new Event('cancel', { cancelable: true }), key = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+  dlg.dispatchEvent(cancel); dlg.dispatchEvent(key);
+  const esc = 'esc=' + (cancel.defaultPrevented && key.defaultPrevented ? 'refused' : 'allowed');
+  const during = esc + ' open=' + document.getElementById('refdlg').open + ' title='
+    + document.getElementById('refdlg-title').textContent + ' rows=' + rows();
+  await wait();
+  const after = 'open=' + document.getElementById('refdlg').open;
+  window.__broken = ['watcher --json'];
+  document.getElementById('refresh').click();
+  await wait();
+  const failed = 'open=' + document.getElementById('refdlg').open + ' rows=' + rows()
+    + ' close=' + !document.getElementById('refdlg-menu').hidden
+    + ' text=' + document.getElementById('refdlg-list').innerText.replace(/\\s+/g, ' ');
+  return 'during=' + during + ' | after=' + after + ' | failed=' + failed;
+};"
+ENGINE="$B7"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "refresh opens a popup"           "$(row AFTER)" "open=true title=Refreshing Dashboard"
+contains "  which Esc does not close"      "$(row AFTER)" "during=esc=refused open=true"
+contains "  listing what it reads"         "$(row AFTER)" "rows=status:reading,guards:reading"
+contains "  and closes once it has read"   "$(row AFTER)" "after=open=false"
+contains "a failed read keeps it open"     "$(row AFTER)" "failed=open=true rows=status:done,guards:failed"
+contains "  with a way to close it"        "$(row AFTER)" "close=true"
+contains "  and the reason"                "$(row AFTER)" "could not reach AWS"
+ENGINE=""
+
 echo "7c. a line that sounds like failure does not fail a healthy build"
 # What happened on a real build: the box's progress said "NvFBC cannot capture
 # with it on", cg reads "cannot" as a failure, and the driver step went red
