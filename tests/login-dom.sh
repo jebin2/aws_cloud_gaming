@@ -189,11 +189,11 @@ row() { grep "^$1 " <<<"$OUT" | head -1; }
 echo "1. a login is archived: one row"
 contains "the account, its size and date" "$(row 'PRESENT ROWS')" "alice / "
 contains "  the size is shown"        "$(row 'PRESENT ROWS')" "/ 21.9 KB / 10 Oct /"
-contains "  and it is the one used"   "$(row 'PRESENT ROWS')" "/ signs in / Forget"
+contains "  and it is the one used"   "$(row 'PRESENT ROWS')" "/ In use / Remove"
 contains "  said once, below"         "$(row 'PRESENT NOTE')" "A new machine signs in as alice."
 # Stated and dismissed in the same breath: 22 KB is not a saving, and offering a
 # delete button next to a cost invites reading it as one.
-contains "deleting is not sold as a saving" "$(row 'PRESENT NOTE')" "saves nothing"
+contains "deleting is not sold as a saving" "$(row 'PRESENT NOTE')" "does not save money"
 contains "  Forget is offered, in red" "$(row 'PRESENT BTN')" "btn btn-danger"
 
 echo "2. several accounts in one tarball"
@@ -209,36 +209,38 @@ check    "  Forget is not offered"    "$(row 'ABSENT BTN')"  "ABSENT BTN | "
 
 echo "4. UNKNOWN is the one that must not read as 'none'"
 # The whole reason this file is rendered rather than grepped.
-contains "it admits it could not look" "$(row 'UNKNOWN ROWS')" "Could not read the saved login"
+contains "it admits it could not look" "$(row 'UNKNOWN ROWS')" "The saved login could not be read"
 lacks    "  and never claims none"     "$(row 'UNKNOWN ROWS')" "No Steam login saved"
 lacks    "  nor invites a sign-in"     "$(row 'UNKNOWN NOTE')" "asks you to sign in"
 # No delete button for a state nobody can vouch for.
 check    "  Forget is not offered"     "$(row 'UNKNOWN BTN')" "UNKNOWN BTN | "
 
 echo "5. present, but the names could not be read"
-contains "the login is still a row"    "$(row 'NONAMES ROWS')" "names unreadable / "
+contains "the login is still a row"    "$(row 'NONAMES ROWS')" "Name unknown / "
 lacks    "  not as zero accounts"      "$(row 'NONAMES ROWS')" "0 accounts"
 
 echo "5c. Steam sign-in is chosen on Build"
-contains "the saved login is the default"  "$(row 'PRESENT BUILD')" "signed in as alice / *Sign in as alice, Ask me to sign in"
+contains "the saved login is the default"  "$(row 'PRESENT BUILD')" "Signs in as alice / *Sign in as alice, Ask me to sign in"
 contains "with nothing saved there is no choice" "$(row 'ABSENT BUILD')" "/ no choice"
 contains "picking 'ask me' saves it through cg" "$(row 'PICK RAN')" "config set GAME_STEAM_LOGIN fresh"
-contains "  and Build then says so"        "$(row 'FRESH BUILD')" "sign in on the machine / Sign in as alice, *Ask me to sign in"
+contains "  and Build then says so"        "$(row 'FRESH BUILD')" "You sign in on the machine / Sign in as alice, *Ask me to sign in"
 
 echo "5b. a copy left in another place"
 contains "its own row, by its place"   "$(row 'ELSE ROWS')" "|| alice / ap-south-2 / 21.8 KB / 26 Sep"
-contains "  used by nothing"           "$(row 'ELSE ROWS')" "/ not used / Forget"
-contains "  after the one that signs in" "$(row 'ELSE ROWS')" "/ signs in / Forget ||"
+contains "  used by nothing"           "$(row 'ELSE ROWS')" "/ Old copy / Remove"
+contains "  after the one that signs in" "$(row 'ELSE ROWS')" "/ In use / Remove ||"
 check    "  its Forget is not red"     "$(row 'ELSE BTN')" "ELSE BTN | btn btn-danger,btn"
 
 echo "6. a numbered prompt is a choice, not a text box"
-contains "the question stands alone"   "$(row 'CHOICE PROMPT')" "leave it running"
+# Asked in the app's words, not cg's terminal prompt.
+contains "the question is a question"  "$(row 'CHOICE PROMPT')" "What should happen to the machine?"
+lacks    "  not the terminal prompt"   "$(row 'CHOICE PROMPT')" "[d] destroy"
 check    "the radios are shown"        "$(row 'CHOICE BOX')"   "CHOICE BOX | shown"
 check    "  and the text field is not" "$(row 'CHOICE INPUT')" "CHOICE INPUT | hidden"
-contains "the first option says what it does" "$(row 'CHOICE ROWS')" "destroy the box"
-contains "  and the second"            "$(row 'CHOICE ROWS')" "leave it running"
-contains "  with the consequence spelled out" "$(row 'CHOICE ROWS')" "keeps billing"
-contains "the default is preselected"  "$(row 'CHOICE ROWS')" "CHECKED d"
+contains "the first option says what it does" "$(row 'CHOICE ROWS')" "Delete the machine"
+contains "  and the second"            "$(row 'CHOICE ROWS')" "Keep it running"
+contains "  with the consequence spelled out" "$(row 'CHOICE ROWS')" "keeps costing"
+contains "the default is preselected"  "$(row 'CHOICE ROWS')" "CHECKED Delete the machine"
 # Dismissing must answer the default, never an empty string: cg reads the reply
 # and an empty one would fall through to its own default anyway, but a build
 # that answers "" to a choice prompt is a thing nobody can debug.

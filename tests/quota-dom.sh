@@ -244,28 +244,28 @@ contains "it waits for a choice"       "$(row 'PICK WHY')"  "Pick one to see wha
 contains "  with the button dead"      "$(row 'PICK BTN')"  "go=false/true"
 
 echo "3. choosing one says what the case would contain"
-contains "it says what you have"       "$(row 'CHOSEN STATE')" "You have 0 vCPU. One g6.xlarge needs 4"
-contains "  and what would be created" "$(row 'CHOSEN PRE')"   "This creates a support case containing"
-contains "  the quota, by name"        "$(row 'CHOSEN BODY')"  "All G and VT Spot Instance Requests (L-3819A6DF)"
-contains "  the value, as one box"     "$(row 'CHOSEN BODY')"  "New value: 4 (exactly one instance - never more)"
+contains "it says what you have"       "$(row 'CHOSEN STATE')" "Your limit: 0 vCPU. One g6.xlarge needs 4"
+contains "  and what would be created" "$(row 'CHOSEN PRE')"   "This sends AWS a request for"
+contains "  the quota, by name"        "$(row 'CHOSEN BODY')"  "Spot GPU machines"
+contains "  the value, as one box"     "$(row 'CHOSEN BODY')"  "New value: 4 vCPU (one machine)"
 contains "  and that a refusal is step one" "$(row 'CHOSEN BODY')" "usually refuses within minutes"
 contains "the button is live now"      "$(row 'CHOSEN BTN')"   "go=false/false"
 
 echo "4. creating"
-contains "it says it is working"       "$(row 'CREATING STATE')" "Creating the case"
+contains "it says it is working"       "$(row 'CREATING STATE')" "Sending the request"
 check    "  and runs the request"      "$(row 'MADE RAN')"       "MADE RAN | --region ap-south-1 quota request spot ;; --region ap-south-1 quota --json ;; --region ap-south-1 quota appeal spot"
 
 echo "5. and then the case exists"
-contains "the status is AWS's own"     "$(row 'MADE STATE')"  "case open"
+contains "the status is AWS's own"     "$(row 'MADE STATE')"  "Being reviewed"
 contains "  with the date asked"       "$(row 'MADE STATE')"  "asked 2026-10-12"
-contains "  explained"                 "$(row 'MADE WHY')"    "Usually this will get refused"
+contains "  explained"                 "$(row 'MADE WHY')"    "usually refuses the first request"
 # "I replied with the appeal and it still says case open" - it will. Replying
 # is a correspondence on the case; the request only moves when AWS decides.
-contains "  and that replying does not move it" "$(row 'MADE WHY')" "does not change when you reply"
+contains "  and that replying does not move it" "$(row 'MADE WHY')" "a person reviews it"
 contains "when AWS last touched it"    "$(row 'MADE STATE')"  "AWS last moved it 2026-10-13"
 # The label says WHEN to use it, because the refusal lands minutes after you
 # have closed the window.
-contains "the appeal is labelled"      "$(row 'MADE PRE')"    "as an appeal when denied"
+contains "the appeal is labelled"      "$(row 'MADE PRE')"    "If AWS refuses, reply to them with this"
 contains "  and is the appeal"         "$(row 'MADE BODY')"   "Requesting an appeal"
 contains "the case is linked"          "$(row 'MADE URL')"    "displayId=100000000000001"
 check    "  and the link opens it"     "$(row OPENED)"        "OPENED | https://console.aws.amazon.com/support/home#/case/?displayId=100000000000001"
@@ -285,7 +285,7 @@ echo "7. Refresh clears, locks, then reflects"
 contains "the old answer goes"         "$(row 'REFRESH NOW')" 'body=""'
 contains "  it says it is reading"     "$(row 'REFRESH NOW')" "reading"
 contains "  and cannot be pressed twice" "$(row 'REFRESH NOW')" "refresh=true/Reading"
-contains "then the state is back"      "$(row 'REFRESH SETTLED')" "case open"
+contains "then the state is back"      "$(row 'REFRESH SETTLED')" "Being reviewed"
 contains "  and so is the button"      "$(row 'REFRESH SETTLED')" "refresh=false/Refresh"
 
 echo "8. nothing threw"

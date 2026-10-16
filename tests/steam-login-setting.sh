@@ -38,8 +38,8 @@ contains "  with both values"             "$cfg" "use,fresh"
 # its own table, so a setting cg grew showed up as a raw GAME_SHOUTING_KEY.
 contains "the registry names it"          "$cfg" "Steam sign-in"
 contains "  and files it with the build settings" "$cfg" "Steam sign-in|The box"
-contains "  and labels what it chose"     "$app" "use: 'use the archived login'"
-contains "  including the other value"    "$app" "fresh: 'sign in fresh on the box'"
+contains "  and labels what it chose"     "$app" "use: 'Use the saved login'"
+contains "  including the other value"    "$app" "fresh: 'Ask me to sign in'"
 
 echo "3. the setting reaches the box"
 contains "provision passes it"         "$prov"  'CG_LOGIN="${GAME_STEAM_LOGIN:-use}"'

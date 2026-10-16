@@ -142,13 +142,13 @@ contains "  and the spot one"          "$doc" "L-3819A6DF"
 contains "  says the refusal is normal" "$doc" "automatic refusal is not a rejection"
 contains "  and why cg cannot appeal"  "$doc" "SubscriptionRequiredException"
 app=$(cat app/renderer/app.js)
-contains "the app offers the ask"      "$app" "Ask AWS for GPU quota"
+contains "the app offers the ask"      "$app" "Ask AWS for a higher GPU limit"
 contains "  and drafts the appeal"     "$app" "'quota', 'appeal'"
 # The dialog is four states of one screen, and tests/quota-dom.sh drives them.
 # What matters here is that the pieces it needs exist at all.
 contains "  reads the state"           "$app" "quotaCmd('quota', '--json')"
 contains "  with the region in it"     "$app" "quotaWhere ? ['--region', quotaWhere"
-contains "  labels the appeal with when to use it" "$app" "as an appeal when denied"
+contains "  labels the appeal with when to use it" "$app" "If AWS refuses, reply to them with this"
 contains "  and reads back rather than believing the submit" "$app" "await quotaRead();"
 main=$(cat app/main/index.js)
 contains "the case link is allowed"    "$main" "console.aws.amazon.com"

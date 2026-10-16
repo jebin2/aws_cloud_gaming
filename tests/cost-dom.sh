@@ -92,6 +92,8 @@ cat > "$T/r/probe.js" <<'PROBE'
       games: [{ name: 'Diablo IV', bytes: 174813206488 }], login: true }] });
     read('AWAY');
     out.push('AWAY RAN | ' + window.__ran.length);
+    [...document.querySelectorAll('#c-bills button')].find(x => x.textContent.startsWith('Saved games')).click();
+    out.push('WENT | ' + (document.querySelector('.nav-item.on') || {}).dataset?.view);
   } catch (e) { out.push('THREW | ' + e.message + ' ' + e.stack); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -127,7 +129,7 @@ row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 echo "1. the month, in rupees at cg's one rate"
 contains "the total in rupees"           "$(row 'REAL c-month')" "₹167"
 contains "  hours played and the pace"   "$(row 'REAL c-month-sub')" "so far · 2.4 h played · on pace for ₹553 by 31 Oct"
-contains "the budget is yours, as set"   "$(row 'REAL c-cap-note')" "Budget ₹5,000 a month - it emails you, it stops nothing."
+contains "the budget is yours, as set"   "$(row 'REAL c-cap-note')" "Budget ₹5,000 a month. AWS emails you if you pass it; it stops nothing."
 lacks    "  not AWS's dollars turned back" "$(row 'REAL c-cap-note')" "5,412"
 contains "  and the bar's verdict"       "$(row 'REAL CHIP')" "under the budget"
 contains "credits in rupees"             "$(row 'REAL c-credits')" "₹12,854 left"
@@ -142,20 +144,27 @@ contains "the month row adds up"         "$(row 'REAL ROW3')" "Month so far / 2.
 contains "  to the same total"           "$(row 'REAL ROW3')" "/ ₹167"
 
 echo "3. storage the bill charges that cg cannot see"
-contains "the warning is said"           "$(row 'REAL UNKNOWN')" "AWS bills ₹370 a month more storage than your saved games explain"
+contains "the warning is said"           "$(row 'REAL UNKNOWN')" "AWS charges ₹370 a month for storage this app cannot find"
 contains "  and counted in standby"      "$(row 'REAL c-standby')" "₹370 a month"
-contains "the saved games, as cg sees them" "$(row 'REAL c-bills')" "Saved gamesnone · ₹0"
+contains "no saved games says None"      "$(row 'REAL c-bills')" "Saved games →None"
+# A disk left behind is a row only when there is one; "none" only raised
+# the question of what it was.
+lacks    "  and no empty disk row"         "$(row 'REAL c-bills')" "disk"
 contains "a bucket that explains it raises nothing" "$(row 'KNOWN UNKNOWN')" "hidden"
 contains "  and standby is what cg knows" "$(row 'KNOWN c-standby')" "₹813 a month"
-contains "  saved games with their size" "$(row 'KNOWN c-bills')" "Saved games160.2 GB · ₹380 a month"
-contains "  a leftover disk is named"    "$(row 'KNOWN c-bills')" "Leftover disks50 GB · ₹433 a month"
-contains "no budget in AWS is said, in red" "$(row 'KNOWN c-cap-note')" "No spending alert exists in AWS"
+contains "  saved games with their size" "$(row 'KNOWN c-bills')" "Saved games →160.2 GB · ₹380 a month"
+contains "  a disk left behind is named" "$(row 'KNOWN c-bills')" "Disk left by a deleted machine50 GB · ₹433 a month"
+contains "no budget in AWS is said, in red" "$(row 'KNOWN c-cap-note')" "No budget alert is set up in AWS"
 
 echo "3b. storage explained by games in another place"
-contains "they are named in the list"    "$(row 'AWAY c-bills')" "Saved in ap-south-2162.8 GB · ₹386 a month - not used, see Library"
+# One Saved games row for every location, with the other place said under it.
+contains "they are counted in one row"   "$(row 'AWAY c-bills')" "Saved games →162.8 GB · ₹386 a month"
+contains "  and where they are, said once" "$(row 'AWAY c-bills')" "162.8 GB of it is in ap-south-2, which your machine does not use"
+lacks    "  not a row of their own"      "$(row 'AWAY c-bills')" "Saved in ap-south-2"
 contains "  and counted in standby"      "$(row 'AWAY c-standby')" "₹386 a month"
 contains "  so nothing is a mystery"     "$(row 'AWAY UNKNOWN')" "hidden"
 check    "  and AWS was not asked again" "$(row 'AWAY RAN')" "AWAY RAN | 0"
+check    "Saved games opens the Games page" "$(row WENT)" "WENT | library"
 
 echo "4. free streaming"
 contains "used of free"                  "$(row 'REAL c-egress')" "0.4 of 100 GB used this month"

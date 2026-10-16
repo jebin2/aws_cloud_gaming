@@ -1069,7 +1069,7 @@ library_keep_for() {
   say "saving the setting"
   config_set GAME_ARCHIVE_EXPIRY_DAYS "$d"
   export GAME_ARCHIVE_EXPIRY_DAYS="$d"
-  say "updating the cloud watchdog"
+  say "updating auto-stop"
   cw_adopt_ntfy
   cw_install || die "saved, but the cloud watchdog still counts the old days - run: cg watchdog install"
   if (( d == 0 )); then log "saved games are kept until you forget them"
@@ -1107,8 +1107,10 @@ for a in json.load(sys.stdin).get("apps",[]):
   echo "This copies $name (${gb} GB) from $sr to $dr, checks every file, then deletes it from $sr."
   echo "AWS charges about INR $(awk -v u="$usd" -v i="$CG_INR_PER_USD" 'BEGIN{printf "%.0f", u*i}') once to copy between regions."
   cg_ask_typed move-game "type MOVE to confirm: " MOVE || { echo "aborted - nothing was copied"; return 1; }
+  local part=0
   for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
-    say "copying $name: $pair"
+    part=$((part + 1))
+    say "copying $name (part $part of 3)"
     aws s3 sync "s3://$sb/steam/steamapps/$pair/" "s3://$db/steam/steamapps/$pair/" \
       --source-region "$sr" --region "$dr" --only-show-errors \
       || die "the copy stopped - nothing was deleted from $sr; run the move again to finish it"

@@ -208,7 +208,7 @@ contains "stop says what it stops"       "$js" 'Stop ${hereNames[0]}'
 # status + watcher are one refresh to the person looking at the dashboard.
 contains "  counting actions, not commands" "$js" "hereNames.length === 1"
 contains "only a long run is worth pointing at" "$js" "const WATCHABLE = new Set(['init', 'destroy', 'open'])"
-contains "  which the pointer uses"      "$js" 'running - show it'
+contains "  which the pointer uses"      "$js" 'is running · show it'
 check    "every icon carries its name"   "$(python3 - <<'PY'
 import re
 html = open("app/renderer/index.html").read()
@@ -267,7 +267,7 @@ contains "  and chosen in a dialog"      "$html" 'id="whereto"'
 contains "  that can measure again"      "$html" 'id="whereto-measure"'
 # Every figure in that dialog is cg's: latency, rupees, and whether it fits.
 contains "the choice shows cg's numbers" "$js" "best ? best.inr_hour_spot : null"
-contains "  and why one cannot be used"  "$js" "no GPU quota here yet"
+contains "  and why one cannot be used"  "$js" "No GPU limit here yet"
 # The popup and the header line are gone, and nothing may bring them back.
 check "no popup is left"                 "$(grep -c \"id=.stage\" app/renderer/index.html)" "0"
 check "  nor the header's command line"  "$(grep -c 'job-line' app/renderer/index.html app/renderer/app.js | grep -vc ':0')" "0"
@@ -294,7 +294,7 @@ contains "main says whether cg is there"  "$main" 'function engineFacts()'
 contains "  over the bridge"              "$(cat app/main/preload.js)" 'cg:engine'
 contains "  and re-reads the contract"    "$main" 'if (found && !CONTRACT.runs_alone) loadContract();'
 contains "the window asks before reading" "$js" 'if (await engineReady()) await refreshAll();'
-contains "  and says the one true thing"  "$js" "'This app cannot find cg'"
+contains "  and says the one true thing"  "$js" "'This app cannot find its scripts'"
 contains "  naming where it looked"       "$js" 'Looked for it at ${engineGone.cg}'
 # A main process too old to answer, or a test stub, is taken at its word.
 contains "  an unanswered ask carries on" "$js" 'try { e = await window.cg.engine(); } catch { return true; }'
@@ -303,7 +303,7 @@ contains "  an unanswered ask carries on" "$js" 'try { e = await window.cg.engin
 contains "trying again cancels first"     "$js" 'if (!job.write) await window.cg.cancel(id)'
 # The key's sentence is cg's answer, not a guess at an error string.
 contains "why a key failed comes from cg" "$js" "switch (credsNow && credsNow.reason)"
-contains "  unreachable is not rejected"  "$js" 'Nothing was rejected - the call never arrived'
+contains "  unreachable is not rejected"  "$js" 'Nothing was rejected; AWS just could not be reached'
 contains "  and an old cg still works"    "$js" "title: 'AWS rejected this access key'"
 
 echo "5b. the build screen, as the design draws it"
@@ -316,7 +316,7 @@ contains "the allocation bar"            "$html" 'id="b-bar"'
 contains "  says what is left, plainly"  "$js" "Too big by"
 contains "the machine comes from cg"     "$js" "const spec = s.spec || {}"
 check    "  with no type hardcoded"      "$(grep -c 'g6\.xlarge\|L4\|16 GiB' app/renderer/app.js)" "0"
-contains "  and the chip says what Build bills" "$js" "Billing starts when the machine launches"
+contains "  and the chip says what Build bills" "$js" "an hour from the moment it starts"
 # cg's dozen-odd steps, and the box's own, are placed in eight plain ones.
 contains "steps are the eight plain ones" "$js" "const BUILD_STEPS = ["
 contains "  and only move forwards"       "$js" "if (at > run.idx)"
@@ -361,10 +361,10 @@ contains "  hidden until something fails"  "$html" '<div class="hidden" id="b-fa
 contains "  with a headline"               "$html" 'id="b-fail-head"'
 contains "  what it means"                 "$html" 'id="b-fail-why"'
 contains "  what to do about it"           "$html" 'id="b-fail-acts"'
-contains "  and cg's own words kept"       "$html" "What cg said"
+contains "  and cg's own words kept"       "$html" ">Details</summary>"
 contains "the actions are keyed by the AWS code" "$js" "const FAIL_ACTS = {"
 contains "  spot capacity offers another machine"   "$js" "InsufficientInstanceCapacity: () => [['Pick another machine'"
-contains "  a quota failure offers the ask"      "$js" "Ask AWS for GPU quota"
+contains "  a quota failure offers the ask"      "$js" "Ask AWS for a higher GPU limit"
 # It lives in the strip, taking the BAR's place: a bar frozen at 35% says
 # nothing, and in the right-hand panel the reason sat under a 200-line
 # auto-scrolling log that had already moved past it.
@@ -381,7 +381,7 @@ check    "  with no second heading under it" \
 contains "  fed by the lines cg marked"    "$js" "if (event.kind === 'fail') { buildFailing = true;"
 contains "  and the report under them"     "$js" "else if (buildFailing && event.t === 'line')"
 contains "  an error event lands there too" "$js" "if (event.t === 'error') buildFail(event.text)"
-contains "  a nonzero exit is never silent" "$js" 'exited ${event.rc} without saying why'
+contains "  a nonzero exit is never silent" "$js" 'stopped without saying why'
 contains "  and the next run clears it"    "$js" "buildFailClear();"
 
 # The machine chooser. Its whole point is that the app knows nothing about any
@@ -409,9 +409,9 @@ contains "  capacity is shown beside price" "$js" "row.score >= 7 ? 'good'"
 contains "choosing one writes the type"   "$js" "'config', 'set', 'GAME_INSTANCE_TYPE'"
 contains "  and the purchase model"       "$js" "'config', 'set', 'GAME_SPOT'"
 contains "  and the region, last"         "$js" "if (moving) await runCg(['config', 'set', 'GAME_REGION'"
-contains "  after confirming the rate"    "$js" 'Build on ${row.type}, ${spot ? '"'"'spot'"'"' : '"'"'on demand'"'"'}?' 
-contains "  saying what each model means" "$js" "launches even when spot has none left"
-contains "  and warning when capacity says no" "$js" "very likely be refused"
+contains "  after confirming the rate"    "$js" 'Use ${row.type}, ${spot ? '"'"'spot'"'"' : '"'"'standard'"'"'}?' 
+contains "  saying what each model means" "$js" "starts even when spot machines run out"
+contains "  and warning when capacity says no" "$js" "likely be refused however cheap"
 contains "a running box locks every pick" "$js" "const usable = !why && !boxNow"
 # The three settings it owns get no second editor, or the dropdowns are back.
 contains "settings defer to the table"    "$js" "CHOSEN_IN_TABLE"
@@ -443,7 +443,7 @@ check    "  and the card it points at exists"          "$(grep -c 'id="s-machine
 # The summary must sit above the button that spends the money, not below it.
 check    "the summary is above Build"    \
          "$(awk '/id="b-pick"/{a=NR} /id="b-build"/{b=NR} END{print (a && b && a < b) ? "yes" : "no"}' app/renderer/index.html)" "yes"
-contains "  and says why"                 "$js" "destroy it before changing the machine"
+contains "  and says why"                 "$js" "Delete it before changing machines"
 contains "  the unpinned zone is priced too" "$js" "usd_hour_spot_max"
 check    "  and still no machine is named here" \
          "$(grep -cE 'g6\.|g6e\.|L40S|L4 ' app/renderer/app.js)" "0"
@@ -451,8 +451,8 @@ check    "  and still no machine is named here" \
 echo "5c. the library and cost screens, in the same language"
 # One Games table: every game, its place, what it costs and when it goes.
 contains "the library is one table of games" "$html" 'id="lib-rows"'
-contains "  each with its place"          "$html" '>PLACE</th>'
-contains "  and when it is deleted"       "$html" '>DELETED ON</th>'
+contains "  each with its place"          "$html" '>Location</th>'
+contains "  and when it is deleted"       "$html" '>Auto-delete</th>'
 contains "  what each game costs, in rupees" "$js" 'cell(tr, r(g.usd_month)'
 contains "  and a total row"              "$html" 'id="lib-foot"'
 contains "  kept for: one setting, applied at once" "$js" "['library', 'keep-for', String(n)]"
@@ -465,7 +465,7 @@ contains "  it says it does not know"     "$js" "the machine's space is not know
 check    "no exchange rate is guessed"    "$(grep -c 'inr_per_usd || 88' app/renderer/app.js)" "0"
 contains "cost projects the month"       "$js" "m.projected_usd"
 contains "  against the budget you set, in rupees" "$js" "Number(setting('GAME_BUDGET_INR', NaN))"
-contains "  which only emails"            "$js" "it emails you, it stops nothing"
+contains "  which only emails"            "$js" "AWS emails you if you pass it; it stops nothing"
 # Rupees only: the Cost page was the last one showing dollars beside them.
 lacks    "  no dollar column"             "$html" "TOTAL ($)"
 check    "  no dollar helper left"        "$(grep -c 'const money = ' app/renderer/app.js)" "0"
@@ -489,7 +489,7 @@ echo "5e. one panel for every long run"
 contains "a run opens the panel it reports in" "$js" "function startRun(args, opts = {})"
 contains "  which is the build screen"   "$js" "goView('build')"
 contains "  titled for what is running"  "$js" "running: 'Deleting the machine'"
-contains "  with the command on the log" "$js" "'cg ' + args.join(' ')"
+contains "  with what is running, by name" "$js" '$('"'"'b-log-title'"'"').textContent = `${CgName(args)} · log`;'
 # Billing counts from a machine that exists: the rental has to have finished.
 contains "  and the bill from when it was rented" "$js" "if (!run.billFrom && at > rent && run.steps[rent])"
 contains "destroy runs through it"       "$js" "startRun(['destroy'])"
@@ -541,7 +541,7 @@ contains "  recording what happened"     "$js" 'note(`${cgName(args)} started`'
 contains "guards come from the watcher"  "$js" "for (const g of guards) {"
 # The minutes are cg's: the page wrote "30 min" and "1 h" whatever was set.
 contains "  with cg's minutes"           "$js" '${g.idle_min || 30} min with no stream'
-contains "  and the last check, aged"    "$js" 'AWS last checked ${ago(cloud.last_decision_age_s)}'
+contains "  and the last check, aged"    "$js" 'Last check ${ago(cloud.last_decision_age_s)}'
 # Rupees only: the budget read "$57 a month" from AWS's own figure.
 contains "the budget is in rupees"       "$js" '${rs(Number(v))} a month'
 lacks    "  never dollars"               "$js" '`$${b.usd} a month`'
@@ -588,7 +588,7 @@ contains "  and copied"                  "$html" 'id="log-copy"'
 contains "  and cleared"                 "$html" 'id="log-clear"'
 check    "  it keeps a bounded number"   "$(grep -c "log.children.length > 2000" app/renderer/app.js)" "1"
 contains "the watchdog's own log is reachable" "$js" "runCg(['watchdog', 'logs']"
-contains "  and reading it is free"      "$html" "costs nothing to read"
+contains "  and reading it is free"      "$html" "Free to load"
 # Which card a setting belongs on is cg's answer now; this file keeps the
 # ORDER of the cards and the sentence under each heading, which is layout.
 contains "the registry carries the grouping" "$(./cg config --json)" '"group"'
@@ -604,7 +604,7 @@ lacks    "  not by editing the file"     "$html" "or by editing the file"
 # "remove with: cg library clean" and there was no button.
 contains "orphans can be cleaned"        "$js" "libraryRun(['library', 'clean']"
 contains "  a game can be forgotten"     "$js" "libraryRun(['library', 'forget'"
-contains "  both ask for the word, once"  "$js" "word: 'FORGET'"
+contains "  both ask for the word, once"  "$js" "word: 'DELETE'"
 # They stay on Library: the Build page is for builds, deletes and sessions.
 lacks    "  and never go to the Build page" "$js" "startRun(['library'"
 # The line that used to be drawn in both processes - and drifted - is drawn by
@@ -695,7 +695,7 @@ echo "6. the actions that spend money ask first"
 # window.confirm draws a native alert that belongs to no design.
 check    "no native alert boxes"         "$(grep -cE '(^|[^a-zA-Z.])confirm\(' app/renderer/app.js)" "0"
 contains "  the app asks in its own dialog" "$html" 'id="confirm-title"'
-contains "a build confirms, with its rate" "$js" 'Billing starts when the machine launches${rate != null'
+contains "a build confirms, with its rate" "$js" 'It costs ${rate != null ? `${rsh(rate)} an hour` : '"'"'by the hour'"'"'} from the moment it starts'
 contains "  and passes the chosen games" "$js" "GAME_APPS: apps"
 contains "a delete confirms"             "$js" "Delete the machine?"
 contains "only GAME_APPS may cross"      "$(cat app/main/index.js)" "ENV_ALLOWED = new Set(['GAME_APPS'])"
@@ -704,11 +704,11 @@ check    "no secret is rendered"         "$(grep -cE 'TAILSCALE_AUTH_KEY|SUNSHIN
 # never touches .env, and a secret can be replaced but not read.
 contains "settings read the registry"    "$js" "settings:  [[['config', '--json']"
 contains "  and write through cg"        "$js" "runCg(['config', 'set', r.key, value]"
-contains "  showing a secret as set"     "$js" "r.is_set ? 'set' : 'not set'"
+contains "  showing a secret as set"     "$js" "r.is_set ? 'Set' : 'Not set'"
 contains "  replacing, never revealing"  "$js" "r.secret ? '' : (r.value || '')"
-contains "  and confirming a clear"      "$js" "remembered as"
+contains "  and confirming a clear"      "$js" "you will not be asked for it again"
 # "1" means nothing to a person, and a secret is worth seeing once, on purpose.
-contains "a choice is shown in words"    "$js" "'1': 'spot', '0': 'on demand'"
+contains "a choice is shown in words"    "$js" "'1': 'Spot', '0': 'Standard'"
 contains "a secret can be revealed"      "$js" "runCg(['config', 'get', r.key]"
 contains "  deliberately, then hidden"   "$js" "click again to hide it"
 

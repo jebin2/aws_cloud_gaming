@@ -4,7 +4,7 @@
 # There was a Dependencies page; setup now installs what is missing in place,
 # so the page was only ever a row of ticks. What survives it is the rule it was
 # built on: never draw an Install button that cannot install anything. When the
-# laptop has no package manager cg can use, or no way to become root, the
+# laptop has no installer the app can use, or no way to become root, the
 # button says how to do it by hand instead - and runs nothing.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -149,12 +149,12 @@ contains "  in the run dialog"          "$(row 'CAN DIALOG')" "true Installing m
 echo "3. a laptop that cannot: the command, and nothing run"
 check    "no Install when it cannot become root" "$(row 'NOROOT LABEL')" "NOROOT LABEL | How to install moonlight"
 check    "  pressed, it runs nothing"   "$(row 'NOROOT RAN')" "NOROOT RAN | "
-contains "  it says why"                "$(row 'NOROOT SAYS')" "cannot become root here (no terminal, and polkit is not installed)"
+contains "  it says why"                "$(row 'NOROOT SAYS')" "cannot get permission to install here (no terminal, and polkit is not installed)"
 contains "  and the command to run"     "$(row 'NOROOT SAYS')" "sudo pacman -S moonlight (by hand)"
 contains "  with nothing to cancel"     "$(row 'NOROOT SAYS')" "no=null"
 check    "no package manager: the same" "$(row 'NOPM LABEL')" "NOPM LABEL | How to install AWS CLI v2"
-contains "  and says so"                "$(row 'NOPM SAYS')" "no package manager cg can use"
-check    "not read yet: offered"        "$(row 'UNREAD LABEL')" "UNREAD LABEL | Install the AWS CLI"
+contains "  and says so"                "$(row 'NOPM SAYS')" "no installer the app can use"
+check    "not read yet: offered"        "$(row 'UNREAD LABEL')" "UNREAD LABEL | Install the Amazon tool"
 
 echo "4. the places that sent you to the page"
 check    "setup's missing-tools step installs" "$(row STEP)" "STEP | Install moonlight"

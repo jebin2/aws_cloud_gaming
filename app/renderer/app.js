@@ -31,12 +31,13 @@ const byCommand = (table, cmd) => {
 // The header groups runs rather than listing them: `cg status` and `cg watcher`
 // are two commands and one refresh to whoever clicked it.
 const RUN_NAME = {
-  init: 'build', destroy: 'destroy', open: 'session', check: 'check',
-  status: 'refresh', watcher: 'refresh', 'library list': 'refresh',
-  cost: 'cost fetch',
-  'library push': 'archive change', 'library pull': 'archive change',
-  'library clean': 'archive change', 'library forget': 'archive change',
-  'library account': 'account change',
+  init: 'the build', destroy: 'deleting', open: 'the session', check: 'the check',
+  status: 'the refresh', watcher: 'the refresh', 'library list': 'the refresh',
+  cost: 'loading the bill',
+  'library push': 'the games change', 'library pull': 'the games change',
+  'library clean': 'the games change', 'library forget': 'the games change',
+  'library move': 'the games change', 'library reset': 'the games change',
+  'library keep-for': 'the games change', 'library account': 'the login change',
 };
 const runName = cmd => byCommand(RUN_NAME, cmd) || cmd[0];
 
@@ -49,39 +50,47 @@ const runName = cmd => byCommand(RUN_NAME, cmd) || cmd[0];
 //         "the build is still running", "the mirror to S3 finished".
 const CG_WORDS = {
   deps: { name: 'the tool check' },
-  creds: { name: 'the key check' },
+  creds: { name: 'the Amazon key check' },
   'creds tailscale': { name: 'the Tailscale check' },
-  config: { name: 'the settings read' },
-  status: { name: 'the box check' },
-  watcher: { name: 'the guard check' },
-  'library list': { name: 'the archive read' },
-  machines: { name: 'the machine list' },
-  sweep: { name: 'the region scan' },
-  cost:              { name: 'the bill fetch' },
+  config: { name: 'reading your settings' },
+  status: { name: 'the machine check' },
+  watcher: { name: 'the auto-stop check' },
+  'library list': { name: 'reading your saved games' },
+  'library elsewhere': { name: 'looking for games in other locations' },
+  machines: { name: 'reading machine prices' },
+  sweep: { name: 'checking all locations' },
+  cost:              { name: 'loading the bill' },
   check:             { name: 'the laptop check' },
+  'watchdog logs':   { name: 'loading the auto-stop history' },
+  'config set':      { name: 'saving a setting' },
   // Everything cg says runs alone - see `cg --contract`, and the test that
   // holds this list to it. These are the ones whose name ends up on a Stop
   // button, so none of them may read as something cheap.
   init:                      { name: 'the build' },
-  destroy:                   { name: 'the destroy' },
-  open:                      { name: 'the stream' },
-  'library push':            { name: 'the mirror to S3' },
-  'library pull':            { name: 'the fetch from S3' },
-  'library forget':          { name: 'forgetting a game' },
-  'library clean':           { name: 'the delete from S3' },
-  'library account':         { name: 'the Steam account change' },
-  'creds set':               { name: 'saving the AWS key' },
+  destroy:                   { name: 'deleting the machine' },
+  open:                      { name: 'the game session' },
+  'library push':            { name: 'saving your games' },
+  'library pull':            { name: 'downloading your games' },
+  'library forget':          { name: 'deleting a game' },
+  'library clean':           { name: 'cleaning up leftover files' },
+  'library move':            { name: 'moving a game' },
+  'library reset':           { name: 'keeping a game' },
+  'library keep-for':        { name: 'changing how long games are kept' },
+  'library account':         { name: 'changing the Steam login' },
+  'creds set':               { name: 'saving your Amazon key' },
   // Longer than 'creds set', which is the AWS key: without this, saving a
   // Tailscale token was announced as saving an AWS one.
   'creds set tailscale':     { name: 'saving the Tailscale token' },
-  'creds tailscale signin':  { name: 'the Tailscale sign-in' },
-  'creds tailscale authkey': { name: 'saving the box auth key' },
-  'deps install':            { name: 'installing the tools' },
+  'creds tailscale signin':  { name: 'signing in to Tailscale' },
+  'creds tailscale authkey': { name: 'saving the machine key' },
+  'deps install':            { name: 'installing tools' },
 };
 const cgWords = cmd => byCommand(CG_WORDS, cmd) || {};
 // Falls back to the command itself: a name nobody wrote down is better said in
 // cg's words than guessed at.
-const cgName = cmd => cgWords(cmd).name || `cg ${cmd.filter(a => !a.startsWith('-')).join(' ')}`;
+const cgName = cmd => cgWords(cmd).name || 'a background task';
+// The same, to start a sentence with.
+const CgName = cmd => { const s = cgName(cmd); return s.charAt(0).toUpperCase() + s.slice(1); };
 // Runs long enough to be worth going back to.
 const WATCHABLE = new Set(['init', 'destroy', 'open']);
 const LONG_LIBRARY = new Set(['push', 'pull', 'clean']);
@@ -128,7 +137,7 @@ function updateHeader() {
   if (elsewhere) {
     // Named in full here, not grouped: this points at one run, and what it is
     // decides whether you want to go and watch it.
-    $('goto-label').textContent = `${cgName(elsewhere.cmd)} is running - show it`;
+    $('goto-label').textContent = `${CgName(elsewhere.cmd)} is running · show it`;
     $('goto').dataset.view = elsewhere.view;
   }
 
@@ -158,7 +167,7 @@ function note(text, tone) {
   if (!activity.length) {
     const el = document.createElement('span');
     el.className = 'text-outline';
-    el.textContent = 'nothing yet';
+    el.textContent = 'Nothing yet';
     wrap.append(el);
     return;
   }
@@ -187,19 +196,29 @@ function logKind(event) {
   return 'other';
 }
 
+// What a row is, in a word. Data a command hands back is the app's to read,
+// not yours: it is shown only with "Show details".
+const LOG_WORD = { step: 'Step', error: 'Problem', fail: 'Problem', warn: 'Note', ask: 'Question',
+                   ok: 'Done', wait: 'Waiting', raw: 'Data' };
+function logShown(row) {
+  return (logFilter === 'all' || row.dataset.group === logFilter)
+    && (row.dataset.raw !== '1' || $('log-details').checked);
+}
 function logLine(event) {
   const kind = event.kind || event.t;
   const row = document.createElement('div');
   row.dataset.group = logKind(event);
+  if (event.t === 'raw') row.dataset.raw = '1';
   row.className = 'log-row';
-  row.hidden = logFilter !== 'all' && row.dataset.group !== logFilter;
+  row.hidden = !logShown(row);
   row.innerHTML = '<time></time><span class="k"></span><span class="t"></span>';
   row.querySelector('time').textContent = (event.at || '').slice(11, 19)
     || new Date().toLocaleTimeString();
-  row.querySelector('.k').textContent = event.t === 'line' ? (event.kind || '') : event.t;
-  row.querySelector('.k').className = 'k ' + kind;
+  row.querySelector('.k').textContent = event.t === 'exit' ? (event.rc === 0 ? 'Done' : 'Stopped')
+    : LOG_WORD[event.t === 'line' ? event.kind : event.t] || '';
+  row.querySelector('.k').className = 'k ' + (event.t === 'exit' ? (event.rc === 0 ? 'ok' : 'fail') : kind);
   row.querySelector('.t').textContent =
-    event.text || event.prompt || (event.t === 'exit' ? `exit ${event.rc}` : '');
+    event.text || event.prompt || (event.t === 'exit' ? (event.rc === 0 ? 'Finished' : 'Did not finish') : '');
   const log = $('log');
   log.append(row);
   // A long build is thousands of lines; the window keeps the last 2000.
@@ -211,9 +230,7 @@ function logLine(event) {
 
 function applyLogFilter(which) {
   logFilter = which;
-  for (const row of $('log').children) {
-    row.hidden = which !== 'all' && row.dataset.group !== which;
-  }
+  for (const row of $('log').children) row.hidden = !logShown(row);
   for (const b of document.querySelectorAll('[data-filter]')) {
     b.classList.toggle('btn-primary', b.dataset.filter === which);
   }
@@ -250,7 +267,9 @@ function askConfirm({ title, body, yes = 'Continue', no = 'Cancel', danger = fal
 }
 
 function ask(id, event) {
-  $('ask-prompt').textContent = event.prompt || event.id;
+  // A question the app knows is asked in its own words; cg's prompt is written
+  // for a terminal ("[d] destroy  [n] leave it running:").
+  $('ask-prompt').textContent = ASK_QUESTION[event.id] || event.prompt || event.id;
   const input = $('ask-input');
   const box = $('ask-choices');
   // cg states the answers it accepts. When it does, this is a CHOICE, and a
@@ -307,9 +326,12 @@ const ASK = {
   tsAuthKey:  'tailscale-auth-key',
   sessionEnd: 'session-end',
 };
+const ASK_QUESTION = {
+  [ASK.sessionEnd]: 'The game session ended. What should happen to the machine?',
+};
 const ASK_CHOICE_LABEL = {
-  [`${ASK.sessionEnd}:d`]: 'destroy the box (recommended - the games are mirrored to S3)',
-  [`${ASK.sessionEnd}:n`]: 'leave it running (it keeps billing by the hour)',
+  [`${ASK.sessionEnd}:d`]: 'Delete the machine (recommended - your games are saved first)',
+  [`${ASK.sessionEnd}:n`]: 'Keep it running (it keeps costing by the hour)',
 };
 // Any id the window pre-answers but cg no longer asks under is a modal waiting
 // to appear in the middle of a build - which is exactly what this replaced.
@@ -319,10 +341,10 @@ async function checkAsks() {
   if (!Array.isArray(asks) || !asks.length) return;   // cg could not be asked
   const gone = Object.values(ASK).filter(id => !asks.includes(id));
   if (gone.length) {
-    console.error('cg no longer asks under: ' + gone.join(', ')
-                  + ' - a dialog here will not be used to answer it');
-    note(`This app expects cg to ask for ${gone.join(', ')}, and it does not. `
-         + 'The app and cg are different versions.', 'text-error');
+    console.error('This app and its scripts are different versions. The scripts no longer ask: ' + gone.join(', ')
+                  + ' - the app cannot answer it.');
+    note(`The app expected to be asked for ${gone.join(', ')}, and was not. `
+         + 'Update the app and its scripts to the same version.', 'text-error');
   }
 }
 
@@ -421,28 +443,28 @@ function billingItems(s) {
   const box = s.box && !['terminated', 'shutting-down'].includes(s.box.state) ? s.box : null;
   if (box) {
     const spot = box.lifecycle === 'spot';
-    items.push({ name: `Machine · ${box.type}, ${spot ? 'spot' : 'on demand'}`,
+    items.push({ name: `Machine · ${box.type}, ${spot ? 'Spot' : 'Standard'}`,
                  hour: box.state === 'running' || box.state === 'pending'
                    ? hourlyInr(box.type, spot) : null,
-                 note: box.state === 'stopped' ? 'stopped - not billed by the hour' : null });
+                 note: box.state === 'stopped' ? 'Stopped · not costing by the hour' : null });
     if (box.public_ip) items.push({ name: 'Public IP address', hour: r.ipv4_hour * inr });
   }
   if (res.volumes_gb > 0) {
     items.push({ name: `${box ? 'Machine disk' : 'Disk left behind'} · ${res.volumes_gb} GB`,
                  month: res.volumes_gb * r.ebs_gb_month * inr,
-                 warn: !box, note: box ? null : 'no machine is using it' });
+                 warn: !box, note: box ? null : 'No machine is using it' });
   }
   const a = s.archive || {};
-  if (a.bytes > 0) items.push({ name: `Game archive · ${GB(a.bytes)}`, month: (a.usd_month || 0) * inr });
+  if (a.bytes > 0) items.push({ name: `Saved games · ${GB(a.bytes)}`, month: (a.usd_month || 0) * inr });
   if (res.snapshots > 0) {
     items.push({ name: `Snapshots · ${res.snapshots}${res.snapshots_gb ? `, ${res.snapshots_gb} GB` : ''}`,
                  month: (res.snapshots_gb || 0) * r.snapshot_gb_month * inr, upTo: true,
-                 warn: true, note: 'cg does not make these' });
+                 warn: true, note: 'Not made by this app' });
   }
   if (res.elastic_ips > 0) {
-    items.push({ name: `Elastic IP address${res.elastic_ips === 1 ? '' : 'es'} · ${res.elastic_ips}`,
+    items.push({ name: `Reserved IP address${res.elastic_ips === 1 ? '' : 'es'} · ${res.elastic_ips}`,
                  hour: res.elastic_ips * r.ipv4_hour * inr, warn: !box,
-                 note: box ? null : 'reserved with no machine' });
+                 note: box ? null : 'Reserved with no machine' });
   }
   return items;
 }
@@ -450,8 +472,8 @@ function billingItems(s) {
 function machineLine(s) {
   const spec = s.spec || {}, cfg = s.config || {};
   const type = s.box ? s.box.type : s.instance_type;
-  const buy = s.box ? (s.box.lifecycle === 'spot' ? 'spot' : 'on demand')
-    : cfg.spot === '0' ? 'on demand' : cfg.spot === '1' ? 'spot' : 'spot when available';
+  const buy = s.box ? (s.box.lifecycle === 'spot' ? 'Spot' : 'Standard')
+    : cfg.spot === '0' ? 'Standard' : cfg.spot === '1' ? 'Spot' : 'Spot when available';
   return [type, spec.gpu ? `NVIDIA ${spec.gpu}` : null, placeName(s.region), buy]
     .filter(Boolean).join(' · ');
 }
@@ -504,7 +526,7 @@ function paintDash() {
   tag.className = 'pill shrink-0 pill-ok';
   $('d-machine').textContent = machineLine(s);
   $('d-rate').textContent = box || building ? ''
-    : `${rs(hour)}/hour while it runs · ready in 10–20 minutes`;
+    : `${rs(hour)} an hour while it runs · ready in about 15 minutes`;
   $('d-rate').hidden = !$('d-rate').textContent;
   $('d-prog').hidden = !building;
   $('d-build').hidden = !!box || building || !!credErr;
@@ -565,7 +587,10 @@ function paintDash() {
   const b = s.budget || {};
   const exact = costNow && costNow.month && costNow.month.total_inr != null ? costNow.month.total_inr : null;
   const spent = exact != null ? exact : b.spent != null ? b.spent * inr : null;
-  const limit = b.limit != null ? b.limit * inr : null;
+  // Your number, as set. AWS keeps it in dollars converted when it was made;
+  // turned back at today's rate it read Rs 5,016 for 5,000.
+  const setBudget = Number(setting('GAME_BUDGET_INR', NaN));
+  const limit = b.limit == null ? null : isFinite(setBudget) ? setBudget : b.limit * inr;
   $('d-month').textContent = spent == null ? '—' : limit ? `${rs(spent)} of ${rs(limit)}` : rs(spent);
   $('d-month-bar').style.width = spent != null && limit ? `${Math.min(100, (spent / limit) * 100)}%` : '0%';
   $('d-month-bar').className = 'h-full ' + (spent != null && limit && spent >= limit * 0.8 ? 'bg-tertiary' : 'bg-primary');
@@ -577,8 +602,8 @@ function paintDash() {
     : spent == null ? `Budget ${rs(limit)}`
     : `${Math.round((spent / limit) * 100)}% of the monthly budget`) + proj;
   $('d-month-src').textContent = exact != null
-    ? `Exact, from Cost Explorer at ${costNowAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-    : b.spent != null ? 'From AWS Budgets - updates a few times a day' : '';
+    ? `Exact, from your AWS bill at ${costNowAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    : b.spent != null ? 'Estimated by AWS · updates a few times a day' : '';
   const call = (s.rates || {}).ce_call_usd;
   $('d-cost-price').textContent = call && isFinite(inr) ? rs(call * inr) : '';
   // The Cost page's Refresh is the same call, so it carries the same price.
@@ -589,17 +614,17 @@ function paintDash() {
   const n = (archive.games || []).length;
   if (credErr || a.error) {
     $('d-games').textContent = 'Unknown';
-    $('d-games-sub').textContent = a.error ? 'The archive could not be read. This is not the same as empty.'
+    $('d-games-sub').textContent = a.error ? 'Your saved games could not be read. That does not mean there are none.'
       : 'AWS could not be reached.';
     $('d-games-keep').textContent = '';
   } else {
     $('d-games').textContent = !a.bytes ? 'No games saved yet'
-      : `${n || '—'} game${n === 1 ? '' : 's'} · ${GB(a.bytes)}`;
+      : n ? `${n} game${n === 1 ? '' : 's'} · ${GB(a.bytes)}` : `${GB(a.bytes)} saved`;
     $('d-games-sub').textContent = a.bytes
       ? `Saved in ${placeName(s.region)} · ${rs((a.usd_month || 0) * inr)} a month to keep` : '';
-    const days = a.expiry_days;
+    const days = (libNow && libNow.expiry_days != null) ? libNow.expiry_days : a.expiry_days;
     $('d-games-keep').textContent = !a.bytes ? ''
-      : days ? `Deleted after ${days} days with no machine.` : 'Kept until you delete them.';
+      : days ? `Deleted ${days} days after you last play.` : 'Kept until you delete them.';
     $('d-games-keep').className = 'font-code-sm text-code-sm mt-space-sm '
       + (days ? 'text-tertiary' : 'text-primary');
   }
@@ -627,7 +652,7 @@ function paintDash() {
     const ms = pingNow && pingNow.median_ms != null ? ` · ${pingNow.median_ms} ms` : '';
     tsLines.push(!pingNow ? [null, 'Checking the connection']
       : pingNow.path === 'direct' ? [true, `Direct connection${ms}`]
-      : pingNow.path === 'DERP' ? ['warn', `Relayed through Tailscale${ms} - slower for streaming`]
+      : pingNow.path === 'DERP' ? ['warn', `Relayed${ms} · slower for streaming`]
       : [null, 'The connection could not be measured']);
   }
   for (const [ok, text] of tsLines) {
@@ -655,9 +680,9 @@ function paintDash() {
     [g2 ? (g2.armed === false ? false : true) : null,
      `An idle machine stops after ${idleAfter}`],
     [g3 ? g3.armed : null,
-     g3 && g3.armed ? 'Cloud watchdog: stops a forgotten machine' : 'Cloud watchdog is off'],
+     g3 && g3.armed ? 'Auto-stop in AWS: stops a forgotten machine' : 'Auto-stop in AWS is off'],
     [b.limit != null ? true : (statusNow ? false : null),
-     b.limit != null ? `Budget alert at ${rs(limit)} - emails ${b.alerts || 0} address${b.alerts === 1 ? '' : 'es'}`
+     b.limit != null ? `Budget alert at ${rs(limit)} · ${b.alerts ? `emails ${b.alerts} address${b.alerts === 1 ? '' : 'es'}` : 'no email address set'}`
                      : 'No budget alert is set'],
   ];
   for (const [ok, text] of lines) {
@@ -684,16 +709,16 @@ function paintSession() {
     const label = b.lastChild;
     if (label && label.nodeType === 3) label.textContent = live ? 'Streaming' : 'Play';
     b.title = live
-      ? `a stream is already running from this laptop (pid ${sessionNow.pid})`
-      : 'opens Moonlight and streams the box';
+      ? `a game session is already open on this laptop`
+      : 'Opens Moonlight and connects to your machine';
   }
   const note = $('b-session');
   if (note) {
     note.hidden = !live;
     note.textContent = live
-      ? `A stream is already open from this laptop (pid ${sessionNow.pid}`
+      ? `A game session is already open on this laptop (open`
         + `${sessionNow.age_s ? ', ' + uptime(new Date(Date.now() - sessionNow.age_s * 1000).toISOString()) : ''}).`
-        + ' Find that Moonlight window - cg refuses a second one.'
+        + ' Switch to that Moonlight window; only one can be open.'
       : '';
   }
 }
@@ -763,8 +788,8 @@ function paintCostPage() {
     $('c-cap-chip').className = 'pill ' + (over ? 'pill-bad' : 'pill-ok');
   }
   $('c-cap-note').textContent = !inAws
-    ? 'No spending alert exists in AWS - nothing will email you.'
-    : isFinite(budget) ? `Budget ${rs(budget)} a month - it emails you, it stops nothing.` : '';
+    ? 'No budget alert is set up in AWS, so nothing will email you.'
+    : isFinite(budget) ? `Budget ${rs(budget)} a month. AWS emails you if you pass it; it stops nothing.` : '';
   $('c-cap-note').className = 'font-code-sm text-code-sm mt-space-sm ' + (inAws ? 'text-outline' : 'text-error');
 
   // ── credits ──
@@ -777,7 +802,7 @@ function paintCostPage() {
   // ── day by day: what you played, the machine, storage, and the rest ──
   const asked = (costNowAt || now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   $('c-days-note').textContent = 'Days with nothing billed are left out. AWS\'s bill runs about a day behind. '
-    + `Asked at ${asked}` + (inr ? ` · ₹${inr} to the dollar` : '')
+    + `Loaded at ${asked}` + (inr ? ` · ₹${inr} to the dollar` : '')
     + (rate.ce_call_usd ? ` · each Refresh costs ${r(rate.ce_call_usd)}.` : '.');
   const parts = x => ({ machine: x.compute || 0, storage: (x.s3 || 0) + (x.disk || 0),
                         other: (x.egress || 0) + (x.api || 0) + (x.other || 0) });
@@ -822,29 +847,42 @@ function paintCostPage() {
   $('c-standby').textContent = standby.usd_month != null
     ? `${r(standby.usd_month + awayUsd + (strayed ? left : 0))} a month` : '—';
   $('c-standby-sub').textContent = res.instance
-    ? 'A machine is running now - its hourly rate is on top of this.'
+    ? 'A machine is running now. Its hourly cost is on top of this.'
     : 'What AWS bills while nothing is running.';
   const bills = $('c-bills');
   bills.textContent = '';
-  const line = (label, value) => {
+  const line = (label, value, go) => {
     const div = document.createElement('div');
     div.className = 'row border-b border-surface-variant/40 last:border-b-0';
-    const a = document.createElement('span'); a.className = 'font-code-sm text-code-sm text-outline'; a.textContent = label;
+    const a = document.createElement(go ? 'button' : 'span');
+    a.className = 'font-code-sm text-code-sm ' + (go ? 'text-primary hover:underline text-left' : 'text-outline');
+    a.textContent = go ? `${label} →` : label;
+    if (go) a.onclick = go;
     const b = document.createElement('span'); b.className = 'font-code-sm text-code-sm'; b.textContent = value;
     div.append(a, b); bills.append(div);
   };
-  line('Saved games', arch.bytes
-    ? `${GB(arch.bytes)} · ${r(standby.archive_usd_month)} a month` : 'none · ₹0');
-  line('Leftover disks', res.volumes_gb
-    ? `${res.volumes_gb} GB · ${r(standby.volumes_usd_month)} a month` : 'none');
+  // One row for saved games, wherever they are - the Games page has them one
+  // by one, so the row goes there. Where some are kept outside the machine's
+  // location, that is said under it rather than as a row of its own.
+  const savedBytes = (arch.bytes || 0) + away.reduce((a, p) => a + (p.bytes || 0), 0);
+  const savedUsd = (standby.archive_usd_month || 0) + awayUsd;
+  line('Saved games', savedBytes ? `${GB(savedBytes)} · ${r(savedUsd)} a month` : 'None', () => goView('library'));
+  if (away.length) {
+    const note = document.createElement('p');
+    note.className = 'font-code-sm text-code-sm text-outline -mt-space-xs mb-space-xs';
+    note.textContent = away.map(p => `${GB(p.bytes)} of it is in ${p.region ? placeName(p.region) : 'another location'}`)
+      .join(', ') + ', which your machine does not use. Move or delete it on Games.';
+    bills.append(note);
+  }
+  // Only when there is one: a disk a deleted machine left behind, which bills
+  // until removed. Normally there are none, and a "none" row only raised the
+  // question of what it was.
+  if (res.volumes_gb) line('Disk left by a deleted machine', `${res.volumes_gb} GB · ${r(standby.volumes_usd_month)} a month`);
   if (res.snapshots_gb) line('Disk copies', `${res.snapshots_gb} GB · ${r(standby.snapshots_usd_month)} a month`);
-  for (const p of away)
-    line(`Saved in ${p.region ? placeName(p.region) : 'another place'}`,
-         `${GB(p.bytes)} · ${r(p.usd_month)} a month - not used, see Library`);
   $('c-unknown').hidden = !strayed;
   $('c-unknown').textContent = strayed
-    ? `AWS bills ${r(left)} a month more storage than your saved games explain. `
-      + 'It is somewhere cg is not looking - most likely games left behind in an earlier region.'
+    ? `AWS charges ${r(left)} a month for storage this app cannot find. `
+      + 'Most likely games left behind in an earlier location.'
     : '';
 
   // ── free streaming ──
@@ -863,7 +901,7 @@ function paintCostPage() {
     const after = `${r(rate.egress_gb)} a GB - about ${r(gbPerHour * rate.egress_gb)} an hour at your quality`;
     $('c-egress-note').textContent = e.gb_left > 0
       ? `About ${Math.floor(e.gb_left / gbPerHour)} h of play left free, then ${after}.`
-      : `The free 100 GB is used - streaming now costs ${after}.`;
+      : `The free 100 GB is used up. Streaming now costs ${after}.`;
   }
 }
 // Games cg saved in a region the machine is no longer built in. They bill like
@@ -906,7 +944,7 @@ function paintLibraryPage() {
   $('lib-error').hidden = !d.error;
   if (d.error) {
     $('lib-error').textContent = `Your saved games could not be read: ${d.error}. `
-      + 'This is not the same as having none.';
+      + 'That does not mean there are none.';
     $('lib-keep').textContent = '';
     $('lib-keepfor-row').hidden = true;
     $('lib-orphan-box').hidden = true;
@@ -945,9 +983,9 @@ function paintLibraryPage() {
         b.className = 'btn'; b.textContent = label; b.onclick = fn;
         act.append(b);
       };
-      if (days) btn('Reset', () => resetGame(g));
+      if (days) btn('Keep', () => resetGame(g));
       if (g.bucket) btn('Move', () => moveGame(g, here, inr));
-      btn('Forget', () => forgetGame(g));
+      btn('Delete', () => forgetGame(g));
     }
     rows.append(tr);
   }
@@ -984,13 +1022,13 @@ function paintLibraryPage() {
   }
   $('lib-keep').textContent = !games.length ? ''
     : !days ? 'Kept until you forget them.'
-    : `Deleted ${days} days after a machine was last running. Reset counts one game from today.`;
+    : `Saved games are deleted ${days} days after you last play. Keep restarts the countdown for one game.`;
 
   $('lib-orphan-box').hidden = !d.orphan_bytes;
   if (d.orphan_bytes) {
     $('lib-orphans').textContent =
-      `${(d.orphan_bytes / 1073741824).toFixed(1)} GB left over from a save that did not finish`
-      + ` · ${r(d.orphan_usd_month)} a month, and no use to any game.`;
+      `${(d.orphan_bytes / 1073741824).toFixed(1)} GB of leftover files from a save that did not finish`
+      + ` · ${r(d.orphan_usd_month)} a month, and no game can use them.`;
   }
 }
 
@@ -999,7 +1037,7 @@ function paintLibraryPage() {
 function deleteOn(g, days, seen, marks) {
   if (days === 0) return 'never';
   if (days == null || !marks) return '—';
-  if (boxNow) return 'kept while a machine runs';
+  if (boxNow) return 'Kept while a machine runs';
   if (!seen) return '—';
   const from = Math.max(Date.parse(seen), g.kept ? Date.parse(g.kept) : 0);
   const when = new Date(from + days * 86400000);
@@ -1018,7 +1056,7 @@ async function resetGame(g) {
 
 async function moveGame(g, here, inr) {
   const name = g.name || g.appid;
-  const to = here ? placeName(here) : 'where your machine is built';
+  const to = here ? placeName(here) : 'where your machine runs';
   const rate = (elsewhereNow || {}).xregion_usd_gb;
   const cost = rate && isFinite(inr) ? rs((g.bytes / 1073741824) * rate * inr) : null;
   const ok = await askConfirm({
@@ -1045,12 +1083,14 @@ const ago = s => s == null ? '' : s < 90 ? `${s}s ago` : s < 5400 ? `${Math.roun
 async function forgetGame(g) {
   const name = g.name || g.appid;
   const ok = await askConfirm({
-    title: `Forget ${name}?`,
+    title: `Delete ${name}?`,
     body: `Its ${GB(g.bytes)} saved copy is deleted for good. There is no undo.\n\n`
         + 'Playing it again means Steam downloads it onto a new machine.',
-    yes: 'Forget', danger: true, word: 'FORGET',
+    yes: 'Delete', danger: true, word: 'DELETE',
   });
-  if (ok) await libraryRun(['library', 'forget', String(g.appid), ...fromArgs(g)], `Forgetting ${name}`, 'forget-game', 'FORGET');
+  // cg asks for FORGET; the word typed here is the app's own, and the answer
+  // handed to cg is cg's.
+  if (ok) await libraryRun(['library', 'forget', String(g.appid), ...fromArgs(g)], `Deleting ${name}`, 'forget-game', 'FORGET');
 }
 
 // The word typed in the app's own dialog, handed to cg when it asks for it.
@@ -1085,7 +1125,8 @@ async function libraryRun(args, doing, askId, word) {
   step('Working…');
   let first = true;
   const onStep = text => {
-    const said = text.charAt(0).toUpperCase() + text.slice(1);
+    const plain = text.replace(/\b(?:af|ap|ca|eu|il|me|mx|sa|us)-[a-z]+-\d\b/g, code => placeName(code));
+    const said = plain.charAt(0).toUpperCase() + plain.slice(1);
     // The placeholder gives way to cg's first real step rather than being ticked.
     if (first) { first = false; list.textContent = ''; current = null; }
     step(said);
@@ -1125,7 +1166,7 @@ function paintBuildLogin() {
   const choice = (config || []).find(r => r.key === 'GAME_STEAM_LOGIN');
   const fresh = choice && (choice.value || choice.default) === 'fresh';
   if (loginNow === null) {
-    line.textContent = 'reading…';
+    line.textContent = 'Reading…';
     note.textContent = '';
     return;
   }
@@ -1141,24 +1182,24 @@ function paintBuildLogin() {
     sel.value = fresh ? 'fresh' : 'use';
   }
   if (fresh) {
-    line.textContent = 'sign in on the machine';
+    line.textContent = 'You sign in on the machine';
     note.textContent = loginNow.present
-      ? 'the saved login is kept, and not used this time'
-      : 'nothing is saved to restore';
+      ? 'Your saved login is kept, but not used this time.'
+      : 'There is no saved login to use.';
     return;
   }
   if (!loginNow.present) {
-    line.textContent = 'sign in on the box';
-    note.textContent = 'no login is archived yet; one is saved when a box shuts down';
+    line.textContent = 'You sign in on the machine';
+    note.textContent = 'No login saved yet. It is saved when a machine shuts down.';
     return;
   }
   // Which account, when the archive says: a key that signs in as someone you
   // did not expect is the thing worth catching before a build, not after it.
   const who = (loginNow.accounts || []).find(a => a.most_recent) || (loginNow.accounts || [])[0];
-  line.textContent = who ? `signed in as ${who.account || who.steamid}` : 'signed in from the archive';
+  line.textContent = who ? `Signs in as ${who.account || who.steamid}` : 'Signs in with your saved login';
   note.textContent = loginNow.accounts === null
-    ? 'restored from the archive - the account names could not be read'
-    : 'restored from the archive, so Steam does not ask';
+    ? 'Uses your saved login (the account name could not be read).'
+    : 'Steam opens already signed in.';
 }
 
 function paintLogin(l) {
@@ -1183,7 +1224,7 @@ function paintLoginTable() {
     return d.toDateString() === new Date().toDateString() ? 'today'
       : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   };
-  const who = a => (a === null || a === undefined ? 'names unreadable'
+  const who = a => (a === null || a === undefined ? 'Name unknown'
     : a.map(r => r.account || r.persona || r.steamid || '?').join(', '));
   const line = (detail, place, status, bucket) => {
     const tr = document.createElement('tr');
@@ -1197,7 +1238,7 @@ function paintLoginTable() {
     const b = document.createElement('button');
     // The one in use is red: forgetting it is what changes the next machine.
     b.className = bucket ? 'btn' : 'btn btn-danger';
-    b.textContent = 'Forget';
+    b.textContent = 'Remove';
     b.onclick = () => forgetLogin(detail, bucket, place);
     act.append(b);
     rows.append(tr);
@@ -1207,18 +1248,18 @@ function paintLoginTable() {
     cell(tr, text, 'py-space-sm ' + (cls || 'text-outline')).colSpan = 6;
     rows.append(tr);
   };
-  if (!l) say('Could not read the saved login - this is not the same as none.', 'text-error');
+  if (!l) say('The saved login could not be read. That does not mean there is none.', 'text-error');
   else if (!l.present) say('No Steam login saved. The next machine asks you to sign in once.');
-  else line(l, here, 'signs in', null);
+  else line(l, here, 'In use', null);
   for (const p of (elsewhereNow && elsewhereNow.places) || []) {
     if (p.error || !p.login_detail || !p.login_detail.present) continue;
-    line(p.login_detail, p.region, 'not used', p.bucket);
+    line(p.login_detail, p.region, 'Old copy', p.bucket);
   }
   if (l && l.present) {
     const accts = l.accounts || [];
     const next = accts.find(r => r.most_recent) || accts[0];
     note.textContent = (next ? `A new machine signs in as ${next.account || next.persona || next.steamid}. ` : '')
-      + 'Forgetting it costs nothing and saves nothing - the next machine just asks you to sign in.'
+      + 'Removing it does not save money. The next machine will just ask you to sign in.'
       + (accts.length > 1 ? ` ${accts.length} accounts are saved together and come back together; to keep `
         + 'only one, sign in as it on the machine and it is saved when the machine shuts down.' : '');
   }
@@ -1229,20 +1270,20 @@ async function forgetLogin(l, bucket, place) {
   const who = rows.length ? rows.map(r => r.account || r.steamid || '?').join(', ') : 'the saved account';
   const where = place ? placeName(place) : '';
   const ok = await askConfirm(bucket ? {
-    title: `Forget the Steam login saved in ${where}?`,
+    title: `Remove the old Steam login in ${where}?`,
     body: `An old copy for ${who} that no machine uses. There is no undo.\n\n`
         + 'The login a new machine signs in as is not affected, and neither are your games.',
-    yes: 'Forget', word: 'FORGET',
+    yes: 'Remove', word: 'REMOVE',
   } : {
-    title: 'Forget the saved Steam login?',
+    title: 'Remove the saved Steam login?',
     body: `This deletes the saved login for ${who}. There is no undo.\n\n`
         + 'Your games are not affected. What you lose is being signed in: the next machine '
         + 'asks for your password and Steam Guard code.\n\n'
-        + 'It is 22 KB, so this saves no money. Do it to change which account a new machine uses.',
-    yes: 'Forget', danger: true, word: 'FORGET',
+        + 'It does not save money. Do it to change which account a new machine uses.',
+    yes: 'Remove', danger: true, word: 'REMOVE',
   });
   if (ok) await libraryRun(['library', 'account', 'forget', ...(bucket ? ['--from', bucket] : [])],
-                          bucket ? `Forgetting the Steam login saved in ${where}` : 'Forgetting the Steam login',
+                          bucket ? `Removing the old Steam login in ${where}` : 'Removing the Steam login',
                           'forget-login', 'FORGET');
 }
 
@@ -1260,7 +1301,7 @@ function netWords(g, d) {
     const end = sd.expected
       ? ` When it shuts down, the machine is ${sd.value === 'terminate' ? 'deleted' : 'stopped'}.` : '';
     return [`${g.idle_min || 15} min with nobody connected, and it shuts itself down.${end}`,
-            'Needs the machine running - it lives on it.'];
+            'Runs on the machine itself.'];
   }
   return [`Every 5 min: ${g.idle_min || 30} min with no stream, or a shutdown stuck for `
           + `${g.stuck_min || 60} min, and AWS ends the machine.`,
@@ -1288,16 +1329,16 @@ function paintGuards(d) {
     : gone ? 'No machine is running · nothing to stop' : `Machine ${d.instance_state}`;
   const cloud = by(3);
   $('g-sub').textContent = cloud.last_decision
-    ? `AWS last checked ${ago(cloud.last_decision_age_s)}: "${cloud.last_decision}"`
-    : cloud.armed ? 'AWS checks every 5 minutes; nothing recorded in the last hour.' : '';
+    ? `Last check ${ago(cloud.last_decision_age_s)}: ${/nothing to do/.test(cloud.last_decision) ? 'nothing running.' : cloud.last_decision}`
+    : cloud.armed ? 'Auto-stop checks every 5 minutes. Nothing recorded in the last hour.' : '';
 
   // What is wrong, in red, on top - not three cards down.
   const warn = [];
-  if (cloud.armed === false) warn.push(`The AWS check is ${cloud.state || 'off'} - a machine left running is stopped only by itself.`);
+  if (cloud.armed === false) warn.push(`Auto-stop in AWS is ${cloud.state || 'off'}. A machine left running can only stop itself.`);
   if (running && by(2).armed === false) warn.push("The machine's own check is off - only AWS will stop it.");
   const sd = d.shutdown_action || {};
-  if (sd.expected && !sd.ok) warn.push(`When it shuts down AWS will ${sd.value || 'do nothing'} it - it must ${sd.expected} it.`);
-  if ((d.budget || {}).usd == null) warn.push('No spending alert exists in AWS - nothing will email you.');
+  if (sd.expected && !sd.ok) warn.push(`AWS is set to ${sd.value === 'terminate' ? 'delete' : 'stop'} the machine when it shuts down; it should ${sd.expected === 'terminate' ? 'delete' : 'stop'} it.`);
+  if ((d.budget || {}).usd == null) warn.push('No budget alert is set up in AWS, so nothing will email you.');
   $('g-warn').textContent = '';
   for (const w of warn) {
     const el = document.createElement('span');
@@ -1345,10 +1386,10 @@ function paintGuards(d) {
     const left = document.createElement('div');
     const n = document.createElement('p');
     n.className = 'font-code-md text-code-md';
-    n.textContent = label(r);
+    n.textContent = PLAIN[key] || label(r);
     const note = document.createElement('p');
     note.className = 'font-code-sm text-code-sm text-outline mt-0.5';
-    note.textContent = r.note;
+    note.textContent = PLAIN_NOTE[key] || r.note;
     left.append(n, note);
     const right = document.createElement('div');
     right.className = 'flex items-center gap-space-sm shrink-0';
@@ -1396,7 +1437,7 @@ function paintDeps(d) {
 // that cannot install anything is worse than none.
 function toolAction(tools) {
   const all = (depsNow && depsNow.tools) || [];
-  const rows = tools.map(t => all.find(x => x.tool === t) || { tool: t, label: t === 'aws' ? 'the AWS CLI' : t });
+  const rows = tools.map(t => all.find(x => x.tool === t) || { tool: t, label: t === 'aws' ? 'the Amazon tool' : t });
   const names = rows.map(x => x.label || x.tool).join(', ');
   // Not read yet: offer it, and cg says so if it cannot.
   if (!depsNow || (depsNow.package_manager && depsNow.root)) {
@@ -1404,8 +1445,8 @@ function toolAction(tools) {
   }
   return { label: `How to install ${names}`, go: () => askConfirm({
     title: `Install ${names} by hand`,
-    body: (depsNow && !depsNow.package_manager ? 'This laptop has no package manager cg can use. '
-           : `This window cannot become root here${depsNow && depsNow.root_blocked ? ` (${depsNow.root_blocked})` : ''}. `)
+    body: (depsNow && !depsNow.package_manager ? 'This laptop has no installer the app can use. '
+           : `The app cannot get permission to install here${depsNow && depsNow.root_blocked ? ` (${depsNow.root_blocked})` : ''}. `)
       + 'Run this, then press Refresh:\n\n' + rows.map(x => x.manual || x.plan || x.tool).join('\n'),
     yes: 'OK', no: null,
   }) };
@@ -1416,9 +1457,9 @@ function installDeps(tools) {
   return runInDialog({
     title: `Installing ${what}`,
     args: ['deps', 'install', ...tools],
-    starting: 'asking for your password first (the dialog can appear behind this window)',
-    done: 'installed',
-    fail: rc => `the install did not finish (exit ${rc})`,
+    starting: 'Asking for your password first. The prompt may open behind this window.',
+    done: 'Installed',
+    fail: rc => 'The install did not finish.',
   });
 }
 
@@ -1431,27 +1472,26 @@ function paintCreds(c) {
   const state = $('creds-state'), detail = $('creds-detail'), btn = $('creds-set');
   btn.hidden = false;
   if (!c.cli) {
-    state.textContent = 'the AWS CLI is not installed';
+    state.textContent = 'A required Amazon tool is not installed';
     state.className = 'font-code-md text-code-md text-error mt-space-sm';
-    detail.textContent = 'Nothing can be read from AWS until it is. Install it, '
-      + 'then this card can take a key.';
+    detail.textContent = 'Install it, then add your key here.';
     const act = toolAction(['aws']);
     btn.textContent = act.label;
     btn.onclick = act.go;
     return;
   }
-  btn.textContent = 'Set access key';
+  btn.textContent = c.key_id ? 'Update access key' : 'Add access key';
   btn.onclick = setCreds;
   if (c.valid) {
-    state.textContent = `${c.key_id || 'a key'} works`;
+    state.textContent = `Key ${c.key_id || ''} is working`.replace('  ', ' ');
     state.className = 'font-code-md text-code-md text-on-surface mt-space-sm';
     // The account is the thing worth seeing on a new laptop: a key that works
     // for the WRONG account reads as "fine" everywhere else in the app.
-    detail.textContent = [c.account && `account ${c.account}`, c.arn, c.source && `from ${c.source}`]
+    detail.textContent = [c.account && `Amazon account ${c.account}`]
       .filter(Boolean).join('  \u00b7  ');
     return;
   }
-  state.textContent = c.key_id ? `${c.key_id} was rejected` : 'no access key is configured';
+  state.textContent = c.key_id ? `Key ${c.key_id} was rejected` : 'No key added yet';
   state.className = 'font-code-md text-code-md text-error mt-space-sm';
   detail.textContent = c.error || 'AWS would not accept it.';
 }
@@ -1469,17 +1509,17 @@ function paintTskey(ts) {
   paintOnboardSoon();
   const state = $('tskey-state'), detail = $('tskey-detail'), btn = $('tskey-set');
   const canRootNow = Boolean(depsNow && depsNow.root);
-  const signed = ts.signed_in === true ? `signed in${ts.node ? ' as ' + ts.node : ''}`
+  const signed = ts.signed_in === true ? `This laptop is signed in${ts.node ? ' as ' + ts.node : ''}`
     : ts.signed_in === false
-      ? (canRootNow ? 'not signed in' : 'not signed in - in a terminal:  sudo tailscale up')
+      ? (canRootNow ? 'This laptop is not signed in' : 'This laptop is not signed in. In a terminal, run: sudo tailscale up')
     : 'Tailscale is not installed';
   const token =
-      !ts.present      ? 'no API token - dead nodes are left in place, key expiry stays on'
-    : ts.valid         ? 'API token works'
-    : ts.valid === false ? `API token rejected${ts.detail ? ' (' + ts.detail + ')' : ''}`
+      !ts.present      ? 'No access token (optional)'
+    : ts.valid         ? 'Access token is working'
+    : ts.valid === false ? 'Access token was rejected'
     // Unreachable says nothing about the token, so it must not be drawn as a
     // bad one: the fix for a flat network is not a new token.
-    : 'API token set, but api.tailscale.com did not answer';
+    : 'Access token saved, but Tailscale did not answer';
   state.textContent = signed;
   state.className = 'font-code-md text-code-md mt-space-sm '
     + (ts.signed_in === true ? 'text-on-surface' : 'text-error');
@@ -1489,18 +1529,18 @@ function paintTskey(ts) {
   // With a token here, nobody has to paste one.
   $('tskey-auth').textContent =
       ts.auth_key_stored && ts.can_mint
-        ? "the box's auth key is stored, and checked before each build"
-    : ts.auth_key_stored ? "the box's auth key is stored in .env"
-    : ts.can_mint        ? "the box's auth key is minted from this token at the next build"
-    : 'no auth key for the box - the next build will ask for one';
-  btn.textContent = ts.present ? 'Replace API token' : 'Set API token';
+        ? 'Machine key saved'
+    : ts.auth_key_stored ? 'Machine key saved'
+    : ts.can_mint        ? 'A machine key is made from your access token at the next build'
+    : 'No machine key yet. The next build will ask for one.';
+  btn.textContent = ts.present ? 'Update access token' : 'Add access token';
   btn.onclick = openTskey;
   // Pasting the box's key is for when the token cannot make one: no token, or
   // a tailnet whose ACLs will not issue an untagged key. With a working token
   // there is nothing to type, so there is no button.
   const authBtn = $('tskey-authkey');
   authBtn.hidden = ts.can_mint && !ts.auth_key_stored;
-  authBtn.textContent = ts.auth_key_stored ? 'Replace auth key' : 'Set auth key';
+  authBtn.textContent = ts.auth_key_stored ? 'Update machine key' : 'Add machine key';
   authBtn.onclick = setAuthKey;
   // Signing in is root's business - systemctl, then `tailscale up` - which in a
   // window means polkit. Where polkit cannot be reached the card says what to
@@ -1557,7 +1597,7 @@ async function runInDialog({ title, args, starting, done, fail }) {
     $('rundlg-done').focus();
     return true;
   }
-  runDlgStatus(rc === null ? 'could not start - something else is running'
+  runDlgStatus(rc === null ? 'Could not start: something else is running.'
                            : (typeof fail === 'function' ? fail(rc) : fail), 'bad');
   $('rundlg-retry').hidden = false;
   $('rundlg-done').hidden = false;
@@ -1579,9 +1619,9 @@ function signInTailscale() {
   return runInDialog({
     title: 'Signing in to Tailscale',
     args: ['creds', 'tailscale', 'signin'],
-    starting: 'starting - a password dialog opens first (it can appear behind this window)',
+    starting: 'Starting. A password prompt opens first and may appear behind this window.',
     done: () => (tskeyNow && tskeyNow.node) ? `signed in as ${tskeyNow.node}` : 'signed in',
-    fail: rc => `sign-in did not finish (exit ${rc})`,
+    fail: rc => 'Sign-in did not finish.',
   });
 }
 $('tskey-signin-go').onclick = signInTailscale;
@@ -1601,7 +1641,7 @@ function watchForSignInLink(text) {
   link.onclick = () => window.cg.openSignIn(m[0]);
   // What is being waited for, in words: the command is not stuck, it is
   // waiting for a browser - and that distinction is the whole dialog.
-  runSurface.status('waiting for you to finish in the browser');
+  runSurface.status('Waiting for you to finish in your browser.');
 }
 
 // Same shape as the AWS form, for the same reasons: one field, one Save, the
@@ -1617,23 +1657,19 @@ function watchForSignInLink(text) {
 // things. DENIED in particular is not the end: every quota this account holds
 // was granted on appeal rather than on the first ask.
 const QUOTA_STATE = {
-  PENDING: ['filed, not yet routed',
-            'AWS has it. The case appears within a minute or two - Refresh to look again.'],
-  CASE_OPENED: ['case open',
-            'A case exists. Usually this will get refused; reply to it with the appeal below '
-          + 'and a human reviews it, which takes two to four days. This line does not change '
-          + 'when you reply - the refusal and your appeal live on the case, and only AWS\u2019s '
-          + 'decision moves the request.'],
-  DENIED: ['refused - this is normal, and not the end',
-            'Every quota this rig has was granted on appeal, not on the first ask. Reply on the '
-          + 'case with the text below: it is the detailed use case they asked for.'],
-  CASE_CLOSED: ['case closed',
-            'Closed without the quota being raised. A closed case cannot be appealed - create a '
-          + 'new request and appeal that one.'],
+  PENDING: ['Sent',
+            'AWS has your request. It shows up within a couple of minutes; press Refresh to check.'],
+  CASE_OPENED: ['Being reviewed',
+            'AWS usually refuses the first request. When it does, reply with the text below '
+          + 'and a person reviews it, usually within two to four days.'],
+  DENIED: ['Refused (this is normal)',
+            'Reply to AWS with the text below. Every limit this setup has was granted on the second ask.'],
+  CASE_CLOSED: ['Closed',
+            'Closed without raising the limit. Send a new request and reply to that one.'],
   APPROVED: ['granted',
-            'It can take up to an hour to appear as the applied value. Refresh to check.'],
+            'It can take up to an hour to show. Press Refresh to check.'],
 };
-const QUOTA_LABEL = { ondemand: 'on demand', spot: 'spot' };
+const QUOTA_LABEL = { ondemand: 'standard', spot: 'spot' };
 let quotaNow = null, quotaKind = '', quotaAppeal = '', quotaCase = null, quotaWhere = '';
 
 const quotaCaseUrl = id => `https://console.aws.amazon.com/support/home#/case/?displayId=${id}`;
@@ -1646,7 +1682,7 @@ function quotaClear() {
   $('quota-log').textContent = '';
   $('quota-case-row').hidden = true;
   $('quota-case-url').textContent = '';
-  $('quota-copy').textContent = 'Copy the appeal';
+  $('quota-copy').textContent = 'Copy the reply';
   quotaAppeal = '';
   quotaCase = null;
 }
@@ -1690,18 +1726,18 @@ async function quotaRender() {
   $('quota-where').disabled = false;
   $('quota-go').hidden = false;
   $('quota-go').disabled = true;
-  $('quota-go').textContent = 'Confirm \u00b7 create case';
+  $('quota-go').textContent = 'Send the request';
   if (!kind) {
     quotaSay('', 'Pick one to see what it would ask for.');
     return;
   }
   const q = (quotaNow || {})[kind];
-  if (!q) { quotaSay('could not read this quota', 'cg quota says more.', 'bad'); return; }
+  if (!q) { quotaSay('Could not read this limit', '', 'bad'); return; }
   const need = quotaNow.vcpus_needed, type = quotaNow.instance_type;
 
   // Nothing to ask for. Offering the button here gets a duplicate refused.
   if (q.enough) {
-    quotaSay(`${q.value} vCPU already covers one ${type}`, 'Nothing to ask for.', 'ok');
+    quotaSay(`Your limit already covers one ${type}`, 'Nothing to ask for.', 'ok');
     $('quota-go').hidden = true;
     return;
   }
@@ -1717,33 +1753,33 @@ async function quotaRender() {
     quotaCase = r.case_id || null;
     $('quota-case-row').hidden = false;
     $('quota-case').hidden = !quotaCase;
-    $('quota-case-url').textContent = quotaCase ? quotaCaseUrl(quotaCase) : 'the case id has not appeared yet - Refresh';
+    $('quota-case-url').textContent = quotaCase ? quotaCaseUrl(quotaCase) : 'It has not appeared yet. Press Refresh.';
     // A closed case cannot be appealed, so asking again is the only way on.
     $('quota-go').hidden = r.status !== 'CASE_CLOSED';
     $('quota-go').disabled = r.status !== 'CASE_CLOSED';
-    if (r.status === 'CASE_CLOSED') $('quota-go').textContent = 'Confirm \u00b7 ask again';
+    if (r.status === 'CASE_CLOSED') $('quota-go').textContent = 'Send it again';
     const appeal = await runCg(quotaCmd('quota', 'appeal', kind), { capture: true });
     quotaAppeal = (appeal || '').trim();
     $('quota-copy').hidden = !quotaAppeal;
     if (quotaAppeal) {
       $('quota-pre-label').hidden = false;
-      $('quota-pre-label').textContent = 'Paste this as a reply on that case as an appeal when denied:';
+      $('quota-pre-label').textContent = 'If AWS refuses, reply to them with this:';
       $('quota-log').textContent = quotaAppeal;
     }
     return;
   }
 
   // Nothing asked for yet: say exactly what the case would contain.
-  quotaSay(`You have ${q.value === null ? 'an unknown number of' : q.value} vCPU. One ${type} needs ${need}.`, '');
+  quotaSay(`Your limit: ${q.value === null ? 'unknown' : q.value} vCPU. One ${type} needs ${need}.`, '');
   $('quota-pre-label').hidden = false;
-  $('quota-pre-label').textContent = 'This creates a support case containing:';
+  $('quota-pre-label').textContent = 'This sends AWS a request for:';
   $('quota-log').textContent =
       `Service:    EC2 Instances\n`
     + `Region:     ${quotaNow.region}\n`
-    + `Quota:      ${kind === 'spot' ? 'All G and VT Spot Instance Requests' : 'Running On-Demand G and VT instances'} (${q.code})\n`
-    + `New value:  ${need}   (exactly one instance - never more)\n\n`
-    + `Free. AWS usually refuses within minutes - that is step one, and the\n`
-    + `appeal on the case it opens is what gets approved.`;
+    + `Limit:      ${kind === 'spot' ? 'Spot GPU machines' : 'Standard GPU machines'}\n`
+    + `New value:  ${need} vCPU (one machine)\n\n`
+    + `Free. AWS usually refuses within minutes; replying to that refusal\n`
+    + `is what gets it approved.`;
   $('quota-go').disabled = false;
 }
 
@@ -1761,7 +1797,7 @@ function quotaWhereOptions(selected) {
     o.textContent = label || code;
     sel.append(o);
   };
-  add(current, current ? `${current} (cg is set to this one)` : '');
+  add(current, current ? `${current} (current)` : '');
   for (const r of (sweepNow && sweepNow.regions) || []) {
     if (r.enabled === false) continue;   // no quota to ask for until it is on
     add(r.region, `${r.region} - ${shortCity(r.city)}`);
@@ -1778,7 +1814,7 @@ async function openQuota(kind, where) {
   // half a second under a new question is worse than showing nothing.
   quotaClear();
   $('quota-kind').value = quotaKind;
-  $('quota-title').textContent = 'Ask AWS for GPU quota';
+  $('quota-title').textContent = 'Ask AWS for a higher GPU limit';
   $('quota-go').hidden = false;
   $('quota-go').disabled = true;
   $('quota-refresh').hidden = true;
@@ -1821,7 +1857,7 @@ $('quota-cancel').onclick = e => { e.preventDefault(); $('quota').close(); };
 $('quota-copy').onclick = async e => {
   e.preventDefault();
   try { await navigator.clipboard.writeText(quotaAppeal); $('quota-copy').textContent = 'Copied'; }
-  catch { $('quota-copy').textContent = 'select it below and copy'; }
+  catch { $('quota-copy').textContent = 'Select it below and copy'; }
 };
 $('quota-case').onclick = e => {
   e.preventDefault();
@@ -1833,16 +1869,16 @@ $('quota-go').onclick = async e => {
   $('quota-go').disabled = true;
   $('quota-go').textContent = 'Creating\u2026';
   $('quota-kind').disabled = true;
-  quotaSay('Creating the case\u2026', 'AWS answers in a few seconds.');
+  quotaSay('Sending the request\u2026', 'AWS answers in a few seconds.');
   $('quota-pre-label').hidden = true;
   const { rc, err } = await runCg(quotaCmd('quota', 'request', quotaKind), { wantRc: true });
   $('quota-kind').disabled = false;
   if (rc !== 0) {
-    quotaSay('the request was not created', (err || '').trim().split('\n')[0]
-      || `cg quota request exited ${rc}`, 'bad');
+    quotaSay('The request was not sent', (err || '').trim().split('\n')[0]
+      || '', 'bad');
     $('quota-log').textContent = (err || '').trim();
     $('quota-go').disabled = false;
-    $('quota-go').textContent = 'Confirm \u00b7 create case';
+    $('quota-go').textContent = 'Send the request';
     return;
   }
   // Read it back rather than believing the submit: the case id lags the
@@ -1851,7 +1887,7 @@ $('quota-go').onclick = async e => {
   await quotaRender();
   if (!quotaCase) {
     $('quota-case-row').hidden = false;
-    $('quota-case-url').textContent = 'the case id has not appeared yet - Refresh in a moment';
+    $('quota-case-url').textContent = 'It has not appeared yet. Press Refresh in a moment.';
   }
 };
 
@@ -1860,8 +1896,8 @@ $('quota-go').onclick = async e => {
 // it is slower than doing it.
 const OPTIN_STATE = {
   ENABLING: ['enabling', 'AWS is working on it. A few minutes is normal - Refresh to look again.'],
-  ENABLED: ['enabled', 'The region is usable. Rows for it are pickable now.'],
-  ENABLED_BY_DEFAULT: ['enabled', 'This region never needed enabling.'],
+  ENABLED: ['enabled', 'This location is ready. You can pick it now.'],
+  ENABLED_BY_DEFAULT: ['enabled', 'This location is already on.'],
   DISABLING: ['being disabled', 'AWS is turning it off. Wait for that to finish first.'],
 };
 let optinNow = null, optinPick = '';
@@ -1905,7 +1941,7 @@ function optinOptions() {
   const seen = new Set();
   sel.textContent = '';
   const first = document.createElement('option');
-  first.value = ''; first.textContent = 'pick one\u2026';
+  first.value = ''; first.textContent = 'Pick one\u2026';
   sel.append(first);
   const measured = new Map();
   for (const r of (sweepNow && sweepNow.regions) || []) measured.set(r.region, r);
@@ -1927,13 +1963,13 @@ function optinOptions() {
       : code;
     into.append(o);
   };
-  const off = group('not enabled yet');
+  const off = group('Not on yet');
   for (const code of (optinNow && optinNow.disabled) || []) if (measured.has(code)) add(off, code, measured.get(code));
   for (const code of (optinNow && optinNow.disabled) || []) add(off, code, null);
   for (const code of (optinNow && optinNow.enabling) || []) add(off, code, measured.get(code));
   // Only the measured ones: every account has a dozen enabled by default, and
   // listing all of them would bury the one you came to check.
-  const on = group('already enabled');
+  const on = group('Already on');
   for (const r of (optinNow && optinNow.regions) || [])
     if (ON_ALREADY.has(r.status) && measured.has(r.region)) add(on, r.region, measured.get(r.region));
   if (!off.children.length) off.remove();
@@ -1946,19 +1982,19 @@ const ON_ALREADY = new Set(['ENABLED', 'ENABLED_BY_DEFAULT']);
 // G instances, and the opt-in does not carry any across from another region.
 function optinBlocker(code) {
   const m = ((sweepNow && sweepNow.regions) || []).find(r => r.region === code);
-  if (!m) return 'No scan of this region yet, so there is nothing to say about it.\n'
-                + 'Scan the regions on Settings and it will carry its numbers.';
+  if (!m) return 'This location has not been checked yet.\n'
+                + 'Check all locations under Choose a machine to see its numbers.';
   const ms = (m.machines || []);
   const fits = ms.filter(x => x.fits_spot || x.fits_ondemand);
   if (fits.length) return `${code} is on, and ${fits.length} machine`
     + `${fits.length > 1 ? 's here are' : ' here is'} already pickable in the table.`;
-  if (!ms.length) return `${code} is on, but AWS offers none of the machines this rig uses here.`;
+  if (!ms.length) return `${code} is on, but AWS offers none of the machines this app uses here.`;
   const q = m.quota || {};
-  return `${code} is on. What stops it being picked is GPU quota, not the opt-in:\n`
+  return `${code} is on. What stops it being picked is the GPU limit:\n`
     + `  on demand  ${q.ondemand_vcpu ?? '?'} vCPU\n`
     + `  spot       ${q.spot_vcpu ?? '?'} vCPU\n`
-    + 'A region starts at 0 and the opt-in carries nothing across, so this needs\n'
-    + 'its own request - "Ask AWS for GPU quota" under Choose a machine, which is free.';
+    + 'A new location starts at 0, so it needs its own request -\n'
+    + '"Ask AWS for a higher GPU limit" under Choose a machine. It is free.';
 }
 
 function optinRender() {
@@ -1968,7 +2004,7 @@ function optinRender() {
   $('optin-go').disabled = true;
   $('optin-go').textContent = 'Confirm \u00b7 enable';
   if (!code) {
-    optinSay('', 'Pick one to see what enabling it means.');
+    optinSay('', 'Pick one to see what switching it on means.');
     return;
   }
   const row = ((optinNow && optinNow.regions) || []).find(r => r.region === code);
@@ -1988,10 +2024,10 @@ function optinRender() {
     + (m ? ` \u00b7 ${Math.round(m.rtt_ms)}ms` : '')
     + (best ? ` \u00b7 ${best.type} at ${best.score}/10` : ''), '');
   $('optin-log').textContent =
-      'This is an account-level change. Everything on this account can use the region\n'
-    + 'afterwards. Nothing is created and nothing is billed by enabling it.\n\n'
-    + 'It takes a few minutes. Turning it back off is slower, and AWS requires the\n'
-    + 'region to be empty first - so this is not a switch to flip and forget.';
+      'This applies to your whole AWS account. Nothing is created or charged.\n'
+    + '\n'
+    + 'It takes a few minutes. Switching it back off is slower, so treat it\n'
+    + 'as permanent.';
   $('optin-go').disabled = false;
 }
 
@@ -2040,7 +2076,7 @@ $('optin-go').onclick = async e => {
   $('optin-log').textContent = (err || '').trim();
   optinBusy(false);
   if (rc !== 0) {
-    optinSay('AWS refused', (err || '').trim().split('\n')[0] || `cg regions enable exited ${rc}`, 'bad');
+    optinSay('AWS refused', (err || '').trim().split('\n')[0] || '', 'bad');
     $('optin-go').disabled = false;
     $('optin-go').textContent = 'Confirm \u00b7 enable';
     return;
@@ -2124,10 +2160,10 @@ $('onefield-cancel').onclick = e => {
 
 function openTskey() {
   openOneField({
-    title: 'Tailscale API token',
-    note: 'An API access token from login.tailscale.com > Settings > Keys - not the auth key a box '
-        + 'joins with. Optional: without one, dead nodes are left in place and key expiry stays on.',
-    label: 'api token', placeholder: 'tskey-api-…',
+    title: 'Tailscale access token',
+    note: 'From login.tailscale.com: Settings, then Keys, then Generate access token. '
+        + 'Optional: it lets the app tidy away old devices for you.',
+    label: 'Access token', placeholder: 'tskey-api-…',
     args: ['creds', 'set', 'tailscale'], askId: ASK.tsToken,
     save: 'Save token', working: 'Checking with Tailscale…',
     strip: 'Tailscale API token (NOT',
@@ -2141,12 +2177,12 @@ function setAuthKey(log) {
   openOneField({
     title: 'A key for your games machine',
     note: 'In Tailscale: Settings \u2192 Keys \u2192 Generate auth key. Turn Reusable on and '
-        + 'Ephemeral off - the machine goes offline every time it is stopped, and an ephemeral '
-        + 'key would forget it.',
-    label: 'auth key', placeholder: 'tskey-auth-…', log,
+        + 'Ephemeral off, so the machine is remembered between sessions.'
+        + '',
+    label: 'Machine key', placeholder: 'tskey-auth-…', log,
     args: ['creds', 'tailscale', 'authkey'], askId: ASK.tsAuthKey,
     save: 'Save key', working: 'Checking with Tailscale…',
-    strip: 'A pre-auth key for the box',
+    strip: 'Machine key',
   });
 }
 
@@ -2163,7 +2199,7 @@ function openAlertEmail(log) {
     note: 'Amazon emails this address if the month passes your budget - it is also what tells '
         + 'you a machine is still running when you thought it was not. Several? Separate them '
         + 'with commas.',
-    label: 'email', placeholder: 'you@example.com', secret: false, log,
+    label: 'Email', placeholder: 'you@example.com', secret: false, log,
     args: v => ['config', 'set', 'EMAIL_ALERTS', v],
     save: 'Save address', working: 'Saving\u2026',
     // `cg config set` is not a command cg says runs alone, so no re-read
@@ -2206,7 +2242,7 @@ $('awskey-cancel').onclick = e => { e.preventDefault(); awsKeyPending = null; $(
 $('awskey-go').onclick = async e => {
   e.preventDefault();
   const id = $('awskey-id').value.trim(), secret = $('awskey-secret').value.trim();
-  if (!id || !secret) return awsKeyFail('Both halves are needed: the key id and its secret.');
+  if (!id || !secret) return awsKeyFail('Both are needed: the access key ID and the secret.');
   awsKeyPending = { id, secret };
   $('awskey-err').hidden = true;
   $('awskey-go').disabled = true;
@@ -2221,25 +2257,25 @@ $('awskey-go').onclick = async e => {
   }
   // cg's own words, minus the line that only tells you where to find a key -
   // you are holding one.
-  awsKeyFail((err || `cg creds set exited ${rc}`).split('\n')
+  awsKeyFail((err || 'The key could not be saved.').split('\n')
     .filter(l => l.trim() && !l.startsWith('AWS credentials: paste'))
-    .join('\n').trim() || `cg creds set exited ${rc}`);
+    .join('\n').trim() || 'The key could not be saved.');
 };
 
 function setCreds() { openAwsKey(); }
 
 // "1" means nothing to a person: a choice shows what it chose.
 const CHOICE_LABEL = {
-  GAME_SPOT: { '1': 'spot', '0': 'on demand', auto: 'spot when the quota allows' },
-  GAME_STEAM_LOGIN: { use: 'use the archived login', fresh: 'sign in fresh on the box' },
+  GAME_SPOT: { '1': 'Spot', '0': 'Standard', auto: 'Spot when available' },
+  GAME_STEAM_LOGIN: { use: 'Use the saved login', fresh: 'Ask me to sign in' },
 };
 const choiceLabel = (key, v) => (CHOICE_LABEL[key] || {})[v] || v;
 
 function settingValue(r) {
-  if (r.secret) return r.is_set ? 'set' : 'not set';
+  if (r.secret) return r.is_set ? 'Set' : 'Not set';
   if (r.value != null) return choiceLabel(r.key, r.value);
   if (r.default != null) return `${choiceLabel(r.key, r.default)} (default)`;
-  return 'not set';
+  return 'Not set';
 }
 
 // Settings: only what this page sets (SETTINGS_CARDS). Every rule and value is
@@ -2260,7 +2296,7 @@ function paintConfig(rows) {
     const head = document.createElement('div');
     head.className = 'pb-space-sm';
     const h = document.createElement('span');
-    h.className = 'font-label-caps text-label-caps uppercase tracking-wider text-outline';
+    h.className = 'font-body-sm text-body-sm font-medium text-on-surface-variant';
     h.textContent = title;
     head.append(h);
     if (note) head.append(Object.assign(document.createElement('p'),
@@ -2282,10 +2318,18 @@ const SETTINGS_CARDS = [
 ];
 // The names a person uses; cg's own labels are for the terminal.
 const PLAIN = { GAME_RES: 'Resolution', GAME_FPS: 'Frame rate', GAME_BITRATE_KBPS: 'Quality',
-                GAME_DISK_GB: 'System disk' };
+                GAME_DISK_GB: 'System disk',
+                GAME_BUDGET_INR: 'Monthly budget', EMAIL_ALERTS: 'Alert email',
+                GAME_WATCHDOG_IDLE_MIN: 'Stop after idle', GAME_WATCHDOG_STUCK_MIN: 'Force stop after',
+                GAME_NTFY_URL: 'Phone alerts' };
 const PLAIN_NOTE = {
-  GAME_RES: 'e.g. 1920x1080. Empty leaves Moonlight to decide.',
+  GAME_RES: 'For example 1920x1080. Leave empty to let Moonlight decide.',
   GAME_DISK_GB: 'Applies at the next build, and cannot be shrunk later.',
+  GAME_BUDGET_INR: 'AWS emails you if you pass it. It does not stop anything.',
+  EMAIL_ALERTS: 'Where budget alerts go. Separate several with commas.',
+  GAME_WATCHDOG_IDLE_MIN: 'How long a machine can sit unused before auto-stop ends it.',
+  GAME_WATCHDOG_STUCK_MIN: 'If shutting down hangs, auto-stop forces it after this long.',
+  GAME_NTFY_URL: 'Your ntfy topic. Leave empty to turn phone alerts off.',
 };
 // The value, said the way the row means it.
 function plainValue(r) {
@@ -2360,7 +2404,7 @@ function settingRow(r) {
     // so it takes a click, asks cg for it, and hides again.
     const eye = document.createElement('button');
     eye.className = 'btn';
-    eye.title = 'show the value';
+    eye.title = 'Show the value';
     const glyph = document.createElement('span');
     glyph.className = 'material-symbols-outlined text-[16px]';
     glyph.textContent = ICON.visibility;
@@ -2408,7 +2452,7 @@ function editSetting(r, row) {
     if (r.kind === 'number' && r.rule) input.min = r.rule;
     input.value = r.secret ? '' : (r.value || '');
     input.placeholder = r.secret
-      ? (r.is_set ? 'type a new value, or leave empty to clear' : 'empty means go without')
+      ? (r.is_set ? 'Type a new value, or leave empty to clear' : 'Leave empty to go without')
       : (r.default || '');
   }
   input.className = 'bg-surface border border-surface-variant rounded px-space-sm py-0.5 '
@@ -2429,7 +2473,7 @@ function editSetting(r, row) {
     const value = input.value.trim();
     if (r.secret && !value && r.is_set && !(await askConfirm({
           title: `Clear ${label(r)}?`,
-          body: 'It will be remembered as "go without", and cg check --fix will not ask again.',
+          body: 'It is cleared, and you will not be asked for it again.',
           yes: 'Clear', danger: true,
         }))) return;
     save.disabled = true;
@@ -2494,7 +2538,7 @@ function paintPicker(d) {
     td.colSpan = 4;
     td.className = 'py-space-md ' + (failed ? 'text-error' : 'text-outline');
     td.textContent = failed
-      ? `The archive could not be read: ${d.error}`
+      ? `Your saved games could not be read: ${d.error}`
       : 'No games are saved yet. The machine starts empty, and Steam installs games as usual.';
     tr.append(td); body.append(tr);
   }
@@ -2533,9 +2577,9 @@ function paintFit() {
   $('b-fit').textContent = 'Space on the machine';
   $('b-fit').className = 'font-code-sm text-code-sm text-outline';
   const pct = cap != null ? Math.min(100, (gb / cap) * 100) : 0;
-  $('b-fit-pct').textContent = over ? `Too big by ${(gb - cap).toFixed(1)} GB - untick a game`
+  $('b-fit-pct').textContent = over ? `Too big by ${(gb - cap).toFixed(1)} GB. Untick a game.`
     : cap != null ? `${gb.toFixed(1)} of ${cap} GB`
-    : picked.size ? `${gb.toFixed(1)} GB - the machine's space is not known yet` : '';
+    : picked.size ? `${gb.toFixed(1)} GB · the machine's space is not known yet` : '';
   $('b-fit-pct').className = 'font-code-sm text-code-sm ' + (over ? 'text-error' : 'text-on-surface-variant');
   $('b-bar').style.width = pct + '%';
   $('b-bar').className = 'h-full ' + (over ? 'bg-error' : 'bg-primary');
@@ -2551,13 +2595,13 @@ function paintFit() {
   $('b-alloc').hidden = up;
   $('b-hint').textContent = up
     ? 'A machine is already running. Its games were chosen when it was built.'
-    : 'Downloaded from your archive while the machine starts.';
+    : 'Downloaded from your saved games while the machine starts.';
   // What pressing Build does to the bill, said beside the button.
   const rate = buildRate();
   $('b-chip').textContent = up
-    ? `The machine is running${rate != null ? ` · ${rsh(rate)}/hour` : ''}.`
-    : `Billing starts when the machine launches${rate != null ? ` · ${rsh(rate)}/hour` : ''}`
-      + ` · ready in about 10–20 min${picked.size ? ', plus the game download' : ''}`;
+    ? `The machine is running${rate != null ? ` · ${rsh(rate)} an hour` : ''}.`
+    : `${rate != null ? `${rsh(rate)} an hour from the moment it starts` : 'Costs by the hour from the moment it starts'}`
+      + ` · ready in about 15 minutes${picked.size ? ', plus the game download' : ''}`;
 }
 
 // The machine strip: the type you asked for, and what AWS says that type is.
@@ -2724,7 +2768,7 @@ function priceCell(tr, mount, row, spot, inr, cur) {
   if (why) {
     const tag = document.createElement('span');
     tag.className = 'reason';
-    tag.textContent = why;
+    tag.textContent = REASON_LABEL[why] || why;
     label.append(tag);
     label.title = PICK_WHY[why] || why;
   }
@@ -2733,15 +2777,15 @@ function priceCell(tr, mount, row, spot, inr, cur) {
 }
 
 // Said once, under the table, instead of a sentence in every cell.
+// How a reason reads on screen; the keys stay the code's.
+const REASON_LABEL = { 'no quota': 'Over your GPU limit', 'needs opt-in': 'Not switched on',
+                       'no spot market': 'No spot price', 'no price': 'No price' };
 const PICK_WHY = {
-  'no quota': 'Your G-instance quota in this region does not cover this machine for '
-            + 'this purchase model. Asking is free: the button below does it, and drafts '
-            + 'the appeal that gets it approved.',
-  'needs opt-in': 'This region is not enabled on your account. Enabling it is an '
-                + 'account-level change, so this app will not do it for you.',
-  'no spot market': 'AWS publishes no spot price for this machine here, so there is '
-                  + 'nothing to bid on. On demand may still work.',
-  'no price': 'The Pricing API returned nothing for this machine here.',
+  'no quota': 'Your GPU limit here does not cover this machine. Asking for more is free: '
+            + 'use the button below.',
+  'needs opt-in': 'This location is not switched on for your account yet.',
+  'no spot market': 'AWS has no spot price for this machine here. Standard may still work.',
+  'no price': 'AWS did not return a price for this machine here.',
 };
 
 let lastDead = null;
@@ -2776,17 +2820,17 @@ function paintChooser() {
       const td = table.insertRow().insertCell();
       td.colSpan = 8;
       td.className = 'why';
-      td.textContent = !machinesAnswered ? 'reading what this region rents…'
+      td.textContent = !machinesAnswered ? 'Reading prices…'
         : machinesNow && machinesNow.error ? machinesNow.error
-        : 'no machine here fits your quota - Scan all regions to compare every region';
+        : 'No machine here fits your GPU limit. Check all locations to compare.';
     } else {
       const head = table.createTHead().insertRow();
       // The price headers do NOT get text-right: the cells under them lead with
       // a radio at the cell's left edge, so a right-aligned header sat over
       // nothing. capacity is the only genuinely right-aligned column.
-      for (const [label, cls] of [['region', ''], ['city', ''], ['latency', ''],
-                                  ['machine', ''], ['gpu', ''], ['capacity', 'text-right'],
-                                  ['spot INR/hr', ''], ['on demand INR/hr', '']]) {
+      for (const [label, cls] of [['Region', ''], ['City', ''], ['Latency', ''],
+                                  ['Machine', ''], ['GPU', ''], ['Availability', 'text-right'],
+                                  ['Spot ₹/hr', ''], ['Standard ₹/hr', '']]) {
         const th = document.createElement('th');
         th.textContent = label; th.className = cls;
         head.append(th);
@@ -2825,20 +2869,18 @@ function paintChooser() {
 
     // What the table cannot show on its own: how old it is, and what is missing.
     const parts = [];
-    if (boxNow) parts.push('a box is running - destroy it before changing the machine');
-    else if (sweeping) parts.push('scanning all regions - about 90 seconds');
-    else if (!swept && rows.length) parts.push('showing this region only - a scan compares '
-      + 'every region AWS has, measures latency and reads spot capacity (free)');
+    if (boxNow) parts.push('A machine is running. Delete it before changing machines.');
+    else if (sweeping) parts.push('Checking all locations, about 90 seconds');
+    else if (!swept && rows.length) parts.push('Showing this location only. Check all locations '
+      + 'to compare every AWS location (free).');
     if (swept) {
-      parts.push("capacity is AWS's spot placement score: 1 means a launch will almost "
-        + 'certainly be refused, whatever the price says');
+      parts.push('Availability: how likely AWS is to have a spare machine (1 = almost never)');
       // Two numbers in a spot cell are the cheapest and dearest zone, and the
       // zone is not pinned, so the bill can be either.
       if (rows.some(r => r.spotMax != null && r.spot != null && r.spotMax > r.spot))
-        parts.push('a spot range is the cheapest and dearest zone - nothing pins the zone, '
-                 + 'so either is possible');
+        parts.push('A spot price range is the cheapest and dearest it can be');
       const far = (sweepNow.too_far || []).length;
-      if (far) parts.push(`${far} regions are too far to stream and are not listed`);
+      if (far) parts.push(`${far} locations are too far to stream and are not listed`);
     }
     $(mount.note).textContent = parts.join(' · ');
 
@@ -2853,7 +2895,7 @@ function paintChooser() {
       if (!rows.length && machinesAnswered && !(machinesNow && machinesNow.error)) {
         const b = document.createElement('button');
         b.className = 'btn mt-space-xs';
-        b.textContent = 'Ask AWS for GPU quota';
+        b.textContent = 'Ask AWS for a higher GPU limit';
         b.onclick = () => openQuota(null, machinesNow ? machinesNow.region : undefined);
         legend.append(b);
       }
@@ -2867,20 +2909,20 @@ function paintChooser() {
       // at the top of a long screen, and the question is asked at the table.
       if (sweeping && rows.length) {
         const line = document.createElement('div');
-        line.textContent = 'scanning every region now - about 90 seconds. This is '
-          + `${machinesNow ? machinesNow.region : 'one region'} until it lands.`;
+        line.textContent = 'Checking every location (about 90 seconds). Showing '
+          + `${machinesNow ? placeName(machinesNow.region) : 'one location'} until then.`;
         legend.append(line);
       } else if (!swept && rows.length) {
         const line = document.createElement('div');
-        line.textContent = `This is ${machinesNow ? machinesNow.region : 'one region'} only. `
-          + 'A scan compares every region cg can reach - about 90 seconds, and free.';
+        line.textContent = `Showing ${machinesNow ? placeName(machinesNow.region) : 'one location'} only. `
+          + 'Checking all locations takes about 90 seconds and is free.';
         legend.append(line);
         // The button, here, rather than the name of a button elsewhere: this
         // line is where the question gets asked, and the answer was two
         // scrolls away at the top of the screen.
         const b = document.createElement('button');
         b.className = 'btn mt-space-xs';
-        b.textContent = 'Scan all regions';
+        b.textContent = 'Check all locations';
         b.onclick = () => scanRegions($('s-sweep'));
         legend.append(b);
       }
@@ -2888,7 +2930,7 @@ function paintChooser() {
       if (hidden) {
         const line = document.createElement('div');
         line.textContent = `${hidden} more GPU machine${hidden === 1 ? ' is' : 's are'} offered here, `
-          + 'all bigger than your vCPU quota allows. Ask AWS for more, or pick another region.';
+          + 'all over your GPU limit. Ask AWS for more, or pick another location.';
         legend.append(line);
       }
       if (reasons.size) {
@@ -2899,7 +2941,7 @@ function paintChooser() {
         if (reasons.has('no quota')) {
           const b = document.createElement('button');
           b.className = 'btn mt-space-xs';
-          b.textContent = 'Ask AWS for GPU quota';
+          b.textContent = 'Ask AWS for a higher GPU limit';
           // The regions in this table that are enabled and short of quota. One
           // of them is what the button is about; with several, the first is a
           // better guess than the configured region, which may not be in the
@@ -2912,7 +2954,7 @@ function paintChooser() {
         if (reasons.has('needs opt-in')) {
           const b = document.createElement('button');
           b.className = 'btn mt-space-xs ml-space-xs';
-          b.textContent = 'Enable a region';
+          b.textContent = 'Switch on a location';
           b.onclick = () => openOptin();
           legend.append(b);
         }
@@ -2920,15 +2962,15 @@ function paintChooser() {
           if (!reasons.has(r)) continue;
           const line = document.createElement('div');
           const b = document.createElement('b');
-          b.textContent = r;
-          line.append(b, document.createTextNode(' - ' + PICK_WHY[r]));
+          b.textContent = REASON_LABEL[r] || r;
+          line.append(b, document.createTextNode(': ' + PICK_WHY[r]));
           legend.append(line);
         }
       }
     }
     const ageEl = $(mount.age);
     if (ageEl) ageEl.textContent = sweepNow && sweepNow.cached && sweepNow.age_seconds != null
-      ? `scanned ${ago(sweepNow.age_seconds)}` : '';
+      ? `Checked ${ago(sweepNow.age_seconds)}` : '';
   }
   paintBuildPick(rows, cur);
   lockMachines();
@@ -2995,19 +3037,19 @@ function paintBuildPick(rows, cur) {
     spec.vcpus ? `${spec.vcpus} CPUs` : null,
     spec.memory_mib ? `${Math.round(spec.memory_mib / 1024)} GB RAM` : null].filter(Boolean).join(' · ') || '—';
   $('b-pick-where').textContent = [cur.region ? placeName(cur.region) : null,
-    cur.spot ? 'spot' : 'on demand', price != null ? `₹${price}/hour` : null].filter(Boolean).join(' · ');
+    cur.spot ? 'Spot' : 'Standard', price != null ? `₹${price}/hour` : null].filter(Boolean).join(' · ');
 
   // The warnings belong here too: the only place that shows the choice should
   // also say when the choice cannot launch.
   const warn = [];
-  if (boxNow) warn.push('a box is running - it keeps the machine it started on');
+  if (boxNow) warn.push('A machine is running. It keeps the setup it started with.');
   else if (hit && cur.spot && hit.score != null && hit.score <= 2)
-    warn.push(`AWS scores spare ${cur.type} capacity here ${hit.score}/10 - a spot launch will `
-            + 'very likely be refused');
+    warn.push(`AWS rates spare ${cur.type} machines here ${hit.score}/10, so a spot start will `
+            + 'likely be refused');
   else if (hit && cur.spot && hit.fitsSpot === false)
-    warn.push('your spot quota here is 0, so this cannot launch on spot');
+    warn.push('Your spot limit here is 0, so this cannot start on spot');
   else if (!hit && rows.length)
-    warn.push('this machine is not offered in this region - change the setup before building');
+    warn.push('This machine is not offered here. Change the machine before building.');
   $('b-type-note').textContent = warn.join(' · ');
 }
 
@@ -3059,18 +3101,18 @@ const BUILD_STEPS = [
   { doing: 'Installing the software', done: 'Software installed', parts: true,
     match: /building the box|^installing|^installed |^configuring|^setting up|^disabling|nvidia/i },
   { doing: 'Downloading your games', done: 'Games downloaded', games: true, match: /finishing up|restor/i },
-  { doing: 'Pairing Moonlight', done: 'Moonlight paired', match: /on-host watchdog|sunshine account|pairing/i },
+  { doing: 'Connecting Moonlight', done: 'Moonlight connected', match: /on-host watchdog|sunshine account|pairing/i },
   { doing: 'Starting Steam', done: 'Steam started', match: /waiting for steam/i },
 ];
 // A session, as steps. `cg open` announces none - it prints lines, and under
 // the app its waits print only once they are over ("waiting for sunshine ok") -
 // so each step is closed by the line that says it is done.
 const OPEN_STEPS = [
-  { doing: 'Starting the machine', done: 'Machine on',
+  { doing: 'Starting the machine', done: 'Machine started',
     end: /instance already running|^running after|waiting for tailscale|^\s*pong|\bvia\b/i },
   { doing: 'Connecting over Tailscale', done: 'Connected over Tailscale',
     end: /waiting for tailscale ok|tailscale is up|^\s*pong|\bvia\b/i },
-  { doing: 'Waiting for Sunshine', done: 'Sunshine answered', end: /waiting for sunshine ok|sunshine is up|^disk:/i },
+  { doing: 'Starting the game stream', done: 'Game stream ready', end: /waiting for sunshine ok|sunshine is up|^disk:/i },
   { doing: 'Playing', done: 'Played', end: /session ended/i, stream: true,
     note: 'Close Moonlight to stop. You are then asked whether to keep the machine or delete it.' },
 ];
@@ -3081,7 +3123,7 @@ const OPEN_STEPS = [
 const BUILD_PARTS = [
   ['Base system', /^installing base packages/i],
   ['Game disk', /^setting up local nvme/i],
-  ['Idle watchdog', /^installing the idle watchdog/i],
+  ['Auto-stop', /^installing the idle watchdog/i],
   ['Tailscale', /^installing tailscale/i],
   ['Game library', /^installing the s3 game library/i],
   ['Desktop', /^installing desktop/i],
@@ -3203,8 +3245,8 @@ const took = (a, b) => { const s = Math.round((b - a) / 1000); return s < 60 ? `
 const RUN_HEAD = {
   init: { running: 'Building your machine', done: 'Ready to play', failed: 'The build stopped' },
   destroy: { running: 'Deleting the machine', done: 'Machine deleted', failed: 'The delete stopped' },
-  open: { running: 'Starting the stream', done: 'Stream ended', failed: 'The stream stopped' },
-  library: { running: 'Changing the archive', done: 'Archive changed', failed: 'The change stopped' },
+  open: { running: 'Starting the game session', done: 'Session ended', failed: 'The session stopped' },
+  library: { running: 'Changing your saved games', done: 'Saved games changed', failed: 'The change stopped' },
 };
 
 // Which card the Build screen shows is decided by the machine, never by where
@@ -3221,7 +3263,7 @@ function settleRun() {
   if (!run && lastBuild && liveBox()) {
     run = lastBuild;
     $('b-log').innerHTML = lastBuildLog;
-    $('b-log-title').textContent = 'cg init';
+    $('b-log-title').textContent = 'Build log';
   }
 }
 function settleRunOnly() {
@@ -3297,7 +3339,7 @@ function paintRun() {
   const title = $('b-strip-title');
   title.textContent = r.cancelling ? 'Cancelling the build' : machine ? machineTitle()
     : r.kind === 'open' && r.state === 'running' && OPEN_STEPS[r.idx] && OPEN_STEPS[r.idx].stream
-      ? (r.streamEnded ? 'Stream ended' : 'Playing') : head[r.state];
+      ? (r.streamEnded ? 'Session ended' : 'Playing') : head[r.state];
   title.className = 'font-headline-md text-headline-md ' + (r.state === 'failed' ? 'text-error' : '');
   // The bill, in the heading, from the moment the machine is rented.
   const so = r.billFrom && r.rate != null ? r.rate * ((machine ? Date.now() : now) - r.billFrom) / 3600000 : null;
@@ -3310,7 +3352,7 @@ function paintRun() {
   const s = statusNow || {};
   $('b-run-sum').textContent = r.kind === 'init' || r.kind === 'machine' || r.kind === 'open'
     ? [r.kind !== 'init' && liveBox() ? liveBox().type : s.instance_type, s.region ? placeName(s.region) : null,
-       (r.kind !== 'init' && liveBox() ? liveBox().lifecycle !== 'spot' : (s.config || {}).spot === '0') ? 'on demand' : 'spot',
+       (r.kind !== 'init' && liveBox() ? liveBox().lifecycle !== 'spot' : (s.config || {}).spot === '0') ? 'Standard' : 'Spot',
        r.kind !== 'init' ? null
          : r.games ? `${r.games} game${r.games === 1 ? '' : 's'}, ${r.gamesGb.toFixed(1)} GB` : 'no games']
         .filter(Boolean).join(' · ')
@@ -3534,10 +3576,10 @@ const FAIL_ACTS = {
   SpotMaxPriceTooLow: (spot) => FAIL_ACTS.InsufficientInstanceCapacity(spot),
   // Try again is already beside the step; nothing more to offer.
   MaxSpotInstanceCountExceeded: () => [],
-  VcpuLimitExceeded: () => [['Ask AWS for GPU quota', () => openQuota()]],
-  InstanceLimitExceeded: () => [['Ask AWS for GPU quota', () => openQuota()]],
+  VcpuLimitExceeded: () => [['Ask AWS for a higher GPU limit', () => openQuota()]],
+  InstanceLimitExceeded: () => [['Ask AWS for a higher GPU limit', () => openQuota()]],
   'InvalidKeyPair.NotFound': () => [
-    ['Run the preflight fix', () => runCg(['check', '--fix'])],
+    ['Fix it', () => runCg(['check', '--fix'])],
   ],
   // The region is not switched on for this account: another location is the
   // answer, and it is picked where the machine is.
@@ -3658,7 +3700,7 @@ window.cg.onEvent(({ id, event }) => {
       // beats a bare status label the eye slides over.
       if (event.rc !== 0 && !buildFailures.length && !(run && run.cancelling)
           && !(job.cmd[0] === 'open' && event.rc === 130))
-        buildFail(`cg ${job.cmd.join(' ')} exited ${event.rc} without saying why - the log above is all there is.`);
+        buildFail(`${CgName(job.cmd)} stopped without saying why. The log above is all there is.`);
     }
   }
   if (event.t === 'step' && job.onStep) job.onStep(event.text);
@@ -3714,7 +3756,7 @@ window.cg.onEvent(({ id, event }) => {
         if (!paint) throw new Error(`no painter for ${job.json}`);
         paint(data);
       } catch (err) {
-        failure = `could not show cg ${job.cmd[0]}: ${err && err.message ? err.message : err}`;
+        failure = `Could not show ${cgName(job.cmd)}: ${err && err.message ? err.message : err}`;
       }
     }
     if (job.age) $(job.age).textContent = new Date().toLocaleTimeString();
@@ -3728,12 +3770,12 @@ window.cg.onEvent(({ id, event }) => {
     if (job.json) {
       if (event.rc !== 0 || failure) {
         readFailures.set(job.json, failure ? failure
-          : job.err ? `cg ${job.cmd[0]} could not run: ${job.err}`
+          : job.err ? `${CgName(job.cmd)} could not run: ${job.err}`
           // A read that answered WITH its reason has already said it on the
           // screen it belongs to; repeating "exit 1" in the header adds a
           // number and takes away the reason.
-          : painted && painted.error ? `cg ${job.cmd[0]}: ${painted.error}`
-          : `cg ${job.cmd[0]} failed (exit ${event.rc})`);
+          : painted && painted.error ? painted.error
+          : `${CgName(job.cmd)} did not finish.`);
       } else {
         readFailures.delete(job.json);       // it worked this time
       }
@@ -3753,7 +3795,7 @@ window.cg.onEvent(({ id, event }) => {
     // A build, a destroy or a session changes what every free screen shows -
     // the box, the archive, the guards - so read them again once it is over.
     if (job.write) {
-      note(`${cgName(job.cmd)} ${event.rc === 0 ? 'finished' : `stopped (exit ${event.rc})`}`,
+      note(`${CgName(job.cmd)} ${event.rc === 0 ? 'finished' : 'stopped'}`,
            event.rc === 0 ? 'text-primary' : 'text-error');
       afterWrite(job, event.rc);
     }
@@ -3769,7 +3811,7 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart,
   return new Promise(async resolve => {
     const res = await window.cg.run(args, env);
     if (!res.ok) {
-      const why = `${cgName(res.args)} is still running - this has to wait for it`;
+      const why = `${CgName(res.args)} is still running. This has to wait for it.`;
       if (collect) $(collect).textContent = why + '\n';
       if (panel) $(panel).textContent = why;
       return resolve(wantRc ? { rc: null, err: why } : undefined);
@@ -3781,7 +3823,7 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart,
     if (onStart) onStart(res.id);
     if (res.write) note(`${cgName(args)} started`, 'text-primary');
     updateHeader();
-    if (panel) $(panel).textContent = 'running…';
+    if (panel) $(panel).textContent = 'Running…';
   });
 }
 
@@ -3833,7 +3875,7 @@ async function refreshShown(reads = readsFor(view), read = each => refresh(each,
   $('refdlg-title').textContent = `Refreshing ${$('view-title').textContent.trim()}`;
   const price = $('d-cost-price').textContent;
   $('refdlg-sub').textContent = view === 'cost'
-    ? `One Cost Explorer call${price ? `, ${price}` : ''}.`
+    ? `Loading this month\'s bill${price ? `, ${price}` : ''}.`
     : 'Reading the latest from AWS and this laptop.';
   $('refdlg-menu').hidden = true;
   const paint = () => {
@@ -3957,15 +3999,15 @@ function keyProblem() {
   switch (credsNow && credsNow.reason) {
     case 'unreachable':
       return { title: 'This laptop could not reach AWS',
-               body: 'Nothing was rejected - the call never arrived. The key may be fine.',
+               body: 'Nothing was rejected; AWS just could not be reached. Your key may be fine.',
                label: 'Try again', go: retryReads };
     case 'no-key':
       return { title: 'There is no AWS access key on this laptop',
-               body: 'Everything below is unknown, not empty.',
+               body: 'Nothing can be shown until this is fixed.',
                label: 'Add your key', go: () => goSetting($('s-creds-card')) };
     default:
       return { title: 'AWS rejected this access key',
-               body: 'Everything below is unknown, not empty.',
+               body: 'Nothing can be shown until this is fixed.',
                label: 'Add your key', go: () => goSetting($('s-creds-card')) };
   }
 }
@@ -3993,19 +4035,19 @@ function prereqs() {
     // cg creds can say. Both answers decide this one step - the pipeline used
     // to show the second as a row of its own, also called Tools, that came and
     // went as the two answers landed a second apart.
-    { key: 'tools', reads: 'deps', name: 'The tools this rig needs are installed',
+    { key: 'tools', reads: 'deps', name: 'The tools this app needs are installed',
       ok: depsNow ? !missing.length && !cliBroken() : null,
       problem: { blocking: true,
                  title: `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not installed`,
-                 body: 'Nothing here can run without them.',
+                 body: 'The app cannot work without them.',
                  ...toolAction(missing) } },
-    { key: 'cli', reads: 'creds', name: 'The AWS CLI is installed',
+    { key: 'cli', reads: 'creds', name: 'The Amazon tool is installed',
       // Shown only when the tools stage is happy: when it is not, this is the
       // same missing package and the same button, one row further down.
       sameAs: 'tools',
       ok: credsNow ? !!credsNow.cli : null,
-      problem: { blocking: true, title: 'The AWS CLI is not installed',
-                 body: 'Everything below is unknown, not empty.',
+      problem: { blocking: true, title: 'A required Amazon tool is not installed',
+                 body: 'Nothing can be shown until this is fixed.',
                  ...toolAction(['aws']) } },
     // Judged only once there is a CLI to ask with: "AWS rejected this key" is a
     // lie about a laptop that could not ask AWS anything.
@@ -4018,12 +4060,12 @@ function prereqs() {
       // showed this step ticked before it had Tailscale at all.
       ok: tskeyNow ? tskeyNow.signed_in === true : null,
       problem: { blocking: true, title: 'This laptop is not signed in to Tailscale',
-                 body: 'The box has no public SSH port, so nothing here can reach it.',
+                 body: 'Your machine is only reachable over Tailscale.',
                  label: 'Sign in', go: signInTailscale } },
-    { key: 'authkey', reads: 'tskey', name: 'The box has a key to join your tailnet with',
+    { key: 'authkey', reads: 'tskey', name: 'Your machine has a key to join your private network',
       ok: tskeyNow ? !!(tskeyNow.auth_key_stored || tskeyNow.can_mint) : null,
-      problem: { blocking: true, title: 'The box has no Tailscale auth key',
-                 body: 'A build cannot join it to your tailnet without one.',
+      problem: { blocking: true, title: 'Your machine has no key to join your private network',
+                 body: 'A new machine cannot connect without one.',
                  label: 'Paste a key', go: setAuthKey } },
     { key: 'email', reads: 'config', name: 'Billing alerts have somewhere to go',
       ok: email ? !!email.is_set : null,
@@ -4051,8 +4093,8 @@ function prereqs() {
           && !machinesNow.error && (machinesNow.machines || []).some(m => m.fits_spot || m.fits_ondemand),
       problem: regionChosen()
         ? { blocking: true,
-            title: machinesNow ? `${machinesNow.region} cannot rent this machine` : 'Nowhere to run it yet',
-            body: 'Either AWS gives you no GPU quota there, or none of its machines fit. '
+            title: machinesNow ? `${placeName(machinesNow.region)} cannot run this machine` : 'Nowhere to run it yet',
+            body: 'AWS gives you no GPU limit there, or none of its machines fit. '
                 + 'Closer is smoother, and measuring every location is free.',
             label: 'Choose where', go: openWhereTo }
         : { blocking: true, title: 'Pick where it runs',
@@ -4096,7 +4138,7 @@ function paintWhereTo() {
   table.textContent = '';
   const rows = whereToRows();
   const head = document.createElement('tr');
-  for (const h of ['', 'place', 'delay', 'machine', 'spot', 'on demand']) {
+  for (const h of ['', 'Location', 'Latency', 'Machine', 'Spot', 'Standard']) {
     const th = document.createElement('th');
     th.textContent = h;
     head.append(th);
@@ -4129,7 +4171,7 @@ function paintWhereTo() {
     type.className = 'region';
     // Why it cannot be used, where the machine would go: an enabled region
     // with no GPU quota is the one that reads as a broken app.
-    type.textContent = r.type || (r.enabled ? 'no GPU quota here yet' : 'not switched on yet');
+    type.textContent = r.type || (r.enabled ? 'No GPU limit here yet' : 'Not switched on yet');
     const spot = document.createElement('td');
     spot.className = 'num';
     spot.textContent = r.spot != null ? `\u20b9${r.spot}/hr` : '—';
@@ -4144,8 +4186,8 @@ function paintWhereTo() {
     ? `Measured from this laptop \u00b7 ${usable} of ${rows.length} can run your machine`
     : 'Nearer means lower latency.';
   $('whereto-note').textContent = rows.length && !usable
-    ? 'None of them can yet. A region starts with no GPU quota and the request is free - '
-      + 'Settings has it.'
+    ? 'None can yet. A new location starts with no GPU limit; asking for one is free, '
+      + 'under Choose a machine.'
     : '';
   $('whereto-use').disabled = !whereToPick || !rows.some(r => r.region === whereToPick && r.usable);
   // The button names the place, so what it does is never in doubt.
@@ -4419,7 +4461,7 @@ async function runInPipeline(key, args, status) {
 }
 const ONB_FAIL = {
   tools: 'The install did not finish. The details below say why.',
-  cli: 'The AWS CLI did not install. The details below say why.',
+  cli: 'The Amazon tool did not install. The details below say why.',
   tailnet: 'Sign-in did not finish. The details below say why.',
   where: 'The location could not be saved. The details below say why.',
 };
@@ -4471,7 +4513,7 @@ function onbVerified() {
   const rung = prereqs().find(x => x.key === key);
   if (rung && rung.ok === false) {
     const still = key === 'tools' || key === 'cli'
-      ? [...missingTools(), ...(cliBroken() ? ['AWS CLI v2 (installed, but it will not run)'] : [])]
+      ? [...missingTools(), ...(cliBroken() ? ['the Amazon tool (installed, but not working)'] : [])]
       : [];
     onbNote = still.length ? `Still missing: ${still.join(', ')}. The details below say why.`
       : (ONB_FAIL[key] || 'That did not finish. The details below say why.');
@@ -4485,7 +4527,7 @@ const ONB_COPY = {
   open: { name: 'Loading the app', done: () => 'App ready', body: () => '' },
   tools: { name: 'Tools', done: () => 'Tools installed', body: () => '' },
   cli: { name: 'Tools', done: () => 'Tools installed',
-    body: () => 'The AWS CLI is not installed.' },
+    body: () => 'A required Amazon tool is not installed.' },
   key: { name: 'Amazon account', done: () => 'Amazon account connected',
     body: () => ({
       unreachable: 'AWS could not be reached from this laptop, so the key was not checked. '
@@ -4493,17 +4535,17 @@ const ONB_COPY = {
       'no-key': 'Add an AWS access key. The app uses it to start and stop your games machine.',
     }[credsNow && credsNow.reason]
       || 'AWS rejected the saved access key. Add a new one.') },
-  tailnet: { name: 'Private connection', done: () => 'Private connection ready',
+  tailnet: { name: 'Private network', done: () => 'Private network ready',
     body: () => 'Sign this laptop in to Tailscale. Your games machine is reachable only over '
               + 'your private Tailscale network.' },
   authkey: { name: 'Machine key', done: () => 'Machine key saved',
-    body: () => 'Paste a Tailscale auth key. Each new games machine uses it to join your network.' },
-  email: { name: 'Bill alerts',
-    done: () => { const e = cfgVal('EMAIL_ALERTS'); return e ? `Alerts go to ${e}` : 'Bill alerts on'; },
+    body: () => 'Paste a Tailscale auth key. Each new machine uses it to join your private network.' },
+  email: { name: 'Budget alerts',
+    done: () => { const e = cfgVal('EMAIL_ALERTS'); return e ? `Budget alerts go to ${e}` : 'Budget alerts on'; },
     body: () => 'Set the address AWS emails when spending passes your budget.' },
   where: { name: 'Location', done: () => whereDone(),
     body: () => regionChosen() && machinesNow
-      ? `${placeName(machinesNow.region)} has no GPU quota for your machine. Choose another location.`
+      ? `${placeName(machinesNow.region)} has no GPU limit for your machine. Choose another location.`
       : 'Choose where your games machine runs. Nearer means lower latency.' },
 };
 // The city, when the scan knows it; the code otherwise.
@@ -4549,10 +4591,11 @@ const onbSeen = {};
 // already said. A tab is ticked when every read it shows has landed; which
 // reads those are is NEEDS, the same table its own Refresh uses. Cost is not
 // here: its read is a paid Cost Explorer call, made only when you press Fetch.
-const OPENING = [
-  ['dashboard', 'Dashboard'], ['build', 'Build'], ['library', 'Library'],
-  ['guards', 'Guards'], ['settings', 'Settings'],
-];
+// Named as the sidebar names them, read from it, so a renamed page cannot
+// leave its old name here - which is how "Build, Library, Guards" outlived
+// the rename to Machine, Games, Safety.
+const OPENING = ['dashboard', 'build', 'library', 'guards', 'settings'].map(v => [v,
+  (document.querySelector(`.nav-item[data-view="${v}"] span:last-child`) || {}).textContent || v]);
 const readOut = json => [...jobs.values()].some(j => j.json === json);
 
 const ONB_MARK = {
@@ -4589,14 +4632,14 @@ function paintOnboard() {
     $('onb-head').hidden = false;
     wrap.hidden = false;
     $('d-main').hidden = true;
-    $('onb-title').textContent = 'This app cannot find cg';
+    $('onb-title').textContent = 'This app cannot find its scripts';
     $('onb-count').textContent = '';
-    $('onb-sub').textContent = 'cg is the engine; this window is a face on it. '
-      + 'Nothing here can run until there is a cg to run.';
+    $('onb-sub').textContent = 'Cloud Gaming runs on a set of scripts that are not on this laptop yet. '
+      + 'Nothing can run until they are.';
     wrap.textContent = '';
     for (const [state, text, note] of [
       ['failed', `Looked for it at ${engineGone.cg}`, ''],
-      ['locked', 'Install it, or point CG_REPO at a checkout',
+      ['locked', 'Install them with:',
        'git clone https://github.com/jebin2/aws_cloud_gaming ~/cloud_gaming'],
     ]) {
       const row = document.createElement('div');
@@ -4852,7 +4895,7 @@ function paintOnboard() {
         chip.dataset.tool = t.tool;
         chip.dataset.present = recheck ? 'checking' : ok ? 'yes' : 'no';
         chip.textContent = (recheck ? '\u2026 ' : ok ? '\u2713 ' : '\u2717 ') + t.label
-          + (broken && !recheck ? ' - installed, will not run' : '');
+          + (broken && !recheck ? ' (installed, but not working)' : '');
         list.append(chip);
       }
       inner.append(list);
@@ -5017,11 +5060,11 @@ async function firstScan() {
 $('refresh').onclick = () => refreshShown();
 // What Stop costs depends on what is running, so say it before doing it.
 const STOP_WARNING = {
-  init: 'The box may already exist and be billing. If it is, destroy it from the Dashboard - '
-      + 'otherwise the cloud watchdog ends it once it has been idle for 30 minutes.',
-  destroy: 'The games are being mirrored to S3 right now. Stopping can lose everything installed '
-         + 'since the last push, and the box may be left running.',
-  open: 'This only ends the streaming session on this laptop. The box keeps running.',
+  init: 'The machine may already exist and be costing money. Delete it from Home, '
+      + 'or auto-stop ends it after 30 idle minutes.',
+  destroy: 'Your games are being saved right now. Stopping can lose anything installed since '
+         + 'the last save, and the machine may be left running.',
+  open: 'This only ends the game session on this laptop. The machine keeps running.',
 };
 // Settings is a long screen, and arriving on it is not the same as finding the
 // thing you came for: the first instance-type picker went unnoticed entirely
@@ -5082,6 +5125,7 @@ $('d-change').onclick = () => openMachines();
 $('d-ts-signin').onclick = signInTailscale;
 $('d-library').onclick = () => goView('library');
 applyLogFilter('all');           // the default is shown as chosen, not just in force
+$('log-details').onchange = () => applyLogFilter(logFilter);
 for (const b of document.querySelectorAll('[data-filter]')) {
   b.onclick = () => applyLogFilter(b.dataset.filter);
 }
@@ -5095,21 +5139,21 @@ $('log-copy').onclick = async () => {
     .map(r => [...r.children].map(c => c.textContent).join('  ')).join('\n');
   try {
     await navigator.clipboard.writeText(text);
-    $('log-count').textContent = 'copied';
-  } catch { $('log-count').textContent = 'could not copy'; }
+    $('log-count').textContent = 'Copied';
+  } catch { $('log-count').textContent = 'Could not copy'; }
 };
 // Reading CloudWatch logs is free; it is manual only because it is rarely the
 // thing you want, not because it costs anything.
 $('log-cloud').onclick = async () => {
   const btn = $('log-cloud');
   btn.disabled = true;
-  $('log-cloud-label').textContent = 'Fetching…';
-  $('log-cloud-out').textContent = 'fetching…';
+  $('log-cloud-label').textContent = 'Loading…';
+  $('log-cloud-out').textContent = 'Loading…';
   const out = await runCg(['watchdog', 'logs'], { capture: true });
   btn.disabled = false;
-  $('log-cloud-label').textContent = 'Fetch';
+  $('log-cloud-label').textContent = 'Load';
   $('log-cloud-out').textContent = watchdogDigest(out || '')
-    || 'nothing in the last three hours - it writes a line when it decides something';
+    || 'Nothing in the last 3 hours.';
 };
 // The watchdog writes a line every 5 minutes, so three hours is ~40 copies of
 // "nothing to do" around the three hourly lines that say anything. A line seen
@@ -5151,7 +5195,7 @@ $('lib-keepfor').onchange = async ev => {
 $('lib-clean').onclick = async () => {
   const ok = await askConfirm({
     title: 'Clean up the leftover files?',
-    body: 'They belong to no saved game - a save that never finished - and no game can use them.\n\n'
+    body: 'They are left over from a save that did not finish, and no game can use them.\n\n'
         + 'Your saved games are not touched.',
     yes: 'Clean up', danger: true, word: 'CLEAN',
   });
@@ -5171,29 +5215,28 @@ async function chooseMachine(row, spot) {
   const moving = row.region !== cur.region;
   const body =
     (row.gpu ? `${row.gpu}${row.vram ? `, ${row.vram} GB VRAM` : ''}. ` : '')
-    + (price != null ? `About INR ${price} an hour. ` : '')
-    + (spot ? 'Spot is far cheaper, and a region with no spare capacity will refuse to launch it.'
-            : 'On demand costs the full rate and launches even when spot has none left.')
+    + (price != null ? `About ₹${price} an hour. ` : '')
+    + (spot ? 'Spot is far cheaper, but it cannot start when AWS has no spare machines.'
+            : 'Standard costs the full rate and starts even when spot machines run out.')
     + (row.score != null && row.score <= 2
-        ? `\n\nAWS scores spare ${row.type} capacity here ${row.score}/10, so a spot launch will `
-          + 'very likely be refused however cheap it looks.' : '')
+        ? `\n\nAWS rates spare ${row.type} machines here ${row.score}/10, so a spot start will `
+          + 'likely be refused however cheap it looks.' : '')
     + (moving
-        ? `\n\nThis MOVES the rig to ${row.region}. Your game library is in S3 in `
-          + `${cur.region || 'the old region'} and does not follow: the next build creates a new `
-          + 'bucket and reinstalls from Steam. Nothing is deleted or moved by this change, and '
-          + 'the old archive keeps costing storage until you delete it.'
+        ? `\n\nYour machine will run in ${placeName(row.region)}. Your saved games stay in `
+          + `${cur.region ? placeName(cur.region) : 'the old location'}: move them from the Games page `
+          + '(a one-time cost), or the next build downloads them from Steam again.'
         : '')
-    + '\n\nThis applies to the next build; a box that is already running is untouched.';
+    + '\n\nThis applies to the next build. A machine already running is not changed.';
   const ok = await askConfirm({
-    title: moving ? `Move to ${row.region} on ${row.type}?`
-                  : `Build on ${row.type}, ${spot ? 'spot' : 'on demand'}?`,
+    title: moving ? `Run in ${placeName(row.region)} on ${row.type}?`
+                  : `Use ${row.type}, ${spot ? 'spot' : 'standard'}?`,
     body, yes: moving ? 'Move' : 'Use it', danger: moving,
   });
   if (!ok) { paintChooser(); return; }            // put the old choice back
   choosing = true;
   paintChooser();
   const pop = busyPopup('Saving your choice',
-    `${row.type}, ${spot ? 'spot' : 'on demand'}, in ${placeName(row.region)}. Applies to the next build.`,
+    `${row.type}, ${spot ? 'spot' : 'standard'}, in ${placeName(row.region)}. Applies to the next build.`,
     'Saving it');
   let saved = false;
   try {
@@ -5212,7 +5255,7 @@ async function chooseMachine(row, spot) {
   } finally {
     choosing = false;
     paintChooser();
-    saved ? pop.done() : pop.fail('cg did not take the new choice - it is as it was. Logs has what cg said.');
+    saved ? pop.done() : pop.fail('The new choice was not saved; nothing changed. Activity has the details.');
   }
 }
 
@@ -5222,13 +5265,13 @@ async function chooseMachine(row, spot) {
 // Every call it makes is free.
 async function scanRegions(btn) {
   const was = btn && btn.textContent;
-  if (btn) { btn.disabled = true; btn.textContent = 'scanning all regions…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking all locations…'; }
   sweeping = true;
   paintChooser();                 // the table says what it is waiting for
   repaintWhereTo();
   const pop = $('machdlg').open
-    ? busyPopup('Scanning every region', 'Measuring the distance and prices from here - about 90 seconds, and free.',
-                'Scanning all regions')
+    ? busyPopup('Checking every location', 'Measuring distance and prices from here. About 90 seconds, and free.',
+                'Checking all locations')
     : null;
   try {
     await runCg(['sweep', '--json'], { json: 'sweep' });
@@ -5254,7 +5297,6 @@ $('b-login-choice').onchange = async ev => {
 };
 
 $('d-guards').onclick = () => goView('guards');
-$('g-settings').onclick = () => goView('settings');
 // The only button on the dashboard that spends money, and it says so.
 $('d-cost').onclick = () => runCg(['cost', '--json'], { json: 'cost' });
 // A build, a delete and a session all report the same way - steps, lines, an
@@ -5266,12 +5308,12 @@ function startRun(args, opts = {}) {
   goView('build');
   $('b-log').dataset.fresh = 'yes';
   $('b-log').textContent = '';
-  $('b-log-title').textContent = 'cg ' + args.join(' ');
+  $('b-log-title').textContent = `${CgName(args)} · log`;
   buildSteps = 0;
   buildStarted = Date.now();
   $('b-prog').className = 'h-full bg-primary rounded-full';
   $('b-prog').style.width = '0%';
-  $('b-prog-step').textContent = 'starting…';
+  $('b-prog-step').textContent = 'Starting…';
   buildFailClear();
   runBegin(args[0], opts);
   paintRun();
@@ -5298,8 +5340,8 @@ $('b-destroy').onclick = () => $('d-destroy').onclick();
 $('d-destroy').onclick = async () => {
   const ok = await askConfirm({
     title: 'Delete the machine?',
-    body: (sessionNow ? 'The stream open from this laptop is closed first - cg asks before it does.\n\n' : '')
-        + 'Your games are saved to the archive first, and nothing is deleted if that fails.\n\n'
+    body: (sessionNow ? 'The game session on this laptop is closed first.\n\n' : '')
+        + 'Your games are saved first, and nothing is deleted if that fails.\n\n'
         + 'The machine and its disk go. Building a new one takes 10 to 20 minutes.',
     yes: 'Delete machine', danger: true,
   });
@@ -5313,8 +5355,8 @@ $('b-build').onclick = async () => {
     title: 'Build the machine?',
     body: `${picked.size ? `${picked.size} game${picked.size === 1 ? '' : 's'}, ${gb.toFixed(1)} GB, will be`
                          : 'No games will be'} downloaded while it builds.\n\n`
-        + `Billing starts when the machine launches${rate != null ? `, at ${rsh(rate)}/hour` : ''}. `
-        + 'It is ready in about 10 to 20 minutes.',
+        + `It costs ${rate != null ? `${rsh(rate)} an hour` : 'by the hour'} from the moment it starts, `
+        + 'and is ready in about 15 minutes.',
     yes: 'Build',
   });
   if (!ok) return;

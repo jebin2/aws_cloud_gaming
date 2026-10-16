@@ -77,7 +77,7 @@ cat > "$T/r/probe.js" <<'PROBE'
   });
   try {
     paintCreds({ cli: false, source: null, key_id: null, account: null, arn: null,
-                 valid: null, error: 'the AWS CLI is not installed - cg check --fix installs it' });
+                 valid: null, error: 'A required Amazon tool is not installed - cg check --fix installs it' });
     read('NOCLI');
     window.__ran = [];
     document.getElementById('creds-set').click();
@@ -305,7 +305,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     paintTskey({ present: false, valid: null, state: 'absent', detail: null,
                  signed_in: true, node: 'laptop', auth_key_stored: false, can_mint: false });
     paintCreds({ cli: false, source: null, key_id: null, account: null, arn: null,
-                 valid: null, error: 'the AWS CLI is not installed' });
+                 valid: null, error: 'A required Amazon tool is not installed' });
     paintStatus(status('no-cli'));
     // On a screen other than the dashboard, with the CLI gone and then the key
     // rejected: no strip appears above the page - setup checked these once.
@@ -350,8 +350,8 @@ print(html.unescape(m.group(1)) if m else "NO PROBE OUTPUT")')
 row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
 echo "1. no AWS CLI: the card says so, and offers the install"
-contains "the state names the CLI"      "$(row 'NOCLI STATE')" "the AWS CLI is not installed"
-contains "  and that it is installed here" "$(row 'NOCLI DETAIL')" "Install it, then this card can take a key"
+contains "the state names the CLI"      "$(row 'NOCLI STATE')" "A required Amazon tool is not installed"
+contains "  and that it is installed here" "$(row 'NOCLI DETAIL')" "Install it, then add your key here"
 # Installed right here, through the same password dialog setup uses - there is
 # no Dependencies page to send anyone to any more. Drawing the card runs nothing.
 contains "the button installs it"      "$(row 'NOCLI BTN')"    "Install "
@@ -365,18 +365,20 @@ echo "2. a key AWS would not take"
 contains "the key is named, masked"    "$(row 'BAD STATE')"   "****1234"
 contains "  and called rejected"       "$(row 'BAD STATE')"   "rejected"
 contains "  with AWS's reason"         "$(row 'BAD DETAIL')"  "InvalidClientTokenId"
-contains "the button asks for a key"   "$(row 'BAD BTN')"     "Set access key"
+contains "the button asks for a key"   "$(row 'BAD BTN')"     "Update access key"
 # The button opens the form; cg runs when the form is submitted.
 check    "  and runs nothing yet"      "$(row 'BAD RAN')"     "BAD RAN | "
 
 echo "3. a key that works"
 contains "it says which key"           "$(row 'OK STATE')"    "****5678"
-contains "  that it works"             "$(row 'OK STATE')"    "works"
+contains "  that it works"             "$(row 'OK STATE')"    "is working"
 # The account is the point: a key that works for the WRONG account looks
 # perfectly healthy on every other screen.
 contains "  and for which account"     "$(row 'OK DETAIL')"   "account 123456789012"
-contains "  with the identity"         "$(row 'OK DETAIL')"   "user/example"
-contains "  and where it came from"    "$(row 'OK DETAIL')"   "from ~/.aws/credentials"
+# The ARN and the credentials file are plumbing; the account number is the
+# one fact that catches a key for the wrong account.
+lacks    "  not the ARN"               "$(row 'OK DETAIL')"   "user/example"
+lacks    "  nor the file it came from" "$(row 'OK DETAIL')"   "~/.aws"
 
 echo "4. no warning strip above the pages"
 # There was one; setup checks all of this before the app is usable, and a
@@ -389,7 +391,7 @@ echo "4b. the key is one form, and it says what happened"
 # behind them - so a rejected key looked like nothing had happened at all.
 check    "the button opens a form"     "$(row 'FORM OPEN')"    "FORM OPEN | true"
 contains "  with both halves"          "$(row 'FORM FIELDS')"  "id=text secret=password"
-contains "an empty form says so"       "$(row 'EMPTY ERR')"    "Both halves are needed"
+contains "an empty form says so"       "$(row 'EMPTY ERR')"    "Both are needed"
 check    "  and runs nothing"          "$(row 'EMPTY RAN')"    "EMPTY RAN | "
 check    "  staying open"              "$(row 'EMPTY OPEN')"   "EMPTY OPEN | true"
 check    "submitting runs cg creds set" "$(row 'SUBMIT RAN')"  "SUBMIT RAN | creds set"
@@ -410,25 +412,25 @@ check    "a key that works closes it"  "$(row 'OK OPEN')"      "OK OPEN | false"
 echo "4c. Tailscale is its own card, and fails in two ways"
 # Signed in with no token is normal; a token with no sign-in is useless. They
 # are separate facts and the card shows both.
-contains "no token says what is given up" "$(row 'TSNONE TS')" "no API token"
+contains "no token says what is given up" "$(row 'TSNONE TS')" "No access token"
 contains "  while signed in is fine"      "$(row 'TSNONE TS')" "signed in as laptop"
-contains "  and the button offers to set" "$(row 'TSNONE TS')" "Set API token"
-contains "a rejected token says so"       "$(row 'TSBAD TS')"  "API token rejected (401)"
-contains "  offering to replace it"       "$(row 'TSBAD TS')"  "Replace API token"
+contains "  and the button offers to set" "$(row 'TSNONE TS')" "Add access token"
+contains "a rejected token says so"       "$(row 'TSBAD TS')"  "Access token was rejected"
+contains "  offering to replace it"       "$(row 'TSBAD TS')"  "Update access token"
 # Unreachable is not rejected: a new token is not the fix for a flat network.
 contains "unreachable is not rejected"    "$(row 'TSDOWN TS')" "did not answer"
 lacks    "  and is not called rejected"   "$(row 'TSDOWN TS')" "rejected"
 contains "  signed out is said plainly"   "$(row 'TSDOWN TS')" "not signed in"
-contains "a working token"                "$(row 'TSOK TS')"   "API token works"
+contains "a working token"                "$(row 'TSOK TS')"   "Access token is working"
 
 echo "4c2. the box's own key, which is not the token"
 # `tailscale up` takes a node registration key and will not take the API token,
 # and the token must not travel in user-data where the auth key has to live. So
 # the card says where the box's key comes from, which is what decides whether a
 # build stops to ask for one.
-contains "no token: the build will ask"  "$(row 'TSNONE TS')"  "the next build will ask for one"
-contains "a token mints it"              "$(row 'TSOK TS')"    "minted from this token at the next build"
-contains "a stored key is checked"       "$(row 'TSKEPT TS')"  "stored, and checked before each build"
+contains "no token: the build will ask"  "$(row 'TSNONE TS')"  "The next build will ask for one"
+contains "a token mints it"              "$(row 'TSOK TS')"    "made from your access token at the next build"
+contains "a stored key is checked"       "$(row 'TSKEPT TS')"  "Machine key saved"
 
 echo "4d. the token form, like the key form"
 contains "it opens, as a password field"  "$(row 'TSFORM OPEN')" "true type=password"
@@ -460,25 +462,25 @@ echo "4f. a sign-in that goes nowhere says so"
 # complaint is plain stderr, not a cg event, so the panel never showed it.
 contains "stderr reaches the panel"    "$(row 'SIGNIN DEAD')"    "No authentication agent found"
 lacks    "  with no stale starting line" "$(row 'SIGNIN DEAD')"  "starting -"
-contains "  the status says it failed" "$(row 'SIGNIN DEADSTATUS')" "did not finish (exit 127)"
+contains "  the status says it failed" "$(row 'SIGNIN DEADSTATUS')" "Sign-in did not finish"
 contains "  offering another go"        "$(row 'SIGNIN DEADBUTTONS')" "retry=false"
 contains "  and a way out"              "$(row 'SIGNIN DEADBUTTONS')" "done=Close"
 # A write is refused outright while anything else runs - it is not queued - and
 # the only sign of that used to be a line in the header.
 # Named, not spelled: "cg init" is the command, "the build" is the thing that
 # is keeping you waiting - see CG_WORDS.
-contains "a refusal says what holds it" "$(row 'SIGNIN BUSY')"   "the build is still running"
-contains "  and the dialog says so too" "$(row 'SIGNIN BUSY')" "the build is still running"
+contains "a refusal says what holds it" "$(row 'SIGNIN BUSY')"   "The build is still running"
+contains "  and the dialog says so too" "$(row 'SIGNIN BUSY')" "The build is still running"
 lacks    "  without spelling the command" "$(row 'SIGNIN BUSY')" "cg init is still"
 
 echo "4g. the sign-in dialog, start to end"
 # `tailscale up` prints a link and then waits for a browser. That is a thing
 # happening, not a state to read, so it is in front of you while it happens.
 check    "the button opens a dialog"   "$(row 'SIGNIN DIALOG')"  "SIGNIN DIALOG | true"
-contains "  saying what comes first"   "$(row 'SIGNIN STATUS')"  "password dialog opens first"
+contains "  saying what comes first"   "$(row 'SIGNIN STATUS')"  "password prompt opens first"
 contains "  warning it can be behind"  "$(row 'SIGNIN STATUS')"  "behind this window"
 contains "only Cancel while it runs"   "$(row 'SIGNIN BUTTONS')" "cancel=false done=true retry=true"
-contains "the wait is explained"       "$(row 'SIGNIN WAITING')" "waiting for you to finish in the browser"
+contains "the wait is explained"       "$(row 'SIGNIN WAITING')" "Waiting for you to finish in your browser"
 contains "signed in says who"          "$(row 'SIGNIN OKSTATUS')" "signed in as laptop"
 contains "  Cancel goes away"          "$(row 'SIGNIN OKBUTTONS')" "cancel=true"
 contains "  Done appears"              "$(row 'SIGNIN OKBUTTONS')" "done=false label=Done"

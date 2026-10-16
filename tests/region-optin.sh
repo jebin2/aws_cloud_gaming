@@ -148,7 +148,7 @@ contains "cg dispatches optin"        "$(cat cg)" "optin)   shift"
 contains "  and enable"               "$(cat cg)" "enable)  shift"
 contains "  and help names both"      "$(cat cg)" "cg regions [optin|enable <r>]"
 js=$(cat app/renderer/app.js)
-contains "the app offers it"          "$js" "Enable a region"
+contains "the app offers it"          "$js" "Switch on a location"
 contains "  reads the list"           "$js" "'regions', 'optin', '--json'"
 contains "  and runs cg to enable"    "$js" "'regions', 'enable'"
 # The sweep's own numbers next to each candidate: a bare region code is a
@@ -263,17 +263,17 @@ m = re.search(r"<pre id=\"probe-out\">(.*?)</pre>", sys.stdin.read(), re.S)
 print(html.unescape(m.group(1)) if m else "NO PROBE OUTPUT")')
   lacks    "nothing threw"                  "$OUT" "THREW"
   check    "  and no uncaught error"        "$(sed -n 's/^ERRS | //p' <<<"$OUT")" ""
-  contains "the list is in two groups"      "$OUT" "GROUPS | not enabled yet / already enabled"
-  contains "  the measured candidate first" "$OUT" "IN NOT ENABLED YET | ap-southeast-3 - Jakarta, 58ms, g5.xlarge at 1/10"
+  contains "the list is in two groups"      "$OUT" "GROUPS | Not on yet / Already on"
+  contains "  the measured candidate first" "$OUT" "IN NOT ON YET | ap-southeast-3 - Jakarta, 58ms, g5.xlarge at 1/10"
   contains "  and the bare ones after"      "$OUT" "me-south-1"
   # The one people go looking for, which used to be absent entirely.
-  contains "an enabled region is listed"    "$OUT" "IN ALREADY ENABLED | ap-southeast-5 - Malaysia, 48ms, g6.xlarge at 9/10"
+  contains "an enabled region is listed"    "$OUT" "IN ALREADY ON | ap-southeast-5 - Malaysia, 48ms, g6.xlarge at 9/10"
   # Enabled by default and never scanned: listing a dozen of those would bury it.
   lacks    "  but not every default one"    "$OUT" "ap-south-1 -"
   contains "picking it says it is on"       "$OUT" "ON STATE | ● enabled"
-  contains "  and names the real blocker"   "$OUT" "What stops it being picked is GPU quota, not the opt-in"
+  contains "  and names the real blocker"   "$OUT" "What stops it being picked is the GPU limit"
   contains "  with both quotas"             "$OUT" "on demand 0 vCPU spot 0 vCPU"
-  contains "  and where to ask"             "$OUT" "Ask AWS for GPU quota"
+  contains "  and where to ask"             "$OUT" "Ask AWS for a higher GPU limit"
   check    "  with nothing to confirm"      "$(sed -n 's/^ON BTN | //p' <<<"$OUT")" "go=true/true"
   contains "a disabled one still enables"   "$OUT" "OFF STATE | ap-southeast-3 · Jakarta · 58ms"
   check    "  and Confirm is live"          "$(sed -n 's/^OFF BTN | //p' <<<"$OUT")" "go=false/false"

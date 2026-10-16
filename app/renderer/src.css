@@ -47,7 +47,7 @@
      the comparison - which was the whole complaint. */
   .chooser { @apply w-full border-collapse font-code-sm text-code-sm; }
   .chooser th {
-    @apply text-left font-label-caps text-label-caps uppercase tracking-wider
+    @apply text-left font-code-sm text-code-sm
            text-outline font-normal px-space-sm py-space-xs whitespace-nowrap;
   }
   .chooser td { @apply px-space-sm py-space-xs align-middle whitespace-nowrap; }
@@ -90,7 +90,7 @@
      sentence repeated down the column. */
   .chooser label.pick .amount { @apply shrink-0; }
   .chooser label.pick .reason {
-    @apply font-label-caps text-label-caps uppercase tracking-wider
+    @apply font-code-sm text-code-sm
            text-outline-variant whitespace-nowrap;
   }
   /* A row where neither price can be chosen should recede rather than look
@@ -109,7 +109,7 @@
   #b-log .step { @apply border-t border-surface-variant/40 mt-space-xs pt-space-xs; }
   #b-log .step:first-child { @apply border-0 mt-0 pt-0; }
   .log-row time { @apply text-outline shrink-0 w-16; }
-  .log-row .k { @apply text-outline shrink-0 w-16 uppercase; }
+  .log-row .k { @apply text-outline shrink-0 w-20; }
   .log-row .k.fail, .log-row .k.error { @apply text-error; }
   .log-row .k.ok { @apply text-primary; }
   .log-row .k.warn, .log-row .k.wait { @apply text-tertiary; }

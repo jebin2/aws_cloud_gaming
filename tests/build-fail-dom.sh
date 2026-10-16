@@ -148,7 +148,7 @@ contains "cg's full text is kept"        "$(row 'SPOT KEPT')" "true"
 
 echo "3. a different code, a different answer"
 contains "a quota failure says so"       "$(row 'QUOTA HEAD')" "quota is too small"
-contains "  and offers the ask"          "$(row 'QUOTA ACTS')" "Ask AWS for GPU quota"
+contains "  and offers the ask"          "$(row 'QUOTA ACTS')" "Ask AWS for a higher GPU limit"
 lacks    "  not on demand, which will not help" "$(row 'QUOTA ACTS')" "Build on demand"
 
 echo "4. a code nothing is known about"

@@ -156,7 +156,7 @@ check "the failure is recorded after updateHeader" "$order" "updateHeader || fai
 # A painter that THREW was silent for the same reason: the catch wrote that
 # header line and updateHeader overwrote it in the same tick. Found by
 # rendering the page.
-contains "a throwing painter is reported too" "$js" "could not show cg"
+contains "a throwing painter is reported too" "$js" "Could not show"
 contains "  and names the painter it could not find" "$js" "no painter for"
 # Nothing writes a command name into the window's furniture any more: the
 # header line that did is gone, and the pipeline's pane carries cg's own output

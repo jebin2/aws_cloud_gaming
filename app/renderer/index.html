@@ -6,7 +6,7 @@
      CDNs, which this policy forbids, so both are vendored (npm run build:css). -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:;">
-<title>cg</title>
+<title>Cloud Gaming</title>
 <link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="tailwind.css">
 </head>
@@ -15,27 +15,21 @@
 <header class="fixed top-0 left-0 right-0 h-12 z-50 bg-surface-container-lowest flex items-center justify-between px-margin select-none border-b border-surface-variant">
   <div class="flex items-center gap-space-sm">
     <span class="material-symbols-outlined text-primary text-[18px]" data-icon="sports_esports">&#xea28;</span>
-    <span class="font-code-md text-code-md font-medium tracking-tight">cg</span>
+    <span class="font-body-md text-body-md font-medium tracking-tight">Cloud Gaming</span>
   </div>
 </header>
 
 <aside class="fixed left-0 top-12 bottom-0 w-60 bg-surface-container-low z-40 flex flex-col justify-between border-r border-surface-variant">
   <div class="flex flex-col">
     <nav class="flex flex-col gap-0.5 px-space-xs pt-space-md" id="nav">
-      <a class="nav-item on" data-view="dashboard" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="dashboard">&#xe871;</span><span>Dashboard</span></a>
-      <a class="nav-item" data-view="build" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="build_circle">&#xef48;</span><span>Build</span></a>
-      <a class="nav-item" data-view="library" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="stadia_controller">&#xf135;</span><span>Library</span></a>
-      <a class="nav-item" data-view="guards" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="shield">&#xe9e0;</span><span>Guards</span></a>
-      <a class="nav-item" data-view="cost" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="attach_money">&#xe227;</span><span>Cost</span></a>
-      <a class="nav-item" data-view="logs" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="terminal">&#xeb8e;</span><span>Logs</span></a>
+      <a class="nav-item on" data-view="dashboard" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="dashboard">&#xe871;</span><span>Home</span></a>
+      <a class="nav-item" data-view="build" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="build_circle">&#xef48;</span><span>Machine</span></a>
+      <a class="nav-item" data-view="library" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="stadia_controller">&#xf135;</span><span>Games</span></a>
+      <a class="nav-item" data-view="guards" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="shield">&#xe9e0;</span><span>Safety</span></a>
+      <a class="nav-item" data-view="cost" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="attach_money">&#xe227;</span><span>Spending</span></a>
+      <a class="nav-item" data-view="logs" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="terminal">&#xeb8e;</span><span>Activity</span></a>
       <a class="nav-item" data-view="settings" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="settings">&#xe8b8;</span><span>Settings</span></a>
     </nav>
-  </div>
-  <div class="p-space-md border-t border-surface-variant bg-surface-container-lowest">
-    <span class="font-label-caps text-label-caps uppercase text-on-surface-variant">The engine</span>
-    <p class="font-code-sm text-code-sm text-outline mt-space-xs leading-relaxed">
-      This window only runs <span class="text-secondary">cg</span>.<br>The scripts decide everything.
-    </p>
   </div>
 </aside>
 
@@ -47,7 +41,7 @@
               flex items-center justify-between gap-space-md pb-space-md mb-space-lg">
     <div class="flex flex-col gap-space-xs">
       <div class="flex items-center gap-space-sm">
-        <span class="font-headline-lg text-headline-lg" id="view-title">Dashboard</span>
+        <span class="font-headline-lg text-headline-lg" id="view-title">Home</span>
       </div>
     </div>
     <div class="flex items-center gap-space-sm">
@@ -76,7 +70,7 @@
       <div class="onb-col" id="onb-col">
         <div class="flex items-center gap-space-sm mb-space-xl">
           <span class="material-symbols-outlined text-primary text-[44px]" data-icon="sports_esports">&#xea28;</span>
-          <span class="font-headline-lg text-headline-lg font-semibold tracking-tight">cloud gaming</span>
+          <span class="font-headline-lg text-headline-lg font-semibold tracking-tight">Cloud Gaming</span>
           <span class="ml-auto font-code-sm text-code-sm text-outline" id="onb-count"></span>
         </div>
         <div id="onb-head" hidden>
@@ -127,7 +121,7 @@
             <span class="material-symbols-outlined text-[16px]" data-icon="delete">&#xe92e;</span>Delete machine
           </button>
           <button id="d-change" class="font-code-sm text-code-sm text-outline hover:text-on-surface ml-space-sm">
-            Change machine or location &rarr;
+            Change machine
           </button>
         </div>
         <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="d-note"></p>
@@ -136,7 +130,7 @@
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mb-gutter-desktop">
         <!-- Everything that costs money right now, and what each costs. -->
         <div class="p-space-lg rounded-lg bg-surface-container-low">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Billing now</span>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Costing you now</span>
           <div class="flex flex-col gap-space-sm mt-space-md" id="d-bill"></div>
           <div class="flex flex-col gap-0.5 mt-space-md pt-space-sm border-t border-surface-variant" id="d-bill-total"></div>
         </div>
@@ -144,7 +138,7 @@
         <!-- The month, from AWS Budgets (free); the exact figure is a paid call,
              made only when asked. -->
         <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">This month</span>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">This month</span>
           <p class="font-headline-md text-headline-md mt-space-md" id="d-month">&mdash;</p>
           <div class="h-2 rounded-full bg-surface-variant mt-space-sm overflow-hidden">
             <div class="h-full bg-primary" id="d-month-bar" style="width:0%"></div>
@@ -161,7 +155,7 @@
         <!-- The games: the only copy is in the archive, so how long it is kept
              is the news, not the bucket name. -->
         <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Your games</span>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Your games</span>
           <p class="font-headline-md text-headline-md mt-space-md" id="d-games">&mdash;</p>
           <p class="font-code-sm text-code-sm text-outline mt-0.5" id="d-games-sub"></p>
           <p class="font-code-sm text-code-sm mt-space-sm" id="d-games-keep"></p>
@@ -174,7 +168,7 @@
              machine, and - while it is up - whether the path between them is
              direct or relayed, which is what decides how a stream feels. -->
         <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Tailscale</span>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Private network</span>
           <div class="flex flex-col gap-space-sm mt-space-md" id="d-ts"></div>
           <div class="mt-auto pt-space-md">
             <button id="d-ts-signin" class="btn" hidden>Sign in to Tailscale</button>
@@ -183,7 +177,7 @@
 
         <!-- What stops a forgotten machine, and what warns about the bill. -->
         <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Protection</span>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Protection</span>
           <div class="flex flex-col gap-space-sm mt-space-md" id="d-protect"></div>
           <div class="mt-auto pt-space-md">
             <button id="d-guards" class="btn">Details</button>
@@ -224,7 +218,7 @@
         <p class="font-code-sm text-code-sm text-on-surface-variant mt-0.5" id="b-fail-why"></p>
         <div class="flex flex-wrap items-center gap-space-sm mt-space-sm" id="b-fail-acts"></div>
         <details class="mt-space-sm">
-          <summary class="font-code-sm text-code-sm text-outline cursor-pointer">What cg said</summary>
+          <summary class="font-code-sm text-code-sm text-outline cursor-pointer">Details</summary>
           <div class="font-code-sm text-code-sm text-on-surface whitespace-pre-wrap mt-space-xs" id="b-error"></div>
         </details>
       </div>
@@ -235,9 +229,9 @@
         <summary class="font-code-sm text-code-sm text-outline cursor-pointer">Full log</summary>
         <div class="rounded bg-surface-container-lowest mt-space-sm">
           <div class="flex items-center justify-between px-space-md py-space-xs border-b border-surface-variant">
-            <span class="font-code-sm text-code-sm text-outline" id="b-log-title">build log</span>
+            <span class="font-code-sm text-code-sm text-outline" id="b-log-title">Build log</span>
             <label class="font-code-sm text-code-sm text-outline flex items-center gap-space-xs">
-              <input type="checkbox" id="b-follow" class="accent-primary" checked>auto-scroll
+              <input type="checkbox" id="b-follow" class="accent-primary" checked>Auto-scroll
             </label>
           </div>
           <div class="font-code-sm text-code-sm max-h-[46vh] overflow-y-auto px-space-md py-space-sm" id="b-log"></div>
@@ -249,7 +243,7 @@
          Steam, and the bill and the button under them. -->
     <div class="fit-view flex flex-col gap-space-md" id="b-plan">
       <div class="p-space-lg rounded-lg bg-surface-container-low">
-      <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Machine</span>
+      <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Machine</span>
       <div class="flex flex-wrap items-start justify-between gap-space-md mt-space-sm">
         <div class="min-w-0">
           <p class="font-code-md text-code-md text-on-surface" id="b-pick">&mdash;</p>
@@ -277,17 +271,17 @@
       </div>
 
       <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Games to install</span>
+        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Games to install</span>
         <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-hint">
-          Downloaded from your archive while the machine starts.
+          Downloaded from your saved games while the machine starts.
         </p>
         <table class="w-full font-code-sm text-code-sm mt-space-sm">
           <thead class="text-outline">
             <tr class="text-left border-b border-surface-variant">
               <th class="py-space-xs pr-space-sm font-normal w-6"></th>
-              <th class="py-space-xs pr-space-md font-normal">GAME</th>
-              <th class="py-space-xs px-space-md font-normal text-right">SIZE</th>
-              <th class="py-space-xs pl-space-md font-normal text-right">SAVED</th>
+              <th class="py-space-xs pr-space-md font-normal">Game</th>
+              <th class="py-space-xs px-space-md font-normal text-right">Size</th>
+              <th class="py-space-xs pl-space-md font-normal text-right">Saved</th>
             </tr>
           </thead>
           <tbody id="b-games"></tbody>
@@ -304,7 +298,7 @@
       </div>
 
       <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Steam</span>
+        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Steam</span>
         <div class="flex items-center justify-between gap-space-md mt-space-sm">
           <p class="font-body-md text-body-md text-on-surface" id="b-login">&mdash;</p>
           <!-- Whether the next machine restores the saved login or asks: decided
@@ -326,7 +320,7 @@
     <div class="fit-view flex flex-col gap-space-md">
       <div class="p-space-lg rounded-lg bg-surface-container-low">
         <div class="flex items-center justify-between gap-space-md">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Games</span>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Games</span>
           <label class="flex items-center gap-space-sm font-code-sm text-code-sm text-outline" id="lib-keepfor-row" hidden>
             Keep for
             <select id="lib-keepfor" class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-sm text-code-sm text-on-surface"></select>
@@ -336,15 +330,15 @@
         <table class="w-full font-code-sm text-code-sm mt-space-sm">
           <thead class="text-outline">
             <tr class="text-left border-b border-surface-variant">
-              <th class="py-space-xs pr-space-md font-normal">GAME</th>
-              <th class="py-space-xs px-space-md font-normal">PLACE</th>
-              <th class="py-space-xs px-space-md font-normal text-right">SIZE</th>
-              <th class="py-space-xs px-space-md font-normal text-right">PER MONTH</th>
-              <th class="py-space-xs px-space-md font-normal text-right">DELETED ON</th>
+              <th class="py-space-xs pr-space-md font-normal">Game</th>
+              <th class="py-space-xs px-space-md font-normal">Location</th>
+              <th class="py-space-xs px-space-md font-normal text-right">Size</th>
+              <th class="py-space-xs px-space-md font-normal text-right">Cost / month</th>
+              <th class="py-space-xs px-space-md font-normal text-right">Auto-delete</th>
               <th class="py-space-xs pl-space-md font-normal w-0"></th>
             </tr>
           </thead>
-          <tbody id="lib-rows"><tr><td class="py-space-sm text-outline" colspan="6">reading&hellip;</td></tr></tbody>
+          <tbody id="lib-rows"><tr><td class="py-space-sm text-outline" colspan="6">Reading&hellip;</td></tr></tbody>
           <tfoot id="lib-foot" class="border-t border-surface-variant"></tfoot>
         </table>
         <p class="font-code-sm text-code-sm text-outline mt-space-md" id="lib-keep"></p>
@@ -359,19 +353,19 @@
            machine is what a new machine signs in as; a copy a region move
            left elsewhere is used by nothing. A row each, like the games. -->
       <div class="p-space-lg rounded-lg bg-surface-container-low" id="lib-login-box">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Steam login</span>
+        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Steam login</span>
         <table class="w-full font-code-sm text-code-sm mt-space-sm">
           <thead class="text-outline">
             <tr class="text-left border-b border-surface-variant">
-              <th class="py-space-xs pr-space-md font-normal">ACCOUNT</th>
-              <th class="py-space-xs px-space-md font-normal">PLACE</th>
-              <th class="py-space-xs px-space-md font-normal text-right">SIZE</th>
-              <th class="py-space-xs px-space-md font-normal text-right">SAVED</th>
+              <th class="py-space-xs pr-space-md font-normal">Account</th>
+              <th class="py-space-xs px-space-md font-normal">Location</th>
+              <th class="py-space-xs px-space-md font-normal text-right">Size</th>
+              <th class="py-space-xs px-space-md font-normal text-right">Saved</th>
               <th class="py-space-xs px-space-md font-normal"></th>
               <th class="py-space-xs pl-space-md font-normal w-0"></th>
             </tr>
           </thead>
-          <tbody id="lib-login-rows"><tr><td class="py-space-sm text-outline" colspan="6">reading&hellip;</td></tr></tbody>
+          <tbody id="lib-login-rows"><tr><td class="py-space-sm text-outline" colspan="6">Reading&hellip;</td></tr></tbody>
         </table>
         <p class="font-code-sm text-code-sm text-outline mt-space-md" id="lib-login-note"></p>
       </div>
@@ -385,22 +379,21 @@
          Every name, minute and state here is cg's; the markup only has places. -->
     <div class="fit-view flex flex-col gap-space-md">
       <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">What stops the machine</span>
+        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Auto-stop</span>
         <p class="font-headline-md text-headline-md mt-space-sm" id="g-head">&mdash;</p>
         <p class="font-code-sm text-code-sm text-on-surface-variant mt-0.5" id="g-sub"></p>
         <div class="flex flex-col gap-0.5 mt-space-sm font-code-sm text-code-sm text-error" id="g-warn" hidden></div>
       </div>
 
       <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Three safety nets</span>
+        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Three safety nets</span>
         <p class="font-code-sm text-code-sm text-outline mt-0.5">In the order they act. Each one still works when the one before it cannot.</p>
         <div class="flex flex-col mt-space-sm" id="g-nets"></div>
       </div>
 
       <div class="p-space-lg rounded-lg bg-surface-container-low">
         <div class="flex items-center justify-between">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Settings</span>
-          <button class="btn" id="g-settings">All settings</button>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Settings</span>
         </div>
         <div class="flex flex-col mt-space-sm" id="g-knobs"></div>
       </div>
@@ -416,11 +409,11 @@
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-space-md">
         <div class="p-space-lg rounded-lg bg-surface-container-low">
           <div class="flex items-center justify-between">
-            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">This month</span>
+            <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">This month</span>
             <span class="pill" id="c-cap-chip" hidden>&mdash;</span>
           </div>
           <p class="font-headline-xl text-headline-xl mt-space-sm" id="c-month">&mdash;</p>
-          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="c-month-sub">Press Refresh to ask AWS.</p>
+          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="c-month-sub">Press Refresh to load this month&rsquo;s bill.</p>
           <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden" id="c-cap-wrap" hidden>
             <div class="h-full bg-primary" id="c-cap-bar" style="width:0%"></div>
           </div>
@@ -428,14 +421,14 @@
         </div>
 
         <div class="p-space-lg rounded-lg bg-surface-container-low">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">AWS credits</span>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">AWS credits</span>
           <p class="font-headline-xl text-headline-xl mt-space-sm" id="c-credits">&mdash;</p>
           <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="c-credits-note"></p>
         </div>
       </div>
 
       <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Day by day</span>
+        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Day by day</span>
         <p class="font-code-sm text-code-sm text-outline mt-0.5" id="c-days-note">
           Days with nothing billed are left out. AWS's bill runs about a day behind.
         </p>
@@ -443,15 +436,15 @@
           <table class="w-full font-code-sm text-code-sm" id="c-table">
             <thead class="text-outline">
               <tr class="text-left border-b border-surface-variant">
-                <th class="py-space-xs pr-space-md font-normal">DAY</th>
-                <th class="py-space-xs px-space-md font-normal text-right">PLAYED</th>
-                <th class="py-space-xs px-space-md font-normal text-right">MACHINE</th>
-                <th class="py-space-xs px-space-md font-normal text-right">STORAGE</th>
-                <th class="py-space-xs px-space-md font-normal text-right">OTHER</th>
-                <th class="py-space-xs pl-space-md font-normal text-right">TOTAL</th>
+                <th class="py-space-xs pr-space-md font-normal">Day</th>
+                <th class="py-space-xs px-space-md font-normal text-right">Played</th>
+                <th class="py-space-xs px-space-md font-normal text-right">Machine</th>
+                <th class="py-space-xs px-space-md font-normal text-right">Storage</th>
+                <th class="py-space-xs px-space-md font-normal text-right">Other</th>
+                <th class="py-space-xs pl-space-md font-normal text-right">Total</th>
               </tr>
             </thead>
-            <tbody id="c-rows"><tr><td class="py-space-sm text-outline" colspan="6">Nothing asked yet - this is the one page that costs to read.</td></tr></tbody>
+            <tbody id="c-rows"><tr><td class="py-space-sm text-outline" colspan="6">Nothing loaded yet. Press Refresh to load this month&rsquo;s bill.</td></tr></tbody>
             <tfoot id="c-foot" class="border-t border-surface-variant"></tfoot>
           </table>
         </div>
@@ -459,7 +452,7 @@
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-space-md">
         <div class="p-space-lg rounded-lg bg-surface-container-low">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">With no machine running</span>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">When you&rsquo;re not playing</span>
           <p class="font-headline-md text-headline-md mt-space-sm" id="c-standby">&mdash;</p>
           <p class="font-code-sm text-code-sm text-on-surface-variant mt-0.5" id="c-standby-sub"></p>
           <div class="flex flex-col mt-space-sm" id="c-bills"></div>
@@ -468,7 +461,7 @@
 
         <div class="p-space-lg rounded-lg bg-surface-container-low">
           <div class="flex items-center justify-between">
-            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Free streaming</span>
+            <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Free streaming</span>
             <span class="pill" id="c-egress-pct" hidden>&mdash;</span>
           </div>
           <p class="font-headline-md text-headline-md mt-space-sm" id="c-egress">&mdash;</p>
@@ -494,15 +487,15 @@
     <div class="p-space-lg rounded-lg bg-surface-container-low mt-space-md" id="s-creds-card">
       <div class="flex items-start justify-between gap-space-md">
         <div class="min-w-0 flex-1">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Amazon</span>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Amazon account</span>
           <p class="font-code-sm text-code-sm text-outline mt-0.5">
-            The one thing cg cannot install for you. Saved to ~/.aws/credentials, never to .env.
+            The key this app uses to start and stop your machine. Kept on this laptop only.
           </p>
           <p class="font-code-md text-code-md mt-space-sm" id="creds-state">reading…</p>
           <p class="font-code-sm text-code-sm text-outline mt-0.5" id="creds-detail"></p>
         </div>
         <button id="creds-set" class="btn shrink-0">
-          <span class="material-symbols-outlined text-[16px]" data-icon="person">&#xe7fd;</span>Set access key
+          <span class="material-symbols-outlined text-[16px]" data-icon="person">&#xe7fd;</span>Add access key
         </button>
       </div>
     </div>
@@ -510,10 +503,9 @@
     <div class="p-space-lg rounded-lg bg-surface-container-low mt-space-md" id="s-tskey-card">
       <div class="flex items-start justify-between gap-space-md">
         <div class="min-w-0 flex-1">
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Tailscale</span>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Private network</span>
           <p class="font-code-sm text-code-sm text-outline mt-0.5">
-            The private network the box joins. The API token is optional - it prunes dead nodes
-            and turns off key expiry. Saved to .env, and checked before it is written.
+            Tailscale connects this laptop to your machine privately.
           </p>
           <p class="font-code-md text-code-md mt-space-sm" id="tskey-state">reading…</p>
           <p class="font-code-sm text-code-sm text-outline mt-0.5" id="tskey-detail"></p>
@@ -526,11 +518,11 @@
             <span class="material-symbols-outlined text-[16px]" data-icon="bolt">&#xea0b;</span>Sign in
           </button>
           <button id="tskey-set" class="btn">
-            <span class="material-symbols-outlined text-[16px]" data-icon="person">&#xe7fd;</span>Set API token
+            <span class="material-symbols-outlined text-[16px]" data-icon="person">&#xe7fd;</span>Add access token
           </button>
           <!-- The box's own key, for a tailnet that will not let the token make
                one. Hidden when the token can. -->
-          <button id="tskey-authkey" class="btn" hidden>Set auth key</button>
+          <button id="tskey-authkey" class="btn" hidden>Add machine key</button>
         </div>
       </div>
     </div>
@@ -545,9 +537,9 @@
       <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
         <div class="flex items-center justify-between pb-space-md gap-space-sm">
           <div>
-            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Event stream</span>
+            <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Activity</span>
             <p class="font-code-sm text-code-sm text-outline mt-0.5">
-              Every event cg emitted in this window. It is not kept anywhere - closing the app forgets it.
+              What the app did since it opened. Not saved.
             </p>
           </div>
           <span class="font-code-sm text-code-sm text-outline whitespace-nowrap" id="log-count">0</span>
@@ -558,7 +550,10 @@
           <button class="btn" data-filter="steps">Steps</button>
           <button class="btn" data-filter="problems">Problems</button>
           <label class="font-code-sm text-code-sm text-outline flex items-center gap-space-xs ml-auto">
-            <input type="checkbox" id="log-follow" class="accent-primary" checked>auto-scroll
+            <input type="checkbox" id="log-details" class="accent-primary">Show details
+          </label>
+          <label class="font-code-sm text-code-sm text-outline flex items-center gap-space-xs">
+            <input type="checkbox" id="log-follow" class="accent-primary" checked>Auto-scroll
           </label>
           <button class="btn" id="log-copy">
             <span class="material-symbols-outlined text-[16px]" data-icon="terminal">&#xeb8e;</span>Copy
@@ -573,17 +568,16 @@
       <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
         <div class="flex items-center justify-between pb-space-md gap-space-sm">
           <div>
-            <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Cloud watchdog log</span>
+            <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Auto-stop history</span>
             <p class="font-code-sm text-code-sm text-outline mt-0.5">
-              What the watchdog in AWS decided over the last three hours. Kept by AWS, so it is
-              there after this window closes, and it costs nothing to read.
+              What the auto-stop in AWS decided in the last 3 hours. Free to load.
             </p>
           </div>
           <button class="btn shrink-0" id="log-cloud">
-            <span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span><span id="log-cloud-label">Fetch</span>
+            <span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span><span id="log-cloud-label">Load</span>
           </button>
         </div>
-        <pre class="font-code-sm text-code-sm whitespace-pre-wrap flex-1 min-h-[200px] max-h-[62vh] overflow-auto rounded bg-surface-container-lowest p-space-md" id="log-cloud-out">Not fetched. It runs every 5 minutes and writes a line when it decides something.</pre>
+        <pre class="font-code-sm text-code-sm whitespace-pre-wrap flex-1 min-h-[200px] max-h-[62vh] overflow-auto rounded bg-surface-container-lowest p-space-md" id="log-cloud-out">Not loaded yet. The auto-stop checks every 5 minutes.</pre>
       </div>
     </div>
   </section>
@@ -643,13 +637,12 @@
   <p class="font-code-md text-code-md">Connect your Amazon account</p>
   <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md">
     On the Amazon website: your name &rarr; Security credentials &rarr; Create access key.
-    It is checked with Amazon before anything is saved, and kept on this laptop only
-    (~/.aws/credentials).
+    It&rsquo;s checked with Amazon before it&rsquo;s saved, and kept on this laptop only.
   </p>
-  <label class="font-code-sm text-code-sm text-outline" for="awskey-id">access key id</label>
+  <label class="font-code-sm text-code-sm text-outline" for="awskey-id">Access key ID</label>
   <input id="awskey-id" autocomplete="off" spellcheck="false" placeholder="AKIA…"
          class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface mb-space-sm">
-  <label class="font-code-sm text-code-sm text-outline" for="awskey-secret">secret access key</label>
+  <label class="font-code-sm text-code-sm text-outline" for="awskey-secret">Secret access key</label>
   <input id="awskey-secret" type="password" autocomplete="off" spellcheck="false"
          class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
   <pre class="font-code-sm text-code-sm text-error whitespace-pre-wrap mt-space-sm max-h-[30vh] overflow-auto" id="awskey-err" hidden></pre>
@@ -665,7 +658,7 @@
      browser) and by installing a missing tool (which asks polkit first). -->
 <dialog id="rundlg" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[520px] max-w-[46rem]">
   <p class="font-code-md text-code-md" id="rundlg-title">Working</p>
-  <p class="font-code-sm text-code-sm mt-0.5 mb-space-md" id="rundlg-status">starting…</p>
+  <p class="font-code-sm text-code-sm mt-0.5 mb-space-md" id="rundlg-status">Starting…</p>
   <button class="btn btn-primary mb-space-md" id="rundlg-link" hidden>
     <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the sign-in page
   </button>
@@ -685,25 +678,25 @@
      looks the same whether this window made it or found it. -->
 <dialog id="quota" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[600px] max-w-[54rem]">
   <div class="flex items-baseline justify-between gap-space-md">
-    <p class="font-code-md text-code-md" id="quota-title">Ask AWS for GPU quota</p>
+    <p class="font-code-md text-code-md" id="quota-title">Ask AWS for a higher GPU limit</p>
     <p class="font-code-sm text-code-sm text-outline" id="quota-region"></p>
   </div>
 
   <div class="flex items-center gap-space-sm mt-space-md">
     <!-- Quotas are per region, so the region is part of the question. Enabling
          a region gives you zero of everything in it. -->
-    <label class="font-code-sm text-code-sm text-outline" for="quota-where">where?</label>
+    <label class="font-code-sm text-code-sm text-outline" for="quota-where">Location</label>
     <select id="quota-where"
             class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-md text-code-md text-on-surface"></select>
   </div>
 
   <div class="flex items-center gap-space-sm mt-space-sm">
-    <label class="font-code-sm text-code-sm text-outline" for="quota-kind">which limit?</label>
+    <label class="font-code-sm text-code-sm text-outline" for="quota-kind">Limit</label>
     <select id="quota-kind"
             class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-md text-code-md text-on-surface">
-      <option value="">pick one…</option>
-      <option value="ondemand">on demand - Running On-Demand G and VT</option>
-      <option value="spot">spot - All G and VT Spot Instance Requests</option>
+      <option value="">Pick one…</option>
+      <option value="ondemand">Standard machines</option>
+      <option value="spot">Spot machines (cheaper)</option>
     </select>
   </div>
 
@@ -716,7 +709,7 @@
     <button class="btn" id="quota-case">
       <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the case
     </button>
-    <button class="btn" id="quota-copy">Copy the appeal</button>
+    <button class="btn" id="quota-copy">Copy the reply</button>
     <span class="font-code-sm text-code-sm text-outline break-all" id="quota-case-url"></span>
   </div>
 
@@ -726,7 +719,7 @@
   <menu class="flex justify-end gap-space-sm mt-space-md p-0">
     <button class="btn" id="quota-cancel">Close</button>
     <button class="btn" id="quota-refresh" hidden>Refresh</button>
-    <button class="btn btn-primary" id="quota-go" disabled>Confirm · create case</button>
+    <button class="btn btn-primary" id="quota-go" disabled>Send the request</button>
   </menu>
 </dialog>
 
@@ -742,18 +735,18 @@
     <div id="s-machine-card">
       <div class="flex flex-wrap items-baseline justify-between gap-space-md pb-space-md">
         <div>
-          <span class="font-label-caps text-label-caps uppercase tracking-wider text-outline">Machine</span>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Choose a machine</span>
           <!-- One table, not three dropdowns. Region, instance type and purchase
                model are not three decisions - they are one, and the whole point
                is comparing the combinations. Picking a PRICE picks all three. -->
           <p class="font-code-sm text-code-sm text-outline mt-0.5">
-            Pick a price: that chooses the region, the machine and spot or on demand together.
+            Pick where and what to run. Each price is a location and machine together.
           </p>
         </div>
         <div class="flex items-center gap-space-sm shrink-0">
           <span class="font-code-sm text-code-sm text-outline" id="s-sweep-age"></span>
           <button class="btn shrink-0" id="s-sweep">
-            <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Scan all regions
+            <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Check all locations
           </button>
         </div>
       </div>
@@ -796,18 +789,17 @@
 </dialog>
 
 <dialog id="optin" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[600px] max-w-[54rem]">
-  <p class="font-code-md text-code-md">Enable a region</p>
+  <p class="font-code-md text-code-md">Switch on a location</p>
   <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md">
-    A region your account has not opted into. Free, and nothing is created - it only makes the
-    region usable. The ones already on are listed too, so you can check one that a scan has
-    measured and see what else is in its way.
+    Some AWS locations must be switched on for your account before they can be used.
+    It&rsquo;s free and creates nothing.
   </p>
 
   <div class="flex items-center gap-space-sm">
-    <label class="font-code-sm text-code-sm text-outline" for="optin-pick">which region?</label>
+    <label class="font-code-sm text-code-sm text-outline" for="optin-pick">Location</label>
     <select id="optin-pick"
             class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-md text-code-md text-on-surface">
-      <option value="">pick one…</option>
+      <option value="">Pick one…</option>
     </select>
   </div>
 
@@ -818,7 +810,7 @@
   <menu class="flex justify-end gap-space-sm mt-space-md p-0">
     <button class="btn" id="optin-cancel">Close</button>
     <button class="btn" id="optin-refresh" hidden>Refresh</button>
-    <button class="btn btn-primary" id="optin-go" disabled>Confirm · enable</button>
+    <button class="btn btn-primary" id="optin-go" disabled>Switch it on</button>
   </menu>
 </dialog>
 
@@ -828,7 +820,7 @@
 <dialog id="onefield" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[460px] max-w-[40rem]">
   <p class="font-code-md text-code-md" id="onefield-title">—</p>
   <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md" id="onefield-note"></p>
-  <label class="font-code-sm text-code-sm text-outline" for="onefield-input" id="onefield-label">value</label>
+  <label class="font-code-sm text-code-sm text-outline" for="onefield-input" id="onefield-label">Value</label>
   <input id="onefield-input" type="password" autocomplete="off" spellcheck="false"
          class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
   <pre class="font-code-sm text-code-sm text-error whitespace-pre-wrap mt-space-sm max-h-[30vh] overflow-auto" id="onefield-err" hidden></pre>

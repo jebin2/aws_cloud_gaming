@@ -232,10 +232,10 @@ window.__after = async () => {
 };"
 OUT=$(probe "{}")
 check    "nothing is asked at all"     "$(row RAN)" "RAN | "
-contains "the pipeline says so"        "$(row TITLE2)" "This app cannot find cg"
-contains "  and what cg is"            "$(row SUB)" "this window is a face on it"
+contains "the pipeline says so"        "$(row TITLE2)" "This app cannot find its scripts"
+contains "  and what cg is"            "$(row SUB)" "runs on a set of scripts"
 contains "  where it looked"           "$(row STAGETEXT)" "/opt/nope/cg"
-contains "  and how to fix it"         "$(row STAGETEXT)" "CG_REPO"
+contains "  and how to fix it"         "$(row STAGETEXT)" "Install them with"
 contains "  with something to run"     "$(row STAGETEXT)" "git clone"
 contains "the failed step is marked"   "$(row STAGES)" "engine=failed"
 # Installed while the window sat there: no restart.
@@ -479,7 +479,7 @@ OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $cred
 # it used to be a second row also called Tools, that came and went.
 lacks    "  never a second Tools row"  "$(row STAGES)" "cli="
 contains "  Tools is still the step"   "$(row STAGES)" "tools=active"
-contains "  the CLI chip says why"     "$(row STAGETEXT)" "AWS CLI v2 - installed, will not run"
+contains "  the CLI chip says why"     "$(row STAGETEXT)" "AWS CLI v2 (installed, but not working)"
 contains "  and it is red"             "$(row TOOLS)" "aws:no"
 # Installing skips a tool cg can find, so it offers a fresh look instead.
 contains "  offering a fresh look"     "$(row BUTTONS)" "tools=Check again"
@@ -497,7 +497,7 @@ echo "3b. the box has no key to join with"
 # log, then "paste auth key". It is a prerequisite, so it is a stage.
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_nokey, \"config --json\": $cfg_ok}")
 contains "the auth key stage is active" "$(row STAGES)" "authkey=active"
-contains "  saying what it is for"      "$(row STAGETEXT)" "Each new games machine uses it to join your network"
+contains "  saying what it is for"      "$(row STAGETEXT)" "Each new machine uses it to join your private network"
 # No API token here, so there is nothing to mint one with: one button, not two.
 check    "and only pasting is offered"  "$(row BUTTONS)" "BUTTONS | authkey=Paste a key"
 
@@ -694,7 +694,8 @@ window.__after = async () => {
   const step = document.querySelector('[data-stage=open]');
   const opening = 'open=' + step.dataset.state + ' '
     + [...step.querySelectorAll('[data-tab]')]
-        .map(r => r.dataset.tab + ':' + r.dataset.state).join(',');
+        .map(r => r.dataset.tab + ':' + r.dataset.state).join(',')
+    + ' names=' + [...step.querySelectorAll('[data-tab]')].map(r => r.textContent.slice(2)).join(',');
   await new Promise(r => setTimeout(r, 2200));
   return before + ' | after: onb=' + at('onb') + ' cards=' + at('d-main')
        + ' stop=' + at('cancel') + ' | ' + opening;
@@ -708,6 +709,9 @@ contains "  but the box is still being read, so it waits" "$(row AFTER)" "onb=sh
 # it; Guards and Settings do not.
 contains "  the last step is loading"       "$(row AFTER)" "open=loading"
 contains "    one chip per tab"             "$(row AFTER)" "dashboard:checking,build:checking,library:checking,guards:done,settings:done"
+# Named as the sidebar names them: these said Build, Library, Guards after the
+# pages were renamed, because they were a second copy of the names.
+contains "    by the pages' own names"      "$(row AFTER)" "names=Home,Machine,Games,Safety,Settings"
 # Cost reads Cost Explorer, which bills: only on Fetch, never here.
 lacks    "    and never Cost"               "$(row AFTER)" "cost:"
 contains "then the dashboard arrives"       "$(row AFTER)" "after: onb=hidden cards=shown"
@@ -743,7 +747,7 @@ echo "4d. a region that cannot rent the machine is not 'ready'"
 OUT=$(probe "{$READY, \"machines --json\": $machines_noquota, \"sweep --cached --json\": $FULL_SWEEP}")
 contains "the pipeline stays up"       "$(row ONB)" "ONB | shown"
 contains "  with where it runs active" "$(row STAGES)" "where=active"
-contains "  naming the place, not a code" "$(row STAGETEXT)" "Hyderabad has no GPU quota for your machine"
+contains "  naming the place, not a code" "$(row STAGETEXT)" "Hyderabad has no GPU limit for your machine"
 contains "  offering the choice"       "$(row BUTTONS)" "where=Choose a location"
 
 echo "4d2. a region nobody chose is not a choice"
@@ -931,14 +935,14 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0, "snapshots": 0, "elastic_ips": 0}' '{"limit": 57, "spent": 4.5, "alerts": 2}')}")
 contains "no machine, said plainly"        "$(row AFTER)" "title=No machine running"
 lacks    "  not 'nothing is billed'"        "$(row AFTER)" "billed by the hour"
-contains "  what it would be"              "$(row AFTER)" "machine=g6.xlarge · NVIDIA L4 · Hyderabad · spot when available"
-contains "  and what it would cost"        "$(row AFTER)" "rate=₹16/hour while it runs"
+contains "  what it would be"              "$(row AFTER)" "machine=g6.xlarge · NVIDIA L4 · Hyderabad · Spot when available"
+contains "  and what it would cost"        "$(row AFTER)" "rate=₹16 an hour while it runs"
 contains "nothing billing: no items"       "$(row AFTER)" "bill=No billing items."
 contains "the month, in rupees, of the budget" "$(row AFTER)" "month=₹396 of ₹5,016"
-contains "  from Budgets, which is free"   "$(row AFTER)" "src=From AWS Budgets"
+contains "  from Budgets, which is free"   "$(row AFTER)" "src=Estimated by AWS"
 contains "the exact figure's price, in rupees" "$(row AFTER)" "price=₹0.88"
 contains "no games yet"                    "$(row AFTER)" "games=No games saved yet"
-contains "the budget is protection"        "$(row AFTER)" "Budget alert at ₹5,016 - emails 2 addresses"
+contains "the budget is protection"        "$(row AFTER)" "Budget alert at ₹5,016 · emails 2 addresses"
 contains "one action: build"               "$(row AFTER)" "buttons=d-build |"
 lacks    "no dollars anywhere on it"       "$(row AFTER)" "$"
 
@@ -947,12 +951,12 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
      '{"bytes": 136365211648, "usd_month": 3.18, "expiry_days": 14}' \
      '{"volumes_gb": 50, "snapshots": 0, "elastic_ips": 0}' '{"limit": 57, "spent": 4.5, "alerts": 2}')}")
 contains "a running machine: ready"        "$(row AFTER)" "title=Ready to play"
-contains "  the machine, priced by the hour" "$(row AFTER)" "Machine · g6.xlarge, spot ₹16/hour"
+contains "  the machine, priced by the hour" "$(row AFTER)" "Machine · g6.xlarge, Spot ₹16/hour"
 contains "  its public address"            "$(row AFTER)" "Public IP address ₹0.44/hour"
 contains "  its disk, by the month"        "$(row AFTER)" "Machine disk · 50 GB ₹401/month"
-contains "  the archive, by the month"     "$(row AFTER)" "Game archive · 127.0 GB ₹280/month"
+contains "  the archive, by the month"     "$(row AFTER)" "Saved games · 127.0 GB ₹280/month"
 contains "  totalled both ways"            "$(row AFTER)" "total=While running ₹16.44/hour Storage ₹681/month"
-contains "  how long the games are kept"   "$(row AFTER)" "Deleted after 14 days with no machine."
+contains "  how long the games are kept"   "$(row AFTER)" "Deleted 14 days after you last play."
 contains "play and delete, nothing else"   "$(row AFTER)" "buttons=d-open,d-destroy |"
 # (The icon glyph comes first, so this checks the words after it.)
 contains "  it says delete, not destroy"   "$(row AFTER)" " Delete machine"
@@ -962,9 +966,9 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 30, "snapshots": 2, "snapshots_gb": 80, "elastic_ips": 1}' '{"limit": 57, "spent": 4.5, "alerts": 2}')}")
 # No machine, and things still billing: each one named, and the ones cg did not
 # make or that nothing is using marked as such.
-contains "a disk left behind"              "$(row AFTER)" "Disk left behind · 30 GB no machine is using it ₹241/month"
-contains "  snapshots, as the most they cost" "$(row AFTER)" "Snapshots · 2, 80 GB cg does not make these up to ₹88/month"
-contains "  a reserved address"            "$(row AFTER)" "Elastic IP address · 1 reserved with no machine ₹0.44/hour"
+contains "a disk left behind"              "$(row AFTER)" "Disk left behind · 30 GB No machine is using it ₹241/month"
+contains "  snapshots, as the most they cost" "$(row AFTER)" "Snapshots · 2, 80 GB Not made by this app up to ₹88/month"
+contains "  a reserved address"            "$(row AFTER)" "Reserved IP address · 1 Reserved with no machine ₹0.44/hour"
 echo "6b. the dashboard: Tailscale"
 TS="window.__after = async () => {
   await new Promise(r => setTimeout(r, 1200));
@@ -990,7 +994,7 @@ contains "  only once"                     "$(row AFTER)" "pings=1"
 
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP, \"status --json\": $ONLINE,
   \"ping --json\": {\"node\": \"gamevps\", \"path\": \"DERP\", \"median_ms\": 74}}")
-contains "a relayed path says it is slower" "$(row AFTER)" "Relayed through Tailscale · 74 ms - slower for streaming"
+contains "a relayed path says it is slower" "$(row AFTER)" "Relayed · 74 ms · slower for streaming"
 
 ENGINE="$DASH"
 # An older cg sends no price table: every figure is unknown, never ₹0.
@@ -998,7 +1002,7 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": {\"box\": null, \"region\": \"ap-south-2\", \"instance_type\": \"g6.xlarge\",
      \"archive\": {\"bytes\": 1073741824, \"usd_month\": 0.03}, \"res\": {\"volumes_gb\": 0},
      \"budget\": {\"limit\": 57, \"spent\": 4.5}, \"config\": {}, \"local\": {}, \"account\": {}}}")
-contains "no price table: the archive cost is unknown" "$(row AFTER)" "Game archive · 1.0 GB —"
+contains "no price table: the archive cost is unknown" "$(row AFTER)" "Saved games · 1.0 GB —"
 lacks    "  never zero"                    "$(row AFTER)" "₹0.00"
 ENGINE=""
 
@@ -1047,8 +1051,8 @@ ENGINE="$BUILD"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "before a build: the plan"          "$(row AFTER)" "plan=true"
-contains "  saying what Build starts billing" "$(row AFTER)" "chip=Billing starts when the machine launches · ₹16.44/hour"
-contains "the confirm names the rate"        "$(row AFTER)" "Billing starts when the machine launches, at ₹16.44/hour"
+contains "  saying what Build starts billing" "$(row AFTER)" "chip=₹16.44 an hour from the moment it starts"
+contains "the confirm names the rate"        "$(row AFTER)" "It costs ₹16.44 an hour from the moment it starts"
 # Mid-build: setup, budget, machine and Tailscale done; the box's own steps
 # (base packages, the driver) are one step, installing.
 contains "four steps done, the fifth running" "$(row AFTER)" "mid=0=done,1=done,2=done,3=done,4=running,5=locked,6=locked,7=locked"
@@ -1226,7 +1230,7 @@ ENGINE="$B6"
 BOX='{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle": "spot", "launched": "2026-01-01T00:00:00Z"}'
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st "$BOX" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
-contains "play starts with the machine"     "$(row AFTER)" "starting=run:Starting the stream running,locked,locked,locked"
+contains "play starts with the machine"     "$(row AFTER)" "starting=run:Starting the game session running,locked,locked,locked"
 contains "  then is playing"                "$(row AFTER)" "playing=run:Playing done,done,done,running"
 contains "  saying how to stop"             "$(row AFTER)" "Close Moonlight to stop"
 contains "  and what it costs"              "$(row AFTER)" "so far"
@@ -1260,7 +1264,7 @@ B7="window.__after = async () => {
 ENGINE="$B7"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
-contains "refresh opens a popup"           "$(row AFTER)" "open=true title=Refreshing Dashboard"
+contains "refresh opens a popup"           "$(row AFTER)" "open=true title=Refreshing Home"
 contains "  which Esc does not close"      "$(row AFTER)" "during=esc=refused open=true"
 contains "  listing what it reads"         "$(row AFTER)" "rows=status:reading,guards:reading"
 contains "  and closes once it has read"   "$(row AFTER)" "after=open=false"
@@ -1296,7 +1300,7 @@ BOX='{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle": "spot",
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st "$BOX" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "a session is playing"            "$(row AFTER)" "playing=run:Playing"
-contains "stopping it opens the popup"     "$(row AFTER)" "popup=open=true title=Refreshing Build"
+contains "stopping it opens the popup"     "$(row AFTER)" "popup=open=true title=Refreshing Machine"
 contains "  which leaves it ready to play" "$(row AFTER)" "after=run:Ready to play closed=true"
 contains "  and calls nothing a failure"   "$(row AFTER)" "fail=false"
 # One round of reads, under the popup: not the page's, then all of them again.
@@ -1351,7 +1355,7 @@ B10="window.__after = async () => {
   window.askConfirm = async o => { asked = o; return true; };
   const answered = [];
   window.cg.answer = (id, v) => { answered.push(v); return Promise.resolve(true); };
-  [...document.querySelectorAll('#lib-rows button')].find(b => b.textContent === 'Forget').click();
+  [...document.querySelectorAll('#lib-rows button')].find(b => b.textContent === 'Delete').click();
   await wait();
   const id = window.__lastId;
   window.__emit(id, { t: 'ask', id: 'forget-game', prompt: 'type FORGET to confirm: ' });
@@ -1363,7 +1367,7 @@ B10="window.__after = async () => {
     + ' reads=' + [...document.querySelectorAll('#refdlg-list [data-read]')].map(r => r.dataset.read).join(',');
   await wait(); await wait();
   const after = 'view=' + view() + ' popup=' + document.getElementById('refdlg').open;
-  [...document.querySelectorAll('#lib-rows button')].find(b => b.textContent === 'Forget').click();
+  [...document.querySelectorAll('#lib-rows button')].find(b => b.textContent === 'Delete').click();
   await wait();
   const id2 = window.__lastId;
   window.__emit(id2, { t: 'line', text: 'aborted - nothing was deleted' });
@@ -1379,14 +1383,14 @@ LIB='{"games": [{"appid": "2344520", "name": "Diablo IV", "bytes": 96636764160, 
       "total_bytes": 96636764160, "usd_month": 2.21, "selectable_gb": 209, "bucket": "b", "login": {"present": false}}'
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP, \"library list --json\": $LIB,
   \"status --json\": $(st null '{"bytes": 96636764160}' '{"volumes_gb": 0}' '{"limit": 57}')}")
-contains "forget stays on Library"           "$(row AFTER)" "during=view=library word=FORGET"
+contains "forget stays on Library"           "$(row AFTER)" "during=view=library word=DELETE"
 contains "  runs cg's forget"                "$(row AFTER)" "ran=library forget 2344520"
-contains "  with the popup saying so"        "$(row AFTER)" "popup=true:Forgetting Diablo IV"
+contains "  with the popup saying so"        "$(row AFTER)" "popup=true:Deleting Diablo IV"
 contains "  and cg gets the word, no second dialog" "$(row AFTER)" "answered=FORGET askdlg=false"
-contains "done: the popup reads the page again" "$(row AFTER)" "reading=Refreshing Library"
+contains "done: the popup reads the page again" "$(row AFTER)" "reading=Refreshing Games"
 contains "  only the saved games, nothing else" "$(row AFTER)" "reads=library,elsewhere |"
 contains "  and closes, still on Library"    "$(row AFTER)" "after=view=library popup=false"
-contains "refused: the popup stays"          "$(row AFTER)" "refused=popup=true title=Forgetting Diablo IV - not done"
+contains "refused: the popup stays"          "$(row AFTER)" "refused=popup=true title=Deleting Diablo IV - not done"
 contains "  with cg's reason"                "$(row AFTER)" "aborted - nothing was deleted"
 contains "  a Close, and still on Library"   "$(row AFTER)" "close=true view=library"
 ENGINE=""
@@ -1419,7 +1423,7 @@ B11="window.__after = async () => {
   window.__emit(id, { t: 'exit', rc: 0 });
   await wait(); await wait();
   const after = 'view=' + view() + ' popup=' + document.getElementById('refdlg').open;
-  btn(1, 'Reset').click();
+  btn(1, 'Keep').click();
   await wait();
   id = window.__lastId;
   const reset = 'ran=' + window.__ran.slice(-1)[0] + ' popup=' + document.getElementById('refdlg-title').textContent;
@@ -1434,12 +1438,14 @@ B11="window.__after = async () => {
   const before = steps();
   id = window.__lastId;
   window.__emit(id, { t: 'step', text: 'saving the setting' });
-  window.__emit(id, { t: 'step', text: 'updating the cloud watchdog' });
+  window.__emit(id, { t: 'step', text: 'updating auto-stop' });
   const during = steps();
+  window.__emit(id, { t: 'step', text: 'deleting it from ap-south-2' });
+  const city = steps();
   window.__emit(id, { t: 'exit', rc: 0 });
   const reads = [...document.querySelectorAll('#refdlg-list [data-read]')].map(r => r.dataset.read).join(',');
   return 'table=' + table + ' | move=' + move + ' | after=' + after + ' | reset=' + reset + ' | keep=' + keep
-    + ' | steps=before:' + before + ' during:' + during + ' | reads=' + reads;
+    + ' | steps=before:' + before + ' during:' + during + ' city:' + city + ' | reads=' + reads;
 };"
 ENGINE="$B11"
 SEEN=$(date -u -d '-1 day' +%Y-%m-%dT%H:%M:%SZ); KEPT=$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)
@@ -1460,11 +1466,11 @@ TWO_SWEEP='{"cached": true, "age_seconds": 90, "too_far": [], "unreachable": [],
 OUT=$(probe "{$READY, \"sweep --cached --json\": $TWO_SWEEP, \"library list --json\": $LIB2,
   \"library elsewhere --json\": $ELSE,
   \"status --json\": $(st null '{"bytes": 128849018880}' '{"volumes_gb": 0}' '{"limit": 57}')}")
-contains "the machine's place first"         "$(row AFTER)" "rows=Red Dead 2 / Mumbai / 120.0 GB / ₹285 / $D13 / ResetForget"
-contains "  then the other place's, with Move" "$(row AFTER)" "Diablo IV / Hyderabad / 162.8 GB / ₹386 / $D14 / ResetMoveForget"
+contains "the machine's place first"         "$(row AFTER)" "rows=Red Dead 2 / Mumbai / 120.0 GB / ₹285 / $D13 / KeepDelete"
+contains "  then the other place's, with Move" "$(row AFTER)" "Diablo IV / Hyderabad / 162.8 GB / ₹386 / $D14 / KeepMoveDelete"
 contains "  its Reset counts from the Reset" "$(row AFTER)" "/ $D14 /"
 contains "  one total"                       "$(row AFTER)" "foot=Total282.8 GB₹671 a month"
-contains "  and how long, as set"            "$(row AFTER)" "keepfor=14 note=Deleted 14 days after a machine was last running."
+contains "  and how long, as set"            "$(row AFTER)" "keepfor=14 note=Saved games are deleted 14 days after you last play."
 lacks    "  an empty place is not a row"     "$(row AFTER)" "cg-library-empty"
 c=$(row AFTER); lacks "  nor any bucket name on the page" "${c%% | move=*}" "cg-library"
 contains "Move asks first, with the price"   "$(row AFTER)" "title=Move Diablo IV to Mumbai? body=162.8 GB is copied from Hyderabad to Mumbai"
@@ -1476,7 +1482,8 @@ contains "Reset needs no confirm"            "$(row AFTER)" "reset=ran=library r
 contains "Keep for applies at once"          "$(row AFTER)" "keep=ran=library keep-for 30 popup=Keeping saved games for 30 days"
 # The popup said "Keeping saved games for 14 days" twice - title and step.
 contains "  under the title, a placeholder until cg speaks" "$(row AFTER)" "steps=before:● Working…"
-contains "  then cg's own steps, each ticked as the next begins" "$(row AFTER)" "during:✓ Saving the setting, ● Updating the cloud watchdog"
+contains "  then cg's own steps, each ticked as the next begins" "$(row AFTER)" "during:✓ Saving the setting, ● Updating auto-stop"
+contains "  a place by its city, not its code" "$(row AFTER)" "● Deleting it from Hyderabad"
 lacks    "  never the title again"           "$(row AFTER)" "during:● Keeping"
 # And afterwards, only what Keep for can change - not the tools, the keys,
 # Tailscale or the locations, which it used to read all over again.

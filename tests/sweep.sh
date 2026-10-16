@@ -277,9 +277,9 @@ contains "  a price cell is the control"     "$js" "function priceCell"
 # A region change is the most expensive setting in the app and the least
 # obviously so, because nothing visibly breaks until the next build reinstalls
 # 163GB it could have kept.
-contains "moving region asks first"          "$js" "Move to \${row.region} on \${row.type}?"
-contains "  and says the archive stays put"  "$js" "does not follow"
-contains "  and that nothing is deleted"     "$js" "Nothing is deleted or moved"
+contains "moving region asks first"          "$js" "Run in \${placeName(row.region)} on \${row.type}?"
+contains "  and says the archive stays put"  "$js" "Your saved games stay in"
+contains "  and that nothing is deleted"     "$js" "move them from the Games page"
 contains "  and is marked destructive"       "$js" "danger: moving"
 # Three settings, one decision - written together, region last.
 contains "the type is written"               "$js" "'config', 'set', 'GAME_INSTANCE_TYPE'"
@@ -292,8 +292,8 @@ lacks "the app never calls AWS itself"       "$js" "enable-region"
 lacks "  nor does the main process"          "$main" "enable-region"
 contains "it asks cg instead"                "$js" "'regions', 'enable'"
 contains "  behind a confirm"                "$js" "Confirm \u00b7 enable"
-contains "  that says it is account-wide"    "$js" "account-level change"
-contains "  and slow to undo"                "$js" "requires the"
+contains "  that says it is account-wide"    "$js" "applies to your whole AWS account"
+contains "  and slow to undo"                "$js" "treat it"
 contains "  it says so in the cell"          "$js" "needs opt-in"
 
 echo ""

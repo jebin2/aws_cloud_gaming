@@ -105,7 +105,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('ESC ROW | ' + (knob().innerText === before) + ' ' + window.__ran.length);
 
     const ntfyRow = [...document.getElementById('g-knobs').children]
-      .find(r => r.innerText.includes('phone notifications'));
+      .find(r => r.innerText.includes('Phone alerts'));
     ntfyRow.querySelector('button').click();
     const ni = ntfyRow.querySelector('input');
     out.push('NTFY EDIT | ' + ni.type + ' ' + ni.value);
@@ -114,7 +114,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     // Save: a refusal stays on the row with cg's words; a good value comes back
     // as the new value, read again from cg - not the old one left showing.
     const idleRow = () => [...document.getElementById('g-knobs').children]
-      .find(r => r.innerText.includes('cloud watchdog idle'));
+      .find(r => r.innerText.includes('Stop after idle'));
     window.__ran = [];
     idleRow().querySelector('button').click();
     idleRow().querySelector('input').value = '5';
@@ -187,7 +187,7 @@ row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
 echo "1. no machine: nothing to stop, and the nets say why they wait"
 contains "the headline says so"          "$(row 'IDLE HEAD')" "No machine is running · nothing to stop"
-contains "the last AWS check, aged"      "$(row 'IDLE SUB')"  'AWS last checked 25m ago: "nothing running - nothing to do"'
+contains "the last AWS check, aged"      "$(row 'IDLE SUB')"  'Last check 25m ago: nothing running.'
 contains "nothing to warn about"         "$(row 'IDLE WARN')" "hidden"
 contains "net 1 is the quit"             "$(row 'IDLE NET1')" "When you quit Closing Moonlight ends the session."
 contains "  always on"                   "$(row 'IDLE NET1')" "Always on"
@@ -203,8 +203,8 @@ contains "a minute setting in minutes"   "$(row 'IDLE KNOBS')" "45 min"
 contains "  and an unset one says it is the default" "$(row 'IDLE KNOBS')" "60 min (default)"
 
 # The topic is shown, like every other row's value, and Edit opens on it.
-contains "phone notifications show the topic" "$(row 'IDLE KNOBS')" "phone notifications n my-topic-q7 Edit"
-lacks    "  not 'set'"                   "$(row 'IDLE KNOBS')" "notifications n set"
+contains "phone notifications show the topic" "$(row 'IDLE KNOBS')" "Phone alerts Your ntfy topic. Leave empty to turn phone alerts off. my-topic-q7 Edit"
+lacks    "  not 'set'"                   "$(row 'IDLE KNOBS')" "alerts off. Set"
 lacks    "  nor Replace"                 "$(row 'IDLE KNOBS')" "Replace"
 check    "  and Edit opens on it"        "$(row 'NTFY EDIT')" "NTFY EDIT | text my-topic-q7"
 
@@ -233,10 +233,10 @@ done
 
 echo "4. a running machine with things wrong says each one, in red, on top"
 contains "a count, not all"              "$(row 'BAD HEAD')" "Machine running · 1 of 3 safety nets on"
-contains "the AWS check is off"          "$(row 'BAD WARN')" "The AWS check is disabled"
+contains "the AWS check is off"          "$(row 'BAD WARN')" "Auto-stop in AWS is disabled"
 contains "the machine's check is off"    "$(row 'BAD WARN')" "The machine's own check is off"
-contains "the wrong shutdown"            "$(row 'BAD WARN')" "AWS will stop it - it must terminate it"
-contains "no spending alert"             "$(row 'BAD WARN')" "No spending alert exists in AWS"
+contains "the wrong shutdown"            "$(row 'BAD WARN')" "AWS is set to stop the machine when it shuts down; it should delete it."
+contains "no spending alert"             "$(row 'BAD WARN')" "No budget alert is set up in AWS"
 contains "net 2 off"                     "$(row 'BAD NET2')" "Off"
 contains "net 3 off"                     "$(row 'BAD NET3')" "Off"
 

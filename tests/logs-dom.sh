@@ -101,10 +101,10 @@ echo "1. the event stream's filters"
 check    "three, with All chosen from the start" "$(row FILTERS)" "FILTERS | *All,Steps,Problems"
 
 echo "2. Fetch says it is fetching, on itself"
-contains "the button says so"            "$(row FETCHING)" "label=Fetching… disabled=true"
+contains "the button says so"            "$(row FETCHING)" "label=Loading… disabled=true"
 contains "  and no Stop appears top right" "$(row FETCHING)" "stop=false"
 contains "  it reads the watchdog's log" "$(row FETCHING)" "ran=watchdog logs"
-contains "and is back when done"         "$(row FETCHED)"  "label=Fetch disabled=false"
+contains "and is back when done"         "$(row FETCHED)"  "label=Load disabled=false"
 
 echo "3. the log reads as what was decided"
 contains "the 5-minute checks are one line" "$(row DIGEST)" "no running instance tagged gamevps - nothing to do  (36 checks)"
