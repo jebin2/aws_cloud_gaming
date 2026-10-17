@@ -349,15 +349,13 @@ async function checkAsks() {
 const GB = bytes => (bytes / 1073741824).toFixed(1) + ' GB';
 // When a game was saved to the archive, as a date: "10 Oct".
 const savedOn = iso => iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '—';
-// What the configured machine costs an hour, bought the configured way, plus
-// its public address - what Build starts billing. cg's numbers throughout.
+// What Build starts billing: the machine card's price, so the two never differ.
 function buildRate() {
-  const s = statusNow;
-  if (!s) return null;
-  const type = s.box ? s.box.type : s.instance_type;
-  const spot = s.box ? s.box.lifecycle === 'spot' : (s.config || {}).spot !== '0';
-  const h = hourlyInr(type, spot);
-  const r = s.rates || {};
+  return statusNow ? machineFacts().price : null;
+}
+// A machine's hourly price as billed: the machine, plus its public address.
+function withAddress(h) {
+  const r = (statusNow && statusNow.rates) || {};
   return h == null ? null : h + (r.ipv4_hour && r.inr_per_usd ? r.ipv4_hour * r.inr_per_usd : 0);
 }
 function uptime(iso) {
@@ -444,13 +442,144 @@ function hourlyInr(type, spot) {
   return spot ? m.inr_hour_spot : m.inr_hour_ondemand;
 }
 
-function machineLine(s) {
-  const spec = s.spec || {}, cfg = s.config || {};
-  const type = s.box ? s.box.type : s.instance_type;
-  const buy = s.box ? (s.box.lifecycle === 'spot' ? 'Spot' : 'Standard')
-    : cfg.spot === '0' ? 'Standard' : cfg.spot === '1' ? 'Spot' : 'Spot when available';
-  return [type, spec.gpu ? `NVIDIA ${spec.gpu}` : null, placeName(s.region), buy]
-    .filter(Boolean).join(' · ');
+// The machine card, drawn the same on Home and the Machine page: what is
+// running if something is, otherwise what Build would start. Each page puts its
+// own buttons under it.
+function machineFacts() {
+  const s = statusNow || {};
+  const box = s.box && s.box.state !== 'terminated' ? s.box : null;
+  const cur = currentPick();
+  const region = box ? s.region || cur.region : cur.region;
+  const type = box ? box.type : cur.type || s.instance_type;
+  const spot = box ? box.lifecycle === 'spot' : cur.spot;
+  const rows = chooserRows().rows;
+  const hit = rows.find(r => r.region === region && r.type === type);
+  const spec = s.spec || {};
+  const gpu = hit && hit.gpu ? hit.gpu : spec.gpu;
+  const vram = hit && hit.vram;
+  const price = withAddress((hit && (spot ? hit.spot : hit.od)) ?? hourlyInr(type, spot));
+  return { s, box, cur, rows, hit, region, type, spot, price,
+           what: [type, gpu ? `NVIDIA ${gpu}${vram ? `, ${vram} GB` : ''}` : null].filter(Boolean).join(' · ') || '—',
+           where: [region ? placeName(region) : null,
+                   box || cfgVal('GAME_SPOT') === '1' ? (spot ? 'Spot' : 'Standard')
+                     : cfgVal('GAME_SPOT') === '0' ? 'Standard' : 'Spot when available',
+                   price != null ? `${rsh(price)} an hour while it runs` : null].filter(Boolean).join(' · ') };
+}
+
+function renderMachineCard(card) {
+  if (!card || !statusNow) return;
+  const f = machineFacts();
+  const { s, box, cur, hit, rows, price } = f;
+  const credErr = s.error && s.error.credentials;
+  const building = jobsFor('init');
+  const running = !!(box && box.state === 'running');
+  const upHours = box && box.launched ? (Date.now() - new Date(box.launched)) / 3600000 : 0;
+  const idleGuard = ((watcher && watcher.guards) || []).find(g => g.layer === 2);
+  const idleAfter = idleGuard && idleGuard.reaction ? idleGuard.reaction.replace(/ idle$/, '') : '15 min';
+  let title, sub = '', note = '';
+  if (credErr) {
+    title = 'Status unknown';
+    sub = 'AWS could not be reached, so nothing below is known.';
+  } else if (building) {
+    title = 'Building your machine';
+    sub = box && box.launched ? `Started ${uptime(box.launched)} ago · usually 10–20 minutes`
+                              : 'Usually 10–20 minutes';
+  } else if (running) {
+    title = sessionNow ? 'Playing' : 'Ready to play';
+    sub = `Up ${uptime(box.launched)} · ${rs(price != null ? price * upHours : null)} so far`;
+    note = sessionNow ? 'Closing Moonlight asks whether to keep the machine or delete it.'
+                      : `Stops by itself after ${idleAfter} with nobody playing.`;
+  } else if (box) {
+    title = `Machine ${box.state}`;
+    sub = box.state === 'pending' ? 'Starting.' : box.state === 'stopping' || box.state === 'shutting-down'
+      ? 'Shutting down.' : 'Not running.';
+  } else {
+    title = 'No machine running';
+  }
+  // What stands in the way of the choice, said where the choice is shown.
+  const warn = [];
+  if (box && (cur.type !== f.type || cur.region !== f.region))
+    warn.push('Your change applies to the next machine you build.');
+  else if (!box && hit && cur.spot && hit.score != null && hit.score <= 2)
+    warn.push(`AWS rates spare ${cur.type} machines here ${hit.score}/10, so a spot start will `
+            + 'likely be refused');
+  else if (!box && hit && cur.spot && hit.fitsSpot === false)
+    warn.push('Your spot limit here is 0, so this cannot start on spot');
+  else if (!box && !hit && rows.length)
+    warn.push('This machine is not offered here. Change the machine before building.');
+  if (sessionNow && !running)
+    warn.push('A game session is already open on this laptop. Switch to that Moonlight window; only one can be open.');
+
+  card.textContent = '';
+  const top = el('div', 'flex items-start justify-between gap-space-md');
+  const head = el('div', 'min-w-0');
+  const t = el('p', 'font-headline-lg text-headline-lg', title); t.dataset.f = 'title';
+  head.append(t);
+  if (sub) { const p = el('p', 'font-body-md text-body-md text-on-surface-variant mt-space-xs', sub); p.dataset.f = 'sub'; head.append(p); }
+  top.append(head);
+  if (running || building) {
+    const tag = el('span', 'pill shrink-0 pill-ok', building ? 'building' : sessionNow ? 'streaming' : 'running');
+    tag.dataset.f = 'tag';
+    top.append(tag);
+  }
+  const mid = el('div', 'flex flex-wrap items-end justify-between gap-space-md mt-space-lg');
+  const lines = el('div', 'min-w-0');
+  const what = el('p', 'font-code-md text-code-md', f.what); what.dataset.f = 'what';
+  const where = el('p', 'font-code-sm text-code-sm text-outline mt-0.5', f.where); where.dataset.f = 'where';
+  lines.append(what, where);
+  mid.append(lines);
+  if (!box && !building) {
+    const ch = el('button', 'btn shrink-0', 'Change machine');
+    ch.dataset.f = 'change';
+    ch.onclick = () => openMachines();
+    mid.append(ch);
+  }
+  card.append(top, mid);
+  if (warn.length) { const w = el('p', 'font-code-sm text-code-sm text-tertiary mt-space-sm', warn.join(' · ')); w.dataset.f = 'warn'; card.append(w); }
+  if (note) { const n = el('p', 'font-code-sm text-code-sm text-outline mt-space-sm', note); n.dataset.f = 'note'; card.append(n); }
+  return f;
+}
+
+// The whole card, buttons too, built once per page from one recipe, so the
+// two cannot be laid out differently. Ids keep the page's prefix: d- on Home,
+// b- on the Machine page. What Build does differs (Home sends you to pick
+// games), what the card looks like does not.
+function mountMachineCard(box, p) {
+  const body = el('div'); body.id = `${p}-machine-card`;
+  const busy = el('div', 'onb-progress mt-space-md'); busy.id = `${p}-busy`; busy.hidden = true;
+  busy.append(el('i'));
+  const row = el('div', 'flex flex-wrap items-center gap-space-sm mt-space-lg');
+  const btn = (id, cls, icon, glyph, label) => {
+    const b = el('button', cls); b.id = `${p}-${id}`;
+    if (icon) {
+      const i = el('span', 'material-symbols-outlined text-[16px]', glyph);
+      i.dataset.icon = icon;
+      b.append(i);
+    }
+    b.append(document.createTextNode(label));
+    row.append(b);
+    return b;
+  };
+  btn('build', 'btn btn-primary', 'rocket_launch', '\ueb9b', 'Build machine');
+  btn('open', 'btn btn-primary', 'stadia_controller', '\uf135', 'Play').hidden = true;
+  btn('watch', 'btn', null, null, 'Watch the build').hidden = true;
+  btn('destroy', 'btn btn-danger', 'delete', '\ue92e', 'Delete machine').hidden = true;
+  box.append(body, busy, row);
+}
+
+function paintMachineCards() {
+  for (const p of ['d', 'b']) {
+    if (!$(`${p}-build`)) continue;
+    const { box, s } = renderMachineCard($(`${p}-machine-card`)) || {};
+    if (!s) continue;
+    const building = jobsFor('init');
+    const running = !!(box && box.state === 'running');
+    $(`${p}-busy`).hidden = !building;
+    $(`${p}-build`).hidden = !!box || building || !!(s.error && s.error.credentials);
+    $(`${p}-open`).hidden = !running || building;
+    $(`${p}-watch`).hidden = !building || p === 'b';
+    $(`${p}-destroy`).hidden = !box || building;
+  }
 }
 
 function paintDash() {
@@ -461,59 +590,17 @@ function paintDash() {
   const box = s.box && !['terminated'].includes(s.box.state) ? s.box : null;
   const building = jobsFor('init');
   const running = !!(box && box.state === 'running');
-  const spot = box ? box.lifecycle === 'spot' : (s.config || {}).spot !== '0';
-  const hour = hourlyInr(box ? box.type : s.instance_type, spot);
-  const upHours = box && box.launched ? (Date.now() - new Date(box.launched)) / 3600000 : 0;
   const idleGuard = ((watcher && watcher.guards) || []).find(g => g.layer === 2);
   const idleAfter = idleGuard && idleGuard.reaction ? idleGuard.reaction.replace(/ idle$/, '') : '15 min';
 
-  // ── the machine ──
-  const tag = $('d-tag');
-  let title, sub, note = '';
-  if (credErr) {
-    title = 'Status unknown';
-    sub = 'AWS could not be reached, so nothing below is known.';
-  } else if (building) {
-    title = 'Building your machine';
-    sub = box && box.launched ? `Started ${uptime(box.launched)} ago · usually 10–20 minutes`
-                              : 'Usually 10–20 minutes';
-  } else if (running && sessionNow) {
-    title = 'Playing';
-    sub = `Up ${uptime(box.launched)} · ${rs(hour != null ? hour * upHours : null)} so far · ${rs(hour)}/hour`;
-    note = 'Closing Moonlight asks whether to keep the machine or delete it.';
-  } else if (running) {
-    title = 'Ready to play';
-    sub = `Up ${uptime(box.launched)} · ${rs(hour != null ? hour * upHours : null)} so far · ${rs(hour)}/hour`;
-    note = `Stops by itself after ${idleAfter} with nobody playing.`;
-  } else if (box) {
-    title = `Machine ${box.state}`;
-    sub = box.state === 'pending' ? 'Starting.' : box.state === 'stopping' || box.state === 'shutting-down'
-      ? 'Shutting down.' : 'Not running.';
-  } else {
-    title = 'No machine running';
-    sub = '';
-  }
-  $('d-title').textContent = title;
-  $('d-sub').textContent = sub;
-  $('d-sub').hidden = !sub;
-  tag.hidden = !(running || building);
-  tag.textContent = building ? 'building' : sessionNow ? 'streaming' : 'running';
-  tag.className = 'pill shrink-0 pill-ok';
-  $('d-machine').textContent = machineLine(s);
-  $('d-rate').textContent = box || building ? ''
-    : `${rs(hour)} an hour while it runs`;
-  $('d-rate').hidden = !$('d-rate').textContent;
-  $('d-prog').hidden = !building;
-  $('d-build').hidden = !!box || building || !!credErr;
-  $('d-open').hidden = !running || building;
-  $('d-watch').hidden = !building;
-  $('d-destroy').hidden = !box || building;
-  $('d-change').hidden = !!box || building;
-  $('d-note').textContent = note;
-  $('d-note').hidden = !note;
+  // ── the machine: the Machine page's own card ──
+  paintMachineCards();
 
   // ── recurring cost and this month: the Spending page's own cards ──
   renderRecurring($('d-recurring-card'), { hint: 'Exact cost checks the bill.' });
+  // The same card on Spending, redrawn with it: its play line reads the
+  // machine's status, which changes without a Refresh.
+  if (costNow) renderRecurring($('c-recurring-card'));
   renderMonth($('d-month-card'), { hint: 'Press Exact cost to see it.' });
   const b = s.budget || {};
   const limit = b.limit == null ? null
@@ -630,15 +717,7 @@ function paintSession() {
       ? `a game session is already open on this laptop`
       : 'Opens Moonlight and connects to your machine';
   }
-  const note = $('b-session');
-  if (note) {
-    note.hidden = !live;
-    note.textContent = live
-      ? `A game session is already open on this laptop (open`
-        + `${sessionNow.age_s ? ', ' + uptime(new Date(Date.now() - sessionNow.age_s * 1000).toISOString()) : ''}).`
-        + ' Switch to that Moonlight window; only one can be open.'
-      : '';
-  }
+  paintMachineCards();
 }
 
 
@@ -861,9 +940,7 @@ function renderRecurring(box, { hint } = {}) {
   if (res.snapshots_gb) line('Disk copies', `${res.snapshots_gb} GB · ${r(standby.snapshots_usd_month)} a month`);
   box.append(list);
   // What playing adds on top: the machine, by the hour.
-  const s0 = statusNow || {};
-  const play = hourlyInr(s0.box ? s0.box.type : s0.instance_type,
-                         s0.box ? s0.box.lifecycle === 'spot' : (s0.config || {}).spot !== '0');
+  const play = machineFacts().price;
   if (play != null) {
     const pl = el('p', 'font-code-sm text-code-sm text-on-surface-variant mt-space-sm',
       res.instance && res.instance.state === 'running'
@@ -2649,9 +2726,6 @@ function paintFit() {
   // A box is already running: there is nothing to build, and cg would refuse.
   // The screen says so and offers what you can actually do with it.
   const up = !!boxNow;
-  $('b-build').hidden = up;
-  $('b-open').hidden = !(boxNow && boxNow.state === 'running');
-  $('b-destroy').hidden = !up;
   $('b-build').disabled = over || jobs.size > 0;
   for (const box of $('b-games').querySelectorAll('input[type=checkbox]')) box.disabled = up;
   // Nothing here applies while a box is up: what it holds was chosen at build.
@@ -2659,12 +2733,6 @@ function paintFit() {
   $('b-hint').textContent = up
     ? 'A machine is already running. Its games were chosen when it was built.'
     : 'Downloaded from your saved games while the machine starts.';
-  // What pressing Build does to the bill, said beside the button.
-  const rate = buildRate();
-  $('b-chip').textContent = up
-    ? `The machine is running${rate != null ? ` · ${rsh(rate)} an hour` : ''}.`
-    : `${rate != null ? `${rsh(rate)} an hour from the moment it starts` : 'Costs by the hour from the moment it starts'}`
-      + ` · ready in about 15 minutes${picked.size ? ', plus the game download' : ''}`;
 }
 
 // The machine strip: the type you asked for, and what AWS says that type is.
@@ -3035,7 +3103,7 @@ function paintChooser() {
     if (ageEl) ageEl.textContent = sweepNow && sweepNow.cached && sweepNow.age_seconds != null
       ? `Checked ${ago(sweepNow.age_seconds)}` : '';
   }
-  paintBuildPick(rows, cur);
+  paintBuildPick();
   lockMachines();
 }
 
@@ -3085,36 +3153,8 @@ function lockMachines() {
   $('machdlg-close').textContent = choosing ? 'Saving…' : 'Done';
 }
 
-// Build shows the one line that matters: what is about to be built, and what it
-// costs an hour. Everything it says comes from the same rows the table uses, so
-// the two can never disagree.
-function paintBuildPick(rows, cur) {
-  const el = $('b-pick');
-  if (!el) return;
-  const hit = rows.find(r => r.region === cur.region && r.type === cur.type);
-  const price = (hit && (cur.spot ? hit.spot : hit.od)) ?? hourlyInr(cur.type, cur.spot);
-  // The machine, once: what it is on one line, where and at what price on the next.
-  const spec = (statusNow && statusNow.spec) || {};
-  el.textContent = [cur.type,
-    hit && hit.gpu ? `NVIDIA ${hit.gpu}${hit.vram ? `, ${hit.vram} GB` : ''}` : spec.gpu ? `NVIDIA ${spec.gpu}` : null,
-    spec.vcpus ? `${spec.vcpus} CPUs` : null,
-    spec.memory_mib ? `${Math.round(spec.memory_mib / 1024)} GB RAM` : null].filter(Boolean).join(' · ') || '—';
-  $('b-pick-where').textContent = [cur.region ? placeName(cur.region) : null,
-    cur.spot ? 'Spot' : 'Standard', price != null ? `₹${price}/hour` : null].filter(Boolean).join(' · ');
-
-  // The warnings belong here too: the only place that shows the choice should
-  // also say when the choice cannot launch.
-  const warn = [];
-  if (boxNow) warn.push('A machine is running. It keeps the setup it started with.');
-  else if (hit && cur.spot && hit.score != null && hit.score <= 2)
-    warn.push(`AWS rates spare ${cur.type} machines here ${hit.score}/10, so a spot start will `
-            + 'likely be refused');
-  else if (hit && cur.spot && hit.fitsSpot === false)
-    warn.push('Your spot limit here is 0, so this cannot start on spot');
-  else if (!hit && rows.length)
-    warn.push('This machine is not offered here. Change the machine before building.');
-  $('b-type-note').textContent = warn.join(' · ');
-}
+// The choice changed, so the machine card says the new one, on both pages.
+function paintBuildPick() { paintMachineCards(); }
 
 let machinesNow = null;
 // Just the store now. `cg machines` is still read - it is the only answer for
@@ -5185,9 +5225,10 @@ $('cancel').onclick = async () => {
   if (!ok) return;
   for (const [id, j] of jobs) if (j.view === view) window.cg.cancel(id);
 };
+mountMachineCard($('d-hero'), 'd');
+mountMachineCard($('b-machine'), 'b');
 $('d-build').onclick = () => goView('build');
 $('d-watch').onclick = () => goView('build');
-$('d-change').onclick = () => openMachines();
 $('d-ts-signin').onclick = signInTailscale;
 $('d-library').onclick = () => goView('library');
 applyLogFilter('all');           // the default is shown as chosen, not just in force
@@ -5354,7 +5395,6 @@ if (sweepBtn) sweepBtn.onclick = () => scanRegions(sweepBtn);
 
 // Build's "Change": the chooser opens over the page you are on, so the choice
 // is made where the build is - it used to send you to the top of Settings.
-$('b-setup').onclick = () => openMachines();
 $('b-login-choice').onchange = async ev => {
   ev.target.disabled = true;
   await runCg(['config', 'set', 'GAME_STEAM_LOGIN', ev.target.value]);
@@ -5425,8 +5465,7 @@ $('b-build').onclick = async () => {
     title: 'Build the machine?',
     body: `${picked.size ? `${picked.size} game${picked.size === 1 ? '' : 's'}, ${gb.toFixed(1)} GB, will be`
                          : 'No games will be'} downloaded while it builds.\n\n`
-        + `It costs ${rate != null ? `${rsh(rate)} an hour` : 'by the hour'} from the moment it starts, `
-        + 'and is ready in about 15 minutes.',
+        + `It costs ${rate != null ? `${rsh(rate)} an hour` : 'by the hour'} while it runs.`,
     yes: 'Build',
   });
   if (!ok) return;
@@ -5436,6 +5475,8 @@ $('b-build').onclick = async () => {
 for (const link of document.querySelectorAll('.nav-item')) {
   link.onclick = e => {
     e.preventDefault();
+    // The arrival from setup plays once; coming back to Home is not arriving.
+    document.body.classList.remove('arriving');
     document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('on', n === link));
     // The label only: the link's text also holds its icon's glyph, which came
     // out as an invisible character in "Refreshing <page>".

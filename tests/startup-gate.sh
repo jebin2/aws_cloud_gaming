@@ -667,7 +667,8 @@ ENGINE="window.__after = async () => {
   const at = n => document.getElementById(n).hidden ? 'hidden' : 'shown';
   return 'then=' + at('onb') + '/' + at('d-main')
        + ' setup=' + document.body.classList.contains('setup')
-       + ' arriving=' + document.body.classList.contains('arriving');
+       + ' arriving=' + document.body.classList.contains('arriving')
+       + ' back=' + (goView('cost'), goView('dashboard'), document.body.classList.contains('arriving'));
 };"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP}")
 contains "the steps are shown"          "$(row MODE)" "MODE | steps"
@@ -676,6 +677,7 @@ contains "  and held for a beat"        "$(row ONB)" "ONB | shown cards=hidden"
 contains "then the dashboard takes over" "$(row AFTER)" "then=hidden/shown"
 contains "  with the sidebar back"      "$(row AFTER)" "setup=false"
 contains "  and it arrives, not appears" "$(row AFTER)" "arriving=true"
+contains "  once: Home again does not replay it" "$(row AFTER)" "back=false"
 lacks    "nothing rescans"              "$(row RAN)" ";; sweep --json"
 check    "nothing threw"                "$(row ERRS)" "ERRS | "
 ENGINE=""
@@ -922,7 +924,10 @@ DASH="window.__after = async () => {
   const t = id => document.getElementById(id).innerText.replace(/\\s+/g, ' ').trim();
   const q = s => { const e = document.querySelector(s); return e ? e.innerText.replace(/\\s+/g, ' ').trim() : ''; };
   const shown = id => !document.getElementById(id).hidden;
-  return 'title=' + t('d-title') + ' | machine=' + t('d-machine') + ' | rate=' + t('d-rate')
+  return 'title=' + q('#d-machine-card [data-f=title]') + ' | machine=' + q('#d-machine-card [data-f=what]')
+       + ' | where=' + q('#d-machine-card [data-f=where]') + ' | same=' + (q('#d-machine-card [data-f=where]') === q('#b-machine-card [data-f=where]'))
+       + ' | twin=' + (() => { const k = id => [...document.getElementById(id).children].map(c => c.outerHTML).join('')
+           .replace(/id=\"[db]-/g, 'id=\"x-').replace(/ disabled=\"\"/g, ''); return k('d-hero') === k('b-machine'); })()
        + ' | bill=' + t('d-recurring-card')
        + ' | month=' + q('#d-month-card [data-f=total]') + ' | monthsub=' + q('#d-month-card [data-f=sub]')
        + ' | src=' + t('d-month-src')
@@ -938,8 +943,10 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0, "snapshots": 0, "elastic_ips": 0}' '{"limit": 57, "spent": 4.5, "alerts": 2}')}")
 contains "no machine, said plainly"        "$(row AFTER)" "title=No machine running"
 lacks    "  not 'nothing is billed'"        "$(row AFTER)" "billed by the hour"
-contains "  what it would be"              "$(row AFTER)" "machine=g6.xlarge · NVIDIA L4 · Hyderabad · Spot when available"
-contains "  and what it would cost"        "$(row AFTER)" "rate=₹16 an hour while it runs"
+contains "  what it would be"              "$(row AFTER)" "machine=g6.xlarge · NVIDIA L4"
+contains "  where, how, and what it would cost" "$(row AFTER)" "where=Hyderabad · Spot when available · ₹16.44 an hour while it runs"
+contains "  the same card as the Machine page" "$(row AFTER)" "same=true"
+contains "  laid out the same, buttons and all" "$(row AFTER)" "twin=true"
 lacks    "  and no build time on Home"     "$(row AFTER)" "ready in about"
 # Recurring cost is the Spending page's card, from the bill: unchecked, it waits.
 contains "recurring waits for the bill"    "$(row AFTER)" "bill=— Exact cost checks the bill."
@@ -1068,7 +1075,7 @@ BUILD="window.__after = async () => {
   await new Promise(r => setTimeout(r, 1200));
   document.querySelector('.nav-item[data-view=build]').click();
   const plan = !document.getElementById('b-plan').hidden;
-  const chip = document.getElementById('b-chip').textContent.trim();
+  const chip = (document.querySelector('#b-machine-card [data-f=where]') || {}).textContent;
   // The confirm dialog is its own suite's business; here it is answered yes,
   // and what it would have asked is kept.
   let ask = '';
@@ -1105,8 +1112,8 @@ ENGINE="$BUILD"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "before a build: the plan"          "$(row AFTER)" "plan=true"
-contains "  saying what Build starts billing" "$(row AFTER)" "chip=₹16.44 an hour from the moment it starts"
-contains "the confirm names the rate"        "$(row AFTER)" "It costs ₹16.44 an hour from the moment it starts"
+contains "  saying what Build starts billing" "$(row AFTER)" "chip=Hyderabad · Spot when available · ₹16.44 an hour while it runs"
+contains "the confirm names the rate"        "$(row AFTER)" "It costs ₹16.44 an hour while it runs."
 # Mid-build: setup, budget, machine and Tailscale done; the box's own steps
 # (base packages, the driver) are one step, installing.
 contains "four steps done, the fifth running" "$(row AFTER)" "mid=0=done,1=done,2=done,3=done,4=running,5=locked,6=locked,7=locked"

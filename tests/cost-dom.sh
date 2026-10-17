@@ -133,6 +133,11 @@ cat > "$T/r/probe.js" <<'PROBE'
     paintStatus({ box: { id: 'i-1', state: 'running', type: 'g6.xlarge', lifecycle: 'spot' }, rates: {}, budget: {} });
     out.push('RUNNING | ' + billChanges().map(c => c.what).join(','));
     paintCost(COST({}));
+    // Status arriving after a Refresh reaches both copies of the card, not just Home's.
+    statusNow = null; paintCostPage();
+    paintStatus({ box: { id: 'i-1', state: 'running', type: 'g6.xlarge', lifecycle: 'spot' }, rates: {}, budget: {} });
+    const playOf = id => (document.querySelector('#' + id + ' [data-f=play]') || {}).textContent || 'none';
+    out.push('SAME PLAY | ' + playOf('c-recurring-card') + ' == ' + playOf('d-recurring-card'));
     // A restart: nothing in this window, the last bill on this laptop.
     const kept = JSON.parse(localStorage.getItem('cg.lastCost'));
     kept.at = new Date(Date.now() - 2 * 86400000).toISOString();
@@ -238,6 +243,7 @@ check    "Saved games opens the Games page" "$(row WENT)" "WENT | library"
 
 echo "3c. what playing adds, and a machine that exists"
 contains "playing adds the machine, by the hour" "$(row PLAY)" "Playing adds ₹16 an hour for the machine."
+contains "status after a Refresh reaches Spending's card too" "$(row 'SAME PLAY')" "Playing adds ₹16 an hour for the machine. == Playing adds ₹16 an hour for the machine."
 contains "a stopped machine is its own row"  "$(row STOPPED)" "Machine (stopped) →₹433 a month"
 lacks    "  not a disk left behind"           "$(row STOPPED)" "Disk left by a deleted machine"
 

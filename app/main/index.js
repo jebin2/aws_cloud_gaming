@@ -158,6 +158,16 @@ function createWindow() {
     },
   });
   win.once('ready-to-show', () => win.show());
+  // ready-to-show waits on the first paint. If the GPU stalls that paint
+  // never comes and the app runs with no window and no error, so show it
+  // anyway and say why.
+  setTimeout(() => {
+    if (win && !win.isDestroyed() && !win.isVisible()) {
+      console.error('cg: the page has not painted after 5 s; showing the window anyway');
+      win.show();
+    }
+  }, 5000);
+  win.webContents.on('render-process-gone', (_e, d) => console.error('cg: the page stopped:', d.reason, d.exitCode));
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   // A viewer of local files: nothing here should ever navigate to the web.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -172,6 +182,7 @@ function createWindow() {
 // Electron's default menu offers nothing here except ways to confuse.
 Menu.setApplicationMenu(null);
 
+app.on('child-process-gone', (_e, d) => console.error('cg:', d.type, 'process stopped:', d.reason, d.exitCode));
 app.whenReady().then(() => { loadContract(); createWindow(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

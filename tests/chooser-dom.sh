@@ -288,8 +288,7 @@ cat > "$T/r/probe.js" <<'PROBE'
                           .replace(/\s+/g, ' ').trim());
   // One line per painter, naming a DOM effect only that painter produces.
   // The machine on one line - there is no spec card any more.
-  out.push('PAINTED | status/spec | ' + document.getElementById('b-pick').textContent.trim());
-  out.push('PAINTED | status/chip | ' + document.getElementById('b-chip').textContent.trim());
+  out.push('PAINTED | status/spec | ' + document.querySelector('#b-machine-card [data-f=what]').textContent.trim());
   out.push('PAINTED | config | ' + document.querySelectorAll('#s-groups .row').length);
   out.push('PAINTED | guards | ' + document.getElementById('g-nets').children.length);
   out.push('PAINTED | library | ' + document.getElementById('b-fit').textContent.trim());
@@ -307,11 +306,12 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('NOCAP | build | ' + (document.getElementById('b-build').disabled ? 'OFF' : 'on'));
   paintLibrary(DATA.library);
   if (window.__errs.length) out.push('ERRORS: ' + window.__errs.join(' | '));
-  out.push('BPICK | ' + document.getElementById('b-pick').textContent.trim());
-  out.push('BWHERE | ' + document.getElementById('b-pick-where').textContent.trim());
-  out.push('BNOTE | ' + document.getElementById('b-type-note').textContent.trim());
+  const card = f => (document.querySelector('#b-machine-card [data-f=' + f + ']') || {}).textContent || '';
+  out.push('BPICK | ' + card('what'));
+  out.push('BWHERE | ' + card('where'));
+  out.push('BNOTE | ' + card('warn'));
   out.push('BTABLE | ' + (document.getElementById('b-chooser') ? 'PRESENT' : 'absent'));
-  out.push('BSETUP | ' + (document.getElementById('b-setup') ? 'present' : 'ABSENT'));
+  out.push('BSETUP | ' + (document.querySelector('#b-machine-card [data-f=change]') ? 'present' : 'ABSENT'));
   for (const id of ['s-chooser']) {
     const tb = document.getElementById(id);
     out.push('TABLE ' + id + (tb ? '' : ' MISSING'));
@@ -385,7 +385,6 @@ lacks    "  nor could not run"  "$OUT" "could not run:"
 contains "and no read failed at all" "$OUT" "FAILURES: "
 # Named effects, because "no error" is what passed while paintSpec was missing.
 contains "the machine is one line"         "$OUT" "PAINTED | status/spec | g4dn.xlarge"
-contains "  and the chip says what Build bills" "$OUT" "PAINTED | status/chip | ₹"
 # Of the four, only the disk is Settings' own: region, machine and purchase
 # model are the chooser's, and nothing else repeats them.
 contains "paintConfig drew Settings' own rows" "$OUT" "PAINTED | config | 1"
@@ -438,7 +437,7 @@ echo "5b. Build states the choice without offering a second control"
 contains "the machine, once"             "$OUT" "BPICK | g4dn.xlarge"
 contains "  then where and how it is bought" "$OUT" "· Standard"
 contains "  with the GPU"                "$(grep -m1 '^BPICK ' <<<"$OUT")" "NVIDIA T4, 16 GB"
-contains "  and the hourly rate, in rupees" "$(grep -m1 '^BWHERE ' <<<"$OUT")" "₹51/hour"
+contains "  and the hourly rate, in rupees" "$(grep -m1 '^BWHERE ' <<<"$OUT")" "₹51 an hour while it runs"
 
 echo "6. capacity is shown next to price, which is the whole point"
 contains "the good score is there" "$OUT" "9/10"

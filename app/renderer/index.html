@@ -99,32 +99,7 @@
 
       <!-- The machine: one status, one line about it, and the next action. -->
       <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop" id="d-hero">
-        <div class="flex items-start justify-between gap-space-md">
-          <div class="min-w-0">
-            <p class="font-headline-lg text-headline-lg" id="d-title">&mdash;</p>
-            <p class="font-body-md text-body-md text-on-surface-variant mt-space-xs" id="d-sub"></p>
-          </div>
-          <span class="pill shrink-0" id="d-tag" hidden></span>
-        </div>
-        <p class="font-code-md text-code-md mt-space-lg" id="d-machine"></p>
-        <p class="font-code-sm text-code-sm text-outline mt-0.5" id="d-rate"></p>
-        <div class="onb-progress mt-space-md" id="d-prog" hidden><i></i></div>
-        <div class="flex flex-wrap items-center gap-space-sm mt-space-lg">
-          <button id="d-build" class="btn btn-primary">
-            <span class="material-symbols-outlined text-[16px]" data-icon="rocket_launch">&#xeb9b;</span>Build machine
-          </button>
-          <button id="d-open" class="btn btn-primary" hidden>
-            <span class="material-symbols-outlined text-[16px]" data-icon="stadia_controller">&#xf135;</span>Play
-          </button>
-          <button id="d-watch" class="btn" hidden>Watch the build</button>
-          <button id="d-destroy" class="btn btn-danger" hidden>
-            <span class="material-symbols-outlined text-[16px]" data-icon="delete">&#xe92e;</span>Delete machine
-          </button>
-          <button id="d-change" class="font-code-sm text-code-sm text-outline hover:text-on-surface ml-space-sm">
-            Change machine
-          </button>
-        </div>
-        <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="d-note"></p>
+        <!-- Filled by mountMachineCard: the same card as the Machine page's. -->
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mb-gutter-desktop">
@@ -241,33 +216,8 @@
     <!-- Mode A: what will be built - a card each for the machine, the games and
          Steam, and the bill and the button under them. -->
     <div class="fit-view flex flex-col gap-space-md" id="b-plan">
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-      <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Machine</span>
-      <div class="flex flex-wrap items-start justify-between gap-space-md mt-space-sm">
-        <div class="min-w-0">
-          <p class="font-code-md text-code-md text-on-surface" id="b-pick">&mdash;</p>
-          <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-pick-where"></p>
-        </div>
-        <button class="btn shrink-0" id="b-setup">Change</button>
-      </div>
-      <p class="font-code-sm text-code-sm text-tertiary mt-space-xs" id="b-type-note"></p>
-      <p class="font-code-sm text-code-sm text-tertiary mt-space-xs" id="b-session" hidden></p>
-      <!-- The bill and the button belong to the machine they build. -->
-      <div class="flex flex-wrap items-center justify-between gap-space-md mt-space-lg pt-space-md border-t border-surface-variant">
-        <p class="font-code-sm text-code-sm text-on-surface-variant" id="b-chip">&mdash;</p>
-        <div class="flex items-center gap-space-sm">
-          <button class="btn btn-primary" id="b-build">
-            <span class="material-symbols-outlined text-[18px]" data-icon="rocket_launch">&#xeb9b;</span>Build
-          </button>
-          <button class="btn btn-primary" id="b-open" hidden>
-            <span class="material-symbols-outlined text-[18px]" data-icon="sports_esports">&#xea28;</span>Play
-          </button>
-          <button class="btn btn-danger" id="b-destroy" hidden>
-            <span class="material-symbols-outlined text-[18px]" data-icon="delete">&#xe92e;</span>Delete machine
-          </button>
-        </div>
-      </div>
-      </div>
+      <!-- Filled by mountMachineCard: the same card as Home's. -->
+      <div class="p-space-lg rounded-lg bg-surface-container-low" id="b-machine"></div>
 
       <div class="p-space-lg rounded-lg bg-surface-container-low">
         <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Games to install</span>

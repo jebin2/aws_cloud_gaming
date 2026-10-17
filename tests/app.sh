@@ -316,7 +316,7 @@ contains "the allocation bar"            "$html" 'id="b-bar"'
 contains "  says what is left, plainly"  "$js" "Too big by"
 contains "the machine comes from cg"     "$js" "const spec = s.spec || {}"
 check    "  with no type hardcoded"      "$(grep -c 'g6\.xlarge\|L4\|16 GiB' app/renderer/app.js)" "0"
-contains "  and the chip says what Build bills" "$js" "an hour from the moment it starts"
+lacks    "no build time, no second rate line" "$js" "from the moment it starts"
 # cg's dozen-odd steps, and the box's own, are placed in eight plain ones.
 contains "steps are the eight plain ones" "$js" "const BUILD_STEPS = ["
 contains "  and only move forwards"       "$js" "if (at > run.idx)"
@@ -324,8 +324,8 @@ contains "  and carry how long they took" "$js" "function buildStepEnd(event)"
 contains "  the live line shows in the strip" "$js" "\$('b-prog-step').textContent = event.text"
 # A box that is already up cannot be built again - cg would refuse, so the
 # screen offers what you can actually do with it instead.
-contains "a running box replaces the build button" "$js" '$('"'"'b-build'"'"').hidden = up'
-contains "  with play and destroy"       "$js" '$('"'"'b-destroy'"'"').hidden = !up'
+contains "a machine replaces the build button" "$js" '$(`${p}-build`).hidden = !!box'
+contains "  with play and delete"        "$js" '$(`${p}-destroy`).hidden = !box'
 contains "  and the picker goes read-only" "$js" "box.disabled = up"
 contains "  build re-reads the box state" "$js" "build:     [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status'],"
 # The panel sits in a content-sized grid row, so flex-1 had no height to divide
@@ -424,10 +424,12 @@ contains "  but come back if the table is dead" "$js" "function chooserDead"
 # and sends you to the one that exists.
 lacks    "no picker on the Build screen"  "$html" 'id="b-type"'
 lacks    "  and no table either"          "$html" 'id="b-chooser"'
-contains "Build names the chosen machine" "$html" 'id="b-pick"'
-contains "  and offers a way to change it" "$html" 'id="b-setup"'
-# ...as a dialog over Build, not a trip to the top of Settings.
-contains "  which opens the chooser here"  "$js" '$('"'"'b-setup'"'"').onclick = () => openMachines();'
+contains "Build shows the machine card"  "$html" 'id="b-machine"'
+contains "  and so does Home, the same one" "$html" 'id="d-hero"'
+check    "  built by one recipe, buttons too" "$(grep -cE "^mountMachineCard\(\\$\('(d-hero|b-machine)'\), '[db]'\);$" app/renderer/app.js)" "2"
+check    "  and no page keeps its own copy" "$(grep -cE 'id="[db]-(build|open|destroy)"' app/renderer/index.html)" "0"
+# ...as a dialog over the page, not a trip to the top of Settings.
+contains "  which offers the chooser here" "$js" "ch.onclick = () => openMachines();"
 contains "  the one table, in a dialog"    "$html" '<dialog id="machdlg"'
 # Settings is a long screen. Arriving is not enough - the first picker went
 # unnoticed because it was below the fold - so whatever you came for is
@@ -441,8 +443,7 @@ contains "  ending on its own"            "$js" "animationend"
 contains "  with the animation defined"   "$(cat app/renderer/src.css)" "@keyframes flash-attn"
 check    "  and the card it points at exists"          "$(grep -c 'id="s-machine-card"' app/renderer/index.html)" "1"
 # The summary must sit above the button that spends the money, not below it.
-check    "the summary is above Build"    \
-         "$(awk '/id="b-pick"/{a=NR} /id="b-build"/{b=NR} END{print (a && b && a < b) ? "yes" : "no"}' app/renderer/index.html)" "yes"
+contains "the summary is above Build"    "$js" 'box.append(body, busy, row);'
 contains "  and says why"                 "$js" "Delete it before changing machines"
 contains "  the unpinned zone is priced too" "$js" "usd_hour_spot_max"
 check    "  and still no machine is named here" \
@@ -702,7 +703,7 @@ echo "6. the actions that spend money ask first"
 # window.confirm draws a native alert that belongs to no design.
 check    "no native alert boxes"         "$(grep -cE '(^|[^a-zA-Z.])confirm\(' app/renderer/app.js)" "0"
 contains "  the app asks in its own dialog" "$html" 'id="confirm-title"'
-contains "a build confirms, with its rate" "$js" 'It costs ${rate != null ? `${rsh(rate)} an hour` : '"'"'by the hour'"'"'} from the moment it starts'
+contains "a build confirms, with its rate" "$js" 'It costs ${rate != null ? `${rsh(rate)} an hour` : '"'"'by the hour'"'"'} while it runs.'
 contains "  and passes the chosen games" "$js" "GAME_APPS: apps"
 contains "a delete confirms"             "$js" "Delete the machine?"
 contains "only GAME_APPS may cross"      "$(cat app/main/index.js)" "ENV_ALLOWED = new Set(['GAME_APPS'])"
