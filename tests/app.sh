@@ -430,6 +430,9 @@ check    "  built by one recipe, buttons too" "$(grep -cE "^mountMachineCard\(\\
 check    "  and no page keeps its own copy" "$(grep -cE 'id="[db]-(build|open|destroy)"' app/renderer/index.html)" "0"
 # ...as a dialog over the page, not a trip to the top of Settings.
 contains "  which offers the chooser here" "$js" "ch.onclick = () => openMachines();"
+check    "every popup has the one look"   "$(grep -c '<dialog ' app/renderer/index.html)" "$(grep -c '<dialog id="[a-z]*" class="dlg ' app/renderer/index.html)"
+check    "  and one title style"          "$(grep -c '<dialog ' app/renderer/index.html)" "$(grep -c 'class="dlg-title' app/renderer/index.html)"
+check    "  and one button row"           "$(grep -c '<menu class=' app/renderer/index.html)" "$(grep -c '<menu class="dlg-actions"' app/renderer/index.html)"
 contains "  the one table, in a dialog"    "$html" '<dialog id="machdlg"'
 # Settings is a long screen. Arriving is not enough - the first picker went
 # unnoticed because it was below the fold - so whatever you came for is

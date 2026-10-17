@@ -148,7 +148,7 @@ contains "cg dispatches optin"        "$(cat cg)" "optin)   shift"
 contains "  and enable"               "$(cat cg)" "enable)  shift"
 contains "  and help names both"      "$(cat cg)" "cg regions [optin|enable <r>]"
 js=$(cat app/renderer/app.js)
-contains "the app offers it"          "$js" "Switch on a location"
+contains "the app offers it"          "$js" "['Switch it on', () => openOptin()]"
 contains "  reads the list"           "$js" "'regions', 'optin', '--json'"
 contains "  and runs cg to enable"    "$js" "'regions', 'enable'"
 # The sweep's own numbers next to each candidate: a bare region code is a

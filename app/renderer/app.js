@@ -445,6 +445,11 @@ function hourlyInr(type, spot) {
 // The machine card, drawn the same on Home and the Machine page: what is
 // running if something is, otherwise what Build would start. Each page puts its
 // own buttons under it.
+// A GPU as every screen says it: "NVIDIA T4, 16 GB".
+const gpuName = (gpu, vram) => `NVIDIA ${gpu}${vram ? `, ${vram} GB` : ''}`;
+// How far a place is, in a word, with the measurement beside it.
+const distance = ms => `${ms <= 30 ? 'Close' : ms <= 60 ? 'OK' : 'Far'} (${Math.round(ms)} ms)`;
+
 function machineFacts() {
   const s = statusNow || {};
   const box = s.box && s.box.state !== 'terminated' ? s.box : null;
@@ -459,7 +464,7 @@ function machineFacts() {
   const vram = hit && hit.vram;
   const price = withAddress((hit && (spot ? hit.spot : hit.od)) ?? hourlyInr(type, spot));
   return { s, box, cur, rows, hit, region, type, spot, price,
-           what: [type, gpu ? `NVIDIA ${gpu}${vram ? `, ${vram} GB` : ''}` : null].filter(Boolean).join(' · ') || '—',
+           what: [type, gpu ? gpuName(gpu, vram) : null].filter(Boolean).join(' · ') || '—',
            where: [region ? placeName(region) : null,
                    box || cfgVal('GAME_SPOT') === '1' ? (spot ? 'Spot' : 'Standard')
                      : cfgVal('GAME_SPOT') === '0' ? 'Standard' : 'Spot when available',
@@ -2887,21 +2892,23 @@ function priceCell(tr, mount, row, spot, inr, cur) {
 
   // The cheapest zone, and nothing pins the zone: show the spread when the
   // zones disagree, because the cheap number alone is a promise cg cannot keep.
+  // The same price the machine card shows: the public address included.
   const range = spot && inr != null && row.spotMax != null && row.spotMax > inr
-    ? `${inr}-${row.spotMax}` : (inr == null ? null : String(inr));
+    ? `${rsh(withAddress(inr))}–${rsh(withAddress(row.spotMax))}` : (inr == null ? null : rsh(withAddress(inr)));
   const amount = document.createElement('span');
   amount.className = 'amount';
-  amount.textContent = range == null ? '-' : range;
+  amount.textContent = range == null ? 'none' : range;
   label.append(amount);
 
-  // Why, as its own short tag rather than appended to the number: it keeps the
-  // prices readable down the column, and the full sentence is in the legend.
+  // Why, on hover: a mark in the cell, the words in the tooltip and once
+  // under the table, so the prices stay readable down the column.
   if (why) {
     const tag = document.createElement('span');
     tag.className = 'reason';
-    tag.textContent = REASON_LABEL[why] || why;
+    tag.textContent = 'ⓘ';
+    tag.title = `${REASON_LABEL[why] || why}: ${PICK_WHY[why] || why}`;
     label.append(tag);
-    label.title = PICK_WHY[why] || why;
+    label.title = `${REASON_LABEL[why] || why}: ${PICK_WHY[why] || why}`;
   }
   td.append(label);
   return { td, usable, why };
@@ -2912,11 +2919,10 @@ function priceCell(tr, mount, row, spot, inr, cur) {
 const REASON_LABEL = { 'no quota': 'Over your GPU limit', 'needs opt-in': 'Not switched on',
                        'no spot market': 'No spot price', 'no price': 'No price' };
 const PICK_WHY = {
-  'no quota': 'Your GPU limit here does not cover this machine. Asking for more is free: '
-            + 'use the button below.',
-  'needs opt-in': 'This location is not switched on for your account yet.',
-  'no spot market': 'AWS has no spot price for this machine here. Standard may still work.',
-  'no price': 'AWS did not return a price for this machine here.',
+  'no quota': 'your GPU limit here does not cover this machine. Asking for more is free.',
+  'needs opt-in': 'this place is not switched on for your account yet. Switching it on is free.',
+  'no spot market': 'AWS sells no spot machine of this kind here. Standard may still work.',
+  'no price': 'AWS gave no price for this machine here.',
 };
 
 let lastDead = null;
@@ -2959,9 +2965,8 @@ function paintChooser() {
       // The price headers do NOT get text-right: the cells under them lead with
       // a radio at the cell's left edge, so a right-aligned header sat over
       // nothing. capacity is the only genuinely right-aligned column.
-      for (const [label, cls] of [['Region', ''], ['City', ''], ['Latency', ''],
-                                  ['Machine', ''], ['GPU', ''], ['Availability', 'text-right'],
-                                  ['Spot ₹/hr', ''], ['Standard ₹/hr', '']]) {
+      for (const [label, cls] of [['Place', ''], ['Distance', ''], ['Machine', ''], ['Graphics', ''],
+                                  ['Chance of a spare one', 'text-right'], ['Spot, an hour', ''], ['Standard, an hour', '']]) {
         const th = document.createElement('th');
         th.textContent = label; th.className = cls;
         head.append(th);
@@ -2974,15 +2979,16 @@ function paintChooser() {
         if (first && lastRegion !== null) tr.classList.add('group');
         if (row.region === cur.region) tr.classList.add('here');
 
-        cell(tr, first ? row.region : '', 'region');
-        cell(tr, first ? row.city : '', 'city');
-        cell(tr, first && row.rtt != null ? `${Math.round(row.rtt)} ms` : '', 'ms');
+        // The place by its name; AWS's code for it on hover.
+        const place = cell(tr, first ? row.city || placeName(row.region) : '', 'region');
+        if (first) place.title = row.region;
+        cell(tr, first && row.rtt != null ? distance(row.rtt) : '', 'ms');
         cell(tr, row.type, '');
-        cell(tr, row.gpu ? (row.vram ? `${row.gpu} ${row.vram} GB` : row.gpu) : '-', 'city');
+        cell(tr, row.gpu ? gpuName(row.gpu, row.vram) : '', 'city');
 
         const sc = tr.insertCell();
         sc.className = 'num';
-        if (row.score == null) { sc.textContent = swept ? '-' : ''; sc.classList.add('why'); }
+        if (row.score == null) { sc.textContent = ''; sc.classList.add('why'); }
         else {
           const s = document.createElement('span');
           s.className = 'score ' + (row.score >= 7 ? 'good' : row.score <= 2 ? 'bad' : '');
@@ -3005,13 +3011,13 @@ function paintChooser() {
     else if (!swept && rows.length) parts.push('Showing this location only. Check all locations '
       + 'to compare every AWS location (free).');
     if (swept) {
-      parts.push('Availability: how likely AWS is to have a spare machine (1 = almost never)');
       // Two numbers in a spot cell are the cheapest and dearest zone, and the
       // zone is not pinned, so the bill can be either.
       if (rows.some(r => r.spotMax != null && r.spot != null && r.spotMax > r.spot))
         parts.push('A spot price range is the cheapest and dearest it can be');
       const far = (sweepNow.too_far || []).length;
-      if (far) parts.push(`${far} locations are too far to stream and are not listed`);
+      if (far) parts.push(`${far} more place${far === 1 ? ' is' : 's are'} too far to stream `
+        + `(over ${sweepNow.max_ms || 80} ms) and ${far === 1 ? 'is' : 'are'} not listed.`);
     }
     $(mount.note).textContent = parts.join(' · ');
 
@@ -3064,37 +3070,41 @@ function paintChooser() {
           + 'all over your GPU limit. Ask AWS for more, or pick another location.';
         legend.append(line);
       }
+      if (rows.length) {
+        const line = document.createElement('div');
+        line.textContent = 'Spot is much cheaper, but AWS can take the machine back mid-game. '
+          + 'Standard is never taken back.';
+        legend.append(line);
+      }
       if (reasons.size) {
         const intro = document.createElement('div');
-        intro.textContent = 'A price you cannot pick would be refused at launch:';
+        intro.className = 'mt-space-sm';
+        intro.textContent = 'Greyed prices would be refused at launch:';
         legend.append(intro);
-        // The one reason with something to do about it from in here.
-        if (reasons.has('no quota')) {
-          const b = document.createElement('button');
-          b.className = 'btn mt-space-xs';
-          b.textContent = 'Ask AWS for a higher GPU limit';
-          // The regions in this table that are enabled and short of quota. One
-          // of them is what the button is about; with several, the first is a
-          // better guess than the configured region, which may not be in the
-          // table at all.
-          b.onclick = () => openQuota(null, shortOfQuota[0]);
-          legend.append(b);
-        }
-        // The other reason with something to do about it - and unlike the
-        // quota, this one finishes here.
-        if (reasons.has('needs opt-in')) {
-          const b = document.createElement('button');
-          b.className = 'btn mt-space-xs ml-space-xs';
-          b.textContent = 'Switch on a location';
-          b.onclick = () => openOptin();
-          legend.append(b);
-        }
+        // Each reason on one line, with the button that fixes it beside it.
+        const FIX = {
+          'no quota': ['Ask AWS for more', () => openQuota(null, shortOfQuota[0])],
+          'needs opt-in': ['Switch it on', () => openOptin()],
+        };
         for (const r of ['no quota', 'needs opt-in', 'no spot market', 'no price']) {
           if (!reasons.has(r)) continue;
           const line = document.createElement('div');
+          line.className = 'flex flex-wrap items-center gap-space-sm mt-space-xs';
           const b = document.createElement('b');
-          b.textContent = REASON_LABEL[r] || r;
-          line.append(b, document.createTextNode(': ' + PICK_WHY[r]));
+          b.textContent = `${REASON_LABEL[r] || r}:`;
+          const text = document.createElement('span');
+          text.textContent = PICK_WHY[r];
+          // Together, so the gap before the button is not also before the colon.
+          const words = document.createElement('span');
+          words.append(b, ' ', text);
+          line.append(words);
+          if (FIX[r]) {
+            const btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.textContent = FIX[r][0];
+            btn.onclick = FIX[r][1];
+            line.append(btn);
+          }
           legend.append(line);
         }
       }

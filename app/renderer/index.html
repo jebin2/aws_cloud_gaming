@@ -527,34 +527,34 @@
 <!-- Refresh, said out loud: what this page reads, each read ticking as it
      lands, and gone once the page has been redrawn. Modal, so the whole window
      - sidebar too - waits under it rather than being clicked half-updated. -->
-<dialog id="refdlg" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[420px] max-w-[36rem]">
-  <p class="font-headline-md text-headline-md" id="refdlg-title">Refreshing</p>
-  <p class="font-code-sm text-code-sm text-outline mt-0.5" id="refdlg-sub"></p>
+<dialog id="refdlg" class="dlg min-w-[420px] max-w-[36rem]">
+  <p class="dlg-title" id="refdlg-title">Refreshing</p>
+  <p class="dlg-sub" id="refdlg-sub"></p>
   <div class="flex flex-col gap-space-sm mt-space-md" id="refdlg-list"></div>
-  <menu class="flex justify-end gap-space-sm mt-space-lg p-0" id="refdlg-menu" hidden>
+  <menu class="dlg-actions" id="refdlg-menu" hidden>
     <button class="btn btn-primary" id="refdlg-close">Close</button>
   </menu>
 </dialog>
-<dialog id="confirm" class="rounded-lg bg-surface-container-low text-on-surface border border-surface-variant p-space-lg min-w-[460px] max-w-[560px]">
+<dialog id="confirm" class="dlg min-w-[460px] max-w-[560px]">
   <form method="dialog">
-    <p class="font-headline-md text-headline-md" id="confirm-title"></p>
-    <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm whitespace-pre-line" id="confirm-body"></p>
+    <p class="dlg-title" id="confirm-title"></p>
+    <p class="dlg-sub whitespace-pre-line" id="confirm-body"></p>
     <!-- For what cannot be undone: the word cg would ask for, typed here once -
          and handed to cg, so there is one question and not two. -->
     <label class="block mt-space-md" id="confirm-word-row" hidden>
       <span class="font-code-sm text-code-sm text-outline" id="confirm-word-label"></span>
       <input class="mt-space-xs w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface" id="confirm-word" autocomplete="off" spellcheck="false">
     </label>
-    <menu class="flex justify-end gap-space-sm mt-space-lg p-0">
+    <menu class="dlg-actions">
       <button value="no" class="btn" id="confirm-no">Cancel</button>
       <button value="yes" class="btn btn-primary" id="confirm-yes">Continue</button>
     </menu>
   </form>
 </dialog>
 
-<dialog id="ask" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[420px]">
+<dialog id="ask" class="dlg min-w-[420px]">
   <form method="dialog">
-    <p class="font-code-md text-code-md mb-space-md" id="ask-prompt"></p>
+    <p class="dlg-title mb-space-md" id="ask-prompt"></p>
     <input id="ask-input" autocomplete="off" spellcheck="false"
            class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
     <!-- cg says in the ask event which answers it will accept. When it does,
@@ -562,7 +562,7 @@
          harder and easier to get wrong - a build asking "choice [1]:" with a
          text field is not a thing anyone can see the options in. -->
     <div id="ask-choices" class="flex flex-col gap-space-xs" hidden></div>
-    <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+    <menu class="dlg-actions">
       <button value="send" class="btn btn-primary">Answer</button>
     </menu>
   </form>
@@ -571,9 +571,9 @@
 <!-- The AWS access key: one dialog, both halves, and the answer checked before
      it is believed. It used to be two separate prompts with the failure landing
      in the log pane behind them. -->
-<dialog id="awskey" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[460px] max-w-[560px]">
-  <p class="font-code-md text-code-md">Connect your Amazon account</p>
-  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md">
+<dialog id="awskey" class="dlg min-w-[460px] max-w-[560px]">
+  <p class="dlg-title">Connect your Amazon account</p>
+  <p class="dlg-sub mb-space-md">
     On the Amazon website: your name &rarr; Security credentials &rarr; Create access key.
     It&rsquo;s checked with Amazon before it&rsquo;s saved, and kept on this laptop only.
   </p>
@@ -584,7 +584,7 @@
   <input id="awskey-secret" type="password" autocomplete="off" spellcheck="false"
          class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
   <pre class="font-code-sm text-code-sm text-error whitespace-pre-wrap mt-space-sm max-h-[30vh] overflow-auto" id="awskey-err" hidden></pre>
-  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+  <menu class="dlg-actions">
     <button class="btn" id="awskey-cancel">Cancel</button>
     <button class="btn btn-primary" id="awskey-go">Connect</button>
   </menu>
@@ -594,14 +594,14 @@
      runs in front of you, it can be cancelled, and it ends one of two ways.
      Used by the Tailscale sign-in (which prints a link and then WAITS for a
      browser) and by installing a missing tool (which asks polkit first). -->
-<dialog id="rundlg" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[520px] max-w-[46rem]">
-  <p class="font-code-md text-code-md" id="rundlg-title">Working</p>
-  <p class="font-code-sm text-code-sm mt-0.5 mb-space-md" id="rundlg-status">Starting…</p>
+<dialog id="rundlg" class="dlg min-w-[520px] max-w-[46rem]">
+  <p class="dlg-title" id="rundlg-title">Working</p>
+  <p class="dlg-sub mb-space-md" id="rundlg-status">Starting…</p>
   <button class="btn btn-primary mb-space-md" id="rundlg-link" hidden>
     <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the sign-in page
   </button>
   <pre class="font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[32vh] overflow-auto" id="rundlg-log"></pre>
-  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+  <menu class="dlg-actions">
     <!-- Cancel is not decoration: `tailscale up` waits for a browser and a
          package manager can sit on a lock, and closing a dialog tells cg
          nothing. -->
@@ -614,9 +614,9 @@
 <!-- Asking AWS for GPU quota. One dialog, four states: pick a limit, see what
      the case would say, create it, then live with the case that exists - which
      looks the same whether this window made it or found it. -->
-<dialog id="quota" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[600px] max-w-[54rem]">
+<dialog id="quota" class="dlg min-w-[600px] max-w-[54rem]">
   <div class="flex items-baseline justify-between gap-space-md">
-    <p class="font-code-md text-code-md" id="quota-title">Ask AWS for a higher GPU limit</p>
+    <p class="dlg-title" id="quota-title">Ask AWS for a higher GPU limit</p>
     <p class="font-code-sm text-code-sm text-outline" id="quota-region"></p>
   </div>
 
@@ -654,7 +654,7 @@
   <p class="font-code-sm text-code-sm text-outline mt-space-md" id="quota-pre-label" hidden></p>
   <pre class="font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[34vh] overflow-auto" id="quota-log"></pre>
 
-  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+  <menu class="dlg-actions">
     <button class="btn" id="quota-cancel">Close</button>
     <button class="btn" id="quota-refresh" hidden>Refresh</button>
     <button class="btn btn-primary" id="quota-go" disabled>Send the request</button>
@@ -669,17 +669,14 @@
 <!-- Choose a machine: the one place region, machine and spot or on demand are
      picked, together. Opened from Build, the Dashboard and a failed launch, so
      the choice is made where it is needed rather than three screens away. -->
-<dialog id="machdlg" class="rounded-lg bg-surface-container-low text-on-surface border border-surface-variant p-space-lg w-[min(64rem,92vw)]">
+<dialog id="machdlg" class="dlg w-[min(64rem,92vw)]">
     <div id="s-machine-card">
       <div class="flex flex-wrap items-baseline justify-between gap-space-md pb-space-md">
         <div>
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Choose a machine</span>
+          <p class="dlg-title">Choose a machine</p>
           <!-- One table, not three dropdowns. Region, instance type and purchase
                model are not three decisions - they are one, and the whole point
                is comparing the combinations. Picking a PRICE picks all three. -->
-          <p class="font-code-sm text-code-sm text-outline mt-0.5">
-            Pick where and what to run. Each price is a location and machine together.
-          </p>
         </div>
         <div class="flex items-center gap-space-sm shrink-0">
           <span class="font-code-sm text-code-sm text-outline" id="s-sweep-age"></span>
@@ -694,14 +691,14 @@
       <div class="chooser-legend" id="s-chooser-legend"></div>
       <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="s-type-note"></p>
     </div>
-  <div class="flex justify-end mt-space-md">
-    <button class="btn" id="machdlg-close">Done</button>
-  </div>
+  <menu class="dlg-actions">
+    <button class="btn btn-primary" id="machdlg-close">Done</button>
+  </menu>
 </dialog>
 
-<dialog id="whereto" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[560px] max-w-[48rem]">
-  <p class="font-code-md text-code-md">Where should it run?</p>
-  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md" id="whereto-sub">
+<dialog id="whereto" class="dlg min-w-[560px] max-w-[48rem]">
+  <p class="dlg-title">Where should it run?</p>
+  <p class="dlg-sub mb-space-md" id="whereto-sub">
     Measured from this laptop.
   </p>
   <!-- The first time, there is nothing to list yet: say so, visibly, for the
@@ -719,16 +716,16 @@
   <pre class="font-code-sm text-code-sm text-error whitespace-pre-wrap py-space-sm" id="whereto-err" hidden></pre>
   <div class="overflow-x-auto" id="whereto-list"><table class="chooser" id="whereto-table"></table></div>
   <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="whereto-note"></p>
-  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+  <menu class="dlg-actions">
     <button class="btn" id="whereto-measure">Measure again</button>
     <button class="btn" id="whereto-cancel">Cancel</button>
     <button class="btn btn-primary" id="whereto-use">Use it</button>
   </menu>
 </dialog>
 
-<dialog id="optin" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[600px] max-w-[54rem]">
-  <p class="font-code-md text-code-md">Switch on a location</p>
-  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md">
+<dialog id="optin" class="dlg min-w-[600px] max-w-[54rem]">
+  <p class="dlg-title">Switch on a location</p>
+  <p class="dlg-sub mb-space-md">
     Some AWS locations must be switched on for your account before they can be used.
     It&rsquo;s free and creates nothing.
   </p>
@@ -745,7 +742,7 @@
   <p class="font-code-sm text-code-sm text-outline mt-0.5" id="optin-explain"></p>
   <pre class="font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[30vh] overflow-auto mt-space-sm" id="optin-log"></pre>
 
-  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+  <menu class="dlg-actions">
     <button class="btn" id="optin-cancel">Close</button>
     <button class="btn" id="optin-refresh" hidden>Refresh</button>
     <button class="btn btn-primary" id="optin-go" disabled>Switch it on</button>
@@ -755,14 +752,14 @@
 <!-- One secret, typed once and checked before it is kept. Used by the
      Tailscale API token and by the box's own auth key - same shape, same
      rules, different words. -->
-<dialog id="onefield" class="rounded-lg bg-surface-container-low text-on-surface border border-primary p-space-lg min-w-[460px] max-w-[40rem]">
-  <p class="font-code-md text-code-md" id="onefield-title">—</p>
-  <p class="font-code-sm text-code-sm text-outline mt-0.5 mb-space-md" id="onefield-note"></p>
+<dialog id="onefield" class="dlg min-w-[460px] max-w-[40rem]">
+  <p class="dlg-title" id="onefield-title">—</p>
+  <p class="dlg-sub mb-space-md" id="onefield-note"></p>
   <label class="font-code-sm text-code-sm text-outline" for="onefield-input" id="onefield-label">Value</label>
   <input id="onefield-input" type="password" autocomplete="off" spellcheck="false"
          class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
   <pre class="font-code-sm text-code-sm text-error whitespace-pre-wrap mt-space-sm max-h-[30vh] overflow-auto" id="onefield-err" hidden></pre>
-  <menu class="flex justify-end gap-space-sm mt-space-md p-0">
+  <menu class="dlg-actions">
     <button class="btn" id="onefield-cancel">Cancel</button>
     <button class="btn btn-primary" id="onefield-go">Save</button>
   </menu>
