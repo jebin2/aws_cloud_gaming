@@ -1122,7 +1122,7 @@ contains "    the rental, with when billing began" "$(row AFTER)" "Machine rente
 contains "    the box's steps as one"         "$(row AFTER)" "Installing the software"
 contains "    with the line it is on"         "$(row AFTER)" "nvidia-driver-580 unpacked"
 contains "  the heading is the build"         "$(row AFTER)" "title=Building your machine"
-contains "  with the rate in it"              "$(row AFTER)" "₹16.44/hour"
+contains "  with the rate in it"              "$(row AFTER)" "₹16.44 an hour"
 contains "  and the plan is put away"         "$(row AFTER)" "plan=false"
 contains "a failure stops at its step"        "$(row AFTER)" "failed=0=done,1=done,2=done,3=done,4=failed,5=skipped"
 contains "  the heading says so"              "$(row AFTER)" "head=The build stopped"

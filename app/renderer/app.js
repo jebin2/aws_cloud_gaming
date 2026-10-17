@@ -936,7 +936,7 @@ function renderRecurring(box, { hint } = {}) {
   // month while stopped. Otherwise only a disk a deleted machine left behind.
   if (res.instance) {
     const st = res.instance.state;
-    const hr = boxNow ? hourlyInr(boxNow.type, boxNow.lifecycle === 'spot') : null;
+    const hr = boxNow ? machineFacts().price : null;
     line(`Machine (${st})`, st === 'running' ? (hr != null ? `${rsh(hr)} an hour` : 'by the hour')
                                              : `${r(standby.volumes_usd_month)} a month`, () => goView('build'));
   } else if (res.volumes_gb) {
@@ -2920,7 +2920,7 @@ const REASON_LABEL = { 'no quota': 'Over your GPU limit', 'needs opt-in': 'Not s
                        'no spot market': 'No spot price', 'no price': 'No price' };
 const PICK_WHY = {
   'no quota': 'your GPU limit here does not cover this machine. Asking for more is free.',
-  'needs opt-in': 'this place is not switched on for your account yet. Switching it on is free.',
+  'needs opt-in': 'this location is not switched on for your account yet. Switching it on is free.',
   'no spot market': 'AWS sells no spot machine of this kind here. Standard may still work.',
   'no price': 'AWS gave no price for this machine here.',
 };
@@ -2965,7 +2965,7 @@ function paintChooser() {
       // The price headers do NOT get text-right: the cells under them lead with
       // a radio at the cell's left edge, so a right-aligned header sat over
       // nothing. capacity is the only genuinely right-aligned column.
-      for (const [label, cls] of [['Place', ''], ['Distance', ''], ['Machine', ''], ['Graphics', ''],
+      for (const [label, cls] of [['Location', ''], ['Distance', ''], ['Machine', ''], ['Graphics', ''],
                                   ['Chance of a spare one', 'text-right'], ['Spot, an hour', ''], ['Standard, an hour', '']]) {
         const th = document.createElement('th');
         th.textContent = label; th.className = cls;
@@ -2979,7 +2979,7 @@ function paintChooser() {
         if (first && lastRegion !== null) tr.classList.add('group');
         if (row.region === cur.region) tr.classList.add('here');
 
-        // The place by its name; AWS's code for it on hover.
+        // The location by its city; AWS's code for it on hover.
         const place = cell(tr, first ? row.city || placeName(row.region) : '', 'region');
         if (first) place.title = row.region;
         cell(tr, first && row.rtt != null ? distance(row.rtt) : '', 'ms');
@@ -3016,7 +3016,7 @@ function paintChooser() {
       if (rows.some(r => r.spotMax != null && r.spot != null && r.spotMax > r.spot))
         parts.push('A spot price range is the cheapest and dearest it can be');
       const far = (sweepNow.too_far || []).length;
-      if (far) parts.push(`${far} more place${far === 1 ? ' is' : 's are'} too far to stream `
+      if (far) parts.push(`${far} more location${far === 1 ? ' is' : 's are'} too far to stream `
         + `(over ${sweepNow.max_ms || 80} ms) and ${far === 1 ? 'is' : 'are'} not listed.`);
     }
     $(mount.note).textContent = parts.join(' · ');
@@ -3460,7 +3460,7 @@ function paintRun() {
     r.state === 'running' ? mins(now - r.start) : r.kind === 'machine' ? `up ${mins(now - r.start)}`
       : r.state === 'done' && r.kind === 'init' ? `built in ${mins(now - r.start)}` : null,
     so != null ? `${rs(so)} so far` : r.kind === 'init' && r.state === 'failed' ? 'Nothing was billed' : null,
-    r.billFrom && r.rate != null ? `${rsh(r.rate)}/hour` : null,
+    r.billFrom && r.rate != null ? `${rsh(r.rate)} an hour` : null,
   ].filter(Boolean).join(' · ');
   const s = statusNow || {};
   $('b-run-sum').textContent = r.kind === 'init' || r.kind === 'machine' || r.kind === 'open'
@@ -3977,7 +3977,7 @@ async function refresh(each, need = readsFor(view)) {
 // Each read, in the words the page uses for what it shows.
 const READ_NAME = {
   status: 'Your machine and the bill', guards: 'Protection', library: 'Your saved games',
-  elsewhere: 'Games saved in other places',
+  elsewhere: 'Games saved in other locations',
   machines: 'Machines and prices', sweep: 'Locations', config: 'Settings',
   creds: 'Amazon key', tskey: 'Tailscale', deps: 'Tools on this laptop', cost: 'Exact cost this month',
 };
@@ -4254,7 +4254,7 @@ function paintWhereTo() {
   table.textContent = '';
   const rows = whereToRows();
   const head = document.createElement('tr');
-  for (const h of ['', 'Location', 'Latency', 'Machine', 'Spot', 'Standard']) {
+  for (const h of ['', 'Location', 'Distance', 'Machine', 'Spot, an hour', 'Standard, an hour']) {
     const th = document.createElement('th');
     th.textContent = h;
     head.append(th);
@@ -4282,7 +4282,7 @@ function paintWhereTo() {
     city.textContent = r.city || r.region;
     const ms = document.createElement('td');
     ms.className = 'ms num';
-    ms.textContent = r.rtt != null ? `${Math.round(r.rtt)} ms` : '—';
+    ms.textContent = r.rtt != null ? distance(r.rtt) : '—';
     const type = document.createElement('td');
     type.className = 'region';
     // Why it cannot be used, where the machine would go: an enabled region
@@ -4290,10 +4290,10 @@ function paintWhereTo() {
     type.textContent = r.type || (r.enabled ? 'No GPU limit here yet' : 'Not switched on yet');
     const spot = document.createElement('td');
     spot.className = 'num';
-    spot.textContent = r.spot != null ? `\u20b9${r.spot}/hr` : '—';
+    spot.textContent = r.spot != null ? rsh(withAddress(r.spot)) : '—';
     const od = document.createElement('td');
     od.className = 'num';
-    od.textContent = r.od != null ? `\u20b9${r.od}/hr` : '—';
+    od.textContent = r.od != null ? rsh(withAddress(r.od)) : '—';
     tr.append(pick, city, ms, type, spot, od);
     table.append(tr);
   }

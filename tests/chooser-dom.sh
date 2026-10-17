@@ -455,7 +455,7 @@ contains "and the bad one"         "$OUT" "1/10"
 contains "the column says what the score means" "$OUT" "Chance of a spare one"
 contains "spot and standard, told apart"  "$OUT" "Spot is much cheaper, but AWS can take the machine back mid-game."
 contains "the age of the scan is shown"   "$OUT" "Checked 5m ago"
-contains "and what was left out"          "$OUT" "2 more places are too far to stream (over 80 ms) and are not listed."
+contains "and what was left out"          "$OUT" "2 more locations are too far to stream (over 80 ms) and are not listed."
 
 echo "7. the three settings it owns have no second editor"
 # Not even a pointer: Settings does not list region, machine or purchase model.
@@ -527,7 +527,7 @@ contains "  naming the limit"             "$(row 'NOSWEEP LEGEND')" "over your G
 contains "  with both ways round it"      "$(row 'NOSWEEP LEGEND')" "Ask AWS for more, or pick another location"
 lacks    "  and not after one"            "$(row 'LEGEND')" "more GPU machines are offered here"
 contains "  and names the quota case"      "$OUT" "Over your GPU limit: your GPU limit here"
-contains "  the opt-in case"               "$OUT" "Not switched on: this place is not switched on"
+contains "  the opt-in case"               "$OUT" "Not switched on: this location is not switched on"
 contains "  and the missing market"        "$OUT" "No spot price: AWS sells no spot machine"
 # Only the reasons actually on screen: this fixture has no priceless row.
 lacks    "  but not a reason nothing shows" "$OUT" "no price - The Pricing API"
