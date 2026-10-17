@@ -920,11 +920,14 @@ st() { # st <box json> <archive json> <res json> <budget json>
 DASH="window.__after = async () => {
   await new Promise(r => setTimeout(r, 1200));
   const t = id => document.getElementById(id).innerText.replace(/\\s+/g, ' ').trim();
+  const q = s => { const e = document.querySelector(s); return e ? e.innerText.replace(/\\s+/g, ' ').trim() : ''; };
   const shown = id => !document.getElementById(id).hidden;
   return 'title=' + t('d-title') + ' | machine=' + t('d-machine') + ' | rate=' + t('d-rate')
-       + ' | bill=' + t('d-bill') + ' | total=' + t('d-bill-total')
-       + ' | month=' + t('d-month') + ' | src=' + t('d-month-src') + ' | price=' + t('d-cost-price')
-       + ' | games=' + t('d-games') + ' ' + t('d-games-sub') + ' ' + t('d-games-keep')
+       + ' | bill=' + t('d-recurring-card')
+       + ' | month=' + q('#d-month-card [data-f=total]') + ' | monthsub=' + q('#d-month-card [data-f=sub]')
+       + ' | src=' + t('d-month-src')
+       + ' | price=' + t('d-cost-price')
+       + ' | games=' + t('d-games')
        + ' | protect=' + t('d-protect')
        + ' | buttons=' + ['d-build', 'd-open', 'd-destroy'].filter(shown).join(',')
        + ' | destroy=' + t('d-destroy');
@@ -937,9 +940,13 @@ contains "no machine, said plainly"        "$(row AFTER)" "title=No machine runn
 lacks    "  not 'nothing is billed'"        "$(row AFTER)" "billed by the hour"
 contains "  what it would be"              "$(row AFTER)" "machine=g6.xlarge · NVIDIA L4 · Hyderabad · Spot when available"
 contains "  and what it would cost"        "$(row AFTER)" "rate=₹16 an hour while it runs"
-contains "nothing billing: no items"       "$(row AFTER)" "bill=No billing items."
-contains "the month, in rupees, of the budget" "$(row AFTER)" "month=₹396 of ₹5,016"
-contains "  from Budgets, which is free"   "$(row AFTER)" "src=Estimated by AWS"
+lacks    "  and no build time on Home"     "$(row AFTER)" "ready in about"
+# Recurring cost is the Spending page's card, from the bill: unchecked, it waits.
+contains "recurring waits for the bill"    "$(row AFTER)" "bill=— Exact cost checks the bill."
+# The month is the bill, checked on request. AWS Budgets' figure is after
+# credits - it read Rs 0 while Rs 285 had been used - so it is not shown.
+contains "the month waits for a check"     "$(row AFTER)" "month=— | monthsub=Press Exact cost to see it."
+lacks    "  not Budgets' after-credit figure" "$(row AFTER)" "₹396"
 contains "the exact figure's price, in rupees" "$(row AFTER)" "price=₹0.88"
 contains "no games yet"                    "$(row AFTER)" "games=No games saved yet"
 contains "the budget is protection"        "$(row AFTER)" "Budget alert at ₹5,016 · emails 2 addresses"
@@ -951,12 +958,9 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
      '{"bytes": 136365211648, "usd_month": 3.18, "expiry_days": 14}' \
      '{"volumes_gb": 50, "snapshots": 0, "elastic_ips": 0}' '{"limit": 57, "spent": 4.5, "alerts": 2}')}")
 contains "a running machine: ready"        "$(row AFTER)" "title=Ready to play"
-contains "  the machine, priced by the hour" "$(row AFTER)" "Machine · g6.xlarge, Spot ₹16/hour"
-contains "  its public address"            "$(row AFTER)" "Public IP address ₹0.44/hour"
-contains "  its disk, by the month"        "$(row AFTER)" "Machine disk · 50 GB ₹401/month"
-contains "  the archive, by the month"     "$(row AFTER)" "Saved games · 127.0 GB ₹280/month"
-contains "  totalled both ways"            "$(row AFTER)" "total=While running ₹16.44/hour Storage ₹681/month"
-contains "  how long the games are kept"   "$(row AFTER)" "Deleted 14 days after you last play."
+# Home shows the bill as last checked, like Spending - not what exists this
+# minute. A build showed on Home and not on Spending; now both wait for a check.
+lacks    "  the bill's view, not a live list" "$(row AFTER)" "Public IP address"
 contains "play and delete, nothing else"   "$(row AFTER)" "buttons=d-open,d-destroy |"
 # (The icon glyph comes first, so this checks the words after it.)
 contains "  it says delete, not destroy"   "$(row AFTER)" " Delete machine"
@@ -964,11 +968,9 @@ lacks    "    anywhere on the page"         "$(row AFTER)" "Destroy"
 
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 30, "snapshots": 2, "snapshots_gb": 80, "elastic_ips": 1}' '{"limit": 57, "spent": 4.5, "alerts": 2}')}")
-# No machine, and things still billing: each one named, and the ones cg did not
-# make or that nothing is using marked as such.
-contains "a disk left behind"              "$(row AFTER)" "Disk left behind · 30 GB No machine is using it ₹241/month"
-contains "  snapshots, as the most they cost" "$(row AFTER)" "Snapshots · 2, 80 GB Not made by this app up to ₹88/month"
-contains "  a reserved address"            "$(row AFTER)" "Reserved IP address · 1 Reserved with no machine ₹0.44/hour"
+# Leftovers are the bill's to say, on both pages: not drawn on Home from the
+# live read any more. (A disk left behind is a Recurring cost row - cost-dom.)
+lacks    "leftovers are not a live list on Home" "$(row AFTER)" "Snapshots ·"
 echo "6b. the dashboard: Tailscale"
 TS="window.__after = async () => {
   await new Promise(r => setTimeout(r, 1200));
@@ -977,10 +979,62 @@ TS="window.__after = async () => {
        + ' | pings=' + window.__ran.filter(c => c === 'ping --json').length;
 };"
 ENGINE="$TS"
+KEPT_ENGINE="$ENGINE"
+echo "6b2. games in another location count, by name; the last bill check is remembered"
+# Diablo IV sits in Hyderabad, billing, while the machine's location has none:
+# Home said "No billing items" and "No games saved yet" over it.
+HOMEGAMES="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  const t = id => document.getElementById(id).innerText.replace(/\\s+/g, ' ').trim();
+  const q = s => { const e = document.querySelector(s); return e ? e.innerText.replace(/\\s+/g, ' ').trim() : ''; };
+  const before = 'bill=' + t('d-recurring-card') + ' | games=' + t('d-games') + ' | month=' + q('#d-month-card [data-f=total]');
+  // A bill check, as Spending makes one.
+  paintSpend({ month: { total_usd: 3.0, total_inr: 285, projected_usd: 5.82, projected_inr: 553,
+                        hours: { on_demand: 0, spot: 3.8 } },
+               rates: { inr_per_usd: 95 }, resources: { budget_usd: 57 },
+               standby: { usd_month: 0, archive_usd_month: 0 }, archive: {} });
+  const remembered = 'bill=' + t('d-recurring-card') + ' | month=' + q('#d-month-card [data-f=total]')
+    + ' | monthsub=' + q('#d-month-card [data-f=sub]') + ' | src=' + t('d-month-src');
+  costNow = null; costNowAt = null;
+  localStorage.setItem('cg.lastCost', JSON.stringify({ total_inr: 999, at: '2020-01-05T10:00:00Z' }));
+  paintDash();
+  const stale = 'month=' + q('#d-month-card [data-f=total]');
+  document.getElementById('d-bill-more').click();
+  const went = document.querySelector('.nav-item.on').dataset.view;
+  document.querySelector('.nav-item[data-view=dashboard]').click();
+  window.__ran = [];
+  document.getElementById('d-cost').click();
+  await new Promise(r => setTimeout(r, 30));
+  const exact = 'view=' + document.querySelector('.nav-item.on').dataset.view
+    + ' popup=' + document.getElementById('refdlg').open + ':' + document.getElementById('refdlg-title').textContent
+    + ' ran=' + window.__ran.filter(l => l.startsWith('cost')).join(';');
+  return before + ' | remembered: ' + remembered + ' | stale: ' + stale
+       + ' | went=' + went + ' | exact: ' + exact;
+};"
+ENGINE="$HOMEGAMES"
+HG_ELSE='{"error": null, "region": "ap-south-1", "inr_per_usd": 88, "expiry_days": 14, "places": [
+  {"bucket": "cg-library-old", "region": "ap-south-2", "error": null, "bytes": 174813455930, "usd_month": 4.07,
+   "games": [{"appid": "2344520", "name": "Diablo IV", "bytes": 174813206488}], "login": false}]}'
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"library list --json\": {\"games\": [], \"total_bytes\": 0, \"bucket\": \"b\", \"login\": {\"present\": false}},
+  \"library elsewhere --json\": $HG_ELSE,
+  \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "unchecked, recurring waits"     "$(row AFTER)" "bill=— Exact cost checks the bill."
+contains "  games elsewhere listed by name" "$(row AFTER)" "games=Diablo IV"
+# Once the bill is checked, the games in Hyderabad are in it, on Home as on Spending.
+contains "checked, games elsewhere count"  "$(row AFTER)" "remembered: bill=₹387 a month"
+contains "  the month from the bill"       "$(row AFTER)" "month=₹285"
+contains "  with its pace"                 "$(row AFTER)" "on pace for ₹553"
+contains "  and when it was checked"       "$(row AFTER)" "src=Checked today"
+contains "a check from another month is not this one" "$(row AFTER)" "stale: month=—"
+contains "Show details opens Spending"     "$(row AFTER)" "went=cost"
+contains "Exact cost opens Spending and refreshes it" "$(row AFTER)" "exact: view=cost popup=true:Refreshing Spending ran=cost --json"
+ENGINE="$KEPT_ENGINE"
+
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "the laptop, by name"             "$(row AFTER)" "This laptop is signed in as laptop"
-contains "  no machine on the network"     "$(row AFTER)" "No machine on the network"
+contains "  no machine yet, said as what happens" "$(row AFTER)" "Your machine joins when you build it"
 contains "  and no path to measure"        "$(row AFTER)" "pings=0"
 contains "  nothing to sign in to"         "$(row AFTER)" "signin=false"
 
@@ -988,7 +1042,7 @@ ONLINE=$(st '{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle":
   | python3 -c 'import json,sys; d=json.load(sys.stdin); d["tailnet"]={"node":"gamevps","online":True}; print(json.dumps(d))')
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP, \"status --json\": $ONLINE,
   \"ping --json\": {\"node\": \"gamevps\", \"path\": \"direct\", \"median_ms\": 18}}")
-contains "a running machine, online"       "$(row AFTER)" "Machine gamevps is online"
+contains "a running machine, online"       "$(row AFTER)" "Your machine is connected"
 contains "  the path, measured once"       "$(row AFTER)" "Direct connection · 18 ms"
 contains "  only once"                     "$(row AFTER)" "pings=1"
 
@@ -1002,7 +1056,7 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": {\"box\": null, \"region\": \"ap-south-2\", \"instance_type\": \"g6.xlarge\",
      \"archive\": {\"bytes\": 1073741824, \"usd_month\": 0.03}, \"res\": {\"volumes_gb\": 0},
      \"budget\": {\"limit\": 57, \"spent\": 4.5}, \"config\": {}, \"local\": {}, \"account\": {}}}")
-contains "no price table: the archive cost is unknown" "$(row AFTER)" "Saved games · 1.0 GB —"
+contains "no price table: nothing is invented" "$(row AFTER)" "bill=— Exact cost checks the bill."
 lacks    "  never zero"                    "$(row AFTER)" "₹0.00"
 ENGINE=""
 

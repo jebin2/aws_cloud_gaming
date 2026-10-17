@@ -46,6 +46,10 @@ cat > "$T/r/probe.js" <<'PROBE'
   try {
     document.querySelector('.nav-item[data-view="logs"]').click();
     await sleep();
+    logLine({ t: 'raw', stream: 'stdout', text: '{"ok":true}' });
+    const last = document.getElementById('log').lastElementChild;
+    out.push('DATA | toggle=' + !!document.getElementById('log-details') + ' hidden=' + last.hidden
+             + ' kind=' + last.querySelector('.k').textContent);
     out.push('FILTERS | ' + [...document.querySelectorAll('[data-filter]')]
       .map(b => (b.classList.contains('btn-primary') ? '*' : '') + b.textContent.trim()).join(','));
     window.__ran = [];
@@ -99,6 +103,8 @@ row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
 echo "1. the event stream's filters"
 check    "three, with All chosen from the start" "$(row FILTERS)" "FILTERS | *All,Steps,Problems"
+
+contains "data lines always show, no toggle" "$(row DATA)" "DATA | toggle=false hidden=false kind=Data"
 
 echo "2. Fetch says it is fetching, on itself"
 contains "the button says so"            "$(row FETCHING)" "label=Loading… disabled=true"

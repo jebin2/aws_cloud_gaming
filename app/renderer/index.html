@@ -45,7 +45,7 @@
       </div>
     </div>
     <div class="flex items-center gap-space-sm">
-      <button id="refresh" class="btn"><span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span>Refresh<em id="refresh-cost" class="not-italic text-tertiary" hidden></em></button>
+      <button id="refresh" class="btn"><span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span>Refresh<em id="refresh-cost" class="not-italic text-tertiary" hidden></em><span id="refresh-age" class="font-code-sm text-code-sm text-outline" hidden></span></button>
       <button id="goto" class="btn" hidden><span class="material-symbols-outlined text-[16px]" data-icon="bolt">&#xea0b;</span><span id="goto-label">running</span></button>
       <button id="cancel" class="btn btn-danger" hidden><span class="material-symbols-outlined text-[16px]" data-icon="error">&#xf8b6;</span><span id="cancel-label">Stop</span></button>
     </div>
@@ -128,22 +128,23 @@
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mb-gutter-desktop">
-        <!-- Everything that costs money right now, and what each costs. -->
-        <div class="p-space-lg rounded-lg bg-surface-container-low">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Costing you now</span>
-          <div class="flex flex-col gap-space-sm mt-space-md" id="d-bill"></div>
-          <div class="flex flex-col gap-0.5 mt-space-md pt-space-sm border-t border-surface-variant" id="d-bill-total"></div>
+        <!-- The same two cards as Spending's, from the same last bill check, so
+             the pages cannot disagree. -->
+        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Recurring cost</span>
+          <div id="d-recurring-card"></div>
+          <div class="flex items-center justify-between gap-space-sm mt-auto pt-space-md">
+            <span class="font-code-sm text-code-sm text-outline" id="d-bill-src"></span>
+            <button id="d-bill-more" class="btn shrink-0">Show details</button>
+          </div>
         </div>
 
-        <!-- The month, from AWS Budgets (free); the exact figure is a paid call,
-             made only when asked. -->
+        <!-- The month, from the bill - a paid call, made only when asked, and
+             remembered with when it was made. AWS Budgets' own figure is after
+             credits, so it read Rs 0 while Rs 285 had been used; it is not shown. -->
         <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
           <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">This month</span>
-          <p class="font-headline-md text-headline-md mt-space-md" id="d-month">&mdash;</p>
-          <div class="h-2 rounded-full bg-surface-variant mt-space-sm overflow-hidden">
-            <div class="h-full bg-primary" id="d-month-bar" style="width:0%"></div>
-          </div>
-          <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="d-month-sub"></p>
+          <div id="d-month-card"></div>
           <div class="flex items-center justify-between gap-space-sm mt-auto pt-space-md">
             <span class="font-code-sm text-code-sm text-outline" id="d-month-src"></span>
             <button id="d-cost" class="btn shrink-0">Exact cost <em class="not-italic text-tertiary" id="d-cost-price"></em></button>
@@ -156,9 +157,7 @@
              is the news, not the bucket name. -->
         <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
           <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Your games</span>
-          <p class="font-headline-md text-headline-md mt-space-md" id="d-games">&mdash;</p>
-          <p class="font-code-sm text-code-sm text-outline mt-0.5" id="d-games-sub"></p>
-          <p class="font-code-sm text-code-sm mt-space-sm" id="d-games-keep"></p>
+          <div class="flex flex-col gap-0.5 mt-space-md font-body-md text-body-md" id="d-games"></div>
           <div class="mt-auto pt-space-md">
             <button id="d-library" class="btn">Manage games</button>
           </div>
@@ -177,7 +176,7 @@
 
         <!-- What stops a forgotten machine, and what warns about the bill. -->
         <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Protection</span>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Safety</span>
           <div class="flex flex-col gap-space-sm mt-space-md" id="d-protect"></div>
           <div class="mt-auto pt-space-md">
             <button id="d-guards" class="btn">Details</button>
@@ -407,17 +406,10 @@
          every rate is cg's. -->
     <div class="fit-view flex flex-col gap-space-md">
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-space-md">
+        <!-- The same card as Home's, drawn by renderMonth. -->
         <div class="p-space-lg rounded-lg bg-surface-container-low">
-          <div class="flex items-center justify-between">
-            <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">This month</span>
-            <span class="pill" id="c-cap-chip" hidden>&mdash;</span>
-          </div>
-          <p class="font-headline-xl text-headline-xl mt-space-sm" id="c-month">&mdash;</p>
-          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="c-month-sub">Press Refresh to load this month&rsquo;s bill.</p>
-          <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden" id="c-cap-wrap" hidden>
-            <div class="h-full bg-primary" id="c-cap-bar" style="width:0%"></div>
-          </div>
-          <p class="font-code-sm text-code-sm text-outline mt-space-sm" id="c-cap-note"></p>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">This month</span>
+          <div id="c-month-card"></div>
         </div>
 
         <div class="p-space-lg rounded-lg bg-surface-container-low">
@@ -427,6 +419,29 @@
         </div>
       </div>
 
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-space-md">
+        <!-- The same card as Home's, drawn by renderRecurring. -->
+        <div class="p-space-lg rounded-lg bg-surface-container-low">
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Recurring cost</span>
+          <div id="c-recurring-card"></div>
+        </div>
+
+        <div class="p-space-lg rounded-lg bg-surface-container-low">
+          <div class="flex items-center justify-between">
+            <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Free streaming</span>
+            <span class="pill" id="c-egress-pct" hidden>&mdash;</span>
+          </div>
+          <p class="font-headline-md text-headline-md mt-space-sm" id="c-egress">&mdash;</p>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5" id="c-egress-src"></p>
+          <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden">
+            <div class="h-full bg-primary" id="c-egress-bar" style="width:0%"></div>
+          </div>
+          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm" id="c-egress-note">
+            The first 100 GB streamed each month is free.
+          </p>
+          <button class="font-code-sm text-code-sm text-primary hover:underline text-left mt-space-xs" id="c-egress-settings">Change quality in Settings &rarr;</button>
+        </div>
+      </div>
       <div class="p-space-lg rounded-lg bg-surface-container-low">
         <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Day by day</span>
         <p class="font-code-sm text-code-sm text-outline mt-0.5" id="c-days-note">
@@ -447,30 +462,6 @@
             <tbody id="c-rows"><tr><td class="py-space-sm text-outline" colspan="6">Nothing loaded yet. Press Refresh to load this month&rsquo;s bill.</td></tr></tbody>
             <tfoot id="c-foot" class="border-t border-surface-variant"></tfoot>
           </table>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-space-md">
-        <div class="p-space-lg rounded-lg bg-surface-container-low">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">When you&rsquo;re not playing</span>
-          <p class="font-headline-md text-headline-md mt-space-sm" id="c-standby">&mdash;</p>
-          <p class="font-code-sm text-code-sm text-on-surface-variant mt-0.5" id="c-standby-sub"></p>
-          <div class="flex flex-col mt-space-sm" id="c-bills"></div>
-          <p class="font-code-sm text-code-sm text-error mt-space-sm" id="c-unknown" hidden></p>
-        </div>
-
-        <div class="p-space-lg rounded-lg bg-surface-container-low">
-          <div class="flex items-center justify-between">
-            <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Free streaming</span>
-            <span class="pill" id="c-egress-pct" hidden>&mdash;</span>
-          </div>
-          <p class="font-headline-md text-headline-md mt-space-sm" id="c-egress">&mdash;</p>
-          <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden">
-            <div class="h-full bg-primary" id="c-egress-bar" style="width:0%"></div>
-          </div>
-          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm" id="c-egress-note">
-            The first 100 GB streamed each month is free.
-          </p>
         </div>
       </div>
     </div>
@@ -550,9 +541,6 @@
           <button class="btn" data-filter="steps">Steps</button>
           <button class="btn" data-filter="problems">Problems</button>
           <label class="font-code-sm text-code-sm text-outline flex items-center gap-space-xs ml-auto">
-            <input type="checkbox" id="log-details" class="accent-primary">Show details
-          </label>
-          <label class="font-code-sm text-code-sm text-outline flex items-center gap-space-xs">
             <input type="checkbox" id="log-follow" class="accent-primary" checked>Auto-scroll
           </label>
           <button class="btn" id="log-copy">

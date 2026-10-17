@@ -217,7 +217,7 @@ print(sum(1 for s in spans if 'data-icon=' not in s))
 PY
 )" "0"
 contains "  and hidden where it means nothing" "$js" "(!NEEDS[view] && view !== 'cost')" 
-contains "cost reads the same one call"  "$js" "runCg(['cost', '--json']"
+contains "cost reads the same one call"  "$js" "v === 'cost' ? [[['cost', '--json'], 'cost']]"
 check    "no button is left mid-page"    "$(grep -c 'cost-run' app/renderer/index.html app/renderer/app.js | grep -vc ':0')" "0"
 
 echo "5a. the first-run pipeline"
@@ -469,7 +469,7 @@ contains "  which only emails"            "$js" "AWS emails you if you pass it; 
 # Rupees only: the Cost page was the last one showing dollars beside them.
 lacks    "  no dollar column"             "$html" "TOTAL ($)"
 check    "  no dollar helper left"        "$(grep -c 'const money = ' app/renderer/app.js)" "0"
-contains "  what bills with nothing running" "$html" 'id="c-standby"'
+contains "  what recurs, every month"     "$html" 'id="c-recurring-card"'
 contains "  and what the bill says beyond it" "$js" "(d.storage || {}).unknown_usd_month"
 contains "  and the egress hours from your bitrate" "$js" "setting('GAME_BITRATE_KBPS', 20000)"
 check    "  reading the same registry"    "$(grep -c 'function setting(key, fallback)' app/renderer/app.js)" "1"
@@ -523,15 +523,22 @@ echo "5g. the dashboard and guards screens"
 # spending anything itself; only its Fetch button bills.
 contains "one painter draws the dashboard" "$js" "function paintDash()"
 contains "  money in rupees only"         "$js" "const rs = n =>"
-contains "  what is billing, item by item" "$js" "function billingItems(s)"
+# Home and Spending draw the same two cards, from the same last bill check, so
+# a build cannot show on one and not the other.
+contains "  one Recurring cost card for both pages" "$js" 'renderRecurring($('"'"'d-recurring-card'"'"')'
+contains "  and on Spending"             "$js" 'renderRecurring($('"'"'c-recurring-card'"'"'))'
+contains "  one This month card for both" "$js" 'renderMonth($('"'"'d-month-card'"'"')'
 contains "  building means a build is running" "$js" "jobsFor('init')"
 contains "the machine strip"             "$js" "GB VRAM"
 contains "the archive repaints the dashboard" "$js" "function paintArchiveCard() { paintDash(); }"
 contains "spend comes from a fetch"      "$js" "function paintSpend(d)"
 # Two places ask for it, both a click: the dashboard button, and the Cost
 # screen's own Refresh.
+# One place reads the bill: Spending's Refresh. Home's Exact cost goes there
+# and presses it, rather than being a second paid call of its own.
 check    "  which is the only paid button" \
-         "$(grep -c "runCg(\['cost', '--json'\]\|v === 'cost' ? \[\[\['cost', '--json'\]" app/renderer/app.js)" "2"
+         "$(grep -c "runCg(\['cost', '--json'\]\|v === 'cost' ? \[\[\['cost', '--json'\]" app/renderer/app.js)" "1"
+contains "  Exact cost opens Spending and refreshes it" "$js" "\$('d-cost').onclick = () => { goView('cost'); \$('refresh').click(); };"
 contains "  and it carries the price"    "$html" 'id="d-cost-price"'
 contains "activity is this window's own" "$js" "function note(text, tone)"
 # What happened, not which command did it: "cg library push started" named a

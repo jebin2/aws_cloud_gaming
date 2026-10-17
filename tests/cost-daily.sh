@@ -178,7 +178,7 @@ check "  and nowhere else in cg"      "$(grep -c '0\.0912\|0\.1093' lib/setup cg
 check "  built from the same call"    "$(grep -c 'cost-daily.py --json' lib/setup)" "1"
 check "the app does no date arithmetic of its own" \
       "$(grep -c 'getMonth() + 1, 0).getDate()' app/renderer/app.js)" "0"
-check "  it renders cg's projection"  "$(grep -c 'm.projected_inr != null' app/renderer/app.js)" "1"
+check "  it renders cg's projection"  "$(grep -c 'on pace for ${r(projected)}' app/renderer/app.js)" "1"
 # The archive is the only thing still billing with no box, so cg cost says when it goes.
 check "cost shows the archive countdown"  "$(sed -n '/^cost() {/,/^}/p' lib/setup | grep -c 'game archive    %s')" "1"
 

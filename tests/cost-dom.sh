@@ -46,7 +46,13 @@ STUB
 cat > "$T/r/probe.js" <<'PROBE'
 (async () => {
   const out = [];
-  const text = id => document.getElementById(id).innerText.replace(/\s+/g, ' ').trim();
+  // The two shared cards: their parts by name, where these were ids.
+  const SHARED = { 'c-month': '#c-month-card [data-f=total]', 'c-month-sub': '#c-month-card [data-f=sub]',
+                   'c-cap-note': '#c-month-card [data-f=note]', 'c-cap-chip': '#c-month-card [data-f=chip]',
+                   'c-standby': '#c-recurring-card [data-f=total]', 'c-standby-sub': '#c-recurring-card [data-f=sub]',
+                   'c-bills': '#c-recurring-card', 'c-unknown': '#c-recurring-card [data-f=unknown]' };
+  const find = id => SHARED[id] ? document.querySelector(SHARED[id]) : document.getElementById(id);
+  const text = id => { const e = find(id); return e ? e.innerText.replace(/\s+/g, ' ').trim() : ''; };
   const day = (date, hours, compute, s3, disk, egress, api, other) =>
     ({ date, hours, compute, s3, disk, egress, api, other,
        total: +(compute + s3 + disk + egress + api + other).toFixed(4) });
@@ -65,10 +71,10 @@ cat > "$T/r/probe.js" <<'PROBE'
   }, over);
   const read = label => {
     for (const id of ['c-month', 'c-month-sub', 'c-cap-note', 'c-credits', 'c-credits-note', 'c-days-note',
-                      'c-standby', 'c-bills', 'c-egress', 'c-egress-note'])
+                      'c-standby', 'c-standby-sub', 'c-bills', 'c-egress', 'c-egress-src', 'c-egress-note'])
       out.push(label + ' ' + id + ' | ' + text(id));
-    out.push(label + ' UNKNOWN | ' + (document.getElementById('c-unknown').hidden ? 'hidden' : text('c-unknown')));
-    out.push(label + ' CHIP | ' + (document.getElementById('c-cap-chip').hidden ? 'hidden' : text('c-cap-chip')));
+    out.push(label + ' UNKNOWN | ' + (find('c-unknown') ? text('c-unknown') : 'hidden'));
+    out.push(label + ' CHIP | ' + (find('c-cap-chip') ? text('c-cap-chip') : 'hidden'));
     [...document.querySelectorAll('#c-rows tr, #c-foot tr')].forEach((tr, i) =>
       out.push(label + ' ROW' + i + ' | ' + [...tr.children].map(td => td.textContent).join(' / ')));
     out.push(label + ' PAGE | ' + document.querySelector('section[data-view=cost]').innerText.replace(/\s+/g, ' '));
@@ -91,9 +97,52 @@ cat > "$T/r/probe.js" <<'PROBE'
       bytes: 174813455930, games_bytes: 174813206488, usd_month: 4.07,
       games: [{ name: 'Diablo IV', bytes: 174813206488 }], login: true }] });
     read('AWAY');
+    // With prices known: the playing line, then a stopped machine as its own row.
+    machinesNow = { region: 'ap-south-1', machines: [{ type: 'g6.xlarge', inr_hour_spot: 16, inr_hour_ondemand: 85 }] };
+    statusNow = { instance_type: 'g6.xlarge', config: { spot: '1' }, rates: { inr_per_usd: 94.95 } };
+    paintCostPage();
+    out.push('PLAY | ' + text('c-bills'));
+    boxNow = { type: 'g6.xlarge', lifecycle: 'spot', state: 'stopped' };
+    statusNow = { box: boxNow, instance_type: 'g6.xlarge', config: { spot: '1' }, rates: { inr_per_usd: 94.95 } };
+    costNow = COST({ resources: { instance: { id: 'i-1', state: 'stopped' }, volumes_gb: 50, budget_usd: 57 },
+                     standby: { usd_month: 4.56, archive_usd_month: 0, volumes_usd_month: 4.56, snapshots_usd_month: 0 } });
+    paintCostPage();
+    out.push('STOPPED | ' + text('c-bills'));
     out.push('AWAY RAN | ' + window.__ran.length);
-    [...document.querySelectorAll('#c-bills button')].find(x => x.textContent.startsWith('Saved games')).click();
+    [...document.querySelectorAll('#c-recurring-card button')].find(x => x.textContent.startsWith('Saved games')).click();
     out.push('WENT | ' + (document.querySelector('.nav-item.on') || {}).dataset?.view);
+    const age = () => document.getElementById('refresh-age').textContent + ' stale=' + document.getElementById('refresh-age').classList.contains('out-of-date');
+    paintCost(COST({}));
+    out.push('AGE | ' + age());
+    costNowAt = new Date(Date.now() - 2 * 86400000);
+    paintRefreshAge();
+    out.push('OLDAGE | ' + age());
+    // Something since the check that changes the bill: the label says so.
+    const ageTitle = () => age() + ' title=' + document.getElementById('refresh-age').title;
+    paintCost(COST({}));
+    out.push('FRESH | ' + ageTitle());
+    noteBillChange('you built a machine');
+    out.push('CHANGED | ' + ageTitle());
+    out.push('HOME CHANGED | ' + document.getElementById('d-month-src').classList.contains('out-of-date'));
+    const st = getComputedStyle(document.getElementById('refresh-age'));
+    out.push('BEAT | anim=' + st.animationName + ' pointer=' + st.pointerEvents + ' opacity=' + st.opacity);
+    paintCost(COST({}));
+    out.push('RECHECKED | ' + ageTitle());
+    // A machine seen running after the check counts, once.
+    paintStatus({ box: { id: 'i-1', state: 'running', type: 'g6.xlarge', lifecycle: 'spot' }, rates: {}, budget: {} });
+    paintStatus({ box: { id: 'i-1', state: 'running', type: 'g6.xlarge', lifecycle: 'spot' }, rates: {}, budget: {} });
+    out.push('RUNNING | ' + billChanges().map(c => c.what).join(','));
+    paintCost(COST({}));
+    // A restart: nothing in this window, the last bill on this laptop.
+    const kept = JSON.parse(localStorage.getItem('cg.lastCost'));
+    kept.at = new Date(Date.now() - 2 * 86400000).toISOString();
+    if (new Date(kept.at).getMonth() !== new Date().getMonth()) kept.at = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 0, 1).toISOString();
+    localStorage.setItem('cg.lastCost', JSON.stringify(kept));
+    costNow = null; costNowAt = null;
+    document.getElementById('c-month-card').textContent = '';
+    restoreBill();
+    out.push('RESTORED | ' + text('c-month') + ' ' + age()
+             + ' expect=' + (Date.now() - Date.parse(kept.at) > 86400000));
   } catch (e) { out.push('THREW | ' + e.message + ' ' + e.stack); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -135,7 +184,26 @@ contains "  and the bar's verdict"       "$(row 'REAL CHIP')" "under the budget"
 contains "credits in rupees"             "$(row 'REAL c-credits')" "₹12,854 left"
 contains "  and how long they last"      "$(row 'REAL c-credits-note')" "about 23 months at this pace"
 contains "the rate is said once"         "$(row 'REAL c-days-note')" "₹94.95 to the dollar"
-contains "  and what a Refresh costs"    "$(row 'REAL c-days-note')" "each Refresh costs ₹0.95"
+# How old the bill on screen is, on the Refresh that renews it: red and
+# blinking once it is more than a day old.
+contains "Refresh says when it was checked" "$(row AGE)" "AGE | Checked today"
+contains "  not stale today"             "$(row AGE)" "stale=false"
+contains "a day-old bill blinks red"      "$(row OLDAGE)" "stale=true"
+echo "5b. a bill gone out of date by something since"
+contains "a fresh check is not marked"   "$(row FRESH)" "stale=false title="
+contains "an action since marks it"       "$(row CHANGED)" "stale=true"
+contains "  and the hover says what, and when" "$(row CHANGED)" "Since then: you built a machine (today"
+contains "  and that the bill runs a day behind" "$(row CHANGED)" "about a day behind"
+check    "  on Home too"                  "$(row 'HOME CHANGED')" "HOME CHANGED | true"
+# A heartbeat, at full strength, and hoverable - the old dimming class it once
+# shared a name with turned the pointer off, hiding the reason.
+contains "  it beats"                    "$(row BEAT)" "anim=cg-heartbeat"
+contains "  can be hovered"              "$(row BEAT)" "pointer=auto"
+contains "a new check clears it"          "$(row RECHECKED)" "stale=false"
+check    "a running machine counts, once" "$(row RUNNING)" "RUNNING | a machine was running"
+contains "the last bill comes back at start" "$(row RESTORED)" "RESTORED | ₹167"
+# stale exactly when it is over a day old (on the 1st, a kept bill is younger).
+r=$(row RESTORED); check "  marked with its age" "$(sed -E 's/.*stale=([a-z]+).*/\1/' <<<"$r")" "$(sed -E 's/.*expect=([a-z]+).*/\1/' <<<"$r")"
 
 echo "2. day by day, in four plain columns"
 check    "a day: played, machine, storage, other, total" "$(row 'REAL ROW0')" "REAL ROW0 | 10 Oct / 2.1 h / ₹118 / ₹14 / ₹1.90 / ₹134"
@@ -152,23 +220,33 @@ contains "no saved games says None"      "$(row 'REAL c-bills')" "Saved games �
 lacks    "  and no empty disk row"         "$(row 'REAL c-bills')" "disk"
 contains "a bucket that explains it raises nothing" "$(row 'KNOWN UNKNOWN')" "hidden"
 contains "  and standby is what cg knows" "$(row 'KNOWN c-standby')" "₹813 a month"
-contains "  saved games with their size" "$(row 'KNOWN c-bills')" "Saved games →160.2 GB · ₹380 a month"
+contains "  saved games with their size" "$(row 'KNOWN c-bills')" "Saved games →₹380 a month"
 contains "  a disk left behind is named" "$(row 'KNOWN c-bills')" "Disk left by a deleted machine50 GB · ₹433 a month"
 contains "no budget in AWS is said, in red" "$(row 'KNOWN c-cap-note')" "No budget alert is set up in AWS"
 
 echo "3b. storage explained by games in another place"
 # One Saved games row for every location, with the other place said under it.
-contains "they are counted in one row"   "$(row 'AWAY c-bills')" "Saved games →162.8 GB · ₹386 a month"
-contains "  and where they are, said once" "$(row 'AWAY c-bills')" "162.8 GB of it is in ap-south-2, which your machine does not use"
+contains "they are counted in one row"   "$(row 'AWAY c-bills')" "Saved games →₹386 a month"
+# A list, each row pointing at its page - where the games are is on Games.
+lacks    "  with no note under it"        "$(row 'AWAY c-bills')" "which your machine does not use"
+contains "recurring is what charges whether or not you play" "$(row 'REAL c-standby-sub')" "Charged every month, whether or not you play."
 lacks    "  not a row of their own"      "$(row 'AWAY c-bills')" "Saved in ap-south-2"
 contains "  and counted in standby"      "$(row 'AWAY c-standby')" "₹386 a month"
 contains "  so nothing is a mystery"     "$(row 'AWAY UNKNOWN')" "hidden"
 check    "  and AWS was not asked again" "$(row 'AWAY RAN')" "AWAY RAN | 0"
 check    "Saved games opens the Games page" "$(row WENT)" "WENT | library"
 
+echo "3c. what playing adds, and a machine that exists"
+contains "playing adds the machine, by the hour" "$(row PLAY)" "Playing adds ₹16 an hour for the machine."
+contains "a stopped machine is its own row"  "$(row STOPPED)" "Machine (stopped) →₹433 a month"
+lacks    "  not a disk left behind"           "$(row STOPPED)" "Disk left by a deleted machine"
+
 echo "4. free streaming"
 contains "used of free"                  "$(row 'REAL c-egress')" "0.4 of 100 GB used this month"
-contains "  hours left, then the price an hour" "$(row 'REAL c-egress-note')" "About 11 h of play left free, then ₹10 a GB - about ₹93 an hour at your quality."
+# What was used is measured; the hours are the most the quality setting could
+# use, so they are a floor - "at least".
+contains "used, from the bill"           "$(row 'REAL c-egress-src')" "From your bill."
+contains "  the worst case, as a floor"  "$(row 'REAL c-egress-note')" "Even at your full quality (20 Mbps, 60 fps, Moonlight's own resolution: about 9 GB an hour), at least 11 more hours are free. After that, ₹10 a GB."
 
 echo "5. none of the old words"
 for w in '$' 'box' 'S3' 'egress' 'Cost Explorer' 'elastic' 'lambda' 'standby' 'COMPUTE' 'API'; do

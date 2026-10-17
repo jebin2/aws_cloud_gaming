@@ -146,6 +146,7 @@ function updateHeader() {
   $('refresh').hidden = (!NEEDS[view] && view !== 'cost') || !!mine.length;
   $('refresh').disabled = busy;                    // only a build or destroy blocks a read
   $('refresh-cost').hidden = view !== 'cost' || !$('refresh-cost').textContent;
+  if ($('refresh-age')) $('refresh-age').hidden = view !== 'cost' || !costNowAt;
   // These change something, so they wait for whatever else is running.
   for (const b of ['b-build', 'b-open', 'b-destroy', 'd-open', 'd-destroy', 'd-build'])
     $(b).disabled = jobs.size > 0;
@@ -196,19 +197,16 @@ function logKind(event) {
   return 'other';
 }
 
-// What a row is, in a word. Data a command hands back is the app's to read,
-// not yours: it is shown only with "Show details".
+// What a row is, in a word.
 const LOG_WORD = { step: 'Step', error: 'Problem', fail: 'Problem', warn: 'Note', ask: 'Question',
                    ok: 'Done', wait: 'Waiting', raw: 'Data' };
 function logShown(row) {
-  return (logFilter === 'all' || row.dataset.group === logFilter)
-    && (row.dataset.raw !== '1' || $('log-details').checked);
+  return logFilter === 'all' || row.dataset.group === logFilter;
 }
 function logLine(event) {
   const kind = event.kind || event.t;
   const row = document.createElement('div');
   row.dataset.group = logKind(event);
-  if (event.t === 'raw') row.dataset.raw = '1';
   row.className = 'log-row';
   row.hidden = !logShown(row);
   row.innerHTML = '<time></time><span class="k"></span><span class="t"></span>';
@@ -397,6 +395,17 @@ function askPing(s) {
 }
 
 function paintStatus(s) {
+  statusAt = new Date().toISOString();
+  const wasUp = statusNow && statusNow.box && statusNow.box.state === 'running';
+  const isUp = s.box && ['running', 'pending'].includes(s.box.state);
+  const checkedAt = lastCost() && lastCost().at;
+  if (checkedAt && isUp && !billChangesSince(checkedAt).some(c => c.what === 'a machine was running')) {
+    noteBillChange('a machine was running');
+  }
+  // Ended outside the app - auto-stop, or the console - with no delete here.
+  const justDeleted = billChanges().some(c => c.what === 'you deleted the machine'
+                                         && Date.now() - Date.parse(c.at) < 15 * 60000);
+  if (wasUp && !isUp && !jobsFor('destroy') && !justDeleted) noteBillChange('the machine stopped');
   paintSpec(s);
   statusNow = s;
   askPing(s);
@@ -433,40 +442,6 @@ function hourlyInr(type, spot) {
   const m = machinesNow && (machinesNow.machines || []).find(x => x.type === type);
   if (!m) return null;
   return spot ? m.inr_hour_spot : m.inr_hour_ondemand;
-}
-
-// Everything billing right now, each with its cost. Built from status's own
-// counts and cg's price table; nothing here is a guess at a resource cg did not
-// report. Hourly items bill while they exist; monthly ones are storage.
-function billingItems(s) {
-  const r = s.rates || {}, inr = r.inr_per_usd || NaN, res = s.res || {}, items = [];
-  const box = s.box && !['terminated', 'shutting-down'].includes(s.box.state) ? s.box : null;
-  if (box) {
-    const spot = box.lifecycle === 'spot';
-    items.push({ name: `Machine · ${box.type}, ${spot ? 'Spot' : 'Standard'}`,
-                 hour: box.state === 'running' || box.state === 'pending'
-                   ? hourlyInr(box.type, spot) : null,
-                 note: box.state === 'stopped' ? 'Stopped · not costing by the hour' : null });
-    if (box.public_ip) items.push({ name: 'Public IP address', hour: r.ipv4_hour * inr });
-  }
-  if (res.volumes_gb > 0) {
-    items.push({ name: `${box ? 'Machine disk' : 'Disk left behind'} · ${res.volumes_gb} GB`,
-                 month: res.volumes_gb * r.ebs_gb_month * inr,
-                 warn: !box, note: box ? null : 'No machine is using it' });
-  }
-  const a = s.archive || {};
-  if (a.bytes > 0) items.push({ name: `Saved games · ${GB(a.bytes)}`, month: (a.usd_month || 0) * inr });
-  if (res.snapshots > 0) {
-    items.push({ name: `Snapshots · ${res.snapshots}${res.snapshots_gb ? `, ${res.snapshots_gb} GB` : ''}`,
-                 month: (res.snapshots_gb || 0) * r.snapshot_gb_month * inr, upTo: true,
-                 warn: true, note: 'Not made by this app' });
-  }
-  if (res.elastic_ips > 0) {
-    items.push({ name: `Reserved IP address${res.elastic_ips === 1 ? '' : 'es'} · ${res.elastic_ips}`,
-                 hour: res.elastic_ips * r.ipv4_hour * inr, warn: !box,
-                 note: box ? null : 'Reserved with no machine' });
-  }
-  return items;
 }
 
 function machineLine(s) {
@@ -526,7 +501,7 @@ function paintDash() {
   tag.className = 'pill shrink-0 pill-ok';
   $('d-machine').textContent = machineLine(s);
   $('d-rate').textContent = box || building ? ''
-    : `${rs(hour)} an hour while it runs · ready in about 15 minutes`;
+    : `${rs(hour)} an hour while it runs`;
   $('d-rate').hidden = !$('d-rate').textContent;
   $('d-prog').hidden = !building;
   $('d-build').hidden = !!box || building || !!credErr;
@@ -537,96 +512,37 @@ function paintDash() {
   $('d-note').textContent = note;
   $('d-note').hidden = !note;
 
-  // ── billing now ──
-  const list = $('d-bill');
-  list.textContent = '';
-  const totals = $('d-bill-total');
-  totals.textContent = '';
-  const items = credErr ? null : billingItems(s);
-  if (!items) {
-    list.append(Object.assign(document.createElement('p'),
-      { className: 'font-body-sm text-body-sm text-outline', textContent: 'Unknown - AWS could not be reached.' }));
-  } else if (!items.length) {
-    list.append(Object.assign(document.createElement('p'),
-      { className: 'font-body-sm text-body-sm text-on-surface-variant', textContent: 'No billing items.' }));
-  }
-  for (const it of items || []) {
-    const row = document.createElement('div');
-    row.className = 'flex items-baseline justify-between gap-space-md';
-    const left = document.createElement('div');
-    left.className = 'min-w-0';
-    const name = document.createElement('p');
-    name.className = 'font-body-md text-body-md ' + (it.warn ? 'text-tertiary' : 'text-on-surface');
-    name.textContent = it.name;
-    left.append(name);
-    if (it.note) {
-      left.append(Object.assign(document.createElement('p'),
-        { className: 'font-code-sm text-code-sm text-outline', textContent: it.note }));
-    }
-    const cost = document.createElement('span');
-    cost.className = 'font-code-md text-code-md shrink-0 ' + (it.warn ? 'text-tertiary' : 'text-on-surface-variant');
-    cost.textContent = it.hour != null ? `${rsh(it.hour)}/hour`
-      : it.month != null ? `${it.upTo ? 'up to ' : ''}${rs(it.month)}/month` : '—';
-    row.append(left, cost);
-    list.append(row);
-  }
-  const perHour = (items || []).reduce((n, i) => n + (i.hour || 0), 0);
-  const perMonth = (items || []).reduce((n, i) => n + (i.month || 0), 0);
-  for (const [label, v] of [['While running', perHour ? `${rsh(perHour)}/hour` : null],
-                            ['Storage', perMonth ? `${rs(perMonth)}/month` : null]]) {
-    if (!v) continue;
-    const row = document.createElement('div');
-    row.className = 'flex justify-between font-code-sm text-code-sm';
-    row.append(Object.assign(document.createElement('span'), { className: 'text-outline', textContent: label }),
-               Object.assign(document.createElement('span'), { className: 'text-on-surface', textContent: v }));
-    totals.append(row);
-  }
-  totals.hidden = !totals.childElementCount;
-
-  // ── this month ──
+  // ── recurring cost and this month: the Spending page's own cards ──
+  renderRecurring($('d-recurring-card'), { hint: 'Exact cost checks the bill.' });
+  renderMonth($('d-month-card'), { hint: 'Press Exact cost to see it.' });
   const b = s.budget || {};
-  const exact = costNow && costNow.month && costNow.month.total_inr != null ? costNow.month.total_inr : null;
-  const spent = exact != null ? exact : b.spent != null ? b.spent * inr : null;
-  // Your number, as set. AWS keeps it in dollars converted when it was made;
-  // turned back at today's rate it read Rs 5,016 for 5,000.
-  const setBudget = Number(setting('GAME_BUDGET_INR', NaN));
-  const limit = b.limit == null ? null : isFinite(setBudget) ? setBudget : b.limit * inr;
-  $('d-month').textContent = spent == null ? '—' : limit ? `${rs(spent)} of ${rs(limit)}` : rs(spent);
-  $('d-month-bar').style.width = spent != null && limit ? `${Math.min(100, (spent / limit) * 100)}%` : '0%';
-  $('d-month-bar').className = 'h-full ' + (spent != null && limit && spent >= limit * 0.8 ? 'bg-tertiary' : 'bg-primary');
-  // cg projects the month from an exact fetch; the window renders that number
-  // and works out none of its own.
-  const m = (costNow && costNow.month) || {};
-  const proj = exact != null && m.projected_inr != null ? ` · on track for ${rs(m.projected_inr)}` : '';
-  $('d-month-sub').textContent = (limit == null ? 'No monthly budget is set.'
-    : spent == null ? `Budget ${rs(limit)}`
-    : `${Math.round((spent / limit) * 100)}% of the monthly budget`) + proj;
-  $('d-month-src').textContent = exact != null
-    ? `Exact, from your AWS bill at ${costNowAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-    : b.spent != null ? 'Estimated by AWS · updates a few times a day' : '';
+  const limit = b.limit == null ? null
+    : isFinite(Number(setting('GAME_BUDGET_INR', NaN))) ? Number(setting('GAME_BUDGET_INR', NaN)) : b.limit * inr;
+  const checked = lastCost();
+  showChecked($('d-month-src'), checked ? checked.at : null, true);
+  showChecked($('d-bill-src'), checked ? checked.at : null, true);
   const call = (s.rates || {}).ce_call_usd;
   $('d-cost-price').textContent = call && isFinite(inr) ? rs(call * inr) : '';
   // The Cost page's Refresh is the same call, so it carries the same price.
   $('refresh-cost').textContent = $('d-cost-price').textContent;
 
   // ── your games ──
+  // Names, wherever they are kept; size, place and dates are on the Games page.
+  const gl = $('d-games');
+  gl.textContent = '';
   const a = s.archive || {};
-  const n = (archive.games || []).length;
-  if (credErr || a.error) {
-    $('d-games').textContent = 'Unknown';
-    $('d-games-sub').textContent = a.error ? 'Your saved games could not be read. That does not mean there are none.'
-      : 'AWS could not be reached.';
-    $('d-games-keep').textContent = '';
+  const say = (text, cls) => gl.append(Object.assign(document.createElement('p'),
+    { className: cls || 'text-on-surface', textContent: text }));
+  if (credErr || a.error || (libNow && libNow.error)) {
+    say('Your saved games could not be read.', 'text-outline');
+  } else if (!libNow) {
+    say('Reading…', 'text-outline');
   } else {
-    $('d-games').textContent = !a.bytes ? 'No games saved yet'
-      : n ? `${n} game${n === 1 ? '' : 's'} · ${GB(a.bytes)}` : `${GB(a.bytes)} saved`;
-    $('d-games-sub').textContent = a.bytes
-      ? `Saved in ${placeName(s.region)} · ${rs((a.usd_month || 0) * inr)} a month to keep` : '';
-    const days = (libNow && libNow.expiry_days != null) ? libNow.expiry_days : a.expiry_days;
-    $('d-games-keep').textContent = !a.bytes ? ''
-      : days ? `Deleted ${days} days after you last play.` : 'Kept until you delete them.';
-    $('d-games-keep').className = 'font-code-sm text-code-sm mt-space-sm '
-      + (days ? 'text-tertiary' : 'text-primary');
+    const names = [...(libNow.games || []), ...elsewherePlaces().flatMap(p => p.games || [])]
+      .map(g => g.name || g.installdir).filter(Boolean);
+    if (!names.length) say('No games saved yet', 'text-on-surface-variant');
+    for (const n of names.slice(0, 5)) say(n);
+    if (names.length > 5) say(`and ${names.length - 5} more`, 'text-outline');
   }
 
   // ── tailscale ──
@@ -641,11 +557,13 @@ function paintDash() {
       : me === false ? 'This laptop is not signed in' : 'Checking this laptop']);
   // The machine, only if there is one.
   if (!box) {
-    tsLines.push([undefined, 'No machine on the network']);
+    tsLines.push([undefined, building ? 'Your machine is connecting…' : 'Your machine joins when you build it']);
+  } else if (tn.node && tn.online) {
+    tsLines.push([true, 'Your machine is connected']);
   } else if (tn.node) {
-    tsLines.push([!!tn.online, `Machine ${tn.node} is ${tn.online ? 'online' : 'offline'}`]);
+    tsLines.push([false, 'Your machine is not connected']);
   } else {
-    tsLines.push([null, building ? 'Machine has not joined yet' : 'Machine is not on the network']);
+    tsLines.push(building ? [null, 'Your machine is connecting…'] : [false, 'Your machine has not connected']);
   }
   // The path, while the machine is online.
   if (box && tn.online) {
@@ -678,7 +596,7 @@ function paintDash() {
     // Installed with every build: with no machine there is nothing for it to
     // watch, which is not the same as it being off.
     [g2 ? (g2.armed === false ? false : true) : null,
-     `An idle machine stops after ${idleAfter}`],
+     `Stops by itself after ${idleAfter} idle`],
     [g3 ? g3.armed : null,
      g3 && g3.armed ? 'Auto-stop in AWS: stops a forgotten machine' : 'Auto-stop in AWS is off'],
     [b.limit != null ? true : (statusNow ? false : null),
@@ -738,12 +656,102 @@ function setting(key, fallback) {
   return (r && (r.effective ?? r.value)) || fallback;
 }
 
+// The last bill check: this window's, else the one remembered on this laptop
+// from the same month. Last month's total is not this month's.
+// The last bill on this laptop, drawn again at start until a new check -
+// with when it was checked, so it is never read as current.
+function restoreBill() {
+  if (costNow) return;
+  try {
+    const kept = JSON.parse(localStorage.getItem('cg.lastCost') || 'null');
+    if (!kept || !kept.bill) return;
+    const at = new Date(kept.at), now = new Date();
+    if (at.getFullYear() !== now.getFullYear() || at.getMonth() !== now.getMonth()) return;
+    costNow = kept.bill;
+    costNowAt = at;
+    paintCostPage();
+    paintDash();
+  } catch { /* nothing remembered */ }
+}
+function lastCost() {
+  const m = costNow && costNow.month;
+  if (m && m.total_inr != null) return { total_inr: m.total_inr, projected_inr: m.projected_inr ?? null, at: costNowAt.toISOString() };
+  try {
+    const kept = JSON.parse(localStorage.getItem('cg.lastCost') || 'null');
+    const at = kept && new Date(kept.at), now = new Date();
+    if (at && at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth()) return kept;
+  } catch { /* nothing remembered */ }
+  return null;
+}
+// "Checked today 14:15", on any element, red and blinking once it is more
+// than a day old. Every "Checked" in the app goes through this.
+function showChecked(el, iso, bill = false) {
+  if (!el) return;
+  el.textContent = iso ? `Checked ${whenChecked(iso)}` : '';
+  const old = !!iso && Date.now() - Date.parse(iso) > 86400000;
+  // A bill label is also out of date once something since has changed it.
+  const since = bill && iso ? billChangesSince(iso) : [];
+  el.classList.toggle('out-of-date', old || since.length > 0);
+  el.title = !iso ? ''
+    : since.length ? `Checked ${whenChecked(iso)}. Since then: `
+        + since.map(c => `${c.what} (${whenChecked(c.at)})`).join(', ')
+        + '. Refresh to see the new total. AWS\'s bill runs about a day behind, '
+        + 'so today\'s changes may take a day to show.'
+    : old ? `Checked ${whenChecked(iso)}, more than a day ago. Refresh to see the current total.`
+    : '';
+}
+
+// What changed the bill after it was checked: actions here that cost or save
+// money, and a machine seen running. Kept on this laptop with the bill, and
+// cleared by the next check.
+const BILL_CHANGE = {
+  init: 'you built a machine', destroy: 'you deleted the machine', open: 'you played',
+  'library move': 'you moved a game', 'library forget': 'you deleted a game',
+  'library clean': 'you cleaned up leftover files',
+};
+function billChanges() {
+  try { return JSON.parse(localStorage.getItem('cg.billChanges') || '[]'); } catch { return []; }
+}
+// At or after: the list is cleared when a check is made, so anything in it
+// came after that check - even within the same millisecond.
+const billChangesSince = iso => billChanges().filter(c => Date.parse(c.at) >= Date.parse(iso));
+function noteBillChange(what) {
+  if (!lastCost()) return;              // nothing checked yet: nothing to go out of date
+  const list = billChanges();
+  list.push({ what, at: new Date().toISOString() });
+  try { localStorage.setItem('cg.billChanges', JSON.stringify(list.slice(-20))); } catch { /* this window only */ }
+  paintDash();
+  paintRefreshAge();
+}
+const whenChecked = iso => {
+  const d = new Date(iso), hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString() ? `today ${hm}`
+    : `${d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} ${hm}`;
+};
+
 function paintSpend(d) {
   // The dashboard shows the last paid fetch and says how old it is. It never
   // fetches on its own: Cost Explorer bills a cent a call.
   costNow = d;
   costNowAt = new Date();
+  // Kept on this laptop, so Home is not empty again after a restart; it is
+  // shown with when it was checked, never as if it were live.
+  const m = d.month || {};
+  try { localStorage.removeItem('cg.billChanges'); } catch { /* nothing kept */ }
+  if (m.total_inr != null) {
+    try {
+      localStorage.setItem('cg.lastCost', JSON.stringify({
+        total_inr: m.total_inr, projected_inr: m.projected_inr ?? null, at: costNowAt.toISOString(), bill: d }));
+    } catch { /* storage unavailable: this window still has it */ }
+  }
   paintDash();
+}
+
+// Spending's Refresh says what it costs and how old the bill on screen is.
+function paintRefreshAge() {
+  const el = $('refresh-age');
+  showChecked(el, costNowAt ? costNowAt.toISOString() : null, true);
+  el.hidden = view !== 'cost' || !costNowAt;
 }
 
 function paintCost(d) {
@@ -752,6 +760,127 @@ function paintCost(d) {
 }
 // Redrawn from the last paid answer when a free one lands - the games found in
 // other places explain storage the bill charges for - so it never asks again.
+// The two cards Home and Spending share, drawn from the last bill check and
+// nothing else - so a build changes neither until the bill is checked again,
+// and the two pages can never disagree. `hint` is what an unchecked card says.
+const el = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls || '', textContent: text || '' });
+function billParts() {
+  const d = costNow;
+  if (!d) return null;
+  const m = d.month || {}, rate = d.rates || {};
+  const inr = rate.inr_per_usd || m.inr_per_usd;
+  const r = usd => (usd == null || !isFinite(usd) || !inr ? '—' : rs(usd * inr));
+  return { d, m, rate, inr, r };
+}
+function renderMonth(box, { hint } = {}) {
+  if (!box) return;
+  box.textContent = '';
+  const p = billParts();
+  const total = el('p', 'font-headline-xl text-headline-xl mt-space-sm');
+  total.dataset.f = 'total';
+  const sub = el('p', 'font-code-sm text-code-sm text-on-surface-variant mt-space-xs');
+  sub.dataset.f = 'sub';
+  box.append(total, sub);
+  if (!p) { total.textContent = '—'; sub.textContent = hint || ''; return; }
+  const { d, m, inr, r } = p;
+  const hours = m.hours ? m.hours.on_demand + m.hours.spot : 0;
+  const projected = m.projected_usd ?? null;
+  const now = new Date();
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  total.textContent = m.total_usd != null ? r(m.total_usd) : '—';
+  sub.textContent = m.total_usd == null ? 'AWS did not answer.'
+    : `so far · ${hours.toFixed(1)} h played`
+      + (projected != null ? ` · on pace for ${r(projected)} by ${monthEnd.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : '');
+  // Your number, in rupees, as you set it. AWS keeps it in dollars, converted
+  // when it was made; turned back at today's rate it read Rs 5,412 for 5,000.
+  const budget = Number(setting('GAME_BUDGET_INR', NaN));
+  const inAws = (d.resources || {}).budget_usd != null;
+  if (inAws && isFinite(budget) && projected != null && inr) {
+    const over = projected * inr > budget;
+    const wrap = el('div', 'h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden');
+    const bar = el('div', 'h-full ' + (over ? 'bg-error' : 'bg-primary'));
+    bar.style.width = Math.min(100, (projected * inr / budget) * 100) + '%';
+    bar.dataset.f = 'bar';
+    wrap.append(bar);
+    const chip = el('span', 'pill ml-space-xs ' + (over ? 'pill-bad' : 'pill-ok'), over ? 'over the budget' : 'under the budget');
+    chip.dataset.f = 'chip';
+    box.append(wrap);
+    sub.append(' ', chip);
+  }
+  const note = el('p', 'font-code-sm text-code-sm mt-space-sm ' + (inAws ? 'text-outline' : 'text-error'),
+    !inAws ? 'No budget alert is set up in AWS, so nothing will email you.'
+      : isFinite(budget) ? `Budget ${rs(budget)} a month. AWS emails you if you pass it; it stops nothing.` : '');
+  note.dataset.f = 'note';
+  box.append(note);
+}
+function renderRecurring(box, { hint } = {}) {
+  if (!box) return;
+  box.textContent = '';
+  const p = billParts();
+  const head = el('p', 'font-headline-md text-headline-md mt-space-sm');
+  head.dataset.f = 'total';
+  const sub = el('p', 'font-code-sm text-code-sm text-on-surface-variant mt-0.5', 'Charged every month, whether or not you play.');
+  sub.dataset.f = 'sub';
+  box.append(head, sub);
+  if (!p) { head.textContent = '—'; sub.textContent = hint || ''; return; }
+  const { d, inr, r } = p;
+  const standby = d.standby || {}, res = d.resources || {}, arch = d.archive || {};
+  // Games cg found in other places explain some or all of what the bill says
+  // beyond the archive in use; only what is left after them is a mystery.
+  const unknown = (d.storage || {}).unknown_usd_month || 0;
+  const away = elsewherePlaces().filter(x => x.usd_month);
+  const awayUsd = away.reduce((a, x) => a + x.usd_month, 0);
+  const left = Math.max(0, unknown - awayUsd);
+  // Under Rs 10 a month is requests and rounding, not something left behind.
+  const strayed = inr && left * inr >= 10;
+  head.textContent = standby.usd_month != null ? `${r(standby.usd_month + awayUsd + (strayed ? left : 0))} a month` : '—';
+  const list = el('div', 'flex flex-col mt-space-sm');
+  list.dataset.f = 'rows';
+  const line = (label, value, go) => {
+    const row = el('div', 'row border-b border-surface-variant/40 last:border-b-0');
+    const a = el(go ? 'button' : 'span', 'font-code-sm text-code-sm ' + (go ? 'text-primary hover:underline text-left' : 'text-outline'),
+                 go ? `${label} →` : label);
+    if (go) a.onclick = go;
+    row.append(a, el('span', 'font-code-sm text-code-sm', value));
+    list.append(row);
+  };
+  // One row for saved games, wherever they are; the Games page has them one by one.
+  const savedBytes = (arch.bytes || 0) + away.reduce((a, x) => a + (x.bytes || 0), 0);
+  const savedUsd = (standby.archive_usd_month || 0) + awayUsd;
+  line('Saved games', savedBytes ? `${r(savedUsd)} a month` : 'None', () => goView('library'));
+  // The machine as the bill saw it: by the hour while it ran, its disk by the
+  // month while stopped. Otherwise only a disk a deleted machine left behind.
+  if (res.instance) {
+    const st = res.instance.state;
+    const hr = boxNow ? hourlyInr(boxNow.type, boxNow.lifecycle === 'spot') : null;
+    line(`Machine (${st})`, st === 'running' ? (hr != null ? `${rsh(hr)} an hour` : 'by the hour')
+                                             : `${r(standby.volumes_usd_month)} a month`, () => goView('build'));
+  } else if (res.volumes_gb) {
+    line('Disk left by a deleted machine', `${res.volumes_gb} GB · ${r(standby.volumes_usd_month)} a month`);
+  }
+  if (res.snapshots_gb) line('Disk copies', `${res.snapshots_gb} GB · ${r(standby.snapshots_usd_month)} a month`);
+  box.append(list);
+  // What playing adds on top: the machine, by the hour.
+  const s0 = statusNow || {};
+  const play = hourlyInr(s0.box ? s0.box.type : s0.instance_type,
+                         s0.box ? s0.box.lifecycle === 'spot' : (s0.config || {}).spot !== '0');
+  if (play != null) {
+    const pl = el('p', 'font-code-sm text-code-sm text-on-surface-variant mt-space-sm',
+      res.instance && res.instance.state === 'running'
+        ? `A machine is running now: ${rsh(play)} an hour on top.`
+        : `Playing adds ${rsh(play)} an hour for the machine.`);
+    pl.dataset.f = 'play';
+    box.append(pl);
+  }
+  if (strayed) {
+    const w = el('p', 'font-code-sm text-code-sm text-error mt-space-sm',
+      `AWS charges ${r(left)} a month for storage this app cannot find. `
+      + 'Most likely games left behind in an earlier location.');
+    w.dataset.f = 'unknown';
+    box.append(w);
+  }
+}
+
 function paintCostPage() {
   const d = costNow;
   if (!d) return;
@@ -766,31 +895,9 @@ function paintCostPage() {
   const now = new Date();
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-  // ── this month, against the budget you set ──
   const hours = m.hours ? m.hours.on_demand + m.hours.spot : 0;
   const projected = m.projected_usd ?? null;
-  $('c-month').textContent = m.total_usd != null ? r(m.total_usd) : '—';
-  $('c-month-sub').textContent = m.total_usd == null ? 'AWS did not answer.'
-    : `so far · ${hours.toFixed(1)} h played`
-      + (projected != null ? ` · on pace for ${r(projected)} by ${short(monthEnd)}` : '');
-  // Your number, in rupees, as you set it. AWS keeps it in dollars, converted
-  // when it was made; turned back at today's rate it read Rs 5,412 for 5,000.
-  const budget = Number(setting('GAME_BUDGET_INR', NaN));
-  const inAws = (d.resources || {}).budget_usd != null;
-  const showBar = inAws && isFinite(budget) && projected != null && inr;
-  $('c-cap-wrap').hidden = !showBar;
-  $('c-cap-chip').hidden = !showBar;
-  if (showBar) {
-    const over = projected * inr > budget;
-    $('c-cap-bar').style.width = Math.min(100, (projected * inr / budget) * 100) + '%';
-    $('c-cap-bar').className = 'h-full ' + (over ? 'bg-error' : 'bg-primary');
-    $('c-cap-chip').textContent = over ? 'over the budget' : 'under the budget';
-    $('c-cap-chip').className = 'pill ' + (over ? 'pill-bad' : 'pill-ok');
-  }
-  $('c-cap-note').textContent = !inAws
-    ? 'No budget alert is set up in AWS, so nothing will email you.'
-    : isFinite(budget) ? `Budget ${rs(budget)} a month. AWS emails you if you pass it; it stops nothing.` : '';
-  $('c-cap-note').className = 'font-code-sm text-code-sm mt-space-sm ' + (inAws ? 'text-outline' : 'text-error');
+  renderMonth($('c-month-card'), { hint: 'Press Refresh to load this month\'s bill.' });
 
   // ── credits ──
   const credits = d.credits_usd;
@@ -800,10 +907,9 @@ function paintCostPage() {
       + (projected ? ` · about ${Math.round(credits / projected)} months at this pace.` : '.');
 
   // ── day by day: what you played, the machine, storage, and the rest ──
-  const asked = (costNowAt || now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  $('c-days-note').textContent = 'Days with nothing billed are left out. AWS\'s bill runs about a day behind. '
-    + `Loaded at ${asked}` + (inr ? ` · ₹${inr} to the dollar` : '')
-    + (rate.ce_call_usd ? ` · each Refresh costs ${r(rate.ce_call_usd)}.` : '.');
+  $('c-days-note').textContent = 'Days with nothing billed are left out. AWS\'s bill runs about a day behind.'
+    + (inr ? ` ₹${inr} to the dollar.` : '');
+  paintRefreshAge();
   const parts = x => ({ machine: x.compute || 0, storage: (x.s3 || 0) + (x.disk || 0),
                         other: (x.egress || 0) + (x.api || 0) + (x.other || 0) });
   const money0 = v => (v ? r(v) : '–');
@@ -832,58 +938,7 @@ function paintCostPage() {
     foot.append(tr);
   }
 
-  // ── what bills with no machine: what cg knows, and what the bill says ──
-  const standby = d.standby || {};
-  const res = d.resources || {};
-  const arch = d.archive || {};
-  // Games cg found in other places explain some or all of what the bill says
-  // beyond the archive in use; only what is left after them is a mystery.
-  const unknown = (d.storage || {}).unknown_usd_month || 0;
-  const away = elsewherePlaces().filter(p => p.usd_month);
-  const awayUsd = away.reduce((a, p) => a + p.usd_month, 0);
-  const left = Math.max(0, unknown - awayUsd);
-  // Under Rs 10 a month is requests and rounding, not something left behind.
-  const strayed = inr && left * inr >= 10;
-  $('c-standby').textContent = standby.usd_month != null
-    ? `${r(standby.usd_month + awayUsd + (strayed ? left : 0))} a month` : '—';
-  $('c-standby-sub').textContent = res.instance
-    ? 'A machine is running now. Its hourly cost is on top of this.'
-    : 'What AWS bills while nothing is running.';
-  const bills = $('c-bills');
-  bills.textContent = '';
-  const line = (label, value, go) => {
-    const div = document.createElement('div');
-    div.className = 'row border-b border-surface-variant/40 last:border-b-0';
-    const a = document.createElement(go ? 'button' : 'span');
-    a.className = 'font-code-sm text-code-sm ' + (go ? 'text-primary hover:underline text-left' : 'text-outline');
-    a.textContent = go ? `${label} →` : label;
-    if (go) a.onclick = go;
-    const b = document.createElement('span'); b.className = 'font-code-sm text-code-sm'; b.textContent = value;
-    div.append(a, b); bills.append(div);
-  };
-  // One row for saved games, wherever they are - the Games page has them one
-  // by one, so the row goes there. Where some are kept outside the machine's
-  // location, that is said under it rather than as a row of its own.
-  const savedBytes = (arch.bytes || 0) + away.reduce((a, p) => a + (p.bytes || 0), 0);
-  const savedUsd = (standby.archive_usd_month || 0) + awayUsd;
-  line('Saved games', savedBytes ? `${GB(savedBytes)} · ${r(savedUsd)} a month` : 'None', () => goView('library'));
-  if (away.length) {
-    const note = document.createElement('p');
-    note.className = 'font-code-sm text-code-sm text-outline -mt-space-xs mb-space-xs';
-    note.textContent = away.map(p => `${GB(p.bytes)} of it is in ${p.region ? placeName(p.region) : 'another location'}`)
-      .join(', ') + ', which your machine does not use. Move or delete it on Games.';
-    bills.append(note);
-  }
-  // Only when there is one: a disk a deleted machine left behind, which bills
-  // until removed. Normally there are none, and a "none" row only raised the
-  // question of what it was.
-  if (res.volumes_gb) line('Disk left by a deleted machine', `${res.volumes_gb} GB · ${r(standby.volumes_usd_month)} a month`);
-  if (res.snapshots_gb) line('Disk copies', `${res.snapshots_gb} GB · ${r(standby.snapshots_usd_month)} a month`);
-  $('c-unknown').hidden = !strayed;
-  $('c-unknown').textContent = strayed
-    ? `AWS charges ${r(left)} a month for storage this app cannot find. `
-      + 'Most likely games left behind in an earlier location.'
-    : '';
+  renderRecurring($('c-recurring-card'));
 
   // ── free streaming ──
   const e = m.egress || {};
@@ -892,16 +947,22 @@ function paintCostPage() {
   const gbPerHour = (kbps * 3600) / 8 / 1e6;
   if (e.gb_used != null) {
     $('c-egress').textContent = `${e.gb_used.toFixed(1)} of ${e.gb_free} GB used this month`;
+    $('c-egress-src').textContent = 'From your bill.';
     const pct = Math.min(100, (e.gb_used / e.gb_free) * 100);
     $('c-egress-pct').hidden = false;
     $('c-egress-pct').textContent = `${pct.toFixed(0)}% used`;
     $('c-egress-pct').className = 'pill ' + (pct > 80 ? 'pill-bad' : 'pill-ok');
     $('c-egress-bar').style.width = pct + '%';
     $('c-egress-bar').className = 'h-full ' + (pct > 80 ? 'bg-tertiary' : 'bg-primary');
-    const after = `${r(rate.egress_gb)} a GB - about ${r(gbPerHour * rate.egress_gb)} an hour at your quality`;
+    // The used figure is measured; the hours are the worst case - what the
+    // quality setting would use flat out - so they are said as "at least".
+    const fps = setting('GAME_FPS', '60'), res = setting('GAME_RES', null);
+    const quality = `${(kbps / 1000).toFixed(0)} Mbps, ${fps} fps, ${res || "Moonlight's own resolution"}`;
     $('c-egress-note').textContent = e.gb_left > 0
-      ? `About ${Math.floor(e.gb_left / gbPerHour)} h of play left free, then ${after}.`
-      : `The free 100 GB is used up. Streaming now costs ${after}.`;
+      ? `Even at your full quality (${quality}: about ${gbPerHour.toFixed(0)} GB an hour), `
+        + `at least ${Math.floor(e.gb_left / gbPerHour)} more hours are free. After that, ${r(rate.egress_gb)} a GB.`
+      : `The free 100 GB is used up. Streaming now costs ${r(rate.egress_gb)} a GB - `
+        + `at most ${r(gbPerHour * rate.egress_gb)} an hour at your quality (${quality}).`;
   }
 }
 // Games cg saved in a region the machine is no longer built in. They bill like
@@ -910,18 +971,19 @@ let elsewhereNow = null;
 function paintElsewhere(d) {
   elsewhereNow = d;
   paintLibraryPage();
+  paintDash();
   if (costNow) paintCostPage();
 }
 // The places worth a line: anything holding something, or that could not be read.
 const elsewherePlaces = () => ((elsewhereNow && elsewhereNow.places) || []).filter(p => p.bytes || p.error);
 
 function paintLibrary(d) {
+  libNow = d;                 // first: Home lists these names as it redraws
   paintPicker(d);
   paintArchiveCard(d);
   // cg says which it is; the app must never turn "I could not look" into
   // "there is nothing there".
   paintLogin(d.login);
-  libNow = d;
   paintLibraryPage();
 }
 let libNow = null;   // the last `cg library list`, for repainting when status lands
@@ -2513,6 +2575,7 @@ let statusBudget = null;
 let costNow = null;  // the last paid cost fetch, if one was made in this window
 let costNowAt = null;
 let statusNow = null; // `cg status --json`, as last read
+let statusAt = null;   // when it was
 // `cg ping --json` - direct or relayed, and the latency - asked only while the
 // machine is online, and at most once a minute: it is a local tailscale ping,
 // free, but it takes a few seconds and means nothing with no machine.
@@ -3797,6 +3860,9 @@ window.cg.onEvent(({ id, event }) => {
     if (job.write) {
       note(`${CgName(job.cmd)} ${event.rc === 0 ? 'finished' : 'stopped'}`,
            event.rc === 0 ? 'text-primary' : 'text-error');
+      // Even one that stopped part-way may have rented or deleted something.
+      const change = byCommand(BILL_CHANGE, job.cmd);
+      if (change && !(job.cmd[0] === 'library' && event.rc !== 0)) noteBillChange(change);
       afterWrite(job, event.rc);
     }
     if (job.resolve) job.resolve(job.wantRc ? { rc: event.rc, err: job.collected || '' }
@@ -5125,7 +5191,7 @@ $('d-change').onclick = () => openMachines();
 $('d-ts-signin').onclick = signInTailscale;
 $('d-library').onclick = () => goView('library');
 applyLogFilter('all');           // the default is shown as chosen, not just in force
-$('log-details').onchange = () => applyLogFilter(logFilter);
+restoreBill();                   // the last bill on this laptop, until a new check
 for (const b of document.querySelectorAll('[data-filter]')) {
   b.onclick = () => applyLogFilter(b.dataset.filter);
 }
@@ -5297,8 +5363,12 @@ $('b-login-choice').onchange = async ev => {
 };
 
 $('d-guards').onclick = () => goView('guards');
+$('d-bill-more').onclick = () => goView('cost');
+$('c-egress-settings').onclick = () => goView('settings');
 // The only button on the dashboard that spends money, and it says so.
-$('d-cost').onclick = () => runCg(['cost', '--json'], { json: 'cost' });
+// Exact cost is the Spending page's own check: go there and press its Refresh,
+// so the bill is read once, behind the same popup, and you are looking at it.
+$('d-cost').onclick = () => { goView('cost'); $('refresh').click(); };
 // A build, a delete and a session all report the same way - steps, lines, an
 // exit - so they all run on the Build screen as steps, and starting one goes
 // there. Watching a delete in a panel that says nothing was the complaint.
