@@ -46,6 +46,8 @@ case "$*" in
   *describe-images*)
     if [[ ${IMAGES:-0} == 1 ]]; then echo '[{"id":"ami-0123456789abcdef0","name":"gamevps-2026-09-14","created":"2026-09-14T10:00:00.000Z","state":"available","gb":50}]'
     else echo '[]'; fi ;;
+  # A g6.xlarge's local disk, as AWS sizes it.
+  *"describe-instance-types"*) echo 250 ;;
   *) exit 1 ;;
 esac
 FAKE
@@ -72,7 +74,7 @@ check "library list"                "$(CG_COLOR=never cg library list)" "$(cat <
   2344520    Diablo® IV                        160.2 GB  2026-09-14 19:00
              total                             160.2 GB   $4.00/month (INR 352)
 
-  229 GB fits on the box at once (209 GB selectable after reserve)
+  233 GB fits on a g6.xlarge at once (213 GB selectable, 20 GB kept free; AWS figure, not yet measured)
 EXP
 )"
 check "library list, with an orphan" "$(CG_COLOR=never ORPHAN=1 cg library list)" "$(cat <<'EXP'
@@ -80,7 +82,7 @@ check "library list, with an orphan" "$(CG_COLOR=never ORPHAN=1 cg library list)
   2344520    Diablo® IV                        160.2 GB  2026-09-14 19:00
              total                             160.2 GB   $4.00/month (INR 352)
 
-  229 GB fits on the box at once (209 GB selectable after reserve)
+  233 GB fits on a g6.xlarge at once (213 GB selectable, 20 GB kept free; AWS figure, not yet measured)
 
   plus 1.0 GB of ORPHANED objects from an unfinished push
   costing $0.03/month and unusable - remove them: cg library clean

@@ -21,7 +21,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-REGION="${GAME_REGION:-ap-south-2}"
+# The default is the registry's (lib/config.sh), not a copy written here.
+REGION="${GAME_REGION:-$(source lib/config.sh && config_field GAME_REGION 3)}"
 TS_HOST="${GAME_TS_HOST:-gamevps}"
 ROLE="${TS_HOST}-box"
 PROFILE="$ROLE"

@@ -30,7 +30,7 @@ render() { # render <authkey> <host> <url> <bucket> <apps> [login]
   # bucket formula existing in four places. Deriving it means a new placeholder
   # fails loudly here the moment it has no value.
   TS_AUTHKEY="$1" TS_HOST="$2" HOST_TGZ_URL="$3" S3_BUCKET="$4" CG_APPS="$5" \
-  CG_LOGIN="${6:-use}" \
+  CG_LOGIN="${6:-use}" CG_RESERVE_GB="${7:-20}" \
   python3 -c 'import os, re, sys
 s = sys.stdin.read()
 # [A-Z0-9_] - S3_BUCKET has a DIGIT in it, and a class without one matched

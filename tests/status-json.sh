@@ -148,6 +148,12 @@ json=$(BOX=running run --json)
 check    "seen ready once: ready, without asking again" "$(jq_ box.ready <<<"$json")" "true"
 check    "  and built"                          "$(jq_ box.built <<<"$json")" "true"
 rm -f "$T/home/.cache/cg/ready-i-0abc123" "$T/home/.cache/cg/built-i-0abc123"
+# How long a build takes is measured by cg init, never promised.
+check    "no build measured: no minutes"   "$(jq_ build.last_min <<<"$json")" "null"
+printf 14 > "$T/home/.cache/cg/last-build-min"
+json=$(BOX=running run --json)
+check    "the last build, as measured"    "$(jq_ build.last_min <<<"$json")" "14"
+rm -f "$T/home/.cache/cg/last-build-min"
 
 echo "2b. what bills, priced by cg, not by the app"
 json=$(SNAPS=2 SNAP_GB=80 run --json)

@@ -41,10 +41,25 @@ cw_aws() { aws --region "$REGION" "$@"; }
 
 cw_int() { [[ ${1:-} =~ ^[0-9]+$ ]] && printf '%s' "$1" || printf '%s' "$2"; }
 
-# Days with no box before the game archive is deleted: 14 unless set, 0 turns it
-# off, and any other number is used as written.
+# A watchdog setting as it is used: .env's value, else the registry's default
+# (lib/config.sh), and never under the registry's minimum - the floors
+# cw_install applies. The defaults lived here as well, as 14, 30 and 60, which
+# is two places to change and one to forget.
+cw_setting() { # cw_setting <KEY>
+  local d m v
+  d=$(source lib/config.sh && config_field "$1" 3)
+  m=$(source lib/config.sh && config_field "$1" 4)
+  v=$(cw_int "${!1:-}" "$d")
+  [[ $m =~ ^[0-9]+$ && $v =~ ^[0-9]+$ ]] && (( v < m )) && v=$m
+  printf '%s' "$v"
+}
+# How often the schedule runs it, in minutes: the rule, every report of the
+# rule, and the app all read this one number.
+CW_EVERY_MIN=5
+
+# Days with no box before the game archive is deleted; 0 turns it off.
 cw_expiry_days() {
-  cw_int "${GAME_ARCHIVE_EXPIRY_DAYS:-}" 14
+  cw_setting GAME_ARCHIVE_EXPIRY_DAYS
 }
 
 # The archive bucket, named exactly as lib/library-aws.sh names it.
@@ -61,8 +76,8 @@ cw_bucket() { # cw_bucket <account>
 # would force a box down while it is still mirroring its games.
 cw_env() { # cw_env <account>
   local idle stuck
-  idle=$(cw_int "${GAME_WATCHDOG_IDLE_MIN:-}" 30); (( idle < 10 )) && idle=10
-  stuck=$(cw_int "${GAME_WATCHDOG_STUCK_MIN:-}" 60); (( stuck < 40 )) && stuck=40
+  idle=$(cw_setting GAME_WATCHDOG_IDLE_MIN)
+  stuck=$(cw_setting GAME_WATCHDOG_STUCK_MIN)
   # CG_NTFY_URL only when set: an unset notification URL is simply absent.
   local ntfy; ntfy=$(cg_ntfy_url)
   # CG_ACCOUNT lets it recognise this host's buckets in other regions by the
@@ -203,7 +218,7 @@ cw_current() {
     [[ $fsha == "$sha" ]] || drift+=("code changed")
     [[ ${fdesc:-} == *"cfg=$(cw_fp "$frole")"* ]] || drift+=("settings changed")
     [[ $fstate == Active && $fupd == Successful ]] || drift+=("function $fstate/$fupd")
-    [[ $(cat "$d/rule") == $'ENABLED\trate(5 minutes)' ]] || drift+=("schedule not enabled")
+    [[ $(cat "$d/rule") == $'ENABLED\t'"rate($CW_EVERY_MIN minutes)" ]] || drift+=("schedule not enabled")
     [[ $(cat "$d/target") == "arn:aws:lambda:$REGION:$acct:function:$CW_NAME" ]] || drift+=("schedule has no target")
     # The closing quote matters: the schedule's ARN is a prefix of the
     # state-change rule's, and without it one permission passed for both.
@@ -354,7 +369,7 @@ cw_install() {
   rm -rf "$d"
 
   fn_arn="arn:aws:lambda:$REGION:$acct:function:$CW_NAME"
-  rule_arn=$(cw_aws events put-rule --name "$CW_NAME" --schedule-expression 'rate(5 minutes)' \
+  rule_arn=$(cw_aws events put-rule --name "$CW_NAME" --schedule-expression "rate($CW_EVERY_MIN minutes)" \
       --state ENABLED --description "Runs the cloud_gaming idle watchdog" \
       --query RuleArn --output text 2>/dev/null) \
     || { log "could not create the schedule $CW_NAME"; return 1; }
@@ -386,7 +401,7 @@ cw_install() {
       --action lambda:InvokeFunction --principal events.amazonaws.com --source-arn "$state_arn" \
       >/dev/null 2>&1 || { log "could not let $CW_STATE_RULE invoke $CW_NAME"; return 1; }
   fi
-  log "armed: $CW_NAME runs every 5 minutes, and hears when a box stops or terminates"
+  log "armed: $CW_NAME runs every $CW_EVERY_MIN minutes, and hears when a box stops or terminates"
   return 0
 }
 
@@ -475,7 +490,7 @@ cw_status() {
   # set, and printed every value twice.
   if [[ -n $fn ]]; then printf '  function  %s  %s\n' "$CW_NAME" "$fn"
   else printf '  function  not installed - cg init creates it\n'; fi
-  if [[ -n $rule ]]; then printf '  schedule  every 5 minutes, %s\n' "$rule"
+  if [[ -n $rule ]]; then printf '  schedule  every %s minutes, %s\n' "$CW_EVERY_MIN" "$rule"
   else printf '  schedule  none\n'; fi
   printf '  can end   only the instance tagged %s\n' "$TS_HOST"
   printf '  archive   %s\n' "$(cw_archive_line)"
@@ -503,7 +518,7 @@ cw_watcher_lines() {
   local rule
   rule=$(cw_aws events describe-rule --name "$CW_NAME" --query State --output text 2>/dev/null) || rule=""
   log_as "$([[ $rule == ENABLED ]] && echo ok || echo warn)" \
-    "cloud watchdog    ${rule:-not installed}  (Lambda $CW_NAME, every 5 min)"
+    "cloud watchdog    ${rule:-not installed}  (Lambda $CW_NAME, every $CW_EVERY_MIN min)"
   local last ms msg
   last=$(cw_aws logs filter-log-events --log-group-name "$CW_LOGS" \
            --start-time "$(( ($(date +%s) - 3600) * 1000 ))" --filter-pattern '"cg-watchdog:"' \
@@ -514,7 +529,7 @@ cw_watcher_lines() {
     [[ $msg == *"CANNOT QUERY AWS"* || $msg == *DENIED* || $msg == *FAILED* ]] \
       && log_as fail "  ^ it cannot act on your account, so layer 3 is decoration"
   elif [[ $rule == ENABLED ]]; then
-    log_as warn "  ^ nothing logged in the last hour, but it runs every 5 min"
+    log_as warn "  ^ nothing logged in the last hour, but it runs every $CW_EVERY_MIN min"
   fi
   return 0
 }

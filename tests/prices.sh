@@ -103,6 +103,11 @@ code() { grep -nE "$1" cg lib/setup lib/game lib/*.sh lib/*.py lambda/*.py app/r
 check    "no AWS price literal"      "$(code '(^|[^0-9.])0\.(0912|1093|086|0125|025|05|005)([^0-9]|$)' | wc -l)" "0"
 # The forms the fixed 88 took: a default, an "or", a constant, a multiplier.
 check    "no rupee rate literal"     "$(code 'INR_PER_USD:-[0-9]|INR_PER_USD"\) or [0-9]|INR_PER_USD = [0-9]|[*/] *88([^0-9]|$)|= *88\.0' | wc -l)" "0"
+# Nor any other fact about a machine or a build that AWS or a measurement
+# knows better: the disk was 229 GB everywhere, the build "10-20 min".
+check    "no fixed game disk size"   "$(code '(disk_gb|DISK_GB)[^,]*(229|:-2[0-9]{2})|\b229 GB fits' | wc -l)" "0"
+check    "no promised build time"    "$(code '10-20 min|10–20 min|10 to 20 min' | wc -l)" "0"
+check    "no watchdog minutes copied" "$(code 'cw_int "[^"]*" [0-9]|idle_min \|\| [0-9]|rate\(5 minutes\)' | wc -l)" "0"
 check    "the free allowance and GST are the only two, in one file" \
          "$(grep -cE '^CG_(EGRESS_FREE_GB|TAX_PCT)=' lib/rates.sh)" "2"
 

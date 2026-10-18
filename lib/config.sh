@@ -19,6 +19,7 @@
 CONFIG_ROWS() {
   cat <<'ROWS'
 GAME_DISK_GB|number|50|30|Root disk in GB. Cannot be shrunk later; applies to the next build.|root disk (GB)|The box
+GAME_DISK_RESERVE_GB|number|20|0|Space kept free on the game disk for Steam's downloads, updates and shader caches.|game disk kept free (GB)|The box
 GAME_ARCHIVE_EXPIRY_DAYS|number|14|0|Days with no box before the cloud watchdog deletes the archive. 0 keeps it forever.|archive expiry (days)|The guards
 GAME_INSTANCE_TYPE|text|g6.xlarge||The EC2 instance type. Its GPU quota must cover it.|instance type|The box
 GAME_REGION|region|ap-south-2||The AWS region everything lives in. Changing it starts over: the archive does not follow.|region|The box
@@ -116,7 +117,7 @@ config_set() {
   [[ -n $value ]] || shown="cleared"
   log_as ok "$key = $shown"
   case $key in
-    GAME_DISK_GB|GAME_INSTANCE_TYPE|GAME_REGION|GAME_SPOT)
+    GAME_DISK_GB|GAME_DISK_RESERVE_GB|GAME_INSTANCE_TYPE|GAME_REGION|GAME_SPOT)
       log_as info "applies to the next cg init" ;;
     GAME_ARCHIVE_EXPIRY_DAYS|GAME_WATCHDOG_IDLE_MIN|GAME_WATCHDOG_STUCK_MIN|GAME_NTFY_URL)
       log_as info "applies when the cloud watchdog is next deployed: cg watchdog install" ;;

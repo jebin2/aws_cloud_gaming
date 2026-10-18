@@ -196,7 +196,7 @@ PROBE
   # that are not enabled, where describe-instance-types cannot be called at all.
   # shellcheck disable=SC2086
   aws ec2 describe-instance-types --region "$(sweep_from)" --instance-types $CG_SWEEP_TYPES \
-    --query 'InstanceTypes[].[InstanceType,VCpuInfo.DefaultVCpus,MemoryInfo.SizeInMiB,GpuInfo.Gpus[0].Name,GpuInfo.Gpus[0].MemoryInfo.SizeInMiB]' \
+    --query 'InstanceTypes[].[InstanceType,VCpuInfo.DefaultVCpus,MemoryInfo.SizeInMiB,GpuInfo.Gpus[0].Name,GpuInfo.Gpus[0].MemoryInfo.SizeInMiB,InstanceStorageInfo.TotalSizeInGB]' \
     --output text 2>/dev/null > "$work/specs" || : > "$work/specs"
 
   # Scores for the shortlist, one call per type rather than per region.
@@ -313,6 +313,8 @@ try:
                 "ram_gib": round(int(p[2]) / 1024, 1),
                 "gpu": None if p[3] in ("None", "") else p[3],
                 "vram_gib": None if p[4] in ("None", "") else round(int(p[4]) / 1024, 1),
+                # The fast local disk games go on, as AWS sizes it (GB).
+                "store_gb": int(p[5]) if len(p) > 5 and p[5].isdigit() else None,
             }
 except OSError:
     pass
@@ -349,6 +351,7 @@ for r, o in optin.items():
             "vram_gib": sp.get("vram_gib"),
             "ram_gib": sp.get("ram_gib"),
             "vcpu": sp.get("vcpu"),
+            "store_gb": sp.get("store_gb"),
             "offered": offered if en else None,
             "usd_hour_spot": sp_usd,
             "usd_hour_spot_max": sp_max,

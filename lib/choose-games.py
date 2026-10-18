@@ -8,12 +8,17 @@ interactively; it printed the table and gave up. Nothing caught it because the
 prompt was written to /dev/tty and therefore untestable, which is the second
 half of the same mistake.
 
-argv: <index-json> <available-gb> <default-selection>
+argv: <index-json> <available-gb> <default-selection> <reserve-gb>
+  available-gb is the machine's game disk less what is kept free, for the type
+  being built (machine_disk_gb in lib/common.sh); empty when it could not be
+  read, and then nothing is refused here - the box restores what fits.
 stdout: the chosen csv of appids, or "none"
 stderr: everything a human reads
 """
 import json, os, sys, unicodedata
-idx, avail_gb, default = sys.argv[1], float(sys.argv[2]), sys.argv[3]
+idx, default = sys.argv[1], sys.argv[3]
+avail_gb = float(sys.argv[2]) if sys.argv[2] else None
+reserve_gb = float(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] else 0.0
 apps = json.loads(idx).get("apps", [])
 GB = 1073741824.0
 def gb(a): return a.get("bytes", 0) / GB
@@ -53,18 +58,22 @@ def table():
     if STYLED:
         line = "%s│%s" % (MAG, R)
         head = "📦 %sGame archive%s" % (B, R)
-        print("\n%s%s╭─ %s %s· %.0f of %.0f GB selectable%s"
-              % (PAD, MAG, head, GREY, avail_gb, avail_gb + 20, R), file=sys.stderr)
+        room = ("%.0f of %.0f GB selectable" % (avail_gb, avail_gb + reserve_gb)
+                if avail_gb is not None else "the machine's space could not be read")
+        print("\n%s%s╭─ %s %s· %s%s" % (PAD, MAG, head, GREY, room, R), file=sys.stderr)
         print("%s%s  %s%-3s %s %-10s %9s  %s%s" % (PAD, line, B, "#", fit("GAME", 32), "APPID", "SIZE", "ARCHIVED", R), file=sys.stderr)
         for i, a in enumerate(apps, 1):
             print("%s%s  %s%-3d%s %s %s%-10s%s %s%6.1f GB%s  %s%s%s"
                   % (PAD, line, CYAN, i, R, fit(a.get("name", "?"), 32), GREY, a["appid"], R,
                      B, gb(a), R, GREY, a.get("pushed", "?")[:16].replace("T", " "), R), file=sys.stderr)
-        print("%s%s  %s20 GB stays free for Proton, shader caches and headroom%s" % (PAD, line, GREY, R), file=sys.stderr)
+        print("%s%s  %s%.0f GB stays free for Proton, shader caches and headroom%s" % (PAD, line, GREY, reserve_gb, R), file=sys.stderr)
         print("%s%s╰─%s\n" % (PAD, MAG, R), file=sys.stderr)
         return
-    print("\nArchive (%.0f GB selectable of %.0f GB - %.0f GB reserved for Proton, shaders, headroom):\n"
-          % (avail_gb, avail_gb + 20, 20), file=sys.stderr)
+    if avail_gb is None:
+        print("\nArchive (the machine's space could not be read - it restores what fits):\n", file=sys.stderr)
+    else:
+        print("\nArchive (%.0f GB selectable of %.0f GB - %.0f GB reserved for Proton, shaders, headroom):\n"
+              % (avail_gb, avail_gb + reserve_gb, reserve_gb), file=sys.stderr)
     print("  %-3s %-10s %-32s %9s  %s" % ("#", "APPID", "GAME", "SIZE", "ARCHIVED"), file=sys.stderr)
     for i, a in enumerate(apps, 1):
         print("  %-3d %-10s %-32s %6.1f GB  %s"
@@ -121,7 +130,7 @@ while True:
         if not sel:
             say("!", YEL, "nothing selected - type numbers, 'all', or 'none'"); print(file=sys.stderr); continue
     total = sum(gb(a) for a in sel)
-    if total > avail_gb:
+    if avail_gb is not None and total > avail_gb:
         # Refuse and explain, rather than silently picking a subset: which game
         # to drop is not a decision a tool should make for you.
         over = total - avail_gb
@@ -133,7 +142,8 @@ while True:
                 % ", ".join("%s (%.0f GB)" % (a.get("name", "?")[:20], gb(a)) for a in fits))
         print(file=sys.stderr)
         continue
-    say("✓", GREEN, "%.0f GB selected, %.0f GB spare. Restoring: %s"
-        % (total, avail_gb - total, ", ".join(a.get("name", "?") for a in sel)))
+    say("✓", GREEN, ("%.0f GB selected, %.0f GB spare. Restoring: %s" % (total, avail_gb - total,
+        ", ".join(a.get("name", "?") for a in sel))) if avail_gb is not None
+        else "%.0f GB selected. Restoring: %s" % (total, ", ".join(a.get("name", "?") for a in sel)))
     print(file=sys.stderr)
     print(",".join(str(a["appid"]) for a in sel)); break

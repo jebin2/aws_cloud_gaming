@@ -18,9 +18,14 @@ PREFIX="${GAME_S3_PREFIX:-steam}"
 # (~2.1 GB, deliberately re-downloaded), shader cache growth - Wukong made
 # 854 MB in minutes - and room for Steam to stage an install without filling the
 # disk. 20 GB, so ~209 GB is selectable.
-DISK_GB="${CG_DISK_GB:-229}"
-RESERVE_GB="${CG_RESERVE_GB:-20}"
-AVAIL_GB=$(( DISK_GB - RESERVE_GB ))
+# The machine being built: its game disk and what is kept free, both from cg
+# (machine_disk_gb, GAME_DISK_RESERVE_GB) - a fixed 229 was a g6.xlarge's, and
+# offered 209 GB on a g4dn.xlarge that holds 109. Unknown, nothing is refused
+# here; the box enforces the real limit at boot.
+DISK_GB="${CG_DISK_GB:-}"
+RESERVE_GB="${CG_RESERVE_GB:-0}"
+AVAIL_GB=""
+[[ $DISK_GB =~ ^[0-9]+$ ]] && AVAIL_GB=$(( DISK_GB > RESERVE_GB ? DISK_GB - RESERVE_GB : 0 ))
 
 command -v aws >/dev/null || { echo "${GAME_APPS:-none}"; exit 0; }
 
@@ -96,5 +101,5 @@ fi
 # have wanted empty. Restoring a game is cheap to ask for and annoying to undo,
 # so it costs one deliberate keystroke. Nothing is lost by defaulting low: the
 # archive is untouched, and `cg library pull --apps <id>` fetches it later.
-choice=$(python3 lib/choose-games.py "$idx" "$AVAIL_GB" none)
+choice=$(python3 lib/choose-games.py "$idx" "$AVAIL_GB" none "$RESERVE_GB")
 echo "${choice:-all}"

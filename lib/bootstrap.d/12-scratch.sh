@@ -22,7 +22,10 @@ DEV=$(lsblk -dno NAME,MODEL | awk '/Instance Storage/{print "/dev/"$1; exit}')
 # A reboot keeps the instance store and its filesystem; only a stop wipes it.
 # So format only when there is nothing there - reformatting on every boot would
 # throw away a library that survived the build's own reboot.
-blkid "$DEV" >/dev/null 2>&1 || mkfs.ext4 -F -L scratch "$DEV"
+# -m 0: no blocks held back for root. ext4 keeps 5% by default so a full
+# system disk can still log in; this disk holds only games, and the 5% was
+# 6 GB of a g4dn.xlarge's 115 and 12 GB of a g6.xlarge's that no game could use.
+blkid "$DEV" >/dev/null 2>&1 || mkfs.ext4 -F -m 0 -L scratch "$DEV"
 mkdir -p /scratch
 mountpoint -q /scratch || mount -o discard,noatime "$DEV" /scratch
 mkdir -p /scratch/tmp /scratch/downloads /scratch/steam/steamapps

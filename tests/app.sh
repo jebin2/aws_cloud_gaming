@@ -551,7 +551,8 @@ contains "  recording what happened"     "$js" 'note(`${cgName(args)} started`'
 # Guards: one card per layer cg reports, never a layer the app invented.
 contains "guards come from the watcher"  "$js" "for (const g of guards) {"
 # The minutes are cg's: the page wrote "30 min" and "1 h" whatever was set.
-contains "  with cg's minutes"           "$js" '${g.idle_min || 30} min with no stream'
+contains "  with cg's minutes"           "$js" "\${g.idle_min ?? '?'} min with no stream"
+lacks    "  and no minutes of its own"   "$js" 'g.idle_min || '
 contains "  and the last check, aged"    "$js" 'Last check ${ago(cloud.last_decision_age_s)}'
 # Rupees only: the budget read "$57 a month" from AWS's own figure.
 contains "the budget is in rupees"       "$js" '${rs(Number(v))} a month'

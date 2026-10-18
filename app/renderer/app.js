@@ -512,20 +512,24 @@ function renderMachineCard(card) {
   const running = !!(box && box.state === 'running');
   const upHours = box && box.launched ? (Date.now() - new Date(box.launched)) / 3600000 : 0;
   const idleGuard = ((watcher && watcher.guards) || []).find(g => g.layer === 2);
-  const idleAfter = idleGuard && idleGuard.reaction ? idleGuard.reaction.replace(/ idle$/, '') : '15 min';
+  const idleAfter = idleGuard && idleGuard.idle_min != null ? `${idleGuard.idle_min} min` : null;
   let title, sub = '', note = '';
   if (credErr) {
     title = 'Status unknown';
     sub = 'AWS could not be reached, so nothing below is known.';
   } else if (building) {
     title = 'Building your machine';
-    sub = box && box.launched ? `Started ${uptime(box.launched)} ago · usually 10–20 minutes`
-                              : 'Usually 10–20 minutes';
+    // How long the last build took, as cg measured it; no number until one has.
+    const took = (s.build || {}).last_min;
+    const last = took != null ? `the last one took ${took} min` : '';
+    sub = box && box.launched ? [`Started ${uptime(box.launched)} ago`, last].filter(Boolean).join(' · ')
+                              : (last ? last[0].toUpperCase() + last.slice(1) : 'Starting');
   } else if (running) {
     title = sessionNow ? 'Playing' : 'Ready to play';
     sub = `Up ${uptime(box.launched)} · ${rs(price != null ? price * upHours : null)} so far`;
     note = sessionNow ? 'Closing Moonlight asks whether to keep the machine or delete it.'
-                      : `Stops by itself after ${idleAfter} with nobody playing.`;
+                      : idleAfter ? `Stops by itself after ${idleAfter} with nobody playing.`
+                                  : 'Stops by itself when nobody is playing.';
   } else if (box) {
     title = `Machine ${box.state}`;
     sub = box.state === 'pending' ? 'Starting.' : box.state === 'stopping' || box.state === 'shutting-down'
@@ -628,7 +632,7 @@ function paintDash() {
   const building = jobsFor('init') || unfinished(box);
   const running = !!(box && box.state === 'running');
   const idleGuard = ((watcher && watcher.guards) || []).find(g => g.layer === 2);
-  const idleAfter = idleGuard && idleGuard.reaction ? idleGuard.reaction.replace(/ idle$/, '') : '15 min';
+  const idleAfter = idleGuard && idleGuard.idle_min != null ? `${idleGuard.idle_min} min` : null;
 
   // ── the machine: the Machine page's own card ──
   paintMachineCards();
@@ -723,7 +727,7 @@ function paintDash() {
     // Installed with every build: with no machine there is nothing for it to
     // watch, which is not the same as it being off.
     [g2 ? (g2.armed === false ? false : true) : null,
-     `Stops by itself after ${idleAfter} idle`],
+     idleAfter ? `Stops by itself after ${idleAfter} idle` : 'Stops by itself when idle'],
     [g3 ? g3.armed : null,
      g3 && g3.armed ? 'Auto-stop in AWS: stops a forgotten machine' : 'Auto-stop in AWS is off'],
     [b.limit != null ? true : (statusNow ? false : null),
@@ -1480,11 +1484,12 @@ function netWords(g, d) {
     const sd = d.shutdown_action || {};
     const end = sd.expected
       ? ` When it shuts down, the machine is ${sd.value === 'terminate' ? 'deleted' : 'stopped'}.` : '';
-    return [`${g.idle_min || 15} min with nobody connected, and it shuts itself down.${end}`,
+    // Every number is cg's (cg watcher), none is a fallback written here.
+    return [`${g.idle_min != null ? `${g.idle_min} min` : 'A while'} with nobody connected, and it shuts itself down.${end}`,
             'Runs on the machine itself.'];
   }
-  return [`Every 5 min: ${g.idle_min || 30} min with no stream, or a shutdown stuck for `
-          + `${g.stuck_min || 60} min, and AWS ends the machine.`,
+  return [`${g.every_min != null ? `Every ${g.every_min} min: ` : ''}${g.idle_min ?? '?'} min with no stream, or a shutdown stuck for `
+          + `${g.stuck_min ?? '?'} min, and AWS ends the machine.`,
           'Works with your laptop and the machine both gone.'];
 }
 function netState(g) {
@@ -2730,15 +2735,26 @@ function paintPicker(d) {
 
     const box = document.createElement('input');
     box.type = 'checkbox'; box.className = 'accent-primary align-middle'; box.dataset.appid = g.appid;
+    // A game bigger than the machine's whole game disk can never be restored
+    // onto it, whatever else is unticked: it is not offered, and says why.
+    const cap = d.selectable_gb;
+    const tooBig = cap != null && g.bytes / 1073741824 > cap;
+    if (tooBig) { picked.delete(g.appid); box.dataset.toobig = 'yes'; }
     box.checked = picked.has(g.appid);
     box.onchange = () => { box.checked ? picked.add(g.appid) : picked.delete(g.appid); paintFit(); };
     cell('py-space-sm pr-space-sm').append(box);
 
-    cell('py-space-sm pr-space-md text-on-surface').textContent = g.name || g.installdir || g.appid;
+    const nameCell = cell('py-space-sm pr-space-md text-on-surface');
+    nameCell.textContent = g.name || g.installdir || g.appid;
+    if (tooBig) {
+      nameCell.append(el('span', 'block font-code-sm text-code-sm text-error',
+        `Too big for a ${d.disk_type || 'machine'} (${cap} GB for games). Pick a machine with a bigger disk.`));
+      tr.className = tr.className.replace('cursor-pointer', 'opacity-60');
+    }
     cell('py-space-sm px-space-md text-right text-on-surface-variant').textContent = GB(g.bytes);
     cell('py-space-sm pl-space-md text-right text-outline').textContent = savedOn(g.pushed);
 
-    tr.onclick = e => { if (e.target !== box) { box.checked = !box.checked; box.onchange(); } };
+    tr.onclick = e => { if (!box.disabled && e.target !== box) { box.checked = !box.checked; box.onchange(); } };
     body.append(tr);
   }
   paintFit();
@@ -2755,7 +2771,8 @@ function paintFit() {
   // enforces the real limit at boot, which is where it must be enforced.
   const gb = selectedGb(), cap = archive.selectable_gb;
   const over = cap != null && gb > cap;
-  $('b-fit').textContent = 'Space on the machine';
+  // Whose disk: the machine the next build makes, as cg read it.
+  $('b-fit').textContent = archive.disk_type ? `Space on a ${archive.disk_type}` : 'Space on the machine';
   $('b-fit').className = 'font-code-sm text-code-sm text-outline';
   const pct = cap != null ? Math.min(100, (gb / cap) * 100) : 0;
   $('b-fit-pct').textContent = over ? `Too big by ${(gb - cap).toFixed(1)} GB. Untick a game.`
@@ -2768,7 +2785,7 @@ function paintFit() {
   // The screen says so and offers what you can actually do with it.
   const up = !!boxNow;
   $('b-build').disabled = over || jobs.size > 0;
-  for (const box of $('b-games').querySelectorAll('input[type=checkbox]')) box.disabled = up;
+  for (const box of $('b-games').querySelectorAll('input[type=checkbox]')) box.disabled = up || box.dataset.toobig === 'yes';
   // Nothing here applies while a box is up: what it holds was chosen at build.
   $('b-alloc').hidden = up;
   $('b-hint').textContent = up
@@ -2863,7 +2880,7 @@ function chooserRows() {
       for (const m of r.machines) {
         out.push({
           region: r.region, city: shortCity(r.city), rtt: r.rtt_ms, enabled: r.enabled,
-          type: m.type, gpu: m.gpu, vram: m.vram_gib, score: m.score,
+          type: m.type, gpu: m.gpu, vram: m.vram_gib, score: m.score, store: m.store_gb ?? null,
           spot: inrNow(m.usd_hour_spot, m.inr_hour_spot), spotMax: inrNow(m.usd_hour_spot_max, m.inr_hour_spot_max),
           od: inrNow(m.usd_hour_ondemand, m.inr_hour_ondemand),
           fitsSpot: m.fits_spot, fitsOd: m.fits_ondemand,
@@ -2880,7 +2897,7 @@ function chooserRows() {
         .filter(m => m.fits_spot || m.fits_ondemand)
         .map(m => ({
           region: machinesNow.region, city: '', rtt: null, enabled: true,
-          type: m.type, gpu: m.gpu, vram: m.vram_gib, score: null,
+          type: m.type, gpu: m.gpu, vram: m.vram_gib, score: null, store: m.store_gb ?? null,
           // No rate from cg, no rupee figure. The app holds no exchange rate.
           spot: inrNow(m.usd_hour_spot, m.inr_hour_spot),
           spotMax: inrNow(m.usd_hour_spot_max, m.inr_hour_spot_max),
@@ -3001,7 +3018,8 @@ function paintChooser() {
       // a radio at the cell's left edge, so a right-aligned header sat over
       // nothing. capacity is the only genuinely right-aligned column.
       for (const [label, cls] of [['Location', ''], ['Distance', ''], ['Machine', ''], ['Graphics', ''],
-                                  ['Chance of a spare one', 'text-right'], ['Spot, an hour', ''], ['Standard, an hour', '']]) {
+                                  ['Game disk', 'text-right'], ['Chance of a spare one', 'text-right'],
+                                  ['Spot, an hour', ''], ['Standard, an hour', '']]) {
         const th = document.createElement('th');
         th.textContent = label; th.className = cls;
         head.append(th);
@@ -3020,6 +3038,9 @@ function paintChooser() {
         cell(tr, first && row.rtt != null ? distance(row.rtt) : '', 'ms');
         cell(tr, row.type, '');
         cell(tr, row.gpu ? gpuName(row.gpu, row.vram) : '', 'city');
+        // The fast disk games go on differs by machine - 125 GB to 250 GB here -
+        // and decides which games fit; AWS's own figure for the type.
+        cell(tr, row.store != null ? `${row.store} GB` : '', 'num');
 
         const sc = tr.insertCell();
         sc.className = 'num';
@@ -3052,7 +3073,7 @@ function paintChooser() {
         parts.push('A spot price range is the cheapest and dearest it can be');
       const far = (sweepNow.too_far || []).length;
       if (far) parts.push(`${far} more location${far === 1 ? ' is' : 's are'} too far to stream `
-        + `(over ${sweepNow.max_ms || 80} ms) and ${far === 1 ? 'is' : 'are'} not listed.`);
+        + `(${sweepNow.max_ms != null ? `over ${sweepNow.max_ms} ms` : 'too slow'}) and ${far === 1 ? 'is' : 'are'} not listed.`);
     }
     $(mount.note).textContent = parts.join(' · ');
 
@@ -5372,7 +5393,7 @@ async function chooseMachine(row, spot) {
   // one catch. A move always says what it leaves behind: saved games belong to
   // a location, and a machine elsewhere cannot reach them.
   const body = [
-    [row.type, row.gpu && gpuName(row.gpu, row.vram)].filter(Boolean).join(' · '),
+    [row.type, row.gpu && gpuName(row.gpu, row.vram), row.store != null && `${row.store} GB game disk`].filter(Boolean).join(' · '),
     `${spot ? 'Spot' : 'Standard'}${price != null
       ? ` · ${hourText(perHour(price), spot && row.spotMax != null ? perHour(row.spotMax) : null)} an hour while it runs` : ''}`,
     spot ? 'Much cheaper, but AWS can take it back mid-game.' : 'Never taken back mid-game.',
@@ -5402,10 +5423,12 @@ async function chooseMachine(row, spot) {
   await runCg(['config', 'set', 'GAME_INSTANCE_TYPE', row.type]);
   await runCg(['config', 'set', 'GAME_SPOT', spot ? '1' : '0']);
   if (moving) await runCg(['config', 'set', 'GAME_REGION', row.region]);
-  // machines is per-region, so a move makes the old answer wrong.
+  // machines is per-region, so a move makes the old answer wrong; and the
+  // games that fit depend on the machine's disk, so the library is read again.
   await Promise.all([runCg(['config', '--json'], { json: 'config' }),
                      runCg(['machines', '--json'], { json: 'machines' }),
-                     runCg(['status', '--json'], { json: 'status' })]);
+                     runCg(['status', '--json'], { json: 'status' }),
+                     runCg(['library', 'list', '--json'], { json: 'library' })]);
   saved = currentPick().type === row.type && currentPick().region === row.region;
   } finally {
     choosing = false;
@@ -5526,7 +5549,9 @@ $('d-destroy').onclick = async () => {
     title: 'Delete the machine?',
     body: (sessionNow ? 'The game session on this laptop is closed first.\n\n' : '')
         + 'Your games are saved first, and nothing is deleted if that fails.\n\n'
-        + 'The machine and its disk go. Building a new one takes 10 to 20 minutes.',
+        + 'The machine and its disk go.'
+        + (((statusNow || {}).build || {}).last_min != null
+           ? ` Building a new one took ${statusNow.build.last_min} minutes last time.` : ''),
     yes: 'Delete machine', danger: true,
   });
   if (ok) await startRun(['destroy']);

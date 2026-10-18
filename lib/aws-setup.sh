@@ -15,7 +15,8 @@ INSTANCE_ID="${GAME_INSTANCE_ID:-i-CHANGEME}"
 # needs no instance, and a build that dies with the laptop should not leave an
 # unwatched bill. The instance-level guards necessarily come after the launch.
 MODE="${1:-all}"
-REGION="${GAME_REGION:-ap-south-2}"
+# The default is the registry's (lib/config.sh), not a copy written here.
+REGION="${GAME_REGION:-$(source "$(dirname "$0")/config.sh" && config_field GAME_REGION 3)}"
 BUDGET_INR="${GAME_BUDGET_INR:-5000}"
 # Resource names must match what setup/game look up, which is $TS_HOST-based.
 TS_HOST="${GAME_TS_HOST:-gamevps}"

@@ -13,9 +13,10 @@ source lib/ssh-key.sh
 source lib/launch-error.sh
 source lib/s3-region.sh
 
-REGION="${GAME_REGION:-ap-south-2}"
+# The default is the registry's (lib/config.sh), not a copy written here.
+REGION="${GAME_REGION:-$(source lib/config.sh && config_field GAME_REGION 3)}"
 TS_HOST="${GAME_TS_HOST:-gamevps}"
-TYPE="${GAME_INSTANCE_TYPE:-g6.xlarge}"
+TYPE="${GAME_INSTANCE_TYPE:-$(source lib/config.sh && config_field GAME_INSTANCE_TYPE 3)}"
 DISK_GB="${GAME_DISK_GB:-50}"
 SPOT="${GAME_SPOT:-0}"
 # Persistent game library. Held in S3 and restored onto the instance store at
@@ -208,12 +209,13 @@ else
       | TS_AUTHKEY="$TS_AUTHKEY" TS_HOST="$TS_HOST" HOST_TGZ_URL="$HOST_TGZ_URL" \
         S3_BUCKET="$S3_BUCKET" CG_APPS="${GAME_APPS:-all}" \
         CG_LOGIN="${GAME_STEAM_LOGIN:-use}" \
+        CG_RESERVE_GB="${GAME_DISK_RESERVE_GB:-$(source lib/config.sh && config_field GAME_DISK_RESERVE_GB 3)}" \
         python3 -c 'import os,sys
 s = sys.stdin.read()
-for k in ("TS_AUTHKEY", "TS_HOST", "HOST_TGZ_URL", "S3_BUCKET", "CG_APPS", "CG_LOGIN"):
+for k in ("TS_AUTHKEY", "TS_HOST", "HOST_TGZ_URL", "S3_BUCKET", "CG_APPS", "CG_LOGIN", "CG_RESERVE_GB"):
     s = s.replace("__%s__" % k, os.environ.get(k, ""))
 missing = [w for w in ("__TS_AUTHKEY__", "__TS_HOST__", "__HOST_TGZ_URL__",
-                       "__S3_BUCKET__", "__CG_APPS__", "__CG_LOGIN__") if w in s]
+                       "__S3_BUCKET__", "__CG_APPS__", "__CG_LOGIN__", "__CG_RESERVE_GB__") if w in s]
 if missing:
     sys.exit("placeholders left unsubstituted: %s" % ", ".join(missing))
 sys.stdout.write(s)' > "$USERDATA" \

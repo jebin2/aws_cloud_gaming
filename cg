@@ -72,7 +72,8 @@ done
 source "$(dirname "${BASH_SOURCE[0]}")/lib/env-file.sh"
 cg_env_load
 
-REGION="${GAME_REGION:-ap-south-2}"
+# The default is the registry's (lib/config.sh), not a copy written here.
+REGION="${GAME_REGION:-$(source lib/config.sh && config_field GAME_REGION 3)}"
 TS_HOST="${GAME_TS_HOST:-gamevps}"
 TS_NODE="${GAME_TS_NODE:-$TS_HOST}"
 INSTANCE_ID="${GAME_INSTANCE_ID:-}"
@@ -312,7 +313,9 @@ choose_games() {
   # reason this prompt exists is that it no longer is.
   # On failure keep whatever .env already said, and fall back to "none" rather
   # than "all" - a chooser that broke should not decide to move 158 GB.
-  sel=$(GAME_S3_BUCKET="$(cg_bucket || true)" bash lib/choose-games.sh) \
+  library_disk_env
+  sel=$(GAME_S3_BUCKET="$(cg_bucket || true)" CG_DISK_GB="$DISK_GB" CG_RESERVE_GB="$RESERVE_GB" \
+        bash lib/choose-games.sh) \
     || sel="${GAME_APPS:-none}"
   export GAME_APPS="${sel:-${GAME_APPS:-none}}"
   cg_env_set GAME_APPS "$GAME_APPS"
@@ -390,8 +393,20 @@ library_index() {
   return 1
 }
 
+# The game disk the NEXT build gets: the configured type's (machine_disk_gb),
+# less the space kept free for Steam (GAME_DISK_RESERVE_GB). Exported for the
+# python that reports it; empty when the type's disk could not be read.
+library_disk_env() {
+  local t gb src
+  t="${GAME_INSTANCE_TYPE:-$(config_field GAME_INSTANCE_TYPE 3)}"
+  read -r gb src < <(machine_disk_gb "$REGION" "$t" 2>/dev/null) || true
+  export DISK_TYPE="$t" DISK_GB="${gb:-}" DISK_SRC="${src:-}" \
+         RESERVE_GB="${GAME_DISK_RESERVE_GB:-$(config_field GAME_DISK_RESERVE_GB 3)}"
+}
+
 # `cg library list --json`: the same index and orphan scan, as data.
 library_json() {
+  library_disk_env
   local idx orph err
   err=$(mktemp)
   if ! idx=$(library_index 2>"$err"); then
@@ -454,8 +469,15 @@ print(json.dumps({
   "orphan_usd_month": month(orphan_bytes, S3) if orphan_bytes else None,
   # null means "could not look", which is not the same as present=false.
   "login": (lambda t: (json.loads(t) if t.strip() else None))(os.environ.get("LOGIN") or ""),
-  # What the box can hold at once, and what cg init offers after its reserve.
-  "disk_gb": 229, "selectable_gb": 209,
+  # What the next machine can hold at once, and what cg init offers after the
+  # space kept free - the disk of the configured type, measured once one has
+  # run. null when it could not be read: the box still enforces the real limit.
+  "disk_type": os.environ.get("DISK_TYPE") or None,
+  "disk_gb": int(os.environ["DISK_GB"]) if os.environ.get("DISK_GB", "").isdigit() else None,
+  "disk_measured": os.environ.get("DISK_SRC") == "measured",
+  "reserve_gb": int(os.environ["RESERVE_GB"]) if os.environ.get("RESERVE_GB", "").isdigit() else None,
+  "selectable_gb": (max(0, int(os.environ["DISK_GB"]) - int(os.environ.get("RESERVE_GB") or 0))
+                    if os.environ.get("DISK_GB", "").isdigit() else None),
   "usd_per_gb_month": S3,
   # Where these are, and how long they are kept: N days after the later of the
   # last machine and the Reset of each game. null when the marks are unreadable.
@@ -468,6 +490,7 @@ print(json.dumps({
 }
 
 library_list() {
+  library_disk_env
   # An index.json is written only by the per-app push. A box built before that
   # mirrors fine but writes no index, so "the archive is empty" would be a lie
   # told about the thing that was looked for rather than the thing that is
@@ -530,8 +553,14 @@ S3, INR = num("CG_S3_USD_GB_MONTH"), num("CG_INR_PER_USD")
 cost = ("   $%.2f/month%s" % (g*S3, " (INR %.0f)" % (g*S3*INR) if INR else "")) if S3 is not None else ""
 print("  %-10s %-32s %6.1f GB%s" % ("","total",g,cost))
 print("")
-print("  229 GB fits on the box at once (209 GB selectable after reserve)")
-if g > 209: print("  the archive is larger than the disk - cg init asks which to restore")'
+t, d, r = os.environ.get("DISK_TYPE") or "the machine", os.environ.get("DISK_GB", ""), int(os.environ.get("RESERVE_GB") or 0)
+if d.isdigit():
+    sel = max(0, int(d) - r)
+    print("  %s GB fits on a %s at once (%d GB selectable, %d GB kept free%s)"
+          % (d, t, sel, r, "" if os.environ.get("DISK_SRC") == "measured" else "; AWS figure, not yet measured"))
+    if g > sel: print("  the archive is larger than that - cg init asks which to restore")
+else:
+    print("  how much a %s holds could not be read - the box restores what fits" % t)'
 }
 
 # Objects the index does not know about.
@@ -1830,7 +1859,7 @@ watcher_json() {
   W_STATE="$st" W_OHW="$ohw" W_SHUTDOWN="$sb" W_WANT="$want" W_RULE="$rule" \
   W_LAST_MS="${ms:-}" W_LAST_MSG="${msg:-}" W_BUDGET="$budget" W_ALERTS="$alerts" \
   W_ARCHIVE="$(cw_archive_line)" W_HOST="$TS_HOST" \
-  W_IDLE="$(cw_int "${GAME_WATCHDOG_IDLE_MIN:-}" 30)" W_STUCK="$(cw_int "${GAME_WATCHDOG_STUCK_MIN:-}" 60)" \
+  W_IDLE="$(cw_setting GAME_WATCHDOG_IDLE_MIN)" W_STUCK="$(cw_setting GAME_WATCHDOG_STUCK_MIN)" W_EVERY="$CW_EVERY_MIN" \
   W_HOST_IDLE="$(sed -n 's/^IDLE_LIMIT="${IDLE_LIMIT:-\([0-9]*\)}".*/\1/p' host/idle-watchdog.sh 2>/dev/null)" \
   python3 -c '
 import json, os, time
@@ -1840,11 +1869,11 @@ age = int(time.time() - int(ms) / 1000) if ms.isdigit() else None
 msg = g("W_LAST_MSG").replace("cg-watchdog: ", "") or None
 budget = g("W_BUDGET")
 # The minutes each watchdog waits, as they are set rather than as they were when
-# this was written: the cloud ones are settings, and the floors are the ones
-# cw_install applies, so this says what the schedule actually does.
-idle = max(int(g("W_IDLE") or 30), 10)
-stuck = max(int(g("W_STUCK") or 60), 40)
-host_idle = int(g("W_HOST_IDLE") or 15)
+# this was written: the cloud ones are settings with their floors applied
+# (cw_setting), the on-host one is read from its own script, and none is
+# written here. One that cannot be read is null.
+num = lambda k: int(g(k)) if (g(k) or "").isdigit() else None
+idle, stuck, host_idle, every = num("W_IDLE"), num("W_STUCK"), num("W_HOST_IDLE"), num("W_EVERY")
 print(json.dumps({
   "host": g("W_HOST"),
   "instance_state": g("W_STATE"),
@@ -1856,7 +1885,8 @@ print(json.dumps({
     # It lives ON the box: with no box there is nothing to arm, which is not the
     # same as a guard that should be running and is not.
     {"layer": 2, "name": "on-host watchdog", "dies_with": "the box it protects",
-     "catches": "a forgotten disconnect, a crashed client", "reaction": f"{host_idle} min idle",
+     "catches": "a forgotten disconnect, a crashed client",
+     "reaction": f"{host_idle} min idle" if host_idle is not None else "idle",
      "idle_min": host_idle,
      "armed": (g("W_OHW") == "active") if g("W_OHW") else None,
      "state": "armed" if g("W_OHW") == "active" else (
@@ -1867,7 +1897,7 @@ print(json.dumps({
     {"layer": 3, "name": "cloud watchdog", "dies_with": "a deleted schedule",
      "catches": "a wedged box, one left running, one stuck going down",
      "reaction": f"{idle} min idle; forced after {stuck} min stuck",
-     "idle_min": idle, "stuck_min": stuck,
+     "idle_min": idle, "stuck_min": stuck, "every_min": every,
      "armed": g("W_RULE") == "ENABLED",
      "state": "armed" if g("W_RULE") == "ENABLED" else (g("W_RULE").lower() or "not installed"),
      "note": g("W_RULE") or "not installed",

@@ -38,7 +38,7 @@ check    "valid JSON"                    "$(python3 -c 'import json,sys;print(ty
 # one added and one silently dropped.
 check    "and these are the settings" \
          "$(python3 -c 'import json,sys;print(" ".join(r["key"] for r in json.load(sys.stdin)))' <<<"$j")" \
-         "GAME_DISK_GB GAME_ARCHIVE_EXPIRY_DAYS GAME_INSTANCE_TYPE GAME_REGION GAME_SPOT GAME_STEAM_LOGIN GAME_BUDGET_INR GAME_WATCHDOG_IDLE_MIN GAME_WATCHDOG_STUCK_MIN GAME_NTFY_URL TAILSCALE_API_KEY EMAIL_ALERTS GAME_RES GAME_FPS GAME_BITRATE_KBPS"
+         "GAME_DISK_GB GAME_DISK_RESERVE_GB GAME_ARCHIVE_EXPIRY_DAYS GAME_INSTANCE_TYPE GAME_REGION GAME_SPOT GAME_STEAM_LOGIN GAME_BUDGET_INR GAME_WATCHDOG_IDLE_MIN GAME_WATCHDOG_STUCK_MIN GAME_NTFY_URL TAILSCALE_API_KEY EMAIL_ALERTS GAME_RES GAME_FPS GAME_BITRATE_KBPS"
 check    "a set value is reported"       "$(jq_ GAME_DISK_GB value <<<"$j")" '"80"'
 check    "  with its default"            "$(jq_ GAME_DISK_GB default <<<"$j")" '"50"'
 check    "  and its minimum"             "$(jq_ GAME_DISK_GB rule <<<"$j")" '"30"'

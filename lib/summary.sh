@@ -139,9 +139,12 @@ init_summary() {
 
   local rule days watchdog
   rule=$(cw_aws events describe-rule --name "$CW_NAME" --query State --output text 2>/dev/null) || rule=""
-  if [[ $rule == ENABLED ]]; then watchdog="cloud watchdog $(cw_int "${GAME_WATCHDOG_IDLE_MIN:-}" 30) min"
+  if [[ $rule == ENABLED ]]; then watchdog="cloud watchdog $(cw_setting GAME_WATCHDOG_IDLE_MIN) min"
   else watchdog="cloud watchdog NOT armed - run: cg watchdog install"; fi
-  summary_row "🔒" "Guards" "on-host 15 min · $watchdog"
+  # The on-host limit as its own script sets it, the same read cg watcher does.
+  local host_idle
+  host_idle=$(sed -n 's/^IDLE_LIMIT="${IDLE_LIMIT:-\([0-9]*\)}".*/\1/p' host/idle-watchdog.sh 2>/dev/null)
+  summary_row "🔒" "Guards" "on-host ${host_idle:-?} min · $watchdog"
   days=$(cw_expiry_days)
   if (( days == 0 )); then summary_more "game archive kept forever"
   else summary_more "game archive deleted after $days days with no box"; fi

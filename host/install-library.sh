@@ -9,6 +9,9 @@ CG_APPS="${3:-${CG_APPS:-all}}"
 # "use" or "fresh" - whether this box restores the archived Steam login. Decided
 # on the laptop, for the same reason CG_APPS is.
 CG_LOGIN="${4:-${CG_LOGIN:-use}}"
+# Space kept free on the game disk: the laptop's GAME_DISK_RESERVE_GB, so the
+# box and the laptop's picker refuse the same games.
+CG_RESERVE_GB="${5:-${CG_RESERVE_GB:-}}"
 S5_VERSION="${S5_VERSION:-2.2.2}"
 
 # The AWS CLI can do this, but at roughly 80 MB/s single-threaded; s5cmd
@@ -50,6 +53,7 @@ CG_S3_PREFIX=$PREFIX
 CG_LIB_DIR=${CG_LIB_DIR:-/scratch/steam}
 CG_APPS=${CG_APPS:-all}
 CG_LOGIN=${CG_LOGIN:-use}
+CG_RESERVE_GB=${CG_RESERVE_GB}
 EOF
 chmod 644 /etc/cg-library.conf
 

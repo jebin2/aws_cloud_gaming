@@ -59,17 +59,17 @@ const SWEEP = {
   regions: [
     { region: 'ap-south-1', city: 'Asia Pacific (Mumbai)', enabled: true, rtt_ms: 22.4,
       quota: { ondemand_vcpu: 4, spot_vcpu: 0 }, best_score: 9, machines: [
-      { type: 'g4dn.xlarge', score: 9, gpu: 'T4', vram_gib: 16, ram_gib: 16, vcpu: 4,
+      { type: 'g4dn.xlarge', score: 9, gpu: 'T4', vram_gib: 16, ram_gib: 16, vcpu: 4, store_gb: 125,
         inr_hour_spot: 18, inr_hour_ondemand: 51, fits_spot: false, fits_ondemand: true },
-      { type: 'g6.xlarge', score: 1, gpu: 'L4', vram_gib: 22.4, ram_gib: 16, vcpu: 4,
+      { type: 'g6.xlarge', score: 1, gpu: 'L4', vram_gib: 22.4, ram_gib: 16, vcpu: 4, store_gb: 250,
         inr_hour_spot: 46, inr_hour_ondemand: 85, fits_spot: false, fits_ondemand: true }]},
     { region: 'ap-southeast-5', city: 'Asia Pacific (Malaysia)', enabled: false, rtt_ms: 48,
       quota: null, best_score: 9, machines: [
-      { type: 'g6.xlarge', score: 9, gpu: 'L4', vram_gib: 22.4, ram_gib: 16, vcpu: 4,
+      { type: 'g6.xlarge', score: 9, gpu: 'L4', vram_gib: 22.4, ram_gib: 16, vcpu: 4, store_gb: 250,
         inr_hour_spot: null, inr_hour_ondemand: 89, fits_spot: null, fits_ondemand: null }]},
     { region: 'ap-south-2', city: 'Asia Pacific (Hyderabad)', enabled: true, rtt_ms: 19,
       quota: { ondemand_vcpu: 4, spot_vcpu: 4 }, best_score: 1, machines: [
-      { type: 'g6.xlarge', score: 1, gpu: 'L4', vram_gib: 22.4, ram_gib: 16, vcpu: 4,
+      { type: 'g6.xlarge', score: 1, gpu: 'L4', vram_gib: 22.4, ram_gib: 16, vcpu: 4, store_gb: 250,
         inr_hour_spot: 13, inr_hour_ondemand: 85, fits_spot: true, fits_ondemand: true }]},
   ],
 };
@@ -304,6 +304,19 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('NOCAP | fit | ' + document.getElementById('b-fit').textContent.trim());
   out.push('NOCAP | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
   out.push('NOCAP | build | ' + (document.getElementById('b-build').disabled ? 'OFF' : 'on'));
+  // A g4dn.xlarge's disk, and a game bigger than all of it: not offered, and
+  // the row says why - ticking it could never work, whatever else is unticked.
+  const small = { ...DATA.library, disk_type: 'g4dn.xlarge', disk_gb: 116, selectable_gb: 96,
+                  games: [{ appid: '9', name: 'Big game', bytes: 175 * 1073741824, usd_month: 4.4, pushed: '2026-10-01T00:00:00Z' },
+                          { appid: '8', name: 'Small game', bytes: 3 * 1073741824, usd_month: 0.1, pushed: '2026-10-01T00:00:00Z' }],
+                  total_bytes: 178 * 1073741824 };
+  paintLibrary(small);
+  const boxes = [...document.querySelectorAll('#b-games input[type=checkbox]')];
+  out.push('SMALL | fit | ' + document.getElementById('b-fit').textContent.trim());
+  out.push('SMALL | big | ' + (boxes[0].disabled ? 'off' : 'on') + ' | ' + boxes[0].closest('tr').textContent.replace(/\s+/g, ' ').trim());
+  out.push('SMALL | small | ' + (boxes[1].disabled ? 'off' : 'on'));
+  boxes[0].closest('tr').click();
+  out.push('SMALL | clicked | ' + boxes[0].checked);
   paintLibrary(DATA.library);
   if (window.__errs.length) out.push('ERRORS: ' + window.__errs.join(' | '));
   const card = f => (document.querySelector('#b-machine-card [data-f=' + f + ']') || {}).textContent || '';
@@ -406,6 +419,11 @@ contains "  and counts what is picked, with no fraction of an unknown" \
 # The box checks the real limit at boot. Refusing the build here on a number
 # nobody has would be guessing in the other direction.
 contains "  and Build is still allowed"    "$OUT" "NOCAP | build | on"
+contains "the meter names the machine"     "$OUT" "SMALL | fit | Space on a g4dn.xlarge"
+contains "a game bigger than its disk is not offered" "$OUT" "SMALL | big | off"
+contains "  and says why"                  "$OUT" "Too big for a g4dn.xlarge (96 GB for games). Pick a machine with a bigger disk."
+contains "  a game that fits still is"     "$OUT" "SMALL | small | on"
+contains "  and clicking its row does nothing" "$OUT" "SMALL | clicked | false"
 
 echo "2. the table lives on Settings, and only there"
 contains "the Settings screen has it"  "$OUT" "TABLE s-chooser"
@@ -428,7 +446,7 @@ echo "4. what is configured is what is checked - all three at once"
 # .env here is ap-south-1 + g4dn.xlarge + GAME_SPOT=0, so exactly one radio is
 # checked and it is the on-demand price of that machine in that region.
 check "exactly one radio is checked" "$(grep -c 'CHECKED' <<<"$OUT" || true)" "1"
-contains "and it is Mumbai g4dn on demand" "$OUT" "g4dn.xlarge | NVIDIA T4, 16 GB | 9/10 | OFF ₹18 [Over your GPU limit] | CHECKED ₹51"
+contains "and it is Mumbai g4dn on demand" "$OUT" "g4dn.xlarge | NVIDIA T4, 16 GB | 125 GB | 9/10 | OFF ₹18 [Over your GPU limit] | CHECKED ₹51"
 
 echo "5. a cell you cannot pick says why"
 # The three refusals are different and lead to different actions.
@@ -437,7 +455,7 @@ contains "the region is not enabled"   "$OUT" "OFF ₹89 [Not switched on]"
 contains "no spot market at all"       "$OUT" "OFF none [No spot price]"
 # Hyderabad has both quotas, so both of its prices are selectable - this is the
 # control case proving the disabling is about quota, not about the region.
-contains "and a usable row is selectable" "$OUT" "Hyderabad | Close (19 ms) | g6.xlarge | NVIDIA L4, 22.4 GB | 1/10 | FREE ₹13 | FREE ₹85"
+contains "and a usable row is selectable" "$OUT" "Hyderabad | Close (19 ms) | g6.xlarge | NVIDIA L4, 22.4 GB | 250 GB | 1/10 | FREE ₹13 | FREE ₹85"
 
 echo "5b. Build states the choice without offering a second control"
 # The one line that matters, from the same rows the table uses, so the two
@@ -468,7 +486,8 @@ echo "8. the radios line up, and look like the rest of the window"
 contains "Settings is actually visible when measured" "$OUT" "VISIBLE | true"
 # Without the line above every rectangle is 0x0 at (0,0) and alignment passes
 # for free, so the measurement is checked for being a measurement at all.
-for col in 5 6; do
+# Columns 6 and 7: Game disk sits before the score since machines differ in it.
+for col in 6 7; do
   row=$(grep "^XCOL | $col | " <<<"$OUT")
   n=$(sed -E 's/.*n=([0-9]+).*/\1/' <<<"$row")
   d=$(sed -E 's/.*distinct=([0-9]+).*/\1/' <<<"$row")

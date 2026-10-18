@@ -287,9 +287,11 @@ for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.ge
   local avail_kb avail
   avail_kb=$(df --output=avail -k "$LIB" 2>/dev/null | tail -1 | tr -d ' ')
   avail=$(( ${avail_kb:-0} * 1024 ))
-  # CG_RESERVE_GB because a g6.2xlarge has 450 GB and this should not assume a
-  # g6.xlarge; CG_DISK_BUDGET to set the ceiling outright, which is how the
-  # tests exercise the skip path without a 300 GB sandbox.
+  # CG_RESERVE_GB is the laptop's GAME_DISK_RESERVE_GB, written into the conf
+  # at build; the free space is measured, never assumed for a type. 20 only on
+  # a box built before the setting reached it. CG_DISK_BUDGET sets the ceiling
+  # outright, which is how the tests exercise the skip path without a 300 GB
+  # sandbox.
   local reserve=$(( ${CG_RESERVE_GB:-20} * 1024 * 1024 * 1024 ))
   local budget=${CG_DISK_BUDGET:-$(( avail - reserve ))}
   (( budget < 0 )) && budget=0

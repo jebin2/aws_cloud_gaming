@@ -53,6 +53,8 @@ case "$args" in
   *"s3 ls"*--recursive*) cat "$LISTING"; [[ $args == *summarize* ]] && printf '\nTotal Objects: 6\n   Total Size: 81419400077\n' ;;
   *"s3 rm"*) exit 0 ;;
   *"s3 ls"*index.json*) [[ ${NO_INDEX:-0} == 1 ]] && exit 1; echo "index.json" ;;
+  # A g6.xlarge's local disk, as AWS sizes it.
+  *"describe-instance-types"*) echo 250 ;;
   *) exit 1 ;;
 esac
 FAKE
@@ -87,7 +89,16 @@ check    "  and when it was archived"  "$(jq_ games.0.pushed)" '"2026-09-13T09:1
 check    "the monthly cost"            "$(jq_ usd_month)" "3.2"
 check    "orphans counted separately"  "$(jq_ orphan_bytes)" "76419394933"
 check    "  with their own cost"       "$(jq_ orphan_usd_month)" "1.78"
-check    "what the disk can hold"      "$(jq_ selectable_gb)" "209"
+# The machine the next build makes: AWS's 250 GB is 233 GiB, less 20 kept free.
+check    "what the disk can hold"      "$(jq_ selectable_gb)" "213"
+check    "  for the machine configured" "$(jq_ disk_type)" '"g6.xlarge"'
+check    "  AWS's figure until measured" "$(jq_ disk_gb) $(jq_ disk_measured)" "233 false"
+# Once a machine of the type has run, cg status measured its /scratch: that
+# figure wins over AWS's, which is a little more than a formatted disk holds.
+mkdir -p "$T/home/.cache/cg" && printf 229 > "$T/home/.cache/cg/scratch-g6.xlarge"
+j=$(run "" list --json)
+check    "measured, the measurement"   "$(jq_ disk_gb) $(jq_ disk_measured) $(jq_ selectable_gb)" "229 true 209"
+rm -f "$T/home/.cache/cg/scratch-g6.xlarge"
 check    "  and no rendered table in it" "$(grep -c APPID <<<"$j")" "0"
 
 echo "2. clean shows what it would delete, and refuses without the word"

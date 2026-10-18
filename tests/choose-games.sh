@@ -13,6 +13,9 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 T=$(mktemp -d); pass=0; fail=0
 trap 'rm -rf "$T"' EXIT
+# The machine being built, as cg passes it (machine_disk_gb and the reserve
+# setting): a g6.xlarge's 229 GB disk, 20 kept free. The picker holds no size.
+export CG_DISK_GB="${CG_DISK_GB-229}" CG_RESERVE_GB="${CG_RESERVE_GB-20}"
 command -v script >/dev/null || { echo "  SKIP - util-linux 'script' not available"; exit 0; }
 
 check()    { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
@@ -201,5 +204,15 @@ check "no local copy in the chooser" "$(grep -cE 'cg-library-.*sha256sum' lib/ch
 # check matches its own pattern.
 check "  nor in this test"           "$(grep -E 'cg-library-.*sha256sum' "$0" | grep -vc 'grep -')" "0"
 contains "the chooser sources the helper" "$(cat lib/choose-games.sh)" "s3-region.sh"
+
+echo "9. the machine decides what fits, not a number written down"
+check "  no disk size in the chooser" "$(grep -cE 'CG_DISK_GB:-[0-9]' lib/choose-games.sh)" "0"
+# The fixture by now: 1 Diablo IV 160 GB, 2 Shakes and Fidget 2.5 GB.
+got=$(CG_DISK_GB=116 ask "1" "2")
+contains "a g4dn.xlarge refuses Diablo IV alone" "$(errs)" "over by"
+check    "  and takes what fits"   "$got" "438040"
+got=$(CG_DISK_GB= ask "1,2")
+contains "no size known: nothing refused" "$(errs)" "could not be read"
+check    "  the box restores what fits" "$got" "2344520,438040"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

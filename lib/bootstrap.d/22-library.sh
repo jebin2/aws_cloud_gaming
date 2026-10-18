@@ -30,7 +30,7 @@
 # moving this after it costs no measurable overlap with the driver install and
 # guarantees the box is reachable whatever happens here.
 progress "installing the S3 game library mirror"
-( cd /opt/cloud-gaming-host && bash ./install-library.sh '__S3_BUCKET__' steam '__CG_APPS__' '__CG_LOGIN__' ) \
+( cd /opt/cloud-gaming-host && bash ./install-library.sh '__S3_BUCKET__' steam '__CG_APPS__' '__CG_LOGIN__' '__CG_RESERVE_GB__' ) \
   || echo ">>> FAILED: library mirror install - games will not persist a stop"
 
 # The restore needs credentials from the instance profile. IMDSv2 needs a token,

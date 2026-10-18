@@ -1016,6 +1016,42 @@ stranded_spot_note() {  # stranded_spot_note <region> <instance-id>; prints noth
   }'
 }
 
+# --- the game disk -------------------------------------------------------------
+# Games go on the machine's own NVMe (/scratch), and how big that is depends on
+# the machine: 125 GB on a g4dn.xlarge, 250 GB on a g6.xlarge. It was written
+# down once as 229 GB - a g6.xlarge's - and every screen offered that much on a
+# g4dn.xlarge with 109 GB, where a 175 GB game cannot fit at all.
+#
+# machine_disk_gb <region> <type> -> "<GiB> measured|aws"
+# What the game disk holds for a machine of that type, in GiB: measured on a
+# real one once one has run (cg status writes it, cached per type - a type's
+# disk does not change), else AWS's own figure for the type, which is in GB
+# (10^9) and a little more than a formatted disk holds. Free: the AWS call is
+# describe-instance-types, cached too. Prints nothing for a type with no local
+# disk, or when AWS cannot be asked.
+cg_scratch_cache() { printf '%s/cg/scratch-%s' "${XDG_CACHE_HOME:-$HOME/.cache}" "$1"; }
+machine_disk_gb() {
+  local cache gb
+  cache=$(cg_scratch_cache "$2")
+  if [[ -s $cache ]]; then printf '%s measured' "$(cat "$cache")"; return 0; fi
+  if [[ -s $cache.aws ]]; then gb=$(cat "$cache.aws")
+  else
+    gb=$(aws ec2 describe-instance-types --region "$1" --instance-types "$2" \
+          --query 'InstanceTypes[0].InstanceStorageInfo.TotalSizeInGB' --output text 2>/dev/null) || gb=""
+    [[ $gb =~ ^[0-9]+$ ]] || return 1
+    mkdir -p "${cache%/*}" 2>/dev/null && printf '%s' "$gb" > "$cache.aws" 2>/dev/null
+  fi
+  printf '%s aws' "$(awk -v g="$gb" 'BEGIN{printf "%.0f", g*1e9/1073741824}')"
+}
+
+# --- how long a build takes ----------------------------------------------------
+# Measured, not promised: cg init records, when it finishes, the minutes from the
+# machine's launch to ready-to-play. Every "a build takes ..." reads this; with
+# no build measured yet it says no number at all. "10-20 min" was written in
+# six places and was true of one machine type, one region and one month.
+cg_last_build_min() { local f="${XDG_CACHE_HOME:-$HOME/.cache}/cg/last-build-min"; [[ -s $f ]] && cat "$f"; }
+cg_build_takes() { local m; m=$(cg_last_build_min); [[ -n $m ]] && printf 'the last one took %s min' "$m" || printf 'it takes a while'; }
+
 # --- notifications ---------------------------------------------------------------
 # GAME_NTFY_URL: a topic on ntfy.sh, or a full URL for any ntfy server. Prints the
 # URL to post to, or nothing - unset and malformed are both "off".

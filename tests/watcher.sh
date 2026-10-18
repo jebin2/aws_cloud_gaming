@@ -22,6 +22,8 @@ strip() { sed -E "s/\r//g; s/${ESC}\[[0-9;]*[A-Za-z]//g"; }
 
 mkdir -p "$T/bin" "$T/home/.ssh" "$T/host"
 cp cg "$T/cg"; cp -r lib "$T/lib"
+# The on-host limit is read from the machine's own script, not a number in cg.
+cp host/idle-watchdog.sh "$T/host/"
 cat > "$T/.env" <<'EOF'
 GAME_INSTANCE_ID=i-test
 GAME_REGION=ap-south-2

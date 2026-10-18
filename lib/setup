@@ -16,9 +16,10 @@ source lib/session.sh
 # shellcheck source=lib/pair.sh
 source lib/pair.sh
 
-REGION="${GAME_REGION:-ap-south-2}"
+# The default is the registry's (lib/config.sh), not a copy written here.
+REGION="${GAME_REGION:-$(source lib/config.sh && config_field GAME_REGION 3)}"
 TS_HOST="${GAME_TS_HOST:-gamevps}"
-TYPE="${GAME_INSTANCE_TYPE:-g6.xlarge}"
+TYPE="${GAME_INSTANCE_TYPE:-$(source lib/config.sh && config_field GAME_INSTANCE_TYPE 3)}"
 
 # Pick up a local .env first, so keys kept there are not prompted for again.
 # Read KEY=VALUE lines rather than sourcing the file: `source` executes any
@@ -275,7 +276,9 @@ status_facts() {
   f archive.expiry_days "$(cw_expiry_days)"
 
   # What .env decides, as facts - never the values of the secrets themselves.
-  f config.disk_gb "${GAME_DISK_GB:-50}"
+  f config.disk_gb "${GAME_DISK_GB:-$(source lib/config.sh && config_field GAME_DISK_GB 3)}"
+  # Minutes the last build took, launch to ready - measured by cg init.
+  f build.last_min "$(cg_last_build_min)"
   f config.spot "${GAME_SPOT:-auto}"
   f config.instance_type "$TYPE"
   f config.notifications "$([[ -n ${GAME_NTFY_URL:-} ]] && echo yes || echo no)"
@@ -342,18 +345,27 @@ status_facts() {
   if [[ -n ${id:-} && ${state:-} == running ]]; then
     [[ -f "${XDG_CACHE_HOME:-$HOME/.cache}/cg/built-$id" ]] && f box.built yes || f box.built no
     local ready_mark="${XDG_CACHE_HOME:-$HOME/.cache}/cg/ready-$id"
-    if [[ -f $ready_mark ]]; then
-      f box.ready yes
+    # The same one ssh also measures the game disk, once per machine type:
+    # what /scratch holds is what the next build of that type can restore
+    # (machine_disk_gb). Used plus available, as Steam - not root - sees it.
+    local scratch_mark; scratch_mark=$(cg_scratch_cache "${itype:-unknown}")
+    local r="no" sz=""
+    if [[ -f $ready_mark && -s $scratch_mark ]]; then
+      r=yes
     elif [[ $node != *offline* && -n $node && -f "$HOME/.ssh/${TS_HOST}.pem" ]]; then
-      local r
-      r=$(ssh -i "$HOME/.ssh/${TS_HOST}.pem" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
+      read -r r sz < <(ssh -i "$HOME/.ssh/${TS_HOST}.pem" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
             -o BatchMode=yes "ubuntu@$(awk '{print $1}' <<<"$node")" \
-            'test -f /var/lib/cloud-gaming-ready && echo yes || echo no' 2>/dev/null) || r=""
+            'r=no; test -f /var/lib/cloud-gaming-ready && r=yes
+             echo "$r $(mountpoint -q /scratch && df -B1 --output=used,avail /scratch | tail -1 | awk "{print \$1+\$2}")"' \
+            2>/dev/null) || r=""
       [[ $r == yes ]] && { mkdir -p "${ready_mark%/*}" && : > "$ready_mark"; } 2>/dev/null
-      f box.ready "$r"
-    else
-      f box.ready no
+      [[ $sz =~ ^[0-9]+$ ]] && (( sz > 0 )) && [[ -n ${itype:-} ]] \
+        && { mkdir -p "${scratch_mark%/*}" && awk -v b="$sz" 'BEGIN{printf "%d", b/1073741824}' > "$scratch_mark"; } 2>/dev/null
     fi
+    # Ready once seen stays ready, answering or not; never seen, the answer
+    # stands - and an ssh that did not answer is unknown (empty), not "no".
+    [[ -f $ready_mark ]] && r=yes
+    f box.ready "$r"
   fi
 }
 
@@ -493,7 +505,7 @@ status_json() {
   for k in "${!F[@]}"; do printf '%s\t%s\n' "$k" "${F[$k]}"; done | python3 -c '
 import json, sys
 out = {"host": sys.argv[1], "region": sys.argv[2], "instance_type": sys.argv[3]}
-NUM = {"config.disk_gb","quota.vcpus","quota.on_demand","quota.spot","res.volumes_gb","res.snapshots",
+NUM = {"config.disk_gb", "build.last_min","quota.vcpus","quota.on_demand","quota.spot","res.volumes_gb","res.snapshots",
        "res.snapshots_gb", "box.disk_gb",
        "spec.vcpus","spec.memory_mib","spec.gpu_memory_mib",
        "session.pid","session.started","session.age_s",
@@ -863,9 +875,9 @@ clean() {
 
 # The nuclear option. Kept separate from `clean` so it can never be a surprise.
 rebuild() {
-  echo "This destroys the instance and its disk, then builds a new one (10-20 min)."
+  echo "This destroys the instance and its disk, then builds a new one ($(cg_build_takes))."
   echo "You will have to pair Moonlight again. No image is saved - the point is"
-  echo "a clean 50 GB baseline."
+  echo "a clean ${GAME_DISK_GB:-$(source lib/config.sh && config_field GAME_DISK_GB 3)} GB baseline."
   echo
   echo "Note: the unattended build has not yet completed end-to-end in one run."
   cg_confirm rebuild "rebuild from scratch? [y/N] " N || { echo "cancelled"; exit 0; }
@@ -1526,7 +1538,7 @@ print("%d\t%s" % (sum(int(a.get("bytes", 0)) for a in apps), label))' 2>/dev/nul
   export CG_RESTORE_BYTES="${CG_RESTORE_BYTES:-0}" CG_RESTORE_LABEL="${CG_RESTORE_LABEL:-games}"
 fi
 
-say "building the box - live progress below (10-20 min)"
+say "building the box - live progress below ($(cg_build_takes))"
 stream_build "ubuntu@$TS_NODE" "$KEY" \
   || { cg_notify "build failed" "The box is still running and billing. Look at: cg log build" high warning
        die "the build did not finish. The instance is still running and still
@@ -1648,7 +1660,7 @@ if wait_for_steam "ubuntu@$TS_NODE" "$KEY" 1500; then
   if $SSH "grep -q '$GAMES_LIB' ~/.steam/steam/config/libraryfolders.vdf" 2>/dev/null; then
     STEAM_MSG="installed, game library on $GAMES_LIB registered, pinned to the dock. Log in and it is ready."
   else
-    STEAM_MSG="installed and pinned, but the game library is NOT registered - games would fill the 50 GB root disk. Add $GAMES_LIB in Steam > Settings > Storage."
+    STEAM_MSG="installed and pinned, but the game library is NOT registered - games would fill the ${GAME_DISK_GB:-$(source lib/config.sh && config_field GAME_DISK_GB 3)} GB root disk. Add $GAMES_LIB in Steam > Settings > Storage."
   fi
 fi
 
@@ -1660,6 +1672,15 @@ fi
 # pairing stuck: a failed pairing is said above, and `cg pair` is its fix.
 mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/cg" 2>/dev/null \
   && : > "${XDG_CACHE_HOME:-$HOME/.cache}/cg/built-${GAME_INSTANCE_ID:-none}" 2>/dev/null || true
+# How long it took, launch to ready, for every "a build takes" that follows. From
+# the instance's own launch time, so a build picked up again after the app was
+# closed still counts from the start.
+_launched=$(aws ec2 describe-instances --region "$REGION" --instance-ids "${GAME_INSTANCE_ID:-none}" \
+  --query 'Reservations[0].Instances[0].LaunchTime' --output text 2>/dev/null) || _launched=""
+_launched_s=$(date -d "$_launched" +%s 2>/dev/null) || _launched_s=""
+if [[ -n $_launched_s ]]; then
+  printf '%d' $(( ($(date +%s) - _launched_s + 59) / 60 )) > "${XDG_CACHE_HOME:-$HOME/.cache}/cg/last-build-min" 2>/dev/null || true
+fi
 
 cg_notify "box ready" "Built, paired and running - it bills by the hour. Play with: cg open" default video_game
 _cg_section_end 0
