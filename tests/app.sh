@@ -409,9 +409,9 @@ contains "  capacity is shown beside price" "$js" "row.score >= 7 ? 'good'"
 contains "choosing one writes the type"   "$js" "'config', 'set', 'GAME_INSTANCE_TYPE'"
 contains "  and the purchase model"       "$js" "'config', 'set', 'GAME_SPOT'"
 contains "  and the region, last"         "$js" "if (moving) await runCg(['config', 'set', 'GAME_REGION'"
-contains "  after confirming the rate"    "$js" 'Use ${row.type}, ${spot ? '"'"'spot'"'"' : '"'"'standard'"'"'}?' 
-contains "  saying what each model means" "$js" "starts even when spot machines run out"
-contains "  and warning when capacity says no" "$js" "likely be refused however cheap"
+contains "  after confirming the rate"    "$js" 'title: `Use ${row.type} in ${placeName(row.region)}?`' 
+contains "  saying what each model means" "$js" "Never taken back mid-game."
+contains "  and warning when capacity says no" "$js" "a spot start will likely be refused."
 contains "a running box locks every pick" "$js" "const usable = !why && !boxNow"
 # The three settings it owns get no second editor, or the dropdowns are back.
 contains "settings defer to the table"    "$js" "CHOSEN_IN_TABLE"
@@ -474,7 +474,7 @@ contains "  which only emails"            "$js" "AWS emails you if you pass it; 
 lacks    "  no dollar column"             "$html" "TOTAL ($)"
 check    "  no dollar helper left"        "$(grep -c 'const money = ' app/renderer/app.js)" "0"
 contains "  what recurs, every month"     "$html" 'id="c-recurring-card"'
-contains "  and what the bill says beyond it" "$js" "(d.storage || {}).unknown_usd_month"
+lacks    "  and no guess at what the bill says beyond it" "$js" "unknown_usd_month"
 contains "  and the egress hours from your bitrate" "$js" "setting('GAME_BITRATE_KBPS', 20000)"
 check    "  reading the same registry"    "$(grep -c 'function setting(key, fallback)' app/renderer/app.js)" "1"
 
@@ -533,7 +533,7 @@ contains "  one Recurring cost card for both pages" "$js" 'renderRecurring($('"'
 contains "  and on Spending"             "$js" 'renderRecurring($('"'"'c-recurring-card'"'"'))'
 contains "  one This month card for both" "$js" 'renderMonth($('"'"'d-month-card'"'"')'
 contains "  building means a build is running" "$js" "jobsFor('init')"
-contains "the machine strip"             "$js" "GB VRAM"
+contains "the machine strip"             "$js" 'gpuName(row.gpu, row.vram)'
 contains "the archive repaints the dashboard" "$js" "function paintArchiveCard() { paintDash(); }"
 contains "spend comes from a fetch"      "$js" "function paintSpend(d)"
 # Two places ask for it, both a click: the dashboard button, and the Cost

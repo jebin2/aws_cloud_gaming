@@ -277,9 +277,9 @@ contains "  a price cell is the control"     "$js" "function priceCell"
 # A region change is the most expensive setting in the app and the least
 # obviously so, because nothing visibly breaks until the next build reinstalls
 # 163GB it could have kept.
-contains "moving region asks first"          "$js" "Run in \${placeName(row.region)} on \${row.type}?"
-contains "  and says the archive stays put"  "$js" "Your saved games stay in"
-contains "  and that nothing is deleted"     "$js" "move them from the Games page"
+contains "moving region asks first"          "$js" 'Use ${row.type} in ${placeName(row.region)}?'
+contains "  and says the archive stays put"  "$js" "will not be on a machine in "
+contains "  and that nothing is deleted"     "$js" "Move them on the Games page"
 contains "  and is marked destructive"       "$js" "danger: moving"
 # Three settings, one decision - written together, region last.
 contains "the type is written"               "$js" "'config', 'set', 'GAME_INSTANCE_TYPE'"

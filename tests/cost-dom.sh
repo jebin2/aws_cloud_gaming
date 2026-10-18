@@ -216,9 +216,10 @@ check    "an idle day says so"           "$(row 'REAL ROW1')" "REAL ROW1 | 13 Oc
 contains "the month row adds up"         "$(row 'REAL ROW3')" "Month so far / 2.4 h"
 contains "  to the same total"           "$(row 'REAL ROW3')" "/ ₹167"
 
-echo "3. storage the bill charges that cg cannot see"
-contains "the warning is said"           "$(row 'REAL UNKNOWN')" "AWS charges ₹370 a month for storage this app cannot find"
-contains "  and counted in standby"      "$(row 'REAL c-standby')" "₹370 a month"
+echo "3. storage the bill charges that cg cannot see is not guessed at"
+# The bill runs days behind: a game just deleted read as lost storage.
+check    "no lost-storage warning"       "$(row 'REAL UNKNOWN')" "REAL UNKNOWN | hidden"
+lacks    "  nor counted in the total"    "$(row 'REAL c-standby')" "₹370"
 contains "no saved games says None"      "$(row 'REAL c-bills')" "Saved games →None"
 # A disk left behind is a row only when there is one; "none" only raised
 # the question of what it was.

@@ -909,15 +909,12 @@ function renderRecurring(box, { hint } = {}) {
   if (!p) { head.textContent = '—'; sub.textContent = hint || ''; return; }
   const { d, inr, r } = p;
   const standby = d.standby || {}, res = d.resources || {}, arch = d.archive || {};
-  // Games cg found in other places explain some or all of what the bill says
-  // beyond the archive in use; only what is left after them is a mystery.
-  const unknown = (d.storage || {}).unknown_usd_month || 0;
+  // Games cg found in other places bill like any others. What the bill says
+  // beyond those is not guessed at here: the bill runs days behind, so a game
+  // just deleted read as "storage this app cannot find" for three days.
   const away = elsewherePlaces().filter(x => x.usd_month);
   const awayUsd = away.reduce((a, x) => a + x.usd_month, 0);
-  const left = Math.max(0, unknown - awayUsd);
-  // Under Rs 10 a month is requests and rounding, not something left behind.
-  const strayed = inr && left * inr >= 10;
-  head.textContent = standby.usd_month != null ? `${r(standby.usd_month + awayUsd + (strayed ? left : 0))} a month` : '—';
+  head.textContent = standby.usd_month != null ? `${r(standby.usd_month + awayUsd)} a month` : '—';
   const list = el('div', 'flex flex-col mt-space-sm');
   list.dataset.f = 'rows';
   const line = (label, value, go) => {
@@ -953,13 +950,6 @@ function renderRecurring(box, { hint } = {}) {
         : `Playing adds ${rsh(play)} an hour for the machine.`);
     pl.dataset.f = 'play';
     box.append(pl);
-  }
-  if (strayed) {
-    const w = el('p', 'font-code-sm text-code-sm text-error mt-space-sm',
-      `AWS charges ${r(left)} a month for storage this app cannot find. `
-      + 'Most likely games left behind in an earlier location.');
-    w.dataset.f = 'unknown';
-    box.append(w);
   }
 }
 
@@ -5330,23 +5320,22 @@ async function chooseMachine(row, spot) {
   if (row.region === cur.region && row.type === cur.type && spot === cur.spot) return;
   const price = spot ? row.spot : row.od;
   const moving = row.region !== cur.region;
-  const body =
-    (row.gpu ? `${row.gpu}${row.vram ? `, ${row.vram} GB VRAM` : ''}. ` : '')
-    + (price != null ? `About ₹${price} an hour. ` : '')
-    + (spot ? 'Spot is far cheaper, but it cannot start when AWS has no spare machines.'
-            : 'Standard costs the full rate and starts even when spot machines run out.')
-    + (row.score != null && row.score <= 2
-        ? `\n\nAWS rates spare ${row.type} machines here ${row.score}/10, so a spot start will `
-          + 'likely be refused however cheap it looks.' : '')
-    + (moving
-        ? `\n\nYour machine will run in ${placeName(row.region)}. Your saved games stay in `
-          + `${cur.region ? placeName(cur.region) : 'the old location'}: move them from the Games page `
-          + '(a one-time cost), or the next build downloads them from Steam again.'
-        : '')
-    + '\n\nThis applies to the next build. A machine already running is not changed.';
+  // Short lines in the words the table uses: what it is, what it costs, the
+  // one catch. A move always says what it leaves behind: saved games belong to
+  // a location, and a machine elsewhere cannot reach them.
+  const body = [
+    [row.type, row.gpu && gpuName(row.gpu, row.vram)].filter(Boolean).join(' · '),
+    `${spot ? 'Spot' : 'Standard'}${price != null ? ` · ${rsh(withAddress(price))} an hour while it runs` : ''}`,
+    spot ? 'Much cheaper, but AWS can take it back mid-game.' : 'Never taken back mid-game.',
+    spot && row.score != null && row.score <= 2
+      ? `Spare machines are scarce here (${row.score}/10), so a spot start will likely be refused.` : '',
+    moving
+      ? `Games saved in ${cur.region ? placeName(cur.region) : 'other locations'} will not be on a machine in `
+        + `${placeName(row.region)}. Move them on the Games page, or Steam downloads them again.` : '',
+    boxNow ? 'The machine running now is not changed. This is for the next build.' : '',
+  ].filter(Boolean).join('\n\n');
   const ok = await askConfirm({
-    title: moving ? `Run in ${placeName(row.region)} on ${row.type}?`
-                  : `Use ${row.type}, ${spot ? 'spot' : 'standard'}?`,
+    title: `Use ${row.type} in ${placeName(row.region)}?`,
     body, yes: moving ? 'Move' : 'Use it', danger: moving,
   });
   if (!ok) { paintChooser(); return; }            // put the old choice back
