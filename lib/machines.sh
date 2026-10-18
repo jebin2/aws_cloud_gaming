@@ -11,9 +11,53 @@
 # describe-instance-types, describe-spot-price-history, service-quotas and the
 # Pricing API cost nothing. Nothing here launches, changes or reserves anything.
 
-# The GPU families this rig can use. Not a preference - a filter, so the list is
-# GPU machines rather than every shape in the region.
-MACHINES_FAMILIES="${CG_MACHINE_FAMILIES:-g4dn g5 g6 g6e gr6}"
+# machines_gpu_types <region> - "<type> <vcpu>" for every machine AWS offers
+# there that can run this rig: an NVIDIA GPU made for graphics work, a whole
+# one, on x86. Each of those is AWS's own description of the type -
+# Manufacturer, Workloads, GpuPartitionSize - and not a list of names: the list
+# this replaced (g4dn g5 g6 g6e gr6) had already missed g7e, AWS's newest.
+#   graphics  compute-only GPUs (the p family) list no graphics workload
+#   whole     a fractional GPU (g6f, gr6f) needs NVIDIA's vGPU driver, which the
+#             build does not install
+#   x86       Steam and Proton; the Graviton g5g is ARM
+# Free (describe-instance-types), and kept for a day per region, so the
+# machines table and the sweep do not ask twice. CG_MACHINE_TYPES, a space
+# separated list, replaces the answer - the tests, or a deliberate short list.
+machines_gpu_types() {
+  local region=$1 cache out
+  if [[ -n ${CG_MACHINE_TYPES:-} ]]; then
+    printf '%s\n' $CG_MACHINE_TYPES | awk '{print $1, 0}'; return 0
+  fi
+  cache="${XDG_CACHE_HOME:-$HOME/.cache}/cg/gpu-types-$region"
+  if [[ -s $cache ]] && (( $(date +%s) - $(stat -c %Y "$cache" 2>/dev/null || echo 0) < 86400 )); then
+    cat "$cache"; return 0
+  fi
+  out=$(aws ec2 describe-instance-types --region "$region" \
+          --filters Name=processor-info.supported-architecture,Values=x86_64 \
+          --query 'InstanceTypes[?GpuInfo].{t:InstanceType,v:VCpuInfo.DefaultVCpus,g:GpuInfo.Gpus[0]}' \
+          --output json 2>/dev/null | python3 -c '
+import json, sys
+try: rows = json.load(sys.stdin)
+except Exception: sys.exit(1)
+for r in rows:
+    g = r.get("g") or {}
+    if g.get("Manufacturer") != "NVIDIA": continue
+    if "graphics" not in (g.get("Workloads") or []): continue
+    if float(g.get("GpuPartitionSize") or 1) < 1: continue
+    print(r["t"], r.get("v") or 0)' | sort -u) || out=""
+  [[ -n $out ]] || { [[ -s $cache ]] && cat "$cache"; return 0; }
+  mkdir -p "${cache%/*}" 2>/dev/null && printf '%s\n' "$out" > "$cache" 2>/dev/null
+  printf '%s\n' "$out"
+}
+
+# machines_shortlist <region> - the smallest of each family: one row per kind of
+# machine, for a scan across every region, where every size of every family
+# would be hundreds of price lookups for rows that mostly cannot be rented.
+machines_shortlist() {
+  machines_gpu_types "$1" | awk '{split($1, p, "."); f = p[1]
+    if (!(f in best) || $2 + 0 < v[f]) { best[f] = $1; v[f] = $2 + 0 } }
+    END { for (f in best) print best[f] }' | sort
+}
 
 # The G/VT vCPU quotas, both purchase models. Either may be 0.
 machines_quota() { # machines_quota <region> -> "<ondemand> <spot>"
@@ -63,12 +107,14 @@ machines_json() { # machines_json <region>
   # than written down twice.
   configured="${GAME_INSTANCE_TYPE:-$(config_field GAME_INSTANCE_TYPE 3 2>/dev/null)}"
 
-  # Offerings first: a type absent from the region must not appear at all.
-  local filt=() f
-  for f in $MACHINES_FAMILIES; do filt+=("$f.*"); done
-  types=$(aws ec2 describe-instance-type-offerings --region "$region" \
+  # Offerings first: a type absent from the region must not appear at all. The
+  # types asked about are the ones AWS says can game (machines_gpu_types).
+  local gpu
+  gpu=$(machines_gpu_types "$region" | awk '{print $1}' | paste -sd, -)
+  types=""
+  [[ -n $gpu ]] && types=$(aws ec2 describe-instance-type-offerings --region "$region" \
             --location-type availability-zone \
-            --filters "Name=instance-type,Values=$(IFS=,; echo "${filt[*]}")" \
+            --filters "Name=instance-type,Values=$gpu" \
             --query 'InstanceTypeOfferings[].[InstanceType,Location]' --output text 2>/dev/null) || types=""
 
   if [[ -z ${types//[[:space:]]/} ]]; then

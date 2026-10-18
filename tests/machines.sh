@@ -28,7 +28,13 @@ args="$*"
 case "$args" in
   *get-service-quota*L-DB2E81BA*)  echo "${OD_Q:-4.0}" ;;
   *get-service-quota*L-3819A6DF*)  echo "${SP_Q:-4.0}" ;;
+  # Which machines can game, from AWS's description of each: two that can and a
+  # bigger one, and four that cannot - a fractional GPU, a compute-only one, an
+  # AMD one. Only the first three may ever be asked about again.
+  *"InstanceTypes[?GpuInfo]"*)
+    echo '[{"t":"g6.xlarge","v":4,"g":{"Manufacturer":"NVIDIA","Workloads":["ml-ai","graphics"],"GpuPartitionSize":1.0}},{"t":"g6e.xlarge","v":4,"g":{"Manufacturer":"NVIDIA","Workloads":["ml-ai","graphics"],"GpuPartitionSize":1.0}},{"t":"g6.2xlarge","v":8,"g":{"Manufacturer":"NVIDIA","Workloads":["ml-ai","graphics"],"GpuPartitionSize":1.0}},{"t":"g6f.large","v":2,"g":{"Manufacturer":"NVIDIA","Workloads":["ml-ai","graphics"],"GpuPartitionSize":0.125}},{"t":"p4d.24xlarge","v":96,"g":{"Manufacturer":"NVIDIA","Workloads":["ml-ai"],"GpuPartitionSize":1.0}},{"t":"g4ad.xlarge","v":4,"g":{"Manufacturer":"AMD","Workloads":["graphics"],"GpuPartitionSize":1.0}}]' ;;
   *describe-instance-type-offerings*)
+    [[ $args == *g6f*||$args == *p4d*||$args == *g4ad* ]] && echo "ASKED-ABOUT-UNFIT $args" >> "${ASKED:-/dev/null}"
     [[ -n ${NO_OFFERS:-} ]] && exit 0
     printf 'g6.xlarge\tap-south-2a\ng6.xlarge\tap-south-2b\n'
     printf 'g6e.xlarge\tap-south-2a\ng6e.xlarge\tap-south-2b\n'
@@ -135,7 +141,19 @@ check "no instance type literals" \
       "$(grep -cE "g6\.xlarge|g6e\.|L40S" lib/machines.sh)" "0"
 # To the paisa, and no rate written down: with none known the rupees are null.
 check "no INR rate literal"  "$(grep -c 'INR_PER_USD:-[0-9]' lib/machines.sh)" "0"
-contains "the families are overridable" "$(cat lib/machines.sh)" "CG_MACHINE_FAMILIES"
+# Which machines can game is AWS's answer, not a list kept here.
+check    "no family list"               "$(grep -v '^\s*#' lib/machines.sh | grep -c 'g4dn g5 g6')" "0"
+j=$(ASKED="$T/asked" run --json)
+check    "the machines that can game are the ones offered" \
+         "$(jq_ '",".join(sorted(m["type"] for m in d["machines"]))' <<<"$j")" "g6.2xlarge,g6.xlarge,g6e.xlarge"
+check    "  a fractional, compute-only or AMD GPU is never even asked about" \
+         "$(cat "$T/asked" 2>/dev/null | wc -l)" "0"
+check    "the sweep compares the smallest of each family" \
+         "$(PATH="$T/bin:$PATH" bash -c 'source lib/machines.sh; machines_shortlist ap-south-2 | LC_ALL=C sort | paste -sd" " -')" "g6.xlarge g6e.xlarge"
+check    "  kept for the day, so it is asked once" \
+         "$(ls "$HOME/.cache/cg/gpu-types-ap-south-2" >/dev/null 2>&1 && echo cached)" "cached"
+check    "CG_MACHINE_TYPES still replaces it" \
+         "$(CG_MACHINE_TYPES="g6.xlarge" bash -c 'source lib/machines.sh; machines_gpu_types x | cut -d" " -f1')" "g6.xlarge"
 
 echo "8. the sandboxes know what cg sources"
 # Adding lib/machines.sh to cg broke two suites that copy a fixed list of lib

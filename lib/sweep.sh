@@ -26,9 +26,17 @@
 # connection to a public endpoint without touching an AWS API at all. Nothing
 # here launches, reserves, enables or changes anything.
 
-# The 4-vCPU shapes, because a 4-vCPU quota cannot reach anything larger and a
-# sweep of every size would be 200 price lookups for rows nobody can rent.
-CG_SWEEP_TYPES="${CG_SWEEP_TYPES:-g4dn.xlarge g5.xlarge g6.xlarge g6e.xlarge}"
+# Which machines the sweep compares: the smallest of each family AWS says can
+# game (machines_shortlist, lib/machines.sh), in the region the machine is built
+# in and the one the sweep asks from - not four names written here, which had
+# missed g7e. CG_SWEEP_TYPES set by hand still wins.
+sweep_types() {
+  if [[ -n ${CG_SWEEP_TYPES:-} ]]; then printf '%s' "$CG_SWEEP_TYPES"; return 0; fi
+  { machines_gpu_types "${REGION:-${GAME_REGION:-}}"; machines_gpu_types "$(sweep_from)"; } \
+    | awk 'NF { split($1, p, "."); f = p[1]
+                if (!(f in best) || $2 + 0 < v[f]) { best[f] = $1; v[f] = $2 + 0 } }
+           END { for (f in best) print best[f] }' | sort | paste -sd' ' -
+}
 # NVIDIA's own requirement for GeForce NOW, and the number the research
 # converges on: past this a stream is not worth launching.
 CG_SWEEP_MAX_MS="${CG_SWEEP_MAX_MS:-80}"
@@ -48,11 +56,15 @@ _SWEEP_SRC=""
 sweep_from() {
   if [[ -n ${CG_SWEEP_FROM:-} ]]; then printf '%s' "$CG_SWEEP_FROM"; return 0; fi
   if [[ -n $_SWEEP_SRC ]]; then printf '%s' "$_SWEEP_SRC"; return 0; fi
-  local c
+  local c probe
   for c in "${REGION:-${GAME_REGION:-}}" $CG_SWEEP_FALLBACKS; do
     [[ -n $c ]] || continue
+    # Any machine AWS offers there will do: the question is whether the call
+    # exists in this region at all.
+    probe=$(machines_gpu_types "$c" | awk 'NR == 1 {print $1}')
+    [[ -n $probe ]] || continue
     if aws ec2 get-spot-placement-scores --region "$c" \
-         --instance-types g4dn.xlarge --target-capacity 1 --region-names "$c" \
+         --instance-types "$probe" --target-capacity 1 --region-names "$c" \
          --query 'SpotPlacementScores' --output text >/dev/null 2>&1; then
       _SWEEP_SRC=$c; printf '%s' "$c"; return 0
     fi
@@ -127,6 +139,12 @@ sweep_city() { # sweep_city <region>
 # sweep_json - the whole sweep, as one object.
 sweep_json() {
   local work rc=0; work=$(mktemp -d) || return 1
+  local CG_SWEEP_TYPES; CG_SWEEP_TYPES=$(sweep_types)
+  if [[ -z $CG_SWEEP_TYPES ]]; then
+    rm -rf "$work"
+    printf '{"error":"AWS did not say which machines it offers - check your AWS credentials","regions":[]}\n'
+    return 0
+  fi
 
   sweep_regions > "$work/regions"
   if [[ ! -s $work/regions ]]; then

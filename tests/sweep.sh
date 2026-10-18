@@ -71,6 +71,9 @@ case "$args" in
     esac ;;
   *get-service-quota*L-DB2E81BA*) echo "${OD_Q:-4.0}" ;;
   *get-service-quota*L-3819A6DF*) echo "${SP_Q:-0.0}" ;;
+  # The machines that can game, as AWS describes them; the sweep compares the
+  # smallest of each family, and never the fractional g6f.
+  *"InstanceTypes[?GpuInfo]"*) echo '[{"t":"g4dn.xlarge","v":4,"g":{"Manufacturer":"NVIDIA","Workloads":["graphics"],"GpuPartitionSize":1.0}},{"t":"g4dn.2xlarge","v":8,"g":{"Manufacturer":"NVIDIA","Workloads":["graphics"],"GpuPartitionSize":1.0}},{"t":"g5.xlarge","v":4,"g":{"Manufacturer":"NVIDIA","Workloads":["graphics"],"GpuPartitionSize":1.0}},{"t":"g6.xlarge","v":4,"g":{"Manufacturer":"NVIDIA","Workloads":["graphics"],"GpuPartitionSize":1.0}},{"t":"g6e.xlarge","v":4,"g":{"Manufacturer":"NVIDIA","Workloads":["graphics"],"GpuPartitionSize":1.0}},{"t":"g6f.large","v":2,"g":{"Manufacturer":"NVIDIA","Workloads":["graphics"],"GpuPartitionSize":0.125}}]' ;;
   *describe-instance-type-offerings*)
     case "$args" in *home-region-1*) printf 'g6.xlarge\n' ;;
                     *near-region-1*) printf 'g4dn.xlarge\n' ;; esac ;;
