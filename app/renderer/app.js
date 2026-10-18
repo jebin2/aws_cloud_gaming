@@ -926,9 +926,10 @@ function renderRecurring(box, { hint } = {}) {
     list.append(row);
   };
   // One row for saved games, wherever they are; the Games page has them one by one.
+  // With none saved there is nothing to charge and nothing to open, so no row.
   const savedBytes = (arch.bytes || 0) + away.reduce((a, x) => a + (x.bytes || 0), 0);
   const savedUsd = (standby.archive_usd_month || 0) + awayUsd;
-  line('Saved games', savedBytes ? `${r(savedUsd)} a month` : 'None', () => goView('library'));
+  if (savedBytes) line('Saved games', `${r(savedUsd)} a month`, () => goView('library'));
   // The machine as the bill saw it: by the hour while it ran, its disk by the
   // month while stopped. Otherwise only a disk a deleted machine left behind.
   if (res.instance) {
@@ -940,6 +941,11 @@ function renderRecurring(box, { hint } = {}) {
     line('Disk left by a deleted machine', `${res.volumes_gb} GB · ${r(standby.volumes_usd_month)} a month`);
   }
   if (res.snapshots_gb) line('Disk copies', `${res.snapshots_gb} GB · ${r(standby.snapshots_usd_month)} a month`);
+  if (!list.children.length) {
+    const none = el('p', 'font-code-sm text-code-sm text-outline', 'Nothing is stored, so nothing is charged.');
+    none.dataset.f = 'none';
+    list.append(none);
+  }
   box.append(list);
   // What playing adds on top: the machine, by the hour.
   const play = machineFacts().price;

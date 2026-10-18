@@ -220,7 +220,8 @@ echo "3. storage the bill charges that cg cannot see is not guessed at"
 # The bill runs days behind: a game just deleted read as lost storage.
 check    "no lost-storage warning"       "$(row 'REAL UNKNOWN')" "REAL UNKNOWN | hidden"
 lacks    "  nor counted in the total"    "$(row 'REAL c-standby')" "₹370"
-contains "no saved games says None"      "$(row 'REAL c-bills')" "Saved games →None"
+lacks    "no saved games, no Saved games row" "$(row 'REAL c-bills')" "Saved games"
+contains "  and nothing stored says so"  "$(row 'REAL c-bills')" "Nothing is stored, so nothing is charged."
 # A disk left behind is a row only when there is one; "none" only raised
 # the question of what it was.
 lacks    "  and no empty disk row"         "$(row 'REAL c-bills')" "disk"
