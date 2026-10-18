@@ -165,6 +165,18 @@ cat > "$T/r/probe.js" <<'PROBE'
     restoreBill();
     out.push('RESTORED | ' + text('c-month') + ' ' + age()
              + ' expect=' + (Date.now() - Date.parse(kept.at) > 86400000));
+    // The app closed in the middle of a build: the box runs, but has not set
+    // itself up. It is building, not ready - no Play - and the build is picked
+    // up again, once, without leaving the page.
+    const card = () => ['title', 'sub'].map(f => (document.querySelector('#d-machine-card [data-f=' + f + ']') || {}).textContent).join(' / ');
+    const onPage = view;
+    window.__ran = [];
+    const half = { id: 'i-half', state: 'running', type: 'g6.xlarge', lifecycle: 'spot', launched: new Date().toISOString(), ready: false, built: false };
+    paintStatus({ box: half, rates: {}, budget: {}, config: {} });
+    out.push('HALF | ' + card() + ' | play=' + !document.getElementById('d-open').hidden
+             + ' | ran=' + window.__ran.filter(r => r.startsWith('init')).length + ' | stayed=' + (view === onPage));
+    paintStatus({ box: half, rates: {}, budget: {}, config: {} });
+    out.push('HALF AGAIN | ran=' + window.__ran.filter(r => r.startsWith('init')).length);
   } catch (e) { out.push('THREW | ' + e.message + ' ' + e.stack); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -266,6 +278,11 @@ contains "playing adds the machine, by the hour" "$(row PLAY)" "Playing adds ₹
 check    "a machine not built yet: the spread across zones" "$(row PLANNED)" "PLANNED | ₹11.77–₹16.77"
 check    "  one that runs: its own zone, address and disk"  "$(row 'IN ZONE')" "IN ZONE | ₹16.77"
 check    "  the disk counts by its size"  "$(row 'BIG DISK')" "BIG DISK | ₹18.03"
+contains "closed mid-build: the card says it is building" "$(row HALF)" "HALF | Building your machine"
+contains "  and offers no Play"            "$(row HALF)" "play=false"
+contains "  the build is picked up again"  "$(row HALF)" "ran=1"
+contains "  without leaving the page"      "$(row HALF)" "stayed=true"
+check    "  once, not on every status"     "$(row 'HALF AGAIN')" "HALF AGAIN | ran=1"
 contains "status after a Refresh reaches Spending's card too" "$(row 'SAME PLAY')" "Playing adds ₹16 an hour for the machine. == Playing adds ₹16 an hour for the machine."
 contains "a stopped machine is its own row"  "$(row STOPPED)" "Machine (stopped) →₹433 a month"
 lacks    "  not a disk left behind"           "$(row STOPPED)" "Disk left by a deleted machine"

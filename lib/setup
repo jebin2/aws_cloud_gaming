@@ -98,10 +98,13 @@ archive_line() {
   sz=$(awk '/Total Size:/{print $3}' <<<"$out")
   if [[ ${n:-0} -eq 0 ]]; then
     printf '  game library    s3://%s  EMPTY - no games archived\n' "$b"
-  else
+  elif [[ -n ${CG_S3_USD_GB_MONTH:-} ]]; then
     printf '  game library    s3://%s  %s objects, %s  ($%.2f/mo)\n' "$b" "$n" \
       "$(numfmt --to=iec --suffix=B "$sz" 2>/dev/null || echo "${sz}B")" \
       "$(awk -v x="$sz" -v r="$CG_S3_USD_GB_MONTH" 'BEGIN{printf "%.2f", x/1073741824*r}')"
+  else
+    printf '  game library    s3://%s  %s objects, %s\n' "$b" "$n" \
+      "$(numfmt --to=iec --suffix=B "$sz" 2>/dev/null || echo "${sz}B")"
   fi
 }
 
@@ -262,7 +265,7 @@ status_facts() {
       f login.present ""; f login.bytes ""; f login.pushed ""
     else
       f archive.objects "${n:-0}"; f archive.bytes "${sz:-0}"
-      f archive.usd_month "$(awk -v x="${sz:-0}" -v r="$CG_S3_USD_GB_MONTH" 'BEGIN{printf "%.2f", x/1073741824*r}')"
+      f archive.usd_month "$([[ -n ${CG_S3_USD_GB_MONTH:-} ]] && awk -v x="${sz:-0}" -v r="$CG_S3_USD_GB_MONTH" 'BEGIN{printf "%.2f", x/1073741824*r}')"
       f login.present "$([[ ${lsz:-0} -gt 0 ]] && echo yes || echo no)"
       f login.bytes "${lsz:-0}"
       f login.pushed "$([[ $lwhen == - ]] && echo "" || printf '%s' "$lwhen")"
@@ -327,6 +330,31 @@ status_facts() {
   else
     f tailnet.node ""; f tailnet.online no
   fi
+
+  # Whether the machine has finished setting itself up, not just whether it
+  # runs. "running" is true three minutes into a twenty-minute build, and the
+  # app read it as ready: closed mid-build and opened again, it offered Play
+  # on a box with no desktop and no Sunshine. The box says it is ready by the
+  # marker its last build step leaves (lib/bootstrap.d/99-finish.sh). Once
+  # seen, it is remembered for that instance, so only a build in progress
+  # costs an ssh - free, over the tailnet. Not on the tailnet yet is not ready;
+  # online but not answering is unknown, never a guess either way.
+  if [[ -n ${id:-} && ${state:-} == running ]]; then
+    [[ -f "${XDG_CACHE_HOME:-$HOME/.cache}/cg/built-$id" ]] && f box.built yes || f box.built no
+    local ready_mark="${XDG_CACHE_HOME:-$HOME/.cache}/cg/ready-$id"
+    if [[ -f $ready_mark ]]; then
+      f box.ready yes
+    elif [[ $node != *offline* && -n $node && -f "$HOME/.ssh/${TS_HOST}.pem" ]]; then
+      local r
+      r=$(ssh -i "$HOME/.ssh/${TS_HOST}.pem" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
+            -o BatchMode=yes "ubuntu@$(awk '{print $1}' <<<"$node")" \
+            'test -f /var/lib/cloud-gaming-ready && echo yes || echo no' 2>/dev/null) || r=""
+      [[ $r == yes ]] && { mkdir -p "${ready_mark%/*}" && : > "$ready_mark"; } 2>/dev/null
+      f box.ready "$r"
+    else
+      f box.ready no
+    fi
+  fi
 }
 
 status() { # status [--json]
@@ -385,9 +413,9 @@ status() { # status [--json]
     printf '  key pair        %s\n' "${F[res.key_pair]:-}"
     printf '  security group  %s\n' "${F[res.security_group]:-}"
     if [[ -n ${F[old_volume.id]:-} ]]; then
-      printf '  old EBS volume  %s  %s GB in %s  (~$%.2f/mo, LEGACY - cg games --delete)\n' \
+      printf '  old EBS volume  %s  %s GB in %s  (~$%s/mo, LEGACY - cg games --delete)\n' \
         "${F[old_volume.id]:-}" "${F[old_volume.gb]:-}" "${F[old_volume.az]:-}" \
-        "$(awk -v s="${F[old_volume.gb]:-}" -v r="$CG_EBS_USD_GB_MONTH" 'BEGIN{printf "%.2f", s*r}')"
+        "$(awk -v s="${F[old_volume.gb]:-}" -v r="${CG_EBS_USD_GB_MONTH:-}" 'BEGIN{if (r == "") printf "?"; else printf "%.2f", s*r}')"
     else
       if [[ -z ${F[archive.bucket]:-} ]]; then
         printf '  game library    not set up yet - cg init creates it\n'
@@ -474,6 +502,8 @@ NUM = {"config.disk_gb","quota.vcpus","quota.on_demand","quota.spot","res.volume
        "login.bytes"}
 BOOL = {"local.tailscale": "up", "local.moonlight": "yes", "local.ssh_key": "yes",
         "local.auth_key": "yes", "tailnet.online": "yes", "config.notifications": "yes",
+        # Empty when the box could not be asked: null, not "not ready".
+        "box.ready": "yes", "box.built": "yes",
         "config.tailscale_api_key": "yes", "config.alert_email": "yes",
         # Left EMPTY when the listing failed, which must read as null - neither
         # true nor false. "I could not look" is not "there is none".
@@ -518,7 +548,7 @@ out["rates"] = {k: price(v) for k, v in {
 # hourly share is the monthly price over these - 720 in some months, 744 in
 # others. Worked out here so the app does no date arithmetic.
 import calendar, datetime
-_n = datetime.datetime.utcnow()
+_n = datetime.datetime.now(datetime.timezone.utc)
 out["rates"]["month_hours"] = calendar.monthrange(_n.year, _n.month)[1] * 24
 print(json.dumps(out, indent=2, sort_keys=True))
 ' "$TS_HOST" "$REGION" "$TYPE"
@@ -590,7 +620,7 @@ out = {
 }
 rate = out["rates"]
 import calendar, datetime
-now = datetime.datetime.utcnow()
+now = datetime.datetime.now(datetime.timezone.utc)
 # A GB-month is a GB kept for the whole month, so the hours are the hours in
 # this month: 720 in some, 744 in others.
 month_hours = calendar.monthrange(now.year, now.month)[1] * 24
@@ -688,8 +718,8 @@ cost() {
   read -r gv gsz gaz < <(ec2 describe-volumes --filters "Name=tag:Name,Values=${TS_HOST}-games" \
     --query 'Volumes[0].[VolumeId,Size,AvailabilityZone]' --output text 2>/dev/null)
   if [[ -n ${gv:-} && $gv != None ]]; then
-    printf '  old EBS volume  %s  %s GB in %s  (~$%.2f/mo, LEGACY - cg games --delete)\n' \
-      "$gv" "$gsz" "$gaz" "$(awk -v s="$gsz" -v r="$CG_EBS_USD_GB_MONTH" 'BEGIN{printf "%.2f", s*r}')"
+    printf '  old EBS volume  %s  %s GB in %s  (~$%s/mo, LEGACY - cg games --delete)\n' \
+      "$gv" "$gsz" "$gaz" "$(awk -v s="$gsz" -v r="${CG_EBS_USD_GB_MONTH:-}" 'BEGIN{if (r == "") printf "?"; else printf "%.2f", s*r}')"
   else
     archive_line
     login_line
@@ -736,14 +766,22 @@ cost() {
   # of 15. Storage genuinely is month-so-far. The month's compute is in the
   # "billed so far" section below, from Cost Explorer.
   echo "not yet billed (Cost Explorer lags about a day):"
+  # A price AWS could not be asked for prints as "?", never as $0.00: an
+  # unknown is not free. The month so far is this month's share of its days.
   awk -v h="${hours:-0}" -v r="$rate" -v g="${disk_gb:-0}" -v sg="${snap_gb:-0}" -v day="$(date -u +%d)" \
-      -v ebs="$CG_EBS_USD_GB_MONTH" -v snap="$CG_SNAPSHOT_USD_GB_MONTH" -v inr="$CG_INR_PER_USD" 'BEGIN{
-    c=h*r; s=g*ebs*(day/30.0); n=sg*snap*(day/30.0);
-    printf "  compute   %6.1f hrs  $%6.2f  (INR %5.0f)  THIS instance only\n", h, c, c*inr;
-    printf "  storage   %6d GB   $%6.2f  (INR %5.0f)  month so far, accrues while stopped\n", g, s, s*inr;
-    if (sg>0) printf "  snapshots %6d GB   $%6.2f  (INR %5.0f)\n", sg, n, n*inr;
+      -v mdays="$(date -u -d "$(date -u +%Y-%m-01) +1 month -1 day" +%d)" \
+      -v ebs="${CG_EBS_USD_GB_MONTH:-}" -v snap="${CG_SNAPSHOT_USD_GB_MONTH:-}" -v inr="${CG_INR_PER_USD:-}" '
+  function usd(v, ok) { return ok ? sprintf("$%6.2f", v) : "      ?" }
+  function rup(v, ok) { return (ok && inr != "") ? sprintf("INR %5.0f", v*inr) : "INR     ?" }
+  BEGIN{
+    c=h*r; s=g*ebs*(day/mdays); n=sg*snap*(day/mdays);
+    okc = r != ""; oks = ebs != "" || g == 0; okn = snap != "" || sg == 0;
+    printf "  compute   %6.1f hrs  %s  (%s)  THIS instance only\n", h, usd(c, okc), rup(c, okc);
+    printf "  storage   %6d GB   %s  (%s)  month so far, accrues while stopped\n", g, usd(s, oks), rup(s, oks);
+    if (sg>0) printf "  snapshots %6d GB   %s  (%s)\n", sg, usd(n, okn), rup(n, okn);
     printf "  ---------------------------------------\n";
-    printf "  estimate              $%6.2f  (INR %5.0f)\n", c+s+n, (c+s+n)*inr;
+    all = okc && oks && okn;
+    printf "  estimate              %s  (%s)\n", usd(c+s+n, all), rup(c+s+n, all);
   }'
   echo "  (egress is counted under 'billed so far' below, not in this estimate)"
   if [[ -z $id ]]; then
@@ -1613,6 +1651,15 @@ if wait_for_steam "ubuntu@$TS_NODE" "$KEY" 1500; then
     STEAM_MSG="installed and pinned, but the game library is NOT registered - games would fill the 50 GB root disk. Add $GAMES_LIB in Steam > Settings > Storage."
   fi
 fi
+
+# This laptop's half of the build is done for this machine: it waited for the
+# box and paired with it. cg status reads it (box.built), so an app closed in
+# the middle of a build - which ends this script, though the box carries on -
+# knows on reopening that the build is not finished and runs it again; a
+# re-run finds the same instance and picks up here. Written whether or not
+# pairing stuck: a failed pairing is said above, and `cg pair` is its fix.
+mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/cg" 2>/dev/null \
+  && : > "${XDG_CACHE_HOME:-$HOME/.cache}/cg/built-${GAME_INSTANCE_ID:-none}" 2>/dev/null || true
 
 cg_notify "box ready" "Built, paired and running - it bills by the hour. Play with: cg open" default video_game
 _cg_section_end 0

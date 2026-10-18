@@ -424,7 +424,11 @@ import json, os, sys
 try:    apps = json.load(sys.stdin).get("apps", [])
 except Exception: apps = []
 GB = 1073741824.0
-S3 = float(os.environ["CG_S3_USD_GB_MONTH"])
+def num(v):
+    try: return float(v)
+    except (TypeError, ValueError): return None
+month = lambda b, rate: None if rate is None else round(b / GB * rate, 2)
+S3 = num(os.environ.get("CG_S3_USD_GB_MONTH"))
 # Per game, not just the total: a screen that lists them must be able to say
 # what each one costs without knowing the price of S3.
 marks = json.loads(os.environ.get("MARKS") or "null")
@@ -432,7 +436,7 @@ kept = (marks or {}).get("kept") or {}
 bucket = os.environ.get("BUCKET") or ""
 games = [{"appid": a.get("appid"), "name": a.get("name"), "installdir": a.get("installdir"),
           "bytes": a.get("bytes", 0), "pushed": a.get("pushed"),
-          "usd_month": round(a.get("bytes", 0) / GB * S3, 2),
+          "usd_month": month(a.get("bytes", 0), S3),
           # The Reset mark, if any: the watchdog counts from the later of this
           # and the last machine.
           "kept": kept.get("%s/%s" % (bucket, a.get("appid")))} for a in apps]
@@ -445,9 +449,9 @@ print(json.dumps({
   "bucket": os.environ.get("BUCKET") or None,
   "games": sorted(games, key=lambda g: -g["bytes"]),
   "total_bytes": total,
-  "usd_month": round(total / GB * S3, 2),
+  "usd_month": month(total, S3),
   "orphan_bytes": orphan_bytes or None,
-  "orphan_usd_month": round(orphan_bytes / GB * S3, 2) if orphan_bytes else None,
+  "orphan_usd_month": month(orphan_bytes, S3) if orphan_bytes else None,
   # null means "could not look", which is not the same as present=false.
   "login": (lambda t: (json.loads(t) if t.strip() else None))(os.environ.get("LOGIN") or ""),
   # What the box can hold at once, and what cg init offers after its reserve.
@@ -456,7 +460,7 @@ print(json.dumps({
   # Where these are, and how long they are kept: N days after the later of the
   # last machine and the Reset of each game. null when the marks are unreadable.
   "region": os.environ.get("HERE") or None,
-  "inr_per_usd": float(os.environ["CG_INR_PER_USD"]),
+  "inr_per_usd": num(os.environ.get("CG_INR_PER_USD")),
   "expiry_days": int(os.environ.get("DAYS") or 0),
   "last_seen": (marks or {}).get("last_seen"),
   "marks_read": marks is not None,
@@ -519,8 +523,12 @@ for a in apps:
     print("  %-10s %-32s %6.1f GB  %s" % (a["appid"], a.get("name","?")[:32],
           a.get("bytes",0)/GB, a.get("pushed","?")[:16].replace("T"," ")))
 g=tot/GB
-S3=float(os.environ["CG_S3_USD_GB_MONTH"]); INR=float(os.environ["CG_INR_PER_USD"])
-print("  %-10s %-32s %6.1f GB   $%.2f/month (INR %.0f)" % ("","total",g,g*S3,g*S3*INR))
+def num(k):
+    try: return float(os.environ.get(k))
+    except (TypeError, ValueError): return None
+S3, INR = num("CG_S3_USD_GB_MONTH"), num("CG_INR_PER_USD")
+cost = ("   $%.2f/month%s" % (g*S3, " (INR %.0f)" % (g*S3*INR) if INR else "")) if S3 is not None else ""
+print("  %-10s %-32s %6.1f GB%s" % ("","total",g,cost))
 print("")
 print("  229 GB fits on the box at once (209 GB selectable after reserve)")
 if g > 209: print("  the archive is larger than the disk - cg init asks which to restore")'
@@ -724,14 +732,18 @@ library_elsewhere_show() {
 import json, os, sys
 d = json.load(sys.stdin)
 if d.get("error"): print("  " + d["error"]); sys.exit(1)
-INR = float(os.environ["CG_INR_PER_USD"])
+def num(v):
+    try: return float(v)
+    except (TypeError, ValueError): return None
+INR = num(os.environ.get("CG_INR_PER_USD"))
 places = [p for p in d["places"] if p["bytes"] or p["error"]]
 if not places: print("  nothing saved anywhere else - every game is in the archive cg uses"); sys.exit()
 for p in places:
     if p["error"]:
         print("  %-14s could not be read: %s" % (p["region"] or "?", p["error"])); continue
-    print("  %-14s %6.1f GB   INR %.0f a month   s3://%s"
-          % (p["region"] or "?", p["bytes"] / 1073741824, p["usd_month"] * INR, p["bucket"]))
+    inr_str = ("   INR %.0f a month" % (p["usd_month"] * INR)) if (INR and p["usd_month"] is not None) else ""
+    print("  %-14s %6.1f GB%s   s3://%s"
+          % (p["region"] or "?", p["bytes"] / 1073741824, inr_str, p["bucket"]))
     for g in p["games"]: print("      %-10s %s" % (g["appid"] or "", g["name"]))
     if p["login"]: print("      (and a Steam login)")
 print()
@@ -890,6 +902,10 @@ for line in (os.environ.get("NAMES") or "").splitlines():
 if len(rows) == 1:
     rows[0]["most_recent"] = True
 b = int(os.environ["BYTES"]) if os.environ["BYTES"].isdigit() else 0
+def num(v):
+    try: return float(v)
+    except (TypeError, ValueError): return None
+s3 = num(os.environ.get("CG_S3_USD_GB_MONTH"))
 print(json.dumps({
   "bucket": os.environ.get("BUCKET") or None,
   "key": os.environ["KEY"],
@@ -898,7 +914,7 @@ print(json.dumps({
   "modified": os.environ.get("WHEN") or None,
   # Said out loud because it governs whether deleting is worth doing: it is not
   # a saving, it is a choice about which account a new box signs in as.
-  "usd_month": round(b / 1073741824.0 * float(os.environ["CG_S3_USD_GB_MONTH"]), 6),
+  "usd_month": round(b / 1073741824.0 * s3, 6) if s3 is not None else None,
   # None means "could not read the names", NOT "no accounts" - the archive
   # cannot exist with nobody in it, so an empty list would be a lie.
   "accounts": rows or None,

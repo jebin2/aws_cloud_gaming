@@ -59,6 +59,9 @@ _cg_rates_fill() {
   while IFS='=' read -r k v; do
     [[ $k =~ ^CG_[A-Z0-9_]+$ && -n $v && -z ${!k:-} ]] && printf -v "$k" '%s' "$v"
   done <<<"$src"
+  for k in $CG_RATE_KEYS; do
+    [[ -n ${!k:-} ]] || printf -v "$k" '%s' ""
+  done
   return 0
 }
 _cg_rates_fill

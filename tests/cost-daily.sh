@@ -141,7 +141,7 @@ check "the rupee rate is one number"   "$(jq2 rates.inr_per_usd)" "88.0"
 # 160.2 GB archive at $0.025 + a 50 GB volume at $0.0912
 check "standby is worked out by cg"    "$(jq2 standby.usd_month)" "8.56"
 # A day is this month's share: 1/30 or 1/31 of it.
-check "  and per day"                  "$(python3 -c 'import calendar,datetime as d,sys; n=d.datetime.utcnow()
+check "  and per day"                  "$(python3 -c 'import calendar,datetime as d,sys; n=d.datetime.now(d.timezone.utc)
 print(abs(float(sys.argv[1]) - 8.56/calendar.monthrange(n.year,n.month)[1]) < 0.0005)' "$(jq2 standby.usd_day)")" "True"
 check "  split by what holds it"       "$(jq2 standby.volumes_usd_month)" "4.56"
 

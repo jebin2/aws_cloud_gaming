@@ -421,6 +421,7 @@ function paintStatus(s) {
   if (wasUp && !isUp && !jobsFor('destroy') && !justDeleted) noteBillChange('the machine stopped');
   paintSpec(s);
   statusNow = s;
+  resumeBuild(s);
   askPing(s);
   paintOnboardSoon();
   statusBudget = s.budget || null;
@@ -507,7 +508,7 @@ function renderMachineCard(card) {
   const f = machineFacts();
   const { s, box, cur, hit, rows, price } = f;
   const credErr = s.error && s.error.credentials;
-  const building = jobsFor('init');
+  const building = jobsFor('init') || unfinished(box);
   const running = !!(box && box.state === 'running');
   const upHours = box && box.launched ? (Date.now() - new Date(box.launched)) / 3600000 : 0;
   const idleGuard = ((watcher && watcher.guards) || []).find(g => g.layer === 2);
@@ -608,7 +609,7 @@ function paintMachineCards() {
     if (!$(`${p}-build`)) continue;
     const { box, s } = renderMachineCard($(`${p}-machine-card`)) || {};
     if (!s) continue;
-    const building = jobsFor('init');
+    const building = jobsFor('init') || unfinished(box);
     const running = !!(box && box.state === 'running');
     $(`${p}-busy`).hidden = !building;
     $(`${p}-build`).hidden = !!box || building || !!(s.error && s.error.credentials);
@@ -624,7 +625,7 @@ function paintDash() {
   const inr = inrRate();
   const credErr = s.error && s.error.credentials;
   const box = s.box && !['terminated'].includes(s.box.state) ? s.box : null;
-  const building = jobsFor('init');
+  const building = jobsFor('init') || unfinished(box);
   const running = !!(box && box.state === 'running');
   const idleGuard = ((watcher && watcher.guards) || []).find(g => g.layer === 2);
   const idleAfter = idleGuard && idleGuard.reaction ? idleGuard.reaction.replace(/ idle$/, '') : '15 min';
@@ -5462,7 +5463,9 @@ $('d-cost').onclick = () => { goView('cost'); $('refresh').click(); };
 let runKind = 'init';
 function startRun(args, opts = {}) {
   runKind = args[0];
-  goView('build');
+  // A build picked up again by itself does not take you off the page you are
+  // on; the machine card says it is building, and Watch the build opens it.
+  if (!opts.stay) goView('build');
   $('b-log').dataset.fresh = 'yes';
   $('b-log').textContent = '';
   $('b-log-title').textContent = `${CgName(args)} · log`;
@@ -5475,6 +5478,30 @@ function startRun(args, opts = {}) {
   runBegin(args[0], opts);
   paintRun();
   return runCg(args, opts.env ? { env: opts.env } : {});
+}
+
+// A machine that runs but has not finished building. Closing the app in the
+// middle of a build ends this laptop's half of it - waiting for the box, then
+// pairing Moonlight - while the box carries on setting itself up; opened again,
+// "running" read as ready and the card offered Play on a box with no desktop.
+// cg status says whether the box is set up (ready) and whether this laptop's
+// half finished (built). Either missing, it is shown as building, and the build
+// is picked up again once: `cg init` finds the same instance and launches
+// nothing new, so it costs nothing beyond the machine already running.
+function unfinished(box) {
+  return !!(box && box.state === 'running' && (box.ready === false || box.built === false));
+}
+let resumedFor = null;
+function resumeBuild(s) {
+  const box = s && s.box;
+  // Reads run beside it freely; a build, a delete or a stream already going is
+  // left alone.
+  if (!unfinished(box) || resumedFor === box.id || ['init', 'destroy', 'open'].some(jobsFor)) return;
+  resumedFor = box.id;
+  // No GAME_APPS: the box was given its games when it launched, and cg keeps
+  // that choice in .env - passing "none" here overwrote it, and with it the
+  // restore's "109 of 160 GB" progress line.
+  startRun(['init'], { stay: true });
 }
 
 // A build, with the games ticked now. Try again uses the ones the failed build

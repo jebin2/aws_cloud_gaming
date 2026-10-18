@@ -138,6 +138,16 @@ check    "json: volumes follow the box" "$(jq_ res.volumes_gb <<<"$json")" "50"
 check    "  spot or on-demand"          "$(jq_ box.lifecycle <<<"$json")" '"spot"'
 json=$(BOX=running LIFECYCLE=None run --json)
 check    "  AWS's None is on-demand"    "$(jq_ box.lifecycle <<<"$json")" '"on-demand"'
+# Running is not ready. An app closed mid-build read "running" as ready and
+# offered Play on a box still installing its desktop.
+json=$(BOX=running run --json)
+check    "running, but not set up: not ready"  "$(jq_ box.ready <<<"$json")" "false"
+check    "  and this laptop's half not done"   "$(jq_ box.built <<<"$json")" "false"
+mkdir -p "$T/home/.cache/cg" && : > "$T/home/.cache/cg/ready-i-0abc123" && : > "$T/home/.cache/cg/built-i-0abc123"
+json=$(BOX=running run --json)
+check    "seen ready once: ready, without asking again" "$(jq_ box.ready <<<"$json")" "true"
+check    "  and built"                          "$(jq_ box.built <<<"$json")" "true"
+rm -f "$T/home/.cache/cg/ready-i-0abc123" "$T/home/.cache/cg/built-i-0abc123"
 
 echo "2b. what bills, priced by cg, not by the app"
 json=$(SNAPS=2 SNAP_GB=80 run --json)
