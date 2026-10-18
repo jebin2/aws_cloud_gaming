@@ -7,8 +7,9 @@
 # later run. Now the password is saved first, checked against the box, and set
 # again on the box itself (sunshine --creds, over ssh) when they disagree.
 #
-# This runs the real block from lib/setup against a fake Sunshine (curl) and a
-# fake box (the ssh command), with no network.
+# This runs the real code - lib/sunshine-login.sh, which the AWS build and your
+# own machines both use - against a fake Sunshine (curl) and a fake box (the ssh
+# command), with no network.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 T=$(mktemp -d); pass=0; fail=0
@@ -51,9 +52,8 @@ printf '%s %s' "$u" "$p" > "$T/box"
 FAKE
 chmod +x "$T/bin/fakessh"
 
-# The block itself, from lib/setup: from its helpers to the pairing that follows.
-awk '/^# Whether Sunshine takes this login/{f=1} /^say "moonlight pairing"/{f=0} f' lib/setup > "$T/block.sh"
-check "the block was found" "$(grep -c 'sun_login_ok' "$T/block.sh" | awk '{print ($1 > 2)}')" "1"
+check "the AWS build uses it"          "$(grep -c 'sun_login_ensure "$IP" "$WELCOME" cg_env_set' lib/setup)" "1"
+check "  and no copy of its own"        "$(grep -c 'api/password' lib/setup)" "0"
 
 run() { # run <welcome> ; the box state in $T/box, the laptop's in $ENVF
   : > "$T/log"; : > "$T/order"; : > "$T/ssh"
@@ -63,8 +63,8 @@ run() { # run <welcome> ; the box state in $T/box, the laptop's in $ENVF
     cg_env_set() { sed -i "/^$1=/d" "$ENVF" 2>/dev/null; echo "$1=$2" >> "$ENVF"; }
     cg_env_file() { echo "$ENVF"; }
     sleep() { :; }
-    IP=100.64.0.1 SUN_UP=1 WELCOME=$1 SSH="fakessh ubuntu@box"
-    source "$T/block.sh" )
+    source lib/sunshine-login.sh
+    sun_login_ensure 100.64.0.1 "$1" cg_env_set fakessh ubuntu@box )
 }
 saved() { sed -n 's/^SUNSHINE_PASS=//p' "$T/env" 2>/dev/null; }
 boxp()  { cut -d' ' -f2 "$T/box" 2>/dev/null; }

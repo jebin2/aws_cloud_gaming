@@ -81,3 +81,17 @@ session_end_first() {
     log_as warn "leaving the stream open - Moonlight will lose the box mid-destroy"
   fi
 }
+
+# moonlight_flags <array-name> - the stream settings from .env as Moonlight's
+# arguments, into the named array. One copy, for every machine a stream starts
+# from: the AWS box (lib/game) and your own (lib/host.sh).
+moonlight_flags() {
+  local -n _mf=$1
+  _mf=()
+  [[ -n ${GAME_RES:-} ]]          && _mf+=(--resolution "$GAME_RES") || true
+  [[ -n ${GAME_FPS:-} ]]          && _mf+=(--fps "$GAME_FPS") || true
+  [[ -n ${GAME_BITRATE_KBPS:-} ]] && _mf+=(--bitrate "$GAME_BITRATE_KBPS") || true
+  [[ -n ${GAME_DISPLAY_MODE:-} ]] && _mf+=(--display-mode "$GAME_DISPLAY_MODE") || true
+  [[ -n ${GAME_VIDEO_CODEC:-} ]]  && _mf+=(--video-codec "$GAME_VIDEO_CODEC") || true
+  [[ ${GAME_PERF_OVERLAY:-0} == 1 ]] && _mf+=(--performance-overlay) || true
+}

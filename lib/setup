@@ -1605,52 +1605,15 @@ for _ in $(seq 1 40); do
   sleep 3
 done
 
-# Whether Sunshine takes this login: the same authenticated call pairing makes.
-sun_login_ok() { # sun_login_ok <user> <pass>
-  [[ -n ${1:-} && -n ${2:-} ]] || return 1
-  [[ $(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 -u "$1:$2" \
-         "https://$IP:47990/api/clients/list" 2>/dev/null) == 200 ]]
-}
-# A new password, saved on this laptop BEFORE the box is given it. Saved after,
-# an init that ended in between - the app closed mid-build - left the box with
-# a password nothing here knew, and every later pairing failed.
-sun_new_login() {
-  SUNSHINE_USER="${SUNSHINE_USER:-admin}"
-  SUNSHINE_PASS="$(python3 -c 'import secrets;print(secrets.token_urlsafe(18))')"
-  cg_env_set SUNSHINE_USER "$SUNSHINE_USER"
-  cg_env_set SUNSHINE_PASS "$SUNSHINE_PASS"
-}
-
+# The login: saved here first, checked against the box, set again on the box
+# when they disagree - lib/sunshine-login.sh, shared with your own machines.
+# shellcheck source=lib/sunshine-login.sh
+source lib/sunshine-login.sh
 if (( ! SUN_UP )); then
   log "Sunshine is not answering on $IP:47990 - skipping account and pairing"
   log "check on the box: systemctl --user status app-dev.lizardbyte.app.Sunshine.service"
 else
-  if (( WELCOME )); then
-    sun_new_login
-    curl -sk --max-time 15 -X POST -H 'Content-Type: application/json' \
-         -d "{\"newUsername\":\"$SUNSHINE_USER\",\"newPassword\":\"$SUNSHINE_PASS\",\"confirmNewPassword\":\"$SUNSHINE_PASS\"}" \
-         "https://$IP:47990/api/password" >/dev/null 2>&1 || true
-  fi
-  # Checked, not assumed - whichever way it was set, or by whichever run. A
-  # reply lost after Sunshine took the password is caught here too.
-  if sun_login_ok "${SUNSHINE_USER:-}" "${SUNSHINE_PASS:-}"; then
-    (( WELCOME )) && log "created; credentials saved to $(cg_env_file)" || log "already configured, and the saved login works"
-  else
-    # The box holds a login this laptop does not know. It is set again ON the
-    # box, which needs no old password: sunshine --creds writes it and exits,
-    # and a restart makes the running Sunshine read it.
-    log "the box's Sunshine login is not the one saved here - setting it again on the box"
-    sun_new_login
-    if $SSH "sunshine --creds '$SUNSHINE_USER' '$SUNSHINE_PASS' >/dev/null 2>&1 \
-             && XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user restart app-dev.lizardbyte.app.Sunshine.service" 2>/dev/null; then
-      for _ in $(seq 1 20); do sun_login_ok "$SUNSHINE_USER" "$SUNSHINE_PASS" && break; sleep 3; done
-    fi
-    if sun_login_ok "$SUNSHINE_USER" "$SUNSHINE_PASS"; then
-      log "reset; credentials saved to $(cg_env_file)"
-    else
-      log "could not set the Sunshine login - do it in the browser at https://$IP:47990"
-    fi
-  fi
+  sun_login_ensure "$IP" "$WELCOME" cg_env_set $SSH || true
 fi
 
 say "moonlight pairing"

@@ -40,14 +40,15 @@ while [[ ${1:-} == -* ]]; do
     ["creds", "set"],
     ["creds", "tailscale", "signin"],
     ["creds", "tailscale", "authkey"],
-    ["deps", "install"]
+    ["deps", "install"],
+    ["host", "setup"], ["host", "open"]
   ],
   "asks": [
     "aws-access-key-id", "aws-secret-access-key",
     "tailscale-api-token", "tailscale-auth-key",
     "alert-email", "session-end", "fix-go-ahead", "steam-login",
     "clean-orphans", "delete-volume", "destroy-all", "forget-game", "forget-login",
-    "move-game"
+    "move-game", "host-sudo"
   ]
 }
 JSON
@@ -92,6 +93,9 @@ source lib/rates.sh
 # `cg destroy` closes it before taking the box away.
 # shellcheck source=lib/session.sh
 source lib/session.sh
+# Your own machines, beside the AWS one - see lib/host.sh.
+# shellcheck source=lib/host.sh
+source lib/host.sh
 # What this region will rent, read from AWS - see lib/machines.sh. The app's
 # instance picker is fed from here, so no list of types lives in the renderer.
 # shellcheck source=lib/machines.sh
@@ -1970,6 +1974,11 @@ build (changes things)
   cg init                    build everything; reuses an existing box   [costs money]
   cg open                    start, stream, stop on exit                [costs money]
   cg pair                    redo the Moonlight handshake (no rebuild needed)
+  cg host add <name> --ssh <user@address>
+                             a machine of your own (Linux), reached over ssh
+  cg host setup <name>       add Tailscale + Sunshine to it, pair Moonlight
+  cg host status|open <name> what it is ready for / stream from it
+  cg host list|remove <name>
   cg stop                    mirror the games to S3, then stop - ends hourly billing
   cg status                  instance, disks, guards, tailnet, ping
   cg library                 what is on the box vs in S3, and what it costs
@@ -2083,6 +2092,7 @@ case "$CMD" in
   # Only the bare report is piped: `games --volume --delete` asks a question.
   games)     if (( $# )); then cmd_games "$@"; else cmd_games | cg_report "🎮" "Games"; fi ;;
   pair)      cmd_pair ;;
+  host)      cmd_host "$@" ;;
   library|lib) cmd_library "$@" ;;
   watchdog)  cmd_watchdog "$@" ;;
   # No leading `shift`: with no subcommand there is nothing to shift, and under
