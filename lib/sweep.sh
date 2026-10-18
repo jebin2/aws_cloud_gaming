@@ -254,13 +254,16 @@ PROBE
   REGIONS_F="$work/regions" RTT_D="$work/rtt" SCORES_F="$work/scores" \
   DETAIL_F="$work/detail" SPECS_F="$work/specs" \
   MAXMS="$CG_SWEEP_MAX_MS" TYPES="$CG_SWEEP_TYPES" \
-  CONFIGURED="${GAME_REGION:-$REGION}" INR="${CG_INR_PER_USD:-88}" \
+  CONFIGURED="${GAME_REGION:-$REGION}" INR="${CG_INR_PER_USD:-}" \
   MEASURED="$measured" \
   python3 -c '
 import json, os, collections
 
 maxms = float(os.environ["MAXMS"])
-inr   = float(os.environ["INR"])
+try:
+    inr = float(os.environ["INR"])
+except (KeyError, ValueError):
+    inr = None
 types = os.environ["TYPES"].split()
 
 optin = {}
@@ -314,8 +317,9 @@ try:
 except OSError:
     pass
 
+# To the paisa, GST included (lib/rates.sh); null when no rupee rate is known.
 def money(v):
-    return None if v is None else round(v * inr)
+    return None if v is None or inr is None else round(v * inr, 2)
 
 regions, far, unknown = [], [], []
 for r, o in optin.items():
@@ -475,8 +479,8 @@ else:
                 q = "%s/%s" % ("ok" if m["fits_ondemand"] else "0",
                                "ok" if m["fits_spot"] else "0")
             price = "%s / %s" % (
-                ("INR %d" % m["inr_hour_spot"]) if m["inr_hour_spot"] is not None else "-",
-                ("INR %d" % m["inr_hour_ondemand"]) if m["inr_hour_ondemand"] is not None else "-")
+                ("INR %.2f" % m["inr_hour_spot"]) if m["inr_hour_spot"] is not None else "-",
+                ("INR %.2f" % m["inr_hour_ondemand"]) if m["inr_hour_ondemand"] is not None else "-")
             print("  %s%-15s %-11s %-7s %-13s %-6s %-9s %s" % (
                 mark if i == 0 else " ",
                 r["region"] if i == 0 else "", city[:11] if i == 0 else "",

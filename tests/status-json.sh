@@ -85,7 +85,7 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$T/bin/moonlight"
 chmod +x "$T/bin"/*
 
 run() { # run [--json]
-  ( cd "$T/repo" && env -i CG_INR_PER_USD=88 PATH="$T/bin:$PATH" HOME="$T/home" BOX="${BOX:-none}" TS_STATE="${TS_STATE-}" TS_NODE_GONE="${TS_NODE_GONE-}" AWS_DEAD="${AWS_DEAD-}" \
+  ( cd "$T/repo" && env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=88 PATH="$T/bin:$PATH" HOME="$T/home" BOX="${BOX:-none}" TS_STATE="${TS_STATE-}" TS_NODE_GONE="${TS_NODE_GONE-}" AWS_DEAD="${AWS_DEAD-}" \
       LIFECYCLE="${LIFECYCLE-}" SNAPS="${SNAPS-}" SNAP_GB="${SNAP_GB-}" \
       CG_COLOR=never bash lib/setup status ${1:+--json} 2>&1 )
 }
@@ -145,7 +145,7 @@ check    "snapshots counted"            "$(jq_ res.snapshots <<<"$json")" "2"
 check    "  and their size"             "$(jq_ res.snapshots_gb <<<"$json")" "80"
 check    "the price table is there"     "$(jq_ rates.s3_gb_month <<<"$json")" "0.025"
 check    "  disk"                       "$(jq_ rates.ebs_gb_month <<<"$json")" "0.0912"
-check    "  snapshots"                  "$(jq_ rates.snapshot_gb_month <<<"$json")" "0.0125"
+check    "  snapshots"                  "$(jq_ rates.snapshot_gb_month <<<"$json")" "0.05"
 check    "  a public IPv4 address"      "$(jq_ rates.ipv4_hour <<<"$json")" "0.005"
 check    "  and the rupee"              "$(jq_ rates.inr_per_usd <<<"$json")" "88.0"
 check    "  and what an exact-cost call costs" "$(jq_ rates.ce_call_usd <<<"$json")" "0.01"

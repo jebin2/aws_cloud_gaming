@@ -518,8 +518,8 @@ contains "  and each game's monthly cost" "$js" "r(g.usd_month)"
 # Twice: `cg cost --json` and `cg status --json` both carry it, each read from
 # the one variable rates.sh sets.
 check    "cg publishes the table"        "$(grep -c 'ce_call_usd' lib/setup)" "2"
-check    "  status carries the prices"   "$(grep -c 'out\["rates"\]' lib/setup)" "1"
-check    "  from one file"               "$(grep -c 'CG_EGRESS_USD_GB=' lib/rates.sh)" "1"
+check    "  status carries the prices"   "$(grep -c 'out\["rates"\] = ' lib/setup)" "1"
+check    "  none of them written down"   "$(grep -cE ':-0\.[0-9]' lib/rates.sh)" "0"
 lacks    "the build confirm quotes no rate" "$js" "an hour on spot"
 
 echo "5g. the dashboard and guards screens"
@@ -706,7 +706,7 @@ echo "6. the actions that spend money ask first"
 # window.confirm draws a native alert that belongs to no design.
 check    "no native alert boxes"         "$(grep -cE '(^|[^a-zA-Z.])confirm\(' app/renderer/app.js)" "0"
 contains "  the app asks in its own dialog" "$html" 'id="confirm-title"'
-contains "a build confirms, with its rate" "$js" 'It costs ${rate != null ? `${rsh(rate)} an hour` : '"'"'by the hour'"'"'} while it runs.'
+contains "a build confirms, with its rate" "$js" 'It costs ${rate != null ? `${rate} an hour` : '"'"'by the hour'"'"'} while it runs.'
 contains "  and passes the chosen games" "$js" "GAME_APPS: apps"
 contains "a delete confirms"             "$js" "Delete the machine?"
 contains "only GAME_APPS may cross"      "$(cat app/main/index.js)" "ENV_ALLOWED = new Set(['GAME_APPS'])"

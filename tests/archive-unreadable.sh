@@ -47,7 +47,7 @@ esac
 FAKE
 chmod +x "$T/bin/aws"
 
-cg_() { ( cd "$T/repo" && env -i CG_INR_PER_USD=88 PATH="$T/bin:$PATH" HOME="$T/home" CG_COLOR=never \
+cg_() { ( cd "$T/repo" && env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=88 PATH="$T/bin:$PATH" HOME="$T/home" CG_COLOR=never \
             FAIL="${FAIL:-none}" bash ./cg "$@" 2>&1 ); }
 err_() { python3 -c 'import json,sys
 try: print(json.load(sys.stdin).get("error") or "")

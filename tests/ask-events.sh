@@ -19,7 +19,7 @@ lacks()    { if [[ $2 != *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 
 # ask '<code>' '<stdin>' - the library, then the code. CG_JSON / CG_YES pass through.
 ask() {
-  ( printf '%b' "${2-}" | env -i CG_INR_PER_USD=88 PATH="$PATH" HOME="$T" CG_COLOR=never \
+  ( printf '%b' "${2-}" | env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=88 PATH="$PATH" HOME="$T" CG_COLOR=never \
       CG_JSON="${CG_JSON-0}" CG_YES="${CG_YES-0}" \
       bash -c 'source lib/common.sh; '"$1" ) 2>&1
 }
@@ -89,7 +89,7 @@ mkdir -p "$T/repo"; cp -r lib lambda "$T/repo/"
 prompts() { # prompts [env...] - settings_prompts with stdin ready to answer
   # shellcheck disable=SC2086
   ( cd "$T/repo" && printf '%b' 'tskey-auth-1\nme@example.com\n' \
-    | env -i CG_INR_PER_USD=88 PATH="$PATH" HOME="$T" CG_COLOR=never REGION=ap-south-2 TS_HOST=gamevps \
+    | env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=88 PATH="$PATH" HOME="$T" CG_COLOR=never REGION=ap-south-2 TS_HOST=gamevps \
         TAILSCALE_API_KEY= GAME_NTFY_URL= GAME_DISK_GB=50 GAME_ARCHIVE_EXPIRY_DAYS=14 $* \
         bash -c 'source lib/common.sh; source lib/cloud-watchdog.sh; source lib/settings.sh; settings_prompts 1' 2>&1 )
 }

@@ -911,8 +911,8 @@ echo "6. the dashboard: what is billing, item by item, in rupees"
 # It used to say "nothing is billing by the hour" and stop there - while the game
 # archive, a disk left behind or a reserved address billed by the month. Now it
 # lists each thing that costs money with what it costs, or says there are none.
-RATES='"rates": {"s3_gb_month": 0.025, "ebs_gb_month": 0.0912, "snapshot_gb_month": 0.0125,
-                 "ipv4_hour": 0.005, "inr_per_usd": 88, "ce_call_usd": 0.01}'
+RATES='"rates": {"s3_gb_month": 0.025, "ebs_gb_month": 0.0912, "snapshot_gb_month": 0.05,
+                 "ipv4_hour": 0.005, "inr_per_usd": 88, "fx_inr_per_usd": 88, "ce_call_usd": 0.01}'
 st() { # st <box json> <archive json> <res json> <budget json>
   echo "{\"box\": $1, \"session\": null, \"region\": \"ap-south-2\", \"host\": \"laptop\",
          \"instance_type\": \"g6.xlarge\", \"archive\": $2, \"res\": $3, \"budget\": $4,
@@ -1514,9 +1514,9 @@ D13=$(date -d '+13 day' '+%-d %b'); D14=$(date -d '+14 day' '+%-d %b')
 LIB2="{\"games\": [{\"appid\": \"1174180\", \"name\": \"Red Dead 2\", \"installdir\": \"RDR2\", \"bytes\": 128849018880, \"usd_month\": 3.0, \"pushed\": \"2026-10-12T00:00:00Z\", \"kept\": null}],
       \"total_bytes\": 128849018880, \"usd_month\": 3.0, \"selectable_gb\": 209, \"bucket\": \"b\", \"login\": {\"present\": false},
       \"region\": \"ap-south-1\", \"inr_per_usd\": 94.95, \"expiry_days\": 14, \"last_seen\": \"$SEEN\", \"marks_read\": true}"
-ELSE="{\"error\": null, \"region\": \"ap-south-1\", \"inr_per_usd\": 94.95, \"xregion_usd_gb\": 0.086, \"expiry_days\": 14,
+ELSE="{\"error\": null, \"region\": \"ap-south-1\", \"inr_per_usd\": 94.95, \"expiry_days\": 14,
   \"last_seen\": \"$SEEN\", \"marks_read\": true, \"bytes\": 174813455930, \"usd_month\": 4.07, \"places\": [
-  {\"bucket\": \"cg-library-old\", \"region\": \"ap-south-2\", \"error\": null, \"bytes\": 174813455930, \"games_bytes\": 174813206488,
+  {\"bucket\": \"cg-library-old\", \"region\": \"ap-south-2\", \"error\": null, \"bytes\": 174813455930, \"games_bytes\": 174813206488, \"xregion_usd_gb\": 0.086,
    \"usd_month\": 4.07, \"login\": true, \"games\": [{\"appid\": \"2344520\", \"name\": \"Diablo IV\", \"installdir\": \"Diablo IV\",
    \"bytes\": 174813206488, \"usd_month\": 4.07, \"pushed\": \"2026-09-26T10:38:58Z\", \"kept\": \"$KEPT\"}]},
   {\"bucket\": \"cg-library-empty\", \"region\": \"ap-south-2\", \"error\": null, \"bytes\": 0, \"games_bytes\": 0,

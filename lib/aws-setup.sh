@@ -6,6 +6,9 @@ set -euo pipefail
 # shellcheck source=lib/env-file.sh
 source "$(dirname "$0")/env-file.sh"
 cg_env_load GAME_
+# The alert address is saved as EMAIL_ALERTS (lib/config.sh); cg check exports
+# it as GAME_ALERT_EMAIL, but run on its own this script must find it too.
+cg_env_load EMAIL_ALERTS
 
 INSTANCE_ID="${GAME_INSTANCE_ID:-i-CHANGEME}"
 # `budget` mode arms the budget BEFORE anything is launched: it is account-level and
@@ -16,7 +19,8 @@ REGION="${GAME_REGION:-ap-south-2}"
 BUDGET_INR="${GAME_BUDGET_INR:-5000}"
 # Resource names must match what setup/game look up, which is $TS_HOST-based.
 TS_HOST="${GAME_TS_HOST:-gamevps}"
-EMAIL="${GAME_ALERT_EMAIL:?set GAME_ALERT_EMAIL}"
+EMAIL="${GAME_ALERT_EMAIL:-${EMAIL_ALERTS:-}}"
+[[ -n $EMAIL ]] || { echo "set EMAIL_ALERTS (cg config set EMAIL_ALERTS you@example.com)" >&2; exit 1; }
 
 # Each guard runs as early as it can, which is why this takes a mode:
 #   shutdown  right after launch. The watchdog arms on the box within a minute
@@ -91,7 +95,13 @@ if [[ $MODE == budget || $MODE == all ]]; then
 # A budget emails its subscribers directly. No root toggle, no confirmation
 # step, and it works the moment it is created. The first two budgets are free.
 echo "==> budget"
-USD=$(awk -v i="$BUDGET_INR" 'BEGIN{printf "%.0f", i/88}')
+# Your rupees at today's exchange rate (lib/rates.sh), not a rate written down
+# once: at 88 the Rs 5,000 budget was $57, which is Rs 5,413 - it emailed late.
+# The plain exchange rate, not the one with GST on it: AWS counts the tax
+# inside the budget, so Rs 5,000 paid is Rs 5,000 / rate dollars of it.
+[[ -n ${CG_FX_INR_PER_USD:-} ]] || source "$(dirname "$0")/rates.sh"
+[[ -n ${CG_FX_INR_PER_USD:-} ]] || { echo "    the exchange rate could not be read - the budget is left as it is"; exit 0; }
+USD=$(awk -v i="$BUDGET_INR" -v f="$CG_FX_INR_PER_USD" 'BEGIN{printf "%.2f", i/f}')
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 
 subs=""
@@ -108,8 +118,13 @@ bfile=$(mktemp); nfile=$(mktemp)
 trap 'rm -f "$bfile" "$nfile"' EXIT
 cat > "$bfile" <<JSON
 {"BudgetName":"${TS_HOST}-monthly","BudgetLimit":{"Amount":"$USD","Unit":"USD"},
- "TimeUnit":"MONTHLY","BudgetType":"COST"}
+ "TimeUnit":"MONTHLY","BudgetType":"COST",
+ "CostTypes":{"IncludeCredit":false,"IncludeRefund":false,"IncludeTax":true}}
 JSON
+# IncludeCredit false: credits pay the bill, but they are spending all the same.
+# Counted after credits, AWS read $0 spent all month while $21 of usage went on,
+# and could never email - while the app's bar counted the usage. Both count
+# the same thing now.
 # 80% of actual spend, and a forecast that the month will blow the limit - the
 # forecast is the one that gives useful warning rather than a post-mortem.
 cat > "$nfile" <<JSON

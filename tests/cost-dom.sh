@@ -138,6 +138,23 @@ cat > "$T/r/probe.js" <<'PROBE'
     paintStatus({ box: { id: 'i-1', state: 'running', type: 'g6.xlarge', lifecycle: 'spot' }, rates: {}, budget: {} });
     const playOf = id => (document.querySelector('#' + id + ' [data-f=play]') || {}).textContent || 'none';
     out.push('SAME PLAY | ' + playOf('c-recurring-card') + ' == ' + playOf('d-recurring-card'));
+    // The hourly price as billed. Spot zones differ, and nothing pins the zone:
+    // a machine not built yet is the spread; one that runs is its own zone's
+    // price. Both carry the address and the disk, which bill by the hour too.
+    //   machine 0.10 or 0.15 $/h, address 0.005 $/h, 100 GB disk at 0.0912 a
+    //   GB-month over a 720-hour month: x 100 rupees to the dollar.
+    const RATES = { inr_per_usd: 100, ipv4_hour: 0.005, ebs_gb_month: 0.0912, month_hours: 720 };
+    machinesNow = { region: 'ap-south-2', machines: [{ type: 'g6.xlarge', usd_hour_spot: 0.10, usd_hour_spot_max: 0.15,
+      inr_hour_spot: 10, spot_usd_by_az: { 'ap-south-2a': 0.10, 'ap-south-2b': 0.15 }, usd_hour_ondemand: 0.9664 }] };
+    boxNow = null;
+    statusNow = { region: 'ap-south-2', instance_type: 'g6.xlarge', config: { spot: '1', disk_gb: 100 }, rates: RATES };
+    out.push('PLANNED | ' + machineFacts().priceText);
+    boxNow = { type: 'g6.xlarge', lifecycle: 'spot', state: 'running', az: 'ap-south-2b', disk_gb: 100 };
+    statusNow = { ...statusNow, box: boxNow };
+    out.push('IN ZONE | ' + machineFacts().priceText);
+    // A bigger disk costs more by the hour.
+    boxNow = { ...boxNow, disk_gb: 200 }; statusNow = { ...statusNow, box: boxNow };
+    out.push('BIG DISK | ' + machineFacts().priceText);
     // A restart: nothing in this window, the last bill on this laptop.
     const kept = JSON.parse(localStorage.getItem('cg.lastCost'));
     kept.at = new Date(Date.now() - 2 * 86400000).toISOString();
@@ -182,7 +199,7 @@ row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
 echo "1. the month, in rupees at cg's one rate"
 contains "the total in rupees"           "$(row 'REAL c-month')" "₹167"
-contains "  hours played and the pace"   "$(row 'REAL c-month-sub')" "so far · 2.4 h played · on pace for ₹553 by 31 Oct"
+contains "  hours played and the pace"   "$(row 'REAL c-month-sub')" "so far · 2.4 h of machine time · on pace for ₹553 by 31 Oct"
 contains "the budget is yours, as set"   "$(row 'REAL c-cap-note')" "Budget ₹5,000 a month. AWS emails you if you pass it; it stops nothing."
 lacks    "  not AWS's dollars turned back" "$(row 'REAL c-cap-note')" "5,412"
 contains "  and the bar's verdict"       "$(row 'REAL CHIP')" "under the budget"
@@ -245,6 +262,10 @@ check    "Saved games opens the Games page" "$(row WENT)" "WENT | library"
 
 echo "3c. what playing adds, and a machine that exists"
 contains "playing adds the machine, by the hour" "$(row PLAY)" "Playing adds ₹16 an hour for the machine."
+# 0.10 x 100 + 0.5 + 100 x 0.0912 / 720 x 100 = 10 + 0.5 + 1.27 = 11.77; 0.15 -> 16.77
+check    "a machine not built yet: the spread across zones" "$(row PLANNED)" "PLANNED | ₹11.77–₹16.77"
+check    "  one that runs: its own zone, address and disk"  "$(row 'IN ZONE')" "IN ZONE | ₹16.77"
+check    "  the disk counts by its size"  "$(row 'BIG DISK')" "BIG DISK | ₹18.03"
 contains "status after a Refresh reaches Spending's card too" "$(row 'SAME PLAY')" "Playing adds ₹16 an hour for the machine. == Playing adds ₹16 an hour for the machine."
 contains "a stopped machine is its own row"  "$(row STOPPED)" "Machine (stopped) →₹433 a month"
 lacks    "  not a disk left behind"           "$(row STOPPED)" "Disk left by a deleted machine"

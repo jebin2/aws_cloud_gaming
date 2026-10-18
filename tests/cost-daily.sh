@@ -5,6 +5,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 REPO=$PWD
+# The scripts read every price from the environment lib/rates.sh fills; run
+# directly here, they get the suites' fixed table.
+set -a; source tests/prices.env; set +a
 T=$(mktemp -d); pass=0; fail=0
 trap 'rm -rf "$T"' EXIT
 
@@ -91,15 +94,17 @@ echo "4d. where the month is heading"
 # by this laptop's month length. cg has both numbers - the answer carries one
 # entry per day of the window, and the window starts on the 1st - so it says it,
 # and the terminal can print it too.
-#   3.76 over 3 days of a 30-day month
-check "projected to month end"        "$(jq_ projected_usd)" "37.6"
-check "  in rupees"                   "$(jq_ projected_inr)" "3309"
+# The pace is the whole days: the last entry is today, not over, and the bill
+# runs a day behind - dividing by it too read low all month.
+#   3.28 over the 2 whole days, for a 30-day month
+check "projected to month end"        "$(jq_ projected_usd)" "49.2"
+check "  in rupees"                   "$(jq_ projected_inr)" "4330"
 check "  the days it divided by"      "$(jq_ days_elapsed)" "3"
 check "  and the month it is in"      "$(jq_ days_in_month)" "30"
 # The divisor is the answer's own day count, not today's date: a month-old
 # fixture must project the same way in any month it is read in.
 contains "the table says it as well"  "$(IN="$T/ce.json" daily)" \
-         "On this pace: 37.60 USD / 3309 INR by the end of the month (3 of its 30 days so far)."
+         "On this pace: 49.20 USD / 4330 INR by the end of the month (3 of its 30 days so far)."
 r=$(IN="$T/empty.json" daily --json)
 check "nothing billed projects to nothing" \
       "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["projected_inr"])' <<<"$r")" "None"
@@ -122,7 +127,7 @@ case "$*" in
 esac
 FAKE
 chmod +x "$T/bin/aws"
-cj=$( cd "$T/repo" && env -i CG_INR_PER_USD=88 PATH="$T/bin:$PATH" HOME="$T/home" CG_COLOR=never \
+cj=$( cd "$T/repo" && env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=88 PATH="$T/bin:$PATH" HOME="$T/home" CG_COLOR=never \
         bash lib/setup cost --json 2>/dev/null )
 jq2() { python3 -c 'import json,sys
 d=json.load(sys.stdin)
@@ -135,7 +140,9 @@ check "  and what a refresh costs"     "$(jq2 rates.ce_call_usd)" "0.01"
 check "the rupee rate is one number"   "$(jq2 rates.inr_per_usd)" "88.0"
 # 160.2 GB archive at $0.025 + a 50 GB volume at $0.0912
 check "standby is worked out by cg"    "$(jq2 standby.usd_month)" "8.56"
-check "  and per day"                  "$(jq2 standby.usd_day)" "0.2853"
+# A day is this month's share: 1/30 or 1/31 of it.
+check "  and per day"                  "$(python3 -c 'import calendar,datetime as d,sys; n=d.datetime.utcnow()
+print(abs(float(sys.argv[1]) - 8.56/calendar.monthrange(n.year,n.month)[1]) < 0.0005)' "$(jq2 standby.usd_day)")" "True"
 check "  split by what holds it"       "$(jq2 standby.volumes_usd_month)" "4.56"
 
 echo "4e. storage as the bill sees it"
@@ -157,13 +164,13 @@ J
 esac
 FAKE
 chmod +x "$T/bin/aws"
-cj=$( cd "$T/repo" && env -i CG_INR_PER_USD=94.95 PATH="$T/bin:$PATH" HOME="$T/home" CG_COLOR=never \
+cj=$( cd "$T/repo" && env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=94.95 PATH="$T/bin:$PATH" HOME="$T/home" CG_COLOR=never \
         bash lib/setup cost --json 2>/dev/null )
 check "the bill's storage, a month of the busiest recent whole day" "$(jq2 storage.billed_usd_month)" "3.9"
 check "  what cg's own bucket explains"  "$(jq2 storage.known_usd_month)" "0.0"
 check "  and the rest, said out loud"    "$(jq2 storage.unknown_usd_month)" "3.9"
 check "the month in rupees at the one rate" "$(jq2 month.total_inr)" "$(python3 -c 'print(round(0.31*94.95))')"
-cj=$( cd "$T/repo" && env -i CG_INR_PER_USD=94.95 SIZE=171986001052 PATH="$T/bin:$PATH" HOME="$T/home" \
+cj=$( cd "$T/repo" && env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=94.95 SIZE=171986001052 PATH="$T/bin:$PATH" HOME="$T/home" \
         CG_COLOR=never bash lib/setup cost --json 2>/dev/null )
 check "a bucket that explains it leaves nothing over" "$(jq2 storage.unknown_usd_month)" "0.0"
 
@@ -173,7 +180,7 @@ check "both daily paths ask Cost Explorer the same way" "$(grep -c 'granularity 
 check "  and renders the summary from it"         "$(grep -c 'cost-daily.py --aggregate' lib/setup)" "1"
 check "cg help mentions it"            "$(grep -c 'cg cost \[--daily\]' cg)" "1"
 check "cg cost --json is one object"  "$(grep -c 'exec lib/setup cost --json' cg)" "1"
-check "the prices live in one file"   "$(grep -c 'CG_S3_USD_GB_MONTH=' lib/rates.sh)" "1"
+check "the prices are AWS's, none typed in" "$(grep -cE ':-0\.[0-9]' lib/rates.sh)" "0"
 check "  and nowhere else in cg"      "$(grep -c '0\.0912\|0\.1093' lib/setup cg lib/game | grep -vc ':0')" "0"
 check "  built from the same call"    "$(grep -c 'cost-daily.py --json' lib/setup)" "1"
 check "the app does no date arithmetic of its own" \

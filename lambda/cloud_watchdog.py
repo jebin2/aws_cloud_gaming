@@ -64,8 +64,16 @@ EXPIRY_DAYS = int(os.environ.get("CG_ARCHIVE_EXPIRY_DAYS", "0") or 0)
 # The expiry check's marks are SSM Parameter Store standard parameters - which cost
 # nothing - under /cloud-gaming/<host>/, not bucket tags, which are billed S3
 # requests. Whether an archive exists comes from S3's free daily size metric.
-S3_USD_PER_GB = float(os.environ.get("CG_S3_USD_PER_GB", "0.025"))
-INR_PER_USD = 88
+# AWS's S3 price and the rupee rate (GST included), as cg had them when it
+# deployed this - never a number written here. Either missing, the archive is
+# described by its size alone.
+def _rate(k):
+    try:
+        return float(os.environ[k])
+    except (KeyError, ValueError):
+        return None
+S3_USD_PER_GB = _rate("CG_S3_USD_GB_MONTH")
+INR_PER_USD = _rate("CG_INR_PER_USD")
 
 # ntfy push notifications. Off unless cg passed a URL.
 NTFY_URL = os.environ.get("CG_NTFY_URL", "")
@@ -501,9 +509,14 @@ def archive_note(cw, now):
     if not size:
         return " No game archive is measured in S3, so nothing else bills."
     gb = size / 1073741824
-    usd = gb * S3_USD_PER_GB
-    note = (" S3 still holds about %s GB of games (as of %s): about $%.2f a month (INR %.0f)."
-            % (("%.1f" if gb < 10 else "%.0f") % gb, day.strftime("%Y-%m-%d"), usd, usd * INR_PER_USD))
+    shown = ("%.1f" if gb < 10 else "%.0f") % gb
+    if S3_USD_PER_GB is None:
+        note = " S3 still holds about %s GB of games (as of %s)." % (shown, day.strftime("%Y-%m-%d"))
+    else:
+        usd = gb * S3_USD_PER_GB
+        note = (" S3 still holds about %s GB of games (as of %s): about $%.2f a month%s."
+                % (shown, day.strftime("%Y-%m-%d"), usd,
+                   " (INR %.0f)" % (usd * INR_PER_USD) if INR_PER_USD else ""))
     if EXPIRY_DAYS > 0:
         note += " Deleted after %d days with no box, around %s." % (
             EXPIRY_DAYS, (now + timedelta(days=EXPIRY_DAYS)).strftime("%Y-%m-%d"))

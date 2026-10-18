@@ -86,9 +86,9 @@ check "the dearest zone is reported too" \
 check "a stale price for the same zone is ignored" \
       "$(jq_ '[m["usd_hour_spot"] for m in d["machines"] if m["type"]=="g6.xlarge"][0] != 0.9999' <<<"$j")" "True"
 check "INR is converted with the rate, not a literal" \
-      "$(jq_ '[m["inr_hour_spot"] for m in d["machines"] if m["type"]=="g6e.xlarge"][0]' <<<"$j")" "49"
+      "$(jq_ '[m["inr_hour_spot"] for m in d["machines"] if m["type"]=="g6e.xlarge"][0]' <<<"$j")" "48.7"
 check "on demand is read from the Pricing API" \
-      "$(jq_ '[m["inr_hour_ondemand"] for m in d["machines"] if m["type"]=="g6.xlarge"][0]' <<<"$j")" "85"
+      "$(jq_ '[m["inr_hour_ondemand"] for m in d["machines"] if m["type"]=="g6.xlarge"][0]' <<<"$j")" "85.04"
 
 echo "3. what a quota cannot cover is marked, not hidden"
 check "8 vCPU does not fit a 4 vCPU spot quota" \
@@ -133,7 +133,8 @@ contains "the person is told"   "$out" "no GPU instance types are offered"
 echo "7. no price or machine is written down in the script"
 check "no instance type literals" \
       "$(grep -cE "g6\.xlarge|g6e\.|L40S" lib/machines.sh)" "0"
-check "no INR rate literal"  "$(grep -c 'INR_PER_USD:-88' lib/machines.sh)" "1"
+# To the paisa, and no rate written down: with none known the rupees are null.
+check "no INR rate literal"  "$(grep -c 'INR_PER_USD:-[0-9]' lib/machines.sh)" "0"
 contains "the families are overridable" "$(cat lib/machines.sh)" "CG_MACHINE_FAMILIES"
 
 echo "8. the sandboxes know what cg sources"

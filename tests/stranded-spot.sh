@@ -16,6 +16,8 @@ mkdir -p "$T/bin"
 
 contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: output lacks '$3'"; fail=$((fail+1)); fi; }
+lacks()    { if [[ $2 != *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
+             else echo "  FAIL $1: output has '$3'"; fail=$((fail+1)); fi; }
 empty()    { if [[ -z ${2//[[:space:]]/} ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: expected nothing, got '$2'"; fail=$((fail+1)); fi; }
 
@@ -32,6 +34,8 @@ esac
 FAKE
 chmod +x "$T/bin/aws"
 
+# The prices as cg exports them (lib/rates.sh), here the suites' fixed table.
+set -a; source tests/prices.env; set +a
 run() {
   ( PATH="$T/bin:$PATH" STATE="${STATE:-running}" LIFECYCLE="${LIFECYCLE:-spot}" \
     SPOT_STATE="${SPOT_STATE:-active}" GB="${GB:-50}" \
@@ -64,6 +68,11 @@ empty "says nothing" "$out"
 echo "5. no instance id at all: silent, not an error"
 out=$( PATH="$T/bin:$PATH" bash -c 'source lib/common.sh; stranded_spot_note ap-south-2 ""' 2>&1 )
 empty "says nothing" "$out"
+
+echo "5b. no price known: it still says it bills, and makes no number up"
+out=$(STATE=stopped LIFECYCLE=spot SPOT_STATE=disabled GB=50 CG_EBS_USD_GB_MONTH= run)
+contains "still bills"         "$out" "still bills, every month"
+lacks    "  with no figure"    "$out" '$'
 
 echo "6. the cost scales with the real volume, not a configured default"
 out=$(STATE=stopped LIFECYCLE=spot SPOT_STATE=disabled GB=200 run)

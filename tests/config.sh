@@ -22,7 +22,7 @@ cp -r lib "$T/repo/"; cp cg "$T/repo/"
 printf 'GAME_DISK_GB=80\nGAME_NTFY_URL=https://ntfy.sh/topic-abc\n' > "$T/repo/.env"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$T/home/aws"; chmod +x "$T/home/aws"
 
-cg_() { ( cd "$T/repo" && env -i CG_INR_PER_USD=88 PATH="$T/home:$PATH" HOME="$T/home" CG_COLOR=never \
+cg_() { ( cd "$T/repo" && env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=88 PATH="$T/home:$PATH" HOME="$T/home" CG_COLOR=never \
             bash ./cg "$@" 2>&1 ); }
 envfile() { cat "$T/repo/.env"; }
 jq_() { python3 -c 'import json,sys

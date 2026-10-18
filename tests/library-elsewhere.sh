@@ -76,7 +76,7 @@ case "$*" in
 esac
 FAKE
 chmod +x "$T/bin/aws"
-run() { ( cd "$T/repo" && printf '%s\n' "${ANSWER:-}" | env -i CG_INR_PER_USD=94.95 CALLS="$T/calls" PUT="$T/put" \
+run() { ( cd "$T/repo" && printf '%s\n' "${ANSWER:-}" | env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=94.95 CALLS="$T/calls" PUT="$T/put" \
             NOWB="$NOWB" OLDB="$OLDB" LEGB="$LEGB" FORB="$FORB" TGZ="$TGZ" PATH="$T/bin:$PATH" HOME="$T/home" \
             CG_COLOR=never "${EXTRA[@]}" bash ./cg "$@" 2>&1 ); }
 EXTRA=()
@@ -105,7 +105,9 @@ check    "  when it was saved, and its size" "$(jq_ places.$p.login_detail.modif
 q=$(python3 -c 'import json,sys,os; print([i for i,p in enumerate(json.load(sys.stdin)["places"]) if p["bucket"]==os.environ["OLDB"]][0])' <<<"$j")
 check    "an empty place has no login to read" "$(jq_ places.$q.login_detail)" "null"
 check    "where the machine is built"     "$(jq_ region)" '"ap-south-1"'
-check    "the rate, the copy price, the days" "$(jq_ inr_per_usd) $(jq_ xregion_usd_gb) $(jq_ expiry_days)" "94.95 0.086 14"
+# The copy price belongs to the place a game leaves: AWS bills transfer at
+# the source region's rate.
+check    "the rate, the copy price, the days" "$(jq_ inr_per_usd) $(jq_ places.$q.xregion_usd_gb) $(jq_ expiry_days)" "94.95 0.086 14"
 check    "when a machine was last seen"   "$(jq_ last_seen)" '"2026-10-16T09:27:52Z"'
 EXTRA=(NO_LIST=1); j=$(run library elsewhere --json); EXTRA=()
 check    "no bucket list is an error, not 'none'" "$(jq_ places)" "null"
@@ -195,7 +197,7 @@ c=$(cd "$T/repo" && bash ./cg --contract)
 contains "it runs alone, as do reset"     "$c" '["library", "reset"], ["library", "keep-for"]'
 
 echo "7. under the app, each question has its id"
-out=$(cd "$T/repo" && printf 'MOVE\n' | env -i CG_JSON=1 CG_INR_PER_USD=94.95 CALLS="$T/calls" PUT="$T/put" \
+out=$(cd "$T/repo" && printf 'MOVE\n' | env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_JSON=1 CG_INR_PER_USD=94.95 CALLS="$T/calls" PUT="$T/put" \
         NOWB="$NOWB" OLDB="$OLDB" LEGB="$LEGB" FORB="$FORB" PATH="$T/bin:$PATH" HOME="$T/home" \
         CG_COLOR=never bash ./cg library move 2344520 --from "$LEGB" 2>&1)
 contains "move asks by id"                "$out" '"id":"move-game"'

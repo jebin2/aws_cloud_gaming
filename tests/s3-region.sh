@@ -71,7 +71,8 @@ contains "and the helper is sourced"        "$prov" "source lib/s3-region.sh"
 echo "5. a cross-region archive is said out loud, because it is money"
 contains "the mismatch is reported"   "$prov" 'the archive is in $BUCKET_REGION but the box is in $REGION'
 contains "  marked as a warning"      "$prov" 'echo "!! the archive is in'
-contains "  with the per-GB price"    "$prov" '0.086/GB'
+contains "  with AWS's per-GB price, for the region the bytes leave" "$prov" 'cg_price "$BUCKET_REGION" CG_XREGION_USD_GB'
+lacks    "  and no price written down"  "$prov" '0.086'
 # The number is MEASURED. It used to say "INR 1,234 for a 163 GB library" -
 # the size the archive happened to be the day that line was written - which on
 # an empty bucket bills you for games that are not there.

@@ -174,7 +174,12 @@ settings_prompts() {
   if [[ -z ${GAME_DISK_GB+set} ]] && (( fix )) && settings_tty; then
     echo
     echo "Root disk, in GB: the OS, the driver and Steam - games live on the box's own NVMe."
-    echo "About INR 8 per GB a month while the box exists, and it cannot be shrunk later."
+    # AWS's disk price (lib/rates.sh), not one written down here.
+    if [[ -n ${CG_EBS_USD_GB_MONTH:-} && -n ${CG_INR_PER_USD:-} ]]; then
+      echo "About INR $(awk -v u="$CG_EBS_USD_GB_MONTH" -v i="$CG_INR_PER_USD" 'BEGIN{printf "%.1f", u*i}') per GB a month while the box exists, and it cannot be shrunk later."
+    else
+      echo "Billed by the GB, every month the box exists, and it cannot be shrunk later."
+    fi
     settings_number GAME_DISK_GB 50 30 "  root disk GB" \
       || log_as fail "no disk size saved - the default, 50 GB, is used, and cg check --fix asks again"
   fi
@@ -182,8 +187,10 @@ settings_prompts() {
 
   if [[ -z ${GAME_ARCHIVE_EXPIRY_DAYS+set} ]] && (( fix )) && settings_tty; then
     echo
-    echo "Days with no box before the cloud watchdog deletes your game archive in S3 (about"
-    echo "INR 350 a month for 160 GB). 0 keeps it forever. The next cg init applies a change."
+    echo "Days with no box before the cloud watchdog deletes your game archive in S3$(
+      [[ -n ${CG_S3_USD_GB_MONTH:-} && -n ${CG_INR_PER_USD:-} ]] \
+        && awk -v u="$CG_S3_USD_GB_MONTH" -v i="$CG_INR_PER_USD" 'BEGIN{printf " (about INR %.0f a month for 100 GB)", 100*u*i}')."
+    echo "0 keeps it forever. The next cg init applies a change."
     settings_number GAME_ARCHIVE_EXPIRY_DAYS 14 0 "  delete the archive after how many days" \
       || log_as fail "no expiry saved - the default, 14 days, is used, and cg check --fix asks again"
   fi

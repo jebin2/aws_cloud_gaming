@@ -145,7 +145,9 @@ init_summary() {
   days=$(cw_expiry_days)
   if (( days == 0 )); then summary_more "game archive kept forever"
   else summary_more "game archive deleted after $days days with no box"; fi
-  summary_more "budget \$$(awk -v i="${GAME_BUDGET_INR:-5000}" 'BEGIN{printf "%.0f", i/88}') · notifications $([[ -n $(cg_ntfy_url) ]] && echo on || echo "off (set GAME_NTFY_URL)")"
+  # The budget as you set it, in rupees - not turned into dollars at a rate
+  # written down years ago and back again.
+  summary_more "budget INR ${GAME_BUDGET_INR:-5000} a month · notifications $([[ -n $(cg_ntfy_url) ]] && echo on || echo "off (set GAME_NTFY_URL)")"
   echo
 
   if ! (( ${PAIRED:-0} )); then summary_pair_step; echo; fi

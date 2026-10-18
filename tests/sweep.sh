@@ -158,7 +158,7 @@ echo "5. an on-demand price is read even where nothing else can be"
 # The Pricing API answers for a region that is not enabled, which is the only
 # number available before opting in - and so the only way to cost the move.
 check "the cold region is priced" \
-      "$(jq_ '[m["inr_hour_ondemand"] for r in d["regions"] if r["region"]=="cold-region-1" for m in r["machines"]][0]' <<<"$out")" "85"
+      "$(jq_ '[m["inr_hour_ondemand"] for r in d["regions"] if r["region"]=="cold-region-1" for m in r["machines"]][0]' <<<"$out")" "85.04"
 check "  but has no spot price, which needs the region enabled" \
       "$(jq_ '[m["inr_hour_spot"] for r in d["regions"] if r["region"]=="cold-region-1" for m in r["machines"]][0]' <<<"$out")" "None"
 

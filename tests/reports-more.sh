@@ -106,7 +106,7 @@ check "snapshot --list, one image"  "$(CG_COLOR=never IMAGES=1 cg snapshot --lis
 IMAGE                   CREATED                 GB   ~USD/mo  NAME
 ami-0123456789abcdef0   2026-09-14T10:00:00     50      2.50  gamevps-2026-09-14
 
-estimated 2.50 USD/month (~INR 220) for 1 image(s)
+at most 2.50 USD/month (~INR 220) for 1 image(s)
 delete one with:  cg snapshot --delete <image-id>
 EXP
 )"

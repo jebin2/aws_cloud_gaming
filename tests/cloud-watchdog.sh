@@ -25,6 +25,8 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, "lambda")
 import cloud_watchdog as w
 w.IDLE_MINUTES, w.BOOT_GRACE_MINUTES, w.STUCK_MINUTES, w.THRESHOLD = 30, 20, 60, 10485760
+# What cg passes at deploy (lib/cloud-watchdog.sh cw_env): the Lambda holds no price.
+w.S3_USD_PER_GB, w.INR_PER_USD = 0.025, 88
 w.NTFY_URL = ""; SEND_FAILS = False
 def fake_send(url, title, message, priority, tags):
     if SEND_FAILS: raise Exception("network down")
@@ -579,6 +581,8 @@ import sys, io, contextlib
 sys.path.insert(0, "lambda")
 import cloud_watchdog as w
 w.TS_HOST, w.NTFY_URL = "gamevps", "https://ntfy.sh/t"
+# What cg passes at deploy (cw_env): the Lambda holds no price of its own.
+w.S3_USD_PER_GB, w.INR_PER_USD = 0.025, 88
 calls = []
 def fake_send(url, title, message, priority, tags):
     calls.append("notify:" + title); print("sent: " + message)

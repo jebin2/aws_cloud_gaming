@@ -54,7 +54,7 @@ chmod +x "$T/bin/aws"
 
 cg_() { # cg_ <args...> - EXTRA passes env through
   # shellcheck disable=SC2086
-  ( cd "$T/repo" && env -i CG_INR_PER_USD=88 PATH="$T/bin" HOME="$T/home" CG_COLOR=never \
+  ( cd "$T/repo" && env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=88 PATH="$T/bin" HOME="$T/home" CG_COLOR=never \
       AWS_LOG="$T/awslog" OD_VAL="${OD_VAL:-0.0}" SPOT_VAL="${SPOT_VAL:-0.0}" \
       HIST="${HIST:-None}" REQ_FAIL="${REQ_FAIL:-}" \
       GAME_REGION=ap-south-1 GAME_INSTANCE_TYPE=g6.xlarge \

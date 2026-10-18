@@ -64,7 +64,7 @@ cg_() { # cg_ <args...> - EXTRA passes env through
   # WAYLAND_DISPLAY: there is no terminal in a test either, so every case here
   # is the app's case - a desktop session and polkit.
   # shellcheck disable=SC2086
-  ( cd "$T/repo" && env -i CG_INR_PER_USD=88 PATH="$T/bin:$T/sys" HOME="$T/home" CG_COLOR=never \
+  ( cd "$T/repo" && env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=88 PATH="$T/bin:$T/sys" HOME="$T/home" CG_COLOR=never \
       WAYLAND_DISPLAY=wayland-1 \
       LOG="$T/log" BIN="$T/bin" PACDB="$T/pacdb" GAME_REGION=ap-south-1 ${EXTRA:-} bash ./cg "$@" 2>&1 )
 }

@@ -353,11 +353,26 @@ const savedOn = iso => iso ? new Date(iso).toLocaleDateString(undefined, { day: 
 function buildRate() {
   return statusNow ? machineFacts().price : null;
 }
-// A machine's hourly price as billed: the machine, plus its public address.
-function withAddress(h) {
+// A machine's hourly price as billed: the machine, its public address and its
+// disk, which all bill by the hour while it exists. Every rate is AWS's, read by
+// cg; the rupee rate has GST in it. A GB-month is the hours of this month, as
+// cg says them.
+function perHour(h, diskGb) {
   const r = (statusNow && statusNow.rates) || {};
-  return h == null ? null : h + (r.ipv4_hour && r.inr_per_usd ? r.ipv4_hour * r.inr_per_usd : 0);
+  if (h == null || !r.inr_per_usd) return h ?? null;
+  const gb = diskGb ?? ((statusNow && statusNow.config) || {}).disk_gb;
+  return h + (r.ipv4_hour ? r.ipv4_hour * r.inr_per_usd : 0)
+           + (gb && r.ebs_gb_month && r.month_hours ? gb * r.ebs_gb_month / r.month_hours * r.inr_per_usd : 0);
 }
+// Dollars to rupees at cg's rate today. A saved scan carries the rupees of
+// the day it ran; the dollars are AWS's, so they are converted again.
+function inrNow(usd, given) {
+  const k = statusNow && statusNow.rates && statusNow.rates.inr_per_usd;
+  return usd != null && k ? usd * k : given ?? null;
+}
+// One price, or the spread when the zones disagree.
+const hourText = (lo, hi) => lo == null ? null
+  : hi != null && Math.round(hi * 100) > Math.round(lo * 100) ? `${rsh(lo)}–${rsh(hi)}` : rsh(lo);
 function uptime(iso) {
   if (!iso) return '—';
   const mins = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
@@ -435,11 +450,13 @@ const rsh = n => n != null && isFinite(n) && n < 100 && Math.round(n * 100) % 10
 // "—", which is true, instead of ₹0, which is not.
 const inrRate = () => (statusNow && statusNow.rates && statusNow.rates.inr_per_usd) || NaN;
 
-// What a machine of this type costs an hour, bought this way, in rupees.
-function hourlyInr(type, spot) {
+// What a machine of this type costs an hour, bought this way, in rupees: in
+// the cheapest zone, or with `dearest`, the dearest - spot only.
+function hourlyInr(type, spot, dearest) {
   const m = machinesNow && (machinesNow.machines || []).find(x => x.type === type);
   if (!m) return null;
-  return spot ? m.inr_hour_spot : m.inr_hour_ondemand;
+  if (spot && dearest) return inrNow(m.usd_hour_spot_max, m.inr_hour_spot_max);
+  return spot ? inrNow(m.usd_hour_spot, m.inr_hour_spot) : inrNow(m.usd_hour_ondemand, m.inr_hour_ondemand);
 }
 
 // The machine card, drawn the same on Home and the Machine page: what is
@@ -462,13 +479,27 @@ function machineFacts() {
   const spec = s.spec || {};
   const gpu = hit && hit.gpu ? hit.gpu : spec.gpu;
   const vram = hit && hit.vram;
-  const price = withAddress((hit && (spot ? hit.spot : hit.od)) ?? hourlyInr(type, spot));
-  return { s, box, cur, rows, hit, region, type, spot, price,
+  // Nothing pins the zone, and spot prices differ by zone. A machine that runs
+  // is priced in its own zone; one not built yet is the spread across zones.
+  const disk = box ? box.disk_gb : (s.config || {}).disk_gb;
+  let lo = null, hi = null;
+  if (box && spot && box.az && machinesNow && machinesNow.region === region) {
+    const m = (machinesNow.machines || []).find(x => x.type === type);
+    const usd = m && m.spot_usd_by_az && m.spot_usd_by_az[box.az];
+    if (usd != null) lo = hi = inrNow(usd);
+  }
+  if (lo == null) {
+    lo = (hit && (spot ? hit.spot : hit.od)) ?? hourlyInr(type, spot);
+    hi = spot ? (hit ? hit.spotMax : hourlyInr(type, true, true)) ?? lo : lo;
+  }
+  const price = perHour(lo, disk), priceMax = perHour(hi, disk);
+  const priceText = hourText(price, priceMax);
+  return { s, box, cur, rows, hit, region, type, spot, price, priceMax, priceText,
            what: [type, gpu ? gpuName(gpu, vram) : null].filter(Boolean).join(' · ') || '—',
            where: [region ? placeName(region) : null,
                    box || cfgVal('GAME_SPOT') === '1' ? (spot ? 'Spot' : 'Standard')
                      : cfgVal('GAME_SPOT') === '0' ? 'Standard' : 'Spot when available',
-                   price != null ? `${rsh(price)} an hour while it runs` : null].filter(Boolean).join(' · ') };
+                   priceText ? `${priceText} an hour while it runs` : null].filter(Boolean).join(' · ') };
 }
 
 function renderMachineCard(card) {
@@ -609,7 +640,10 @@ function paintDash() {
   renderMonth($('d-month-card'), { hint: 'Press Exact cost to see it.' });
   const b = s.budget || {};
   const limit = b.limit == null ? null
-    : isFinite(Number(setting('GAME_BUDGET_INR', NaN))) ? Number(setting('GAME_BUDGET_INR', NaN)) : b.limit * inr;
+    : isFinite(Number(setting('GAME_BUDGET_INR', NaN))) ? Number(setting('GAME_BUDGET_INR', NaN))
+    // AWS keeps the budget in dollars with the tax inside it, so it turns back
+    // into rupees at the plain exchange rate, not the one with GST added.
+    : b.limit * ((s.rates && s.rates.fx_inr_per_usd) || NaN);
   const checked = lastCost();
   showChecked($('d-month-src'), checked ? checked.at : null, true);
   showChecked($('d-bill-src'), checked ? checked.at : null, true);
@@ -873,7 +907,7 @@ function renderMonth(box, { hint } = {}) {
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
   total.textContent = m.total_usd != null ? r(m.total_usd) : '—';
   sub.textContent = m.total_usd == null ? 'AWS did not answer.'
-    : `so far · ${hours.toFixed(1)} h played`
+    : `so far${(d.rates || {}).tax_pct ? `, with ${d.rates.tax_pct}% GST` : ''} · ${hours.toFixed(1)} h of machine time`
       + (projected != null ? ` · on pace for ${r(projected)} by ${monthEnd.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : '');
   // Your number, in rupees, as you set it. AWS keeps it in dollars, converted
   // when it was made; turned back at today's rate it read Rs 5,412 for 5,000.
@@ -948,12 +982,12 @@ function renderRecurring(box, { hint } = {}) {
   }
   box.append(list);
   // What playing adds on top: the machine, by the hour.
-  const play = machineFacts().price;
+  const play = machineFacts().priceText;
   if (play != null) {
     const pl = el('p', 'font-code-sm text-code-sm text-on-surface-variant mt-space-sm',
       res.instance && res.instance.state === 'running'
-        ? `A machine is running now: ${rsh(play)} an hour on top.`
-        : `Playing adds ${rsh(play)} an hour for the machine.`);
+        ? `A machine is running now: ${play} an hour on top.`
+        : `Playing adds ${play} an hour for the machine.`);
     pl.dataset.f = 'play';
     box.append(pl);
   }
@@ -1039,7 +1073,7 @@ function paintCostPage() {
     $('c-egress-note').textContent = e.gb_left > 0
       ? `Even at your full quality (${quality}: about ${gbPerHour.toFixed(0)} GB an hour), `
         + `at least ${Math.floor(e.gb_left / gbPerHour)} more hours are free. After that, ${r(rate.egress_gb)} a GB.`
-      : `The free 100 GB is used up. Streaming now costs ${r(rate.egress_gb)} a GB - `
+      : `The free ${e.gb_free} GB is used up. Streaming now costs ${r(rate.egress_gb)} a GB - `
         + `at most ${r(gbPerHour * rate.egress_gb)} an hour at your quality (${quality}).`;
   }
 }
@@ -1197,12 +1231,17 @@ async function resetGame(g) {
 async function moveGame(g, here, inr) {
   const name = g.name || g.appid;
   const to = here ? placeName(here) : 'where your machine runs';
-  const rate = (elsewhereNow || {}).xregion_usd_gb;
-  const cost = rate && isFinite(inr) ? rs((g.bytes / 1073741824) * rate * inr) : null;
+  // Billed where the bytes leave, at that place's own price; inside one
+  // location a copy has no transfer charge at all.
+  const place = elsewherePlaces().find(p => p.bucket === g.bucket) || {};
+  const same = here && g.region === here;
+  const rate = place.xregion_usd_gb;
+  const cost = !same && rate && isFinite(inr) ? rs((g.bytes / 1073741824) * rate * inr) : null;
   const ok = await askConfirm({
     title: `Move ${name} to ${to}?`,
     body: `${GB(g.bytes)} is copied from ${placeName(g.region)} to ${to}, checked, then deleted from ${placeName(g.region)}.\n\n`
-        + (cost ? `Costs about ${cost} once (AWS charges to copy between regions). ` : '')
+        + (same ? 'Both are in the same location, so there is no transfer charge. '
+           : cost ? `Costs about ${cost} once (AWS charges to copy between regions). ` : '')
         + 'After that your builds download it free. Keeping it costs the same as now.',
     yes: 'Move',
   });
@@ -2824,7 +2863,8 @@ function chooserRows() {
         out.push({
           region: r.region, city: shortCity(r.city), rtt: r.rtt_ms, enabled: r.enabled,
           type: m.type, gpu: m.gpu, vram: m.vram_gib, score: m.score,
-          spot: m.inr_hour_spot, spotMax: m.inr_hour_spot_max, od: m.inr_hour_ondemand,
+          spot: inrNow(m.usd_hour_spot, m.inr_hour_spot), spotMax: inrNow(m.usd_hour_spot_max, m.inr_hour_spot_max),
+          od: inrNow(m.usd_hour_ondemand, m.inr_hour_ondemand),
           fitsSpot: m.fits_spot, fitsOd: m.fits_ondemand,
         });
       }
@@ -2841,10 +2881,9 @@ function chooserRows() {
           region: machinesNow.region, city: '', rtt: null, enabled: true,
           type: m.type, gpu: m.gpu, vram: m.vram_gib, score: null,
           // No rate from cg, no rupee figure. The app holds no exchange rate.
-          spot: m.inr_hour_spot,
-          spotMax: m.usd_hour_spot_max != null && machinesNow.inr_per_usd
-            ? Math.round(m.usd_hour_spot_max * machinesNow.inr_per_usd) : null,
-          od: m.inr_hour_ondemand,
+          spot: inrNow(m.usd_hour_spot, m.inr_hour_spot),
+          spotMax: inrNow(m.usd_hour_spot_max, m.inr_hour_spot_max),
+          od: inrNow(m.usd_hour_ondemand, m.inr_hour_ondemand),
           fitsSpot: m.fits_spot, fitsOd: m.fits_ondemand,
         })),
       swept: false,
@@ -2888,9 +2927,8 @@ function priceCell(tr, mount, row, spot, inr, cur) {
 
   // The cheapest zone, and nothing pins the zone: show the spread when the
   // zones disagree, because the cheap number alone is a promise cg cannot keep.
-  // The same price the machine card shows: the public address included.
-  const range = spot && inr != null && row.spotMax != null && row.spotMax > inr
-    ? `${rsh(withAddress(inr))}–${rsh(withAddress(row.spotMax))}` : (inr == null ? null : rsh(withAddress(inr)));
+  // The same price the machine card shows: the address and the disk included.
+  const range = hourText(perHour(inr), spot && row.spotMax != null ? perHour(row.spotMax) : null);
   const amount = document.createElement('span');
   amount.className = 'amount';
   amount.textContent = range == null ? 'none' : range;
@@ -3068,8 +3106,11 @@ function paintChooser() {
       }
       if (rows.length) {
         const line = document.createElement('div');
+        // What each price holds, so it can be checked against the bill.
+        const tax = ((statusNow && statusNow.rates) || {}).tax_pct;
         line.textContent = 'Spot is much cheaper, but AWS can take the machine back mid-game. '
-          + 'Standard is never taken back.';
+          + 'Standard is never taken back. Each price includes the machine\'s address and disk'
+          + (tax ? `, and ${tax}% GST.` : '.');
         legend.append(line);
       }
       if (reasons.size) {
@@ -4286,10 +4327,10 @@ function paintWhereTo() {
     type.textContent = r.type || (r.enabled ? 'No GPU limit here yet' : 'Not switched on yet');
     const spot = document.createElement('td');
     spot.className = 'num';
-    spot.textContent = r.spot != null ? rsh(withAddress(r.spot)) : '—';
+    spot.textContent = r.spot != null ? rsh(perHour(r.spot)) : '—';
     const od = document.createElement('td');
     od.className = 'num';
-    od.textContent = r.od != null ? rsh(withAddress(r.od)) : '—';
+    od.textContent = r.od != null ? rsh(perHour(r.od)) : '—';
     tr.append(pick, city, ms, type, spot, od);
     table.append(tr);
   }
@@ -5331,7 +5372,8 @@ async function chooseMachine(row, spot) {
   // a location, and a machine elsewhere cannot reach them.
   const body = [
     [row.type, row.gpu && gpuName(row.gpu, row.vram)].filter(Boolean).join(' · '),
-    `${spot ? 'Spot' : 'Standard'}${price != null ? ` · ${rsh(withAddress(price))} an hour while it runs` : ''}`,
+    `${spot ? 'Spot' : 'Standard'}${price != null
+      ? ` · ${hourText(perHour(price), spot && row.spotMax != null ? perHour(row.spotMax) : null)} an hour while it runs` : ''}`,
     spot ? 'Much cheaper, but AWS can take it back mid-game.' : 'Never taken back mid-game.',
     spot && row.score != null && row.score <= 2
       ? `Spare machines are scarce here (${row.score}/10), so a spot start will likely be refused.` : '',
@@ -5465,12 +5507,12 @@ $('d-destroy').onclick = async () => {
 $('b-build').onclick = async () => {
   const apps = picked.size ? [...picked].join(',') : 'none';
   const gb = selectedGb();
-  const rate = buildRate();
+  const rate = statusNow ? machineFacts().priceText : null;
   const ok = await askConfirm({
     title: 'Build the machine?',
     body: `${picked.size ? `${picked.size} game${picked.size === 1 ? '' : 's'}, ${gb.toFixed(1)} GB, will be`
                          : 'No games will be'} downloaded while it builds.\n\n`
-        + `It costs ${rate != null ? `${rsh(rate)} an hour` : 'by the hour'} while it runs.`,
+        + `It costs ${rate != null ? `${rate} an hour` : 'by the hour'} while it runs.`,
     yes: 'Build',
   });
   if (!ok) return;

@@ -638,7 +638,10 @@ library_elsewhere_json() {
     r=$(s3_bucket_region "$b" 2>/dev/null) || continue
     cg_bucket_ours "$b" "$r" "$acct" "$TS_HOST" || continue
     i=$((i + 1))
-    printf '%s\t%s\n' "$b" "$r" > "$work/$i.meta"
+    # That region's own prices: a bucket bills at the rate where it is, and a
+    # game leaves it at that region's transfer price.
+    printf '%s\t%s\t%s\t%s\n' "$b" "$r" "$(cg_price "$r" CG_S3_USD_GB_MONTH)" \
+      "$(cg_price "$r" CG_XREGION_USD_GB)" > "$work/$i.meta"
     # An empty prefix exits 1 with nothing on stderr: that is an empty bucket.
     # Anything said on stderr is a listing that failed, which is not.
     aws s3 ls "s3://$b/steam/" --recursive --region "$r" > "$work/$i.ls" 2> "$work/$i.err" || true
@@ -653,13 +656,18 @@ library_elsewhere_json() {
 import json, os, re
 w, n = os.environ["WORK"], int(os.environ["N"])
 GB = 1073741824.0
-S3 = float(os.environ["CG_S3_USD_GB_MONTH"])
+def num(v):
+    try: return float(v)
+    except (TypeError, ValueError): return None
 read = lambda f: open(os.path.join(w, f)).read() if os.path.exists(os.path.join(w, f)) else ""
+# A month of b bytes at a GB-month price; None when the price is unknown.
+month = lambda b, rate: None if rate is None else round(b / GB * rate, 2)
 marks = json.loads(read("marks") or "null")
 kept = (marks or {}).get("kept") or {}
 places = []
 for i in range(1, n + 1):
-    bucket, region = (read("%d.meta" % i).rstrip("\n").split("\t") + [""])[:2]
+    bucket, region, s3, xr = (read("%d.meta" % i).rstrip("\n").split("\t") + ["", "", ""])[:4]
+    S3, XR = num(s3), num(xr)
     err = read("%d.err" % i).strip().splitlines()
     games_b = login_b = other_b = 0
     dirs = {}
@@ -679,16 +687,18 @@ for i in range(1, n + 1):
     # The index names the games; without one, the folders they were saved in do.
     games = ([{"appid": str(a.get("appid")), "name": a.get("name") or a.get("installdir"),
                "installdir": a.get("installdir"), "bytes": a.get("bytes", 0), "pushed": a.get("pushed"),
-               "usd_month": round(a.get("bytes", 0) / GB * S3, 2),
+               "usd_month": month(a.get("bytes", 0), S3),
                "kept": kept.get("%s/%s" % (bucket, a.get("appid")))} for a in apps]
              or [{"appid": None, "name": d, "installdir": d, "bytes": s, "pushed": None,
-                  "usd_month": round(s / GB * S3, 2), "kept": None} for d, s in dirs.items()])
+                  "usd_month": month(s, S3), "kept": None} for d, s in dirs.items()])
     total = games_b + login_b + other_b
     places.append({
         "bucket": bucket, "region": region or None,
         "error": err[0] if err else None,
         "bytes": None if err else total, "games_bytes": None if err else games_b,
-        "usd_month": None if err else round(total / GB * S3, 2),
+        "usd_month": None if err else month(total, S3),
+        # What it costs to bring a game from here to where the machine is built.
+        "xregion_usd_gb": XR,
         "games": sorted(games, key=lambda g: -(g["bytes"] or 0)),
         "login": login_b > 0,
         # The same shape as library list --json gives for the one in use.
@@ -699,13 +709,13 @@ print(json.dumps({"error": None, "places": places,
                   # Where the machine is built, and what it costs to bring a
                   # game here - the app must not need another read for either.
                   "region": os.environ["HERE"],
-                  "inr_per_usd": float(os.environ["CG_INR_PER_USD"]),
-                  "xregion_usd_gb": float(os.environ["CG_XREGION_USD_GB"]),
+                  "inr_per_usd": num(os.environ.get("CG_INR_PER_USD")),
                   "expiry_days": int(os.environ["DAYS"]),
                   "last_seen": (marks or {}).get("last_seen"),
                   "marks_read": marks is not None,
                   "bytes": sum(p["bytes"] for p in known),
-                  "usd_month": round(sum(p["usd_month"] for p in known), 2)}, indent=2))'
+                  "usd_month": None if any(p["usd_month"] is None for p in known)
+                               else round(sum(p["usd_month"] for p in known), 2)}, indent=2))'
   rm -rf "$work"
 }
 
@@ -1103,9 +1113,17 @@ for a in json.load(sys.stdin).get("apps",[]):
   IFS=$'\t' read -r name dir bytes <<<"$row"
   [[ -n $dir && $dir != *"/"* && $dir != "." && $dir != ".." ]] || die "refusing to move $id: its install folder is '${dir}'"
   gb=$(awk -v b="$bytes" 'BEGIN{printf "%.1f", b/1073741824}')
-  usd=$(awk -v b="$bytes" -v r="$CG_XREGION_USD_GB" 'BEGIN{printf "%.2f", b/1073741824*r}')
   echo "This copies $name (${gb} GB) from $sr to $dr, checks every file, then deletes it from $sr."
-  echo "AWS charges about INR $(awk -v u="$usd" -v i="$CG_INR_PER_USD" 'BEGIN{printf "%.0f", u*i}') once to copy between regions."
+  # Billed where the bytes leave, at that region's price - and not at all
+  # inside one region, where a copy pays only its requests.
+  local xr; xr=$( [[ $sr == "$dr" ]] && echo 0 || cg_price "$sr" CG_XREGION_USD_GB ) || xr=""
+  if [[ $xr == 0 ]]; then
+    echo "Both are in $dr, so there is no transfer charge - only a few rupees of requests."
+  elif [[ -n $xr && -n ${CG_INR_PER_USD:-} ]]; then
+    echo "AWS charges about INR $(awk -v b="$bytes" -v r="$xr" -v i="$CG_INR_PER_USD" 'BEGIN{printf "%.0f", b/1073741824*r*i}') once to copy between regions."
+  else
+    echo "AWS charges once, by the GB, to copy between regions - the price could not be read."
+  fi
   cg_ask_typed move-game "type MOVE to confirm: " MOVE || { echo "aborted - nothing was copied"; return 1; }
   local part=0
   for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
@@ -1658,13 +1676,23 @@ import json,sys
 imgs=json.loads('''$imgs''')
 if not imgs: print("no saved images - nothing billing"); sys.exit()
 print(f"{'IMAGE':<24}{'CREATED':<22}{'GB':>4}  {'~USD/mo':>8}  NAME")
+import os
+# AWS's snapshot price and the rupee rate, from lib/rates.sh. The size is the
+# volume the image was taken from - the most its snapshot can bill.
+def env(k):
+    try: return float(os.environ[k])
+    except (KeyError, ValueError): return None
+rate, inr = env("CG_SNAPSHOT_USD_GB_MONTH"), env("CG_INR_PER_USD")
 tot=0.0
 for i in imgs:
     gb=i.get('gb') or 0
-    mo=gb*0.05          # EBS snapshot storage, approx
-    tot+=mo
-    print(f"{i['id']:<24}{i['created'][:19]:<22}{gb:>4}  {mo:>8.2f}  {i['name']}")
-print(f"\nestimated {tot:.2f} USD/month (~INR {tot*88:.0f}) for {len(imgs)} image(s)")
+    mo=gb*rate if rate is not None else None
+    tot+=mo or 0
+    print(f"{i['id']:<24}{i['created'][:19]:<22}{gb:>4}  {(f'{mo:.2f}' if mo is not None else '?'):>8}  {i['name']}")
+if rate is None:
+    print(f"\n{len(imgs)} image(s) - the snapshot price could not be read from AWS")
+else:
+    print(f"\nat most {tot:.2f} USD/month" + (f" (~INR {tot*inr:.0f})" if inr else "") + f" for {len(imgs)} image(s)")
 print("delete one with:  cg snapshot --delete <image-id>")
 PY
       ;;

@@ -14,12 +14,22 @@ import os
 import sys
 
 # The rate lib/rates.sh settled on, so this total and every other rupee figure
-# agree. A fixed 88 here put the month at Rs 265 while the rows under it, at
-# today's 94.95, added up to more.
+# agree: a dollar of AWS charges in rupees, GST included. A fixed 88 here put
+# the month at Rs 265 while the rows under it, at today's 94.95, added up to
+# more. None when no rate could be found - the rupee column then says so.
 try:
-    INR = float(os.environ.get("CG_INR_PER_USD") or 88)
+    INR = float(os.environ["CG_INR_PER_USD"])
+except (KeyError, ValueError):
+    INR = None
+try:
+    TAX = float(os.environ.get("CG_TAX_PCT") or 0)
 except ValueError:
-    INR = 88.0
+    TAX = 0.0
+# AWS's free allowance for data out to the internet - lib/rates.sh.
+try:
+    FREE_GB = float(os.environ["CG_EGRESS_FREE_GB"])
+except (KeyError, ValueError):
+    FREE_GB = None
 COLS = ["compute", "s3", "disk", "egress", "api", "other"]
 
 
@@ -62,8 +72,10 @@ def project(days, month_total):
     already happened.
 
     The window asked of Cost Explorer starts on the 1st and ends tomorrow, so
-    the answer carries one entry per day elapsed, today included - which is the
-    divisor, taken from the data rather than from this machine's clock.
+    the answer carries one entry per day elapsed, today included. Today is not
+    over and the bill runs about a day behind, so the pace is the days before
+    today: dividing the month by every day including today read low all month.
+    On the 1st there is no whole day yet, and no pace.
 
     The window's own first date says which month it is, and therefore how many
     days it has; the app used to work this out in the renderer, which meant the
@@ -73,15 +85,23 @@ def project(days, month_total):
         return {"days_elapsed": len(days), "days_in_month": None,
                 "projected_usd": None, "projected_inr": None}
     elapsed = len(days)
+    whole = days[:-1]
+    if not whole:
+        return {"days_elapsed": elapsed, "days_in_month": None,
+                "projected_usd": None, "projected_inr": None}
     try:
         year, mon = (int(x) for x in str(days[0].get("d", "")).split("-")[:2])
         in_month = calendar.monthrange(year, mon)[1]
     except (TypeError, ValueError):
         return {"days_elapsed": elapsed, "days_in_month": None,
                 "projected_usd": None, "projected_inr": None}
-    usd = month_total / elapsed * in_month
+    # What the whole days ran at, for every day of the month. Today's partial
+    # charges are not in the pace; the days to come, today included, are.
+    done = sum(float(g["c"]) for d in whole for g in (d.get("g") or []))
+    usd = done / len(whole) * in_month
     return {"days_elapsed": elapsed, "days_in_month": in_month,
-            "projected_usd": round(usd, 4), "projected_inr": round(usd * INR)}
+            "projected_usd": round(usd, 4),
+            "projected_inr": round(usd * INR) if INR else None}
 
 
 def table(days):
@@ -114,22 +134,27 @@ def table(days):
     def cell(v):
         return "%9s" % ("-" if v <= 0.0005 else "%.2f" % v)
 
+    def inr(usd):
+        return "%8s" % ("?" if INR is None else "%.0f" % (usd * INR))
+
     for d, hours, cols, total in rows:
         print("  %-11s %5s" % (d, "-" if hours <= 0 else "%.1f" % hours)
               + "".join(cell(cols[c]) for c in COLS)
-              + "%9.2f%8.0f" % (total, total * INR))
+              + "%9.2f" % total + inr(total))
     print("  " + "-" * (len(head) - 2))
     month_total = sum(month.values())
     print("  %-11s %5.1f" % ("TOTAL", month_hours)
           + "".join(cell(month[c]) for c in COLS)
-          + "%9.2f%8.0f" % (month_total, month_total * INR))
+          + "%9.2f" % month_total + inr(month_total))
+    rate = ("INR unknown - no exchange rate could be read" if INR is None
+            else "INR at %.2f a dollar%s" % (INR, " (%g%% GST included)" % TAX if TAX else ""))
     if empty:
-        print("  %d day(s) with nothing billed are not shown. USD, and INR at %d."
-              % (empty, INR))
+        print("  %d day(s) with nothing billed are not shown. USD before tax, and %s."
+              % (empty, rate))
     else:
-        print("  USD, and INR at %d." % INR)
+        print("  USD before tax, and %s." % rate)
     pr = project(days, month_total)
-    if pr["projected_usd"] is not None and pr["days_elapsed"] < pr["days_in_month"]:
+    if pr["projected_inr"] is not None and pr["days_elapsed"] < pr["days_in_month"]:
         print("  On this pace: %.2f USD / %d INR by the end of the month"
               " (%d of its %d days so far)."
               % (pr["projected_usd"], pr["projected_inr"],
@@ -167,13 +192,13 @@ def as_json(days):
         "days": rows,
         "usage": sorted(({"type": u["type"], "qty": round(u["qty"], 4), "usd": round(u["usd"], 4)}
                          for u in usage.values()), key=lambda x: -x["usd"]),
-        "total_usd": month, "total_inr": round(month * INR),
+        "total_usd": month, "total_inr": round(month * INR) if INR is not None else None,
         # The same arithmetic the window used to do for itself.
         **project(days, month),
         "hours": {k: round(v, 2) for k, v in hours.items()},
         "usd_per_hour": rates,
-        "egress": {"gb_used": round(out_gb, 2), "gb_free": 100.0,
-                   "gb_left": round(max(0.0, 100.0 - out_gb), 2)},
+        "egress": {"gb_used": round(out_gb, 2), "gb_free": FREE_GB,
+                   "gb_left": round(max(0.0, FREE_GB - out_gb), 2) if FREE_GB is not None else None},
         "inr_per_usd": INR,
     }
 

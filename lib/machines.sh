@@ -104,7 +104,7 @@ machines_json() { # machines_json <region>
 
   SPECS="$specs" OFFERS="$types" PRICES="$prices" ONDEMAND="$od_list" \
   REGION="$region" OD_Q="$od_q" SP_Q="$sp_q" \
-  CONFIGURED="$configured" SPOT="${GAME_SPOT:-0}" INR="${CG_INR_PER_USD:-88}" \
+  CONFIGURED="$configured" SPOT="${GAME_SPOT:-0}" INR="${CG_INR_PER_USD:-}" \
   python3 -c '
 import json, os, collections
 
@@ -126,7 +126,15 @@ for p in rows("PRICES", 3):
 
 od = {p[0]: float(p[1]) for p in rows("ONDEMAND", 2)}
 
-inr = float(os.environ["INR"])
+# A dollar of AWS charges in rupees, GST included (lib/rates.sh). Unknown, the
+# rupee figures are null and the app says so; the dollars still stand.
+try:
+    inr = float(os.environ["INR"])
+except (KeyError, ValueError):
+    inr = None
+# To the paisa: the app adds the address and the disk to these, and a price
+# rounded to the rupee first was up to 50 paise out before it showed paise.
+money = lambda usd: None if usd is None or inr is None else round(usd * inr, 2)
 od_q, sp_q = int(os.environ["OD_Q"]), int(os.environ["SP_Q"])
 
 machines = []
@@ -149,10 +157,14 @@ for p in rows("SPECS", 6):
         "fits_ondemand": vcpu <= od_q,
         "fits_spot": vcpu <= sp_q,
         "usd_hour_ondemand": od.get(t),
-        "inr_hour_ondemand": round(od[t] * inr) if t in od else None,
+        "inr_hour_ondemand": money(od.get(t)),
         "usd_hour_spot": cheap[1] if cheap else None,
-        "inr_hour_spot": round(cheap[1] * inr) if cheap else None,
+        "inr_hour_spot": money(cheap[1]) if cheap else None,
         "spot_az": cheap[0] if cheap else None,
+        # Every zone, priced: nothing pins the zone, so a running machine is
+        # priced by the zone it is in, not by the cheapest one.
+        "spot_usd_by_az": dict(sorted(spot[t].items())) if spot.get(t) else {},
+        "inr_hour_spot_max": money(dear[1]) if dear else None,
         "usd_hour_spot_max": dear[1] if dear else None,
         "spot_az_max": dear[0] if dear else None,
     }
@@ -196,7 +208,7 @@ print()
 print("  %-14s %-5s %-9s %-8s %-7s %-8s %s" %
       ("TYPE", "VCPU", "GPU", "VRAM", "RAM", "DISK", "SPOT / ON DEMAND"))
 def inr(v):
-    return "INR %-5d" % v if v is not None else "    -    "
+    return "INR %-6.2f" % v if v is not None else "    -     "
 
 # Only the shapes a quota actually covers, unless asked for everything: this
 # region offers 17 and two are reachable, and a list where 15 rows say "no

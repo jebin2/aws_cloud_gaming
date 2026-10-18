@@ -61,7 +61,7 @@ chmod +x "$T/bin/curl"
 
 run() { # run '<code>' - with lib/ loaded and the fake API on PATH
   # shellcheck disable=SC2086
-  ( cd "$PWD" && env -i CG_INR_PER_USD=88 PATH="$T/bin" HOME="$T/home" CG_COLOR=never \
+  ( cd "$PWD" && env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=88 PATH="$T/bin" HOME="$T/home" CG_COLOR=never \
       API_LOG="$T/apilog" KEYGET="${KEYGET:-}" POST_FAIL="${POST_FAIL:-}" \
       POST_BODY="${POST_BODY:-}" \
       TAILSCALE_API_KEY="${TAILSCALE_API_KEY-tskey-api-tok1-secret}" \

@@ -67,8 +67,13 @@ cw_env() { # cw_env <account>
   local ntfy; ntfy=$(cg_ntfy_url)
   # CG_ACCOUNT lets it recognise this host's buckets in other regions by the
   # name cg gives them, so games a region move left behind expire too.
-  printf 'Variables={CG_TS_HOST=%s,CG_IDLE_MINUTES=%s,CG_BOOT_GRACE_MINUTES=20,CG_STUCK_MINUTES=%s,CG_BUCKET=%s,CG_ACCOUNT=%s,CG_ARCHIVE_EXPIRY_DAYS=%s%s}' \
-    "$TS_HOST" "$idle" "$stuck" "$(cw_bucket "$1")" "$1" "$(cw_expiry_days)" "${ntfy:+,CG_NTFY_URL=$ntfy}"
+  # The S3 price and the rupee rate as cg has them today (lib/rates.sh), for
+  # the one sentence the watchdog says about what the archive costs. Absent
+  # when unknown, and the sentence then gives the size alone.
+  printf 'Variables={CG_TS_HOST=%s,CG_IDLE_MINUTES=%s,CG_BOOT_GRACE_MINUTES=20,CG_STUCK_MINUTES=%s,CG_BUCKET=%s,CG_ACCOUNT=%s,CG_ARCHIVE_EXPIRY_DAYS=%s%s%s%s}' \
+    "$TS_HOST" "$idle" "$stuck" "$(cw_bucket "$1")" "$1" "$(cw_expiry_days)" \
+    "${CG_S3_USD_GB_MONTH:+,CG_S3_USD_GB_MONTH=$CG_S3_USD_GB_MONTH}" "${CG_INR_PER_USD:+,CG_INR_PER_USD=$CG_INR_PER_USD}" \
+    "${ntfy:+,CG_NTFY_URL=$ntfy}"
 }
 
 # Describe and read metrics anywhere; stop, terminate and tag ONLY the instance

@@ -44,7 +44,9 @@ touch -d '2 days ago' "$CACHE"
 check "unreachable: the last good rate"   "$(rate "file://$T/missing.json")" "80.00"
 
 echo "5. never fetched and unreachable"
-check "88, and only then"                 "$(rate "file://$T/missing.json" HOME="$T/empty")" "88"
+# No rate is invented: with none ever fetched it is unknown, and every rupee
+# figure says so rather than using a number from years ago.
+check "unknown, never a guess"            "$(rate "file://$T/missing.json" HOME="$T/empty")" ""
 
 echo "6. a rate set by hand wins"
 check "it is used"                        "$(CG_INR_PER_USD=90 CG_FX_URL="file://$T/good.json" bash -c 'source lib/rates.sh; echo "$CG_INR_PER_USD"')" "90"

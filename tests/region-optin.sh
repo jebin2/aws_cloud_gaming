@@ -67,7 +67,7 @@ chmod +x "$T/bin/aws"
 
 cg_() {
   # shellcheck disable=SC2086
-  ( cd "$T/repo" && env -i CG_INR_PER_USD=88 PATH="$T/bin" HOME="$T/home" CG_COLOR=never \
+  ( cd "$T/repo" && env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=88 PATH="$T/bin" HOME="$T/home" CG_COLOR=never \
       AWS_LOG="$T/awslog" TICK="$T/tick" STATUSES="${STATUSES-DISABLED}" \
       LIST_AP5="${LIST_AP5:-DISABLED}" ENABLE_FAIL="${ENABLE_FAIL:-}" \
       GAME_REGION=ap-south-1 ${EXTRA:-} bash ./cg "$@" 2>&1 )

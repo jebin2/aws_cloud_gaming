@@ -20,7 +20,7 @@ lacks()    { if [[ $2 != *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 
 run() { # run '<code>' [CG_JSON value] - the library, then the code
   # Events are on stderr, the command's own data on stdout: merge for the tests.
-  ( env -i CG_INR_PER_USD=88 PATH="$PATH" HOME="$T" CG_JSON="${2-1}" CG_COLOR="${CG_COLOR-}" \
+  ( env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=88 PATH="$PATH" HOME="$T" CG_JSON="${2-1}" CG_COLOR="${CG_COLOR-}" \
       bash -c 'source lib/common.sh; '"$1" 2>&1 )
 }
 # Every line must parse, and each is reported as <t>[:<kind>] for easy assertions.

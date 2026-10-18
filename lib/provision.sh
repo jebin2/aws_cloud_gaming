@@ -170,16 +170,26 @@ else
                    | sed -n 's/^[[:space:]]*Total Size:[[:space:]]*//p' | tail -1) || ARCH_BYTES=""
       [[ $ARCH_BYTES =~ ^[0-9]+$ ]] || ARCH_BYTES=""
       echo "!! the archive is in $BUCKET_REGION but the box is in $REGION"
+      # AWS's price for data leaving the archive's region - the region the
+      # bytes leave is the one that bills them - read like every other price.
+      # shellcheck source=lib/rates.sh
+      source lib/rates.sh
+      XR=$(cg_price "$BUCKET_REGION" CG_XREGION_USD_GB) || XR=""
+      XR_TXT=${XR:+\$$XR/GB}; XR_TXT=${XR_TXT:-a per-GB price}
       if [[ -z $ARCH_BYTES ]]; then
         echo "   the box can read it, but every GB crossing regions is billed at"
-        echo "   \$0.086/GB. The size could not be read - cg library list shows it."
+        echo "   $XR_TXT. The size could not be read - cg library list shows it."
       elif (( ARCH_BYTES < 1073741824 )); then
         echo "   nothing is archived there yet, so nothing is being billed to cross"
-        echo "   regions. Once games are pushed, every GB back is \$0.086/GB."
+        echo "   regions. Once games are pushed, every GB back is $XR_TXT."
       else
         echo "   the box can read it, but every GB crossing regions is billed at"
-        echo "   \$0.086/GB - about INR $(( ARCH_BYTES * 86 / 1000000000 * 88 / 1000 )) \
-for the $(( ARCH_BYTES / 1073741824 )) GB in it now, each pull."
+        if [[ -n $XR && -n ${CG_INR_PER_USD:-} ]]; then
+          echo "   $XR_TXT - about INR $(awk -v b="$ARCH_BYTES" -v r="$XR" -v i="$CG_INR_PER_USD" \
+            'BEGIN{printf "%.0f", b/1073741824*r*i}') for the $(( ARCH_BYTES / 1073741824 )) GB in it now, each pull."
+        else
+          echo "   $XR_TXT, for the $(( ARCH_BYTES / 1073741824 )) GB in it now, each pull."
+        fi
       fi
       echo "   To keep everything in $REGION instead, clear GAME_S3_BUCKET from .env"
       echo "   and let cg init make one there - the games in $BUCKET_REGION stay put."

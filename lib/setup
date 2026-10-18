@@ -191,12 +191,19 @@ status_facts() {
   if [[ -n $id ]]; then
     # InstanceLifecycle is "spot" for a spot box and absent (None) for on-demand:
     # the two are billed at very different rates, and the dashboard prices it.
-    read -r state itype ip launched lifecycle < <(ec2 describe-instances --instance-ids "$id" \
-      --query 'Reservations[0].Instances[0].[State.Name,InstanceType,PublicIpAddress,LaunchTime,InstanceLifecycle]' --output text)
+    # The zone and the root disk too: spot prices differ by zone (2x here), and
+    # the disk bills by the hour beside the machine - the hourly price on screen
+    # is the machine in ITS zone plus its address plus its disk.
+    read -r state itype ip launched lifecycle az rootvol < <(ec2 describe-instances --instance-ids "$id" \
+      --query 'Reservations[0].Instances[0].[State.Name,InstanceType,PublicIpAddress,LaunchTime,InstanceLifecycle,Placement.AvailabilityZone,BlockDeviceMappings[0].Ebs.VolumeId]' --output text)
     [[ ${lifecycle:-None} == None ]] && lifecycle=on-demand
     [[ ${ip:-None} == None ]] && ip=""
     f box.state "$state"; f box.type "$itype"; f box.public_ip "$ip"; f box.launched "$launched"
     f box.lifecycle "$lifecycle"
+    [[ ${az:-None} == None ]] || f box.az "$az"
+    if [[ ${rootvol:-None} != None ]]; then
+      f box.disk_gb "$(ec2 describe-volumes --volume-ids "$rootvol" --query 'Volumes[0].Size' --output text 2>/dev/null)"
+    fi
   fi
 
   f res.volumes_gb "$(ec2 describe-volumes --query 'sum(Volumes[].Size)' --output text 2>/dev/null)"
@@ -459,7 +466,7 @@ status_json() {
 import json, sys
 out = {"host": sys.argv[1], "region": sys.argv[2], "instance_type": sys.argv[3]}
 NUM = {"config.disk_gb","quota.vcpus","quota.on_demand","quota.spot","res.volumes_gb","res.snapshots",
-       "res.snapshots_gb",
+       "res.snapshots_gb", "box.disk_gb",
        "spec.vcpus","spec.memory_mib","spec.gpu_memory_mib",
        "session.pid","session.started","session.age_s",
        "res.images","res.elastic_ips","archive.objects","archive.bytes","archive.usd_month",
@@ -493,12 +500,26 @@ if not out.get("session", {}).get("pid"): out["session"] = None
 # what each costs without keeping its own copy. Reading them costs nothing.
 import os
 g = os.environ.get
-out["rates"] = {k: float(g(v) or 0) for k, v in {
+def price(k):
+    # Unknown is null, never 0: a price AWS could not be asked for must read
+    # as unknown on screen, not as free.
+    try: return float(g(k))
+    except (TypeError, ValueError): return None
+out["rates"] = {k: price(v) for k, v in {
   "s3_gb_month": "CG_S3_USD_GB_MONTH", "ebs_gb_month": "CG_EBS_USD_GB_MONTH",
   "snapshot_gb_month": "CG_SNAPSHOT_USD_GB_MONTH", "ipv4_hour": "CG_IPV4_USD_HOUR",
-  "inr_per_usd": "CG_INR_PER_USD", "ce_call_usd": "CG_CE_CALL_USD",
+  # inr_per_usd is a dollar of AWS charges in rupees, GST included; the plain
+  # exchange rate is beside it for the one thing that needs it (the budget).
+  "inr_per_usd": "CG_INR_PER_USD", "fx_inr_per_usd": "CG_FX_INR_PER_USD",
+  "tax_pct": "CG_TAX_PCT", "ce_call_usd": "CG_CE_CALL_USD",
   # Streaming out of AWS, for what a bitrate costs an hour on Settings.
   "egress_gb": "CG_EGRESS_USD_GB", "egress_free_gb": "CG_EGRESS_FREE_GB"}.items()}
+# The hours in this month: a GB-month of disk is a GB for all of them, so its
+# hourly share is the monthly price over these - 720 in some months, 744 in
+# others. Worked out here so the app does no date arithmetic.
+import calendar, datetime
+_n = datetime.datetime.utcnow()
+out["rates"]["month_hours"] = calendar.monthrange(_n.year, _n.month)[1] * 24
 print(json.dumps(out, indent=2, sort_keys=True))
 ' "$TS_HOST" "$REGION" "$TYPE"
 }
@@ -528,7 +549,7 @@ cost_json() {
   # assignment written before A is A's alone, which left every field null.
   python3 lib/cost-daily.py --json < "$ce" \
     | CJ_HOST="$TS_HOST" CJ_REGION="$REGION" CJ_ID="${id:-}" CJ_STATE="${state:-}" \
-      CJ_DISK="${disk_gb:-0}" CJ_SNAP="${snap_gb:-0}" CJ_IMAGES="${imgs:-0}" \
+      CJ_DISK="${disk_gb:-0}" CJ_SNAP="${snap_gb:-0}" CJ_IMAGES="${imgs:-0}" CJ_EIPS="${eips:-0}" \
       CJ_KEY="$([[ ${key:-0} != 0 ]] && echo 1 || echo 0)" \
       CJ_SG="$([[ ${sg:-0} != 0 ]] && echo 1 || echo 0)" CJ_BUDGET="${budget:-}" \
       CJ_CREDITS="$credits" CJ_BUCKET="$b" CJ_OBJECTS="${n:-0}" CJ_BYTES="${sz:-0}" \
@@ -554,50 +575,66 @@ out = {
   "archive": {
     "bucket": g("CJ_BUCKET") or None,
     "objects": num(g("CJ_OBJECTS")), "bytes": bytes_ or None,
-    "usd_month": round(bytes_ / 1073741824 * float(g("CG_S3_USD_GB_MONTH") or 0), 2) if bytes_ else None,
+    "usd_month": None,
     "decision": g("CJ_DECISION") or None,
   },
-  # The prices themselves, from lib/rates.sh. A screen that must print a rate
-  # reads it here rather than keeping its own copy - the app holds no prices.
-  "rates": {
-    "s3_gb_month":       float(g("CG_S3_USD_GB_MONTH") or 0),
-    "ebs_gb_month":      float(g("CG_EBS_USD_GB_MONTH") or 0),
-    "snapshot_gb_month": float(g("CG_SNAPSHOT_USD_GB_MONTH") or 0),
-    "egress_gb":         float(g("CG_EGRESS_USD_GB") or 0),
-    "egress_free_gb":    float(g("CG_EGRESS_FREE_GB") or 0),
-    "ce_call_usd":       float(g("CG_CE_CALL_USD") or 0),
-    "inr_per_usd":       float(g("CG_INR_PER_USD") or 0),
-  },
+  # The prices themselves, from lib/rates.sh - which read them from AWS. A
+  # screen that must print a rate reads it here rather than keeping its own
+  # copy; one AWS could not be asked for is null, and its figures unknown.
+  "rates": {k: num(g(v)) for k, v in {
+    "s3_gb_month": "CG_S3_USD_GB_MONTH", "ebs_gb_month": "CG_EBS_USD_GB_MONTH",
+    "snapshot_gb_month": "CG_SNAPSHOT_USD_GB_MONTH", "egress_gb": "CG_EGRESS_USD_GB",
+    "egress_free_gb": "CG_EGRESS_FREE_GB", "ce_call_usd": "CG_CE_CALL_USD",
+    "ipv4_hour": "CG_IPV4_USD_HOUR", "inr_per_usd": "CG_INR_PER_USD",
+    "fx_inr_per_usd": "CG_FX_INR_PER_USD", "tax_pct": "CG_TAX_PCT"}.items()},
 }
+rate = out["rates"]
+import calendar, datetime
+now = datetime.datetime.utcnow()
+# A GB-month is a GB kept for the whole month, so the hours are the hours in
+# this month: 720 in some, 744 in others.
+month_hours = calendar.monthrange(now.year, now.month)[1] * 24
+def monthly(qty, price):
+    """qty of something billed by the month, in dollars: 0 for none, None
+    when there is some but its price is unknown."""
+    if not qty: return 0.0
+    return None if price is None else qty * price
 # What still bills with no box at all: the archive, plus any volume or snapshot
-# left behind. One number, worked out once, here.
-archive_usd = out["archive"]["usd_month"] or 0.0
+# left behind, plus any Elastic IP - an address bills by the hour whether or not
+# anything uses it. One number, worked out once, here.
+archive_usd = monthly(bytes_ / 1073741824, rate["s3_gb_month"])
+out["archive"]["usd_month"] = round(archive_usd, 2) if bytes_ and archive_usd is not None else None
 vol = num(g("CJ_DISK")) or 0.0
 snap = num(g("CJ_SNAP")) or 0.0
-standby = (archive_usd
-           + vol * float(g("CG_EBS_USD_GB_MONTH") or 0)
-           + snap * float(g("CG_SNAPSHOT_USD_GB_MONTH") or 0))
+eips = num(g("CJ_EIPS")) or 0.0
+out["resources"]["elastic_ips"] = int(eips)
+parts = {"archive": archive_usd, "volumes": monthly(vol, rate["ebs_gb_month"]),
+         "snapshots": monthly(snap, rate["snapshot_gb_month"]),
+         "addresses": monthly(eips * month_hours, rate["ipv4_hour"])}
+standby = None if any(v is None for v in parts.values()) else sum(parts.values())
+r2 = lambda v, n=2: None if v is None else round(v, n)
 # Storage as the BILL sees it, beside storage as cg sees it. cg only knows the
 # bucket in .env; a region move left 160 GB of games in another one, billing
 # Rs 385 a month, while this said the archive was empty and standby was Rs 0.
 # The most recent whole day that billed any S3 is the rate: today is partial,
 # and Cost Explorer lags, so the largest of the last three such days.
-import datetime
-today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+today = now.strftime("%Y-%m-%d")
 days = [d for d in (ce.get("days") or []) if d.get("date", "") < today and (d.get("s3") or 0) > 0]
 recent = [d["s3"] for d in days[-3:]]
 billed = round(max(recent) * 30, 2) if recent else None
+known = archive_usd or 0.0
 out["storage"] = {
   "billed_usd_month": billed,
-  "known_usd_month": round(archive_usd, 2),
-  "unknown_usd_month": round(max(0.0, billed - archive_usd), 2) if billed is not None else None,
+  "known_usd_month": round(known, 2),
+  "unknown_usd_month": round(max(0.0, billed - known), 2) if billed is not None else None,
 }
 out["standby"] = {
-  "usd_month": round(standby, 2),
-  "usd_day": round(standby / 30.0, 4),
-  "archive_usd_month": round(archive_usd, 2),
-  "volumes_usd_month": round(vol * float(g("CG_EBS_USD_GB_MONTH") or 0), 2),
-  "snapshots_usd_month": round(snap * float(g("CG_SNAPSHOT_USD_GB_MONTH") or 0), 2),
+  "usd_month": r2(standby),
+  "usd_day": r2(None if standby is None else standby / calendar.monthrange(now.year, now.month)[1], 4),
+  "archive_usd_month": r2(archive_usd),
+  "volumes_usd_month": r2(parts["volumes"]),
+  "snapshots_usd_month": r2(parts["snapshots"]),
+  "addresses_usd_month": r2(parts["addresses"]),
 }
 print(json.dumps(out, indent=2, sort_keys=True))
 ' || echo "{}"
@@ -605,7 +642,7 @@ print(json.dumps(out, indent=2, sort_keys=True))
 }
 
 cost() {
-  local id state rate hours disk_gb snap_gb imgs budget key sg DAILY=0 JSON=0
+  local id state rate hours disk_gb snap_gb imgs eips budget key sg DAILY=0 JSON=0
   case ${1:-} in
     --daily) DAILY=1 ;;
     --json)  DAILY=1; JSON=1 ;;   # the JSON view is always day by day
@@ -627,6 +664,8 @@ cost() {
   disk_gb=$(ec2 describe-volumes --query 'sum(Volumes[].Size)' --output text 2>/dev/null || echo 0)
   snap_gb=$(ec2 describe-snapshots --owner-ids self --query 'sum(Snapshots[].VolumeSize)' --output text 2>/dev/null || echo 0)
   imgs=$(ec2 describe-images --owners self --query 'length(Images)' --output text 2>/dev/null || echo 0)
+  # An Elastic IP bills by the hour, attached or not.
+  eips=$(ec2 describe-addresses --query 'length(Addresses)' --output text 2>/dev/null || echo 0)
   key=$(ec2 describe-key-pairs --key-names "$TS_HOST" --query 'length(KeyPairs)' --output text 2>/dev/null || echo 0)
   sg=$(ec2 describe-security-groups --filters "Name=group-name,Values=${TS_HOST}-sg" \
         --query 'length(SecurityGroups)' --output text 2>/dev/null || echo 0)
