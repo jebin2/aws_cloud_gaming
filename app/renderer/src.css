@@ -63,6 +63,10 @@
   .chooser td.region { @apply text-on-surface; }
   .chooser td.city, .chooser td.ms { @apply text-on-surface-variant; }
   .chooser td.num { @apply text-right tabular-nums; }
+  /* A number column's heading sits over its numbers. The plain text-right
+     utility lost to ".chooser th" (an element and a class beat a class), so
+     both right-aligned columns had their headings on the left. */
+  .chooser th.num { @apply text-right; }
   /* A price cell IS the control: clicking it picks region, type and model.
      The radio comes FIRST, at the cell's left edge, so every radio in a column
      lines up. It used to sit beside a right-aligned number, which put it at a

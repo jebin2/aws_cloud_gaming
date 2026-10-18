@@ -321,6 +321,9 @@ cat > "$T/r/probe.js" <<'PROBE'
   if (window.__errs.length) out.push('ERRORS: ' + window.__errs.join(' | '));
   const card = f => (document.querySelector('#b-machine-card [data-f=' + f + ']') || {}).textContent || '';
   out.push('BPICK | ' + card('what'));
+  // A number column's heading sits over its numbers.
+  out.push('HEADALIGN | ' + [...document.querySelectorAll('#s-chooser th')]
+    .filter(th => /Game disk|Chance/.test(th.textContent)).map(th => getComputedStyle(th).textAlign).join(','));
   out.push('BWHERE | ' + card('where'));
   out.push('BNOTE | ' + card('warn'));
   // The why-mark in a greyed cell, even on a greyed row, is not greyed itself.
@@ -419,6 +422,8 @@ contains "  and counts what is picked, with no fraction of an unknown" \
 # The box checks the real limit at boot. Refusing the build here on a number
 # nobody has would be guessing in the other direction.
 contains "  and Build is still allowed"    "$OUT" "NOCAP | build | on"
+check    "number headings are right-aligned, over their numbers" "$(grep '^HEADALIGN' <<<"$OUT")" "HEADALIGN | right,right"
+contains "the machine card says how much room it has" "$(grep '^BPICK' <<<"$OUT")" " GB"
 contains "the meter names the machine"     "$OUT" "SMALL | fit | Space on a g4dn.xlarge"
 contains "a game bigger than its disk is not offered" "$OUT" "SMALL | big | off"
 contains "  and says why"                  "$OUT" "Too big for a g4dn.xlarge (96 GB for games). Pick a machine with a bigger disk."
