@@ -495,8 +495,16 @@ function machineFacts() {
   }
   const price = perHour(lo, disk), priceMax = perHour(hi, disk);
   const priceText = hourText(price, priceMax);
-  return { s, box, cur, rows, hit, region, type, spot, price, priceMax, priceText,
-           what: [type, gpu ? gpuName(gpu, vram) : null].filter(Boolean).join(' · ') || '—',
+  // Room for games, in the same number the Build page's meter uses: cg's
+  // figure for this machine type, less the space kept free. Before that is
+  // read, the type's disk as AWS sizes it.
+  const lib = libNow || {};
+  const store = hit ? hit.store
+    : ((machinesNow && (machinesNow.machines || []).find(m => m.type === type)) || {}).store_gb;
+  const room = lib.disk_type === type && lib.selectable_gb != null ? `${lib.selectable_gb} GB for games`
+    : store != null ? `${store} GB disk` : null;
+  return { s, box, cur, rows, hit, region, type, spot, price, priceMax, priceText, room,
+           what: [type, gpu ? gpuName(gpu, vram) : null, room].filter(Boolean).join(' · ') || '—',
            where: [region ? placeName(region) : null,
                    box || cfgVal('GAME_SPOT') === '1' ? (spot ? 'Spot' : 'Standard')
                      : cfgVal('GAME_SPOT') === '0' ? 'Standard' : 'Spot when available',
@@ -3018,7 +3026,7 @@ function paintChooser() {
       // a radio at the cell's left edge, so a right-aligned header sat over
       // nothing. capacity is the only genuinely right-aligned column.
       for (const [label, cls] of [['Location', ''], ['Distance', ''], ['Machine', ''], ['Graphics', ''],
-                                  ['Game disk', 'text-right'], ['Chance of a spare one', 'text-right'],
+                                  ['Game disk', 'num'], ['Chance of a spare one', 'num'],
                                   ['Spot, an hour', ''], ['Standard, an hour', '']]) {
         const th = document.createElement('th');
         th.textContent = label; th.className = cls;
