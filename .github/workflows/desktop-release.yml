@@ -118,6 +118,12 @@ jobs:
           # Said on every release: what the download actually is, and what it
           # still needs from you before it can build anything on AWS.
           body: |
+            ## Two kinds of machine
+
+            A GPU machine rented from AWS by the hour, or a Linux server of your own reached
+            over SSH - added from Home, set up and removed each in one dialog. Disconnecting
+            AWS deletes everything cg made there, in every region, so nothing is left billing.
+
             ## Self-contained
 
             The scripts travel with the app - `cg`, `lib/` and the Lambda are inside the
@@ -144,10 +150,11 @@ jobs:
             or running it as `./cg-*.AppImage --appimage-extract-and-run`. The `.tar.gz` needs
             nothing at all.
 
-            ## Before it can build a box
+            ## Before it can play
 
-            It needs an AWS account, a Tailscale auth key and the local tools. The app's
-            Settings screen asks for each one, or:
+            Everything is asked when you add a machine. A server of your own needs an SSH
+            login and Tailscale on this computer; AWS also needs an AWS account and a
+            Tailscale auth key. From a terminal:
 
                 ./cg check --fix
 
