@@ -1524,7 +1524,11 @@ B11="window.__after = async () => {
 };"
 ENGINE="$B11"
 SEEN=$(date -u -d '-1 day' +%Y-%m-%dT%H:%M:%SZ); KEPT=$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)
-D13=$(date -d '+13 day' '+%-d %b'); D14=$(date -d '+14 day' '+%-d %b')
+# The dates the rows should show, counted from the same instants the app counts
+# from, in the same local time - not from "now": KEPT is an hour ago, and in the
+# hour after midnight that is yesterday, so "+14 days from now" was a day out
+# and the check failed every night from 00:00 to 01:00.
+D13=$(date -d "$SEEN + 14 days" '+%-d %b'); D14=$(date -d "$KEPT + 14 days" '+%-d %b')
 LIB2="{\"games\": [{\"appid\": \"1174180\", \"name\": \"Red Dead 2\", \"installdir\": \"RDR2\", \"bytes\": 128849018880, \"usd_month\": 3.0, \"pushed\": \"2026-10-12T00:00:00Z\", \"kept\": null}],
       \"total_bytes\": 128849018880, \"usd_month\": 3.0, \"selectable_gb\": 209, \"bucket\": \"b\", \"login\": {\"present\": false},
       \"region\": \"ap-south-1\", \"inr_per_usd\": 94.95, \"expiry_days\": 14, \"last_seen\": \"$SEEN\", \"marks_read\": true}"
