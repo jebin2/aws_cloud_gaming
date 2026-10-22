@@ -428,6 +428,12 @@ cat > "$T/r/probe.js" <<'PROBE'
     await until(() => $$('rundlg-log').textContent.includes('prune them by hand'));
     out.push('DISC LINK | signin=' + !$$('rundlg-link').hidden + ' status=' + txt($$('rundlg-status')));
     window.__finish();
+    await until(() => $$('rundlg-status').textContent.includes('Nothing left billing'));
+    await wait(1500);     // longer than the beat a self-closing dialog waits
+    out.push('DISC RESULT | open=' + $$('rundlg').open + ' ' + txt($$('rundlg-status'))
+             + ' buttons=' + [...$$('rundlg').querySelectorAll('button')].filter(b => !b.hidden).map(b => b.textContent.trim()).join(',')
+             + ' behind=' + view);
+    $$('rundlg-done').click();
     await until(() => !$$('rundlg').open);
     out.push('DISC DONE | ' + $$('rundlg').open + ' answered=' + window.__answers.slice(answersBefore).join(',')
              + ' ran=' + window.__ran.filter(a => a === 'aws disconnect').length
@@ -576,7 +582,8 @@ check    "DELETE must be typed first"            "$(row 'DISC WORD')" "DISC WORD
 check    "  exactly"                             "$(row 'DISC WRONG')" "DISC WRONG | go-off=true"
 check    "  then Disconnect can be pressed"      "$(row 'DISC RIGHT')" "DISC RIGHT | go-off=false"
 check    "an admin page in the log is no sign-in button" "$(row 'DISC LINK')" "DISC LINK | signin=false status=Deleting…"
-check    "it runs, cg's own DELETE answered, and closes onto Home without AWS" "$(row 'DISC DONE')" "DISC DONE | false answered=DELETE ran=1 view=dashboard aws-card=hidden add-aws=shown"
+check    "done: it stays, ticked, with Done - Home already behind it" "$(row 'DISC RESULT')" "DISC RESULT | open=true ✓AWS disconnected. Nothing left billing. buttons=Done behind=dashboard"
+check    "it runs, cg's own DELETE answered, and Done closes onto Home without AWS" "$(row 'DISC DONE')" "DISC DONE | false answered=DELETE ran=1 view=dashboard aws-card=hidden add-aws=shown"
 check    "which reopens its steps"               "$(row 'FINISH')" "FINISH | true Finish setting up AWS"
 
 check "no errors on the page" "$(row 'ERRS')" "ERRS | "

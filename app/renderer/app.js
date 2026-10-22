@@ -1986,9 +1986,10 @@ async function runInDialog(opts) {
     // Everything behind the dialog has already re-read: these are writes.
     runDlgStatus(typeof done === 'function' ? done(err || '') : done, 'ok');
     const shut = !!(close && close(err || ''));
+    // Done: a tick lands - then a beat and the dialog goes by itself, or it
+    // waits for Done.
+    $('rundlg-status').prepend(el('span', 'onb-tick text-primary mr-space-xs', '\u2713'));
     if (shut) {
-      // Done: a tick lands, a beat to see it, and the dialog goes by itself.
-      $('rundlg-status').prepend(el('span', 'onb-tick text-primary mr-space-xs', '\u2713'));
       afterBeat(() => closeDialog($('rundlg')));
     } else {
       $('rundlg-done').hidden = false;
@@ -4638,7 +4639,8 @@ async function removeAws() {
     starting: 'Deleting\u2026',
     stoppable: false,
     done: 'AWS disconnected. Nothing left billing.',
-    close: () => true,
+    // Stays to be read, with Done: it is the last word on the whole account.
+    close: () => false,
     after: async () => { await refreshAll(); goView('dashboard'); },
     fail: rc => rc === 3 ? 'Could not reach AWS. Nothing was deleted.'
                          : 'Not everything could be deleted. See details above; AWS stays connected so it can be seen.',
