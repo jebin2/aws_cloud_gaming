@@ -257,6 +257,7 @@ cat > "$T/r/probe.js" <<'PROBE'
              + ' label=' + document.getElementById('rundlg-done').textContent.trim()
              + ' link=' + document.getElementById('rundlg-link').hidden);
     document.getElementById('rundlg-done').click();
+    await new Promise(r => setTimeout(r, 400));     // its closing motion
     out.push('SIGNIN CLOSED | ' + tsup.open);
 
     // Cancelling has to reach cg: tailscale up is waiting on a browser that is

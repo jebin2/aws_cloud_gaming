@@ -278,7 +278,7 @@ check "nothing repeats on a timer"       "$(grep -c 'setInterval' app/renderer/a
 # One delay, and it starts no command: the finished steps are held on screen
 # for a beat so you see them finish, instead of six ticks flashing for 200ms.
 check "  and one delay, which it is"     "$(grep -c 'setTimeout' app/renderer/app.js)" "1"
-contains "  the handover beat"           "$js" 'function afterBeat(then) { return setTimeout(then, ONB_HANDOVER_MS); }'
+contains "  the handover beat"           "$js" 'function afterBeat(then, ms = ONB_HANDOVER_MS) { return setTimeout(then, ms); }'
 contains "  after which it closes on the card" "$js" "note('AWS added', 'text-primary'); closeAdd();"
 # Home is never hidden: with no machine it asks the one question instead.
 lacks    "Home waits for nothing"        "$html" '<div id="d-main" hidden>'

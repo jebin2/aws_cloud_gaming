@@ -181,6 +181,49 @@ function updateHeader() {
 // The dashboard's activity list: what cg did in this window. The app keeps no
 // history beyond it - the durable record is the watchdog's own log, shown on
 // the Guards screen.
+// A dialog leaves the way it came in - sinking a little and fading, the room
+// brightening behind it - then closes. With less motion asked for, at once.
+// Opened again meanwhile (keepOpen), it stays.
+const closing = new WeakMap();
+function closeDialog(dlg, rv) {
+  if (!dlg.open || closing.has(dlg)) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || !dlg.animate) { dlg.close(rv); return; }
+  const opts = { duration: 160, easing: 'ease-in', fill: 'forwards' };
+  const anims = [dlg.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(4px) scale(.98)' }], opts)];
+  try { anims.push(dlg.animate([{ opacity: 1 }, { opacity: 0 }], { ...opts, pseudoElement: '::backdrop' })); } catch { /* no backdrop animation here */ }
+  const job = { kept: false };
+  closing.set(dlg, job);
+  // Closed when the motion's time is up, not on its finished promise: an
+  // animation the compositor never runs would leave the dialog open for good.
+  afterBeat(() => {
+    if (job.kept) return;
+    closing.delete(dlg);
+    if (dlg.open) dlg.close(rv);
+    for (const a of anims) a.cancel();
+  }, opts.duration);
+}
+function keepOpen(dlg) {
+  const job = closing.get(dlg);
+  if (!job) return;
+  job.kept = true;
+  closing.delete(dlg);
+  for (const a of dlg.getAnimations()) a.cancel();
+}
+
+// toast(text, tone) - a word that outlasts the dialog it came from, until it
+// is dismissed.
+function toast(text, tone) {
+  const t = el('div', 'toast flex items-start gap-space-sm p-space-md rounded-lg bg-surface-container-high border '
+    + (tone === 'warn' ? 'border-tertiary' : tone === 'bad' ? 'border-error' : 'border-surface-variant'));
+  t.append(el('span', 'font-body-sm text-body-sm text-on-surface flex-1', text));
+  const x = el('button', 'btn shrink-0', '\u00d7');
+  x.title = 'Dismiss';
+  x.onclick = () => t.remove();
+  t.append(x);
+  $('toasts').append(t);
+  return t;
+}
+
 function note(text, tone) {
   activity.unshift({ at: new Date(), text, tone });
   activity.length = Math.min(activity.length, 8);
@@ -1859,6 +1902,7 @@ async function runInDialog({ title, args, starting, done, fail, confirm, close, 
     go.hidden = false;
     go.textContent = confirm.yes || 'Continue';
     go.className = 'btn ' + (confirm.danger ? 'btn-danger' : 'btn-primary');
+    keepOpen($('rundlg'));
     if (!$('rundlg').open) $('rundlg').showModal();
     go.focus();
     const yes = await new Promise(resolve => {
@@ -1881,6 +1925,7 @@ async function runInDialog({ title, args, starting, done, fail, confirm, close, 
   log.dataset.fresh = 'yes';
   runDlgStatus(starting);
   $('rundlg-busy').hidden = false;
+  keepOpen($('rundlg'));
   if (!$('rundlg').open) $('rundlg').showModal();
   const { rc, err } = await runCg(args, { collect: 'rundlg-log', wantRc: true,
                                           onStart: id => { runDlgJob = id; } });
@@ -1897,9 +1942,15 @@ async function runInDialog({ title, args, starting, done, fail, confirm, close, 
   if (rc === 0) {
     // Everything behind the dialog has already re-read: these are writes.
     runDlgStatus(typeof done === 'function' ? done(err || '') : done, 'ok');
-    $('rundlg-done').hidden = false;
-    $('rundlg-done').focus();
-    if (close && close(err || '')) afterBeat(() => { if ($('rundlg').open) $('rundlg').close(); });
+    const shut = !!(close && close(err || ''));
+    if (shut) {
+      // Done: a tick lands, a beat to see it, and the dialog goes by itself.
+      $('rundlg-status').prepend(el('span', 'onb-tick text-primary mr-space-xs', '\u2713'));
+      afterBeat(() => closeDialog($('rundlg')));
+    } else {
+      $('rundlg-done').hidden = false;
+      $('rundlg-done').focus();
+    }
     return true;
   }
   runDlgStatus(rc === null ? 'Another task is running.'
@@ -1909,9 +1960,11 @@ async function runInDialog({ title, args, starting, done, fail, confirm, close, 
   $('rundlg-done').textContent = 'Close';
   return false;
 }
-$('rundlg-done').onclick = e => { e.preventDefault(); $('rundlg').close(); };
+$('rundlg-done').onclick = e => { e.preventDefault(); closeDialog($('rundlg')); };
 // Closed while it is still asking: a no.
-$('rundlg').addEventListener('close', () => { if (runDlgConfirm) runDlgConfirm(false); });
+// The close event is queued: one that lands after the dialog was opened again
+// to ask afresh is not a no to that.
+$('rundlg').addEventListener('close', () => { if (runDlgConfirm && !$('rundlg').open) runDlgConfirm(false); });
 $('rundlg-retry').onclick = e => { e.preventDefault(); if (runDlgRetry) runDlgRetry(); };
 // Cancelling has to reach cg: `tailscale up` is waiting on a browser that is
 // never going to answer, and a package manager can be sitting on a lock.
@@ -4437,24 +4490,24 @@ async function playOn(name) {
   await refreshHosts(name);
 }
 
-// Removing a machine of yours: asked, run and reported in one dialog. cg says
-// when the machine could not be reached to revoke the key; that result stays
-// on screen to be read, anything else closes by itself.
+// Removing a machine of yours: asked, run and reported in one dialog that
+// closes by itself once Home has caught up. cg says when the machine could not
+// be reached to revoke the key: that outlasts the dialog, as a toast.
 async function removeHost(name) {
   const unreachable = out => /could not reach it/.test(out);
+  let said = '';
   const ok = await runInDialog({
     title: `Remove ${name}`,
     confirm: { body: 'Revokes the app\'s SSH key on the machine and removes it from the app.\n'
                    + 'Sunshine, Steam and games on it are not changed.', yes: 'Remove', danger: true },
     args: ['host', 'remove', name],
     starting: 'Revoking SSH key…',
-    done: out => unreachable(out)
-      ? 'Removed from the app. The SSH key could not be revoked (machine unreachable).'
-      : 'Removed.',
-    close: out => !unreachable(out),
+    done: 'Removed.',
+    close: () => true,
     stoppable: false,
     // Before it says Removed: the list read again, and Home shown without it.
-    after: async () => {
+    after: async out => {
+      said = out;
       hostStatus.delete(name);
       hostLogs.delete(name);
       await refreshHosts();
@@ -4462,6 +4515,9 @@ async function removeHost(name) {
     },
     fail: () => 'Not removed. See details above.',
   });
+  if (ok && unreachable(said))
+    toast(`${name} was removed, but its SSH key could not be revoked: the machine was unreachable. `
+        + 'Remove the line from its ~/.ssh/authorized_keys when it is back.', 'warn');
   return ok;
 }
 
@@ -4512,6 +4568,7 @@ function openAdd(kind) {
   $('onb-title').textContent = kind === 'aws'
     ? (awsAdded() ? 'Finish setting up AWS' : 'Add AWS') : 'Add a server';
   paintOnboard();
+  keepOpen($('adddlg'));
   if (!$('adddlg').open) $('adddlg').showModal();
   // Everything its steps are judged on was read when the window opened, except
   // what only AWS answers: AWS not added yet, the reads behind the gate go now -
@@ -4525,7 +4582,7 @@ function closeAdd() {
   // nothing changed on the server.
   if (serverPwAsk) { window.cg.answer(serverPwAsk, ''); serverPwAsk = null; }
   serverForm.querySelector('#add-pw').value = '';
-  if ($('adddlg').open) $('adddlg').close();
+  if ($('adddlg').open) closeDialog($('adddlg'));
   paintHome();
 }
 $('adddlg-close').onclick = e => { e.preventDefault(); closeAdd(); };
@@ -4666,13 +4723,14 @@ function askPassword({ title, sub, placeholder = '' }) {
       if (done) return;
       done = true;
       input.value = '';
-      if (dlg.open) dlg.close();
+      if (dlg.open) closeDialog(dlg);
       resolve(v);
     };
     yes.onclick = e => { e.preventDefault(); if (input.value) finish(input.value); };
     $('pwdlg-no').onclick = e => { e.preventDefault(); finish(null); };
     dlg.onclose = () => finish(null);
-    dlg.showModal();
+    keepOpen(dlg);
+    if (!dlg.open) dlg.showModal();
     input.focus();
   });
 }
@@ -5188,8 +5246,9 @@ function onbHandOver(then) {
   onbHandover = afterBeat(() => { onbHandover = null; then(); });
 }
 // The one delay in the app: a finished thing is held on screen for a beat, so
-// it is seen to finish, then `then`. It starts no command.
-function afterBeat(then) { return setTimeout(then, ONB_HANDOVER_MS); }
+// it is seen to finish - or a dialog for the length of its closing motion -
+// then `then`. It starts no command.
+function afterBeat(then, ms = ONB_HANDOVER_MS) { return setTimeout(then, ms); }
 
 // The stage that is running something, and the job it started - so it can be
 // stopped, which matters: a sign-in waits on a browser that may never answer.

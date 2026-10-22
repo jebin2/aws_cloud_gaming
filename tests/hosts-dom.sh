@@ -124,6 +124,8 @@ cat > "$T/r/probe.js" <<'PROBE'
 (async () => {
   const out = [];
   const wait = ms => new Promise(r => setTimeout(r, ms));
+  // Until something is so, or a limit: what a busy machine takes longer to reach.
+  const until = async (ok, max = 5000) => { for (let t = 0; t < max && !ok(); t += 50) await wait(50); };
   const txt = e => (e ? e.textContent.replace(/\s+/g, ' ').trim() : '(missing)');
   const $$ = id => document.getElementById(id);
   const shown = id => ($$(id).hidden ? 'hidden' : 'shown');
@@ -209,7 +211,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     $$('pwdlg-input').value = 'tskey-auth-PASTED';
     $$('pwdlg-input').dispatchEvent(new Event('input'));
     $$('pwdlg-yes').click();
-    await wait(100);
+    await until(() => !$$('pwdlg').open);     // its closing motion
     out.push('KEY ANSWER | ' + window.__answers.includes('tskey-auth-PASTED') + ' closed=' + !$$('pwdlg').open);
     out.push('SETUP LIVE | ' + txt($$('onb-live-setup')) + ' open=' + $$('adddlg').open);
     out.push('HOME WELCOME | ' + shown('d-welcome') + ' machines=' + shown('d-machines') + ' aws=' + shown('d-hero'));
@@ -306,10 +308,11 @@ cat > "$T/r/probe.js" <<'PROBE'
     removeBtn().click();
     await wait(50);
     $$('rundlg-go').click();
-    await wait(1400);
-    out.push('REMOVE DOWN | ' + $$('rundlg').open + ' ' + txt($$('rundlg-status')) + ' / ' + vis('rundlg'));
-    $$('rundlg-done').click();
-    await wait(50);
+    await until(() => !$$('rundlg').open && $$('toasts').children.length);
+    out.push('REMOVE DOWN | ' + $$('rundlg').open + ' toast=' + txt($$('toasts')));
+    const tx = $$('toasts').querySelector('button');
+    if (tx) tx.click();
+    out.push('TOAST GONE | ' + $$('toasts').children.length);
 
     // Added again, already set up: nothing is run on it, and the dialog closes.
     STATUS.set_up = true;
@@ -321,9 +324,9 @@ cat > "$T/r/probe.js" <<'PROBE'
     $$('add-user').value = 'me';
     $$('add-pw').value = 'letmein';
     button(document.querySelector('[data-stage="server"]'), 'Connect').click();
-    await wait(600);
+    await until(() => /setup:done/.test(stages()));
     out.push('READD | ' + stages() + ' setups=' + (window.__ran.filter(a => a.startsWith('host setup')).length - setupsBefore));
-    await wait(1200);
+    await until(() => !$$('adddlg').open);
     out.push('READD CLOSED | ' + $$('adddlg').open);
   } catch (e) { out.push('THREW | ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
   out.push('ERRS | ' + window.__errs.join(' ;; '));
@@ -439,9 +442,11 @@ check    "  while it runs, nothing to press - no Cancel" "$(row 'REMOVE RUNNING'
 check    "  asking shows no loading"             "$(row 'REMOVE ASK BUSY')" "REMOVE ASK BUSY | false"
 check    "  and Esc does not close it"           "$(row 'REMOVE ESC')" "REMOVE ESC | stopped=true"
 check    "removed, it keeps loading while the list is read again" "$(row 'REMOVE UPDATING')" "REMOVE UPDATING | true Updating… busy=true view=build buttons="
-check    "  then says Removed, with Home already without it" "$(row 'REMOVE DONE')" "REMOVE DONE | true Removed. busy=false view=dashboard card=false"
-check    "  which closes onto Home, machine gone" "$(row 'REMOVE CLOSED')" "REMOVE CLOSED | false view=dashboard hosts=0"
-check    "unreachable: said, and left to read"   "$(row 'REMOVE DOWN')" "REMOVE DOWN | true Removed from the app. The SSH key could not be revoked (machine unreachable). / Done"
+check    "  then says Removed, with Home already without it" "$(row 'REMOVE DONE')" "REMOVE DONE | true ✓Removed. busy=false view=dashboard card=false"
+check    "  which closes by itself onto Home, machine gone" "$(row 'REMOVE CLOSED')" "REMOVE CLOSED | false view=dashboard hosts=0"
+contains "unreachable: closes all the same"      "$(row 'REMOVE DOWN')" "REMOVE DOWN | false toast="
+contains "  and says so in a toast that stays"  "$(row 'REMOVE DOWN')" "homebox was removed, but its SSH key could not be revoked: the machine was unreachable."
+check    "  until it is dismissed"              "$(row 'TOAST GONE')" "TOAST GONE | 0"
 contains "added again, already set up: done as it is" "$(row 'READD')" "server:done setup:done setups=0"
 check    "  and the dialog closes by itself"     "$(row 'READD CLOSED')" "READD CLOSED | false"
 check    "which reopens its steps"               "$(row 'FINISH')" "FINISH | true Finish setting up AWS"
