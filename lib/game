@@ -340,7 +340,7 @@ destroy() {
   echo "terminating ..."
   ec2 terminate-instances --instance-ids "$INSTANCE_ID" >/dev/null
   wait_instance_state "$REGION" "$INSTANCE_ID" terminated
-  sed -i '/^GAME_INSTANCE_ID=/d' .env 2>/dev/null || true
+  cg_env_unset GAME_INSTANCE_ID 2>/dev/null || true   # where cg keeps it, not a .env here
   echo "terminated; disk deleted. Only the saved image (if any) still bills."
 }
 

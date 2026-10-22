@@ -3653,6 +3653,17 @@ const RUN_HEAD = {
 // "Back to dashboard" cleared that - so leaving and coming back swapped a
 // finished build for the plan of a machine that already existed.
 const liveBox = () => boxNow && boxNow.state !== 'terminated' ? boxNow : null;
+// What a failed build left billing - asked of the machine, not of which step
+// it stopped at: a build can stop after the launch, inside the launching step,
+// and it said "Nothing was billed" over a machine running at Rs 20 an hour.
+// Nothing is claimed until a status read after the failure has answered (the
+// painter repaints this as it lands).
+function failedBill() {
+  const box = liveBox();
+  if (box) return `A machine is ${box.state} - delete it to stop billing`;
+  // A status read after the run ended, and no machine in it.
+  return run && run.ended && boxSeenAt > run.ended ? 'Nothing was billed' : null;
+}
 
 // A finished run that the machine has moved past gives way to it.
 function settleRun() {
@@ -3744,7 +3755,7 @@ function paintRun() {
   $('b-strip-meta').textContent = [
     r.state === 'running' ? mins(now - r.start) : r.kind === 'machine' ? `up ${mins(now - r.start)}`
       : r.state === 'done' && r.kind === 'init' ? `built in ${mins(now - r.start)}` : null,
-    so != null ? `${rs(so)} so far` : r.kind === 'init' && r.state === 'failed' ? 'Nothing was billed' : null,
+    so != null ? `${rs(so)} so far` : r.kind === 'init' && r.state === 'failed' ? failedBill() : null,
     r.billFrom && r.rate != null ? `${rsh(r.rate)} an hour` : null,
   ].filter(Boolean).join(' · ');
   const s = statusNow || {};

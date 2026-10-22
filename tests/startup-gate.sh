@@ -1161,16 +1161,24 @@ B2="window.__after = async () => {
       + [...document.querySelectorAll('#b-run-acts button')].map(b => b.textContent.trim()).join(',');
   };
   const a = await go(['preflight', 'arming the budget', 'provisioning instance'], 1);
+  // The same failure with a machine there after all - launched, then the
+  // build stopped inside the launching step: said, never 'nothing was billed'.
+  const boxWas = boxNow;
+  boxNow = { id: 'i-0295', state: 'running' };
+  paintRun();
+  const a2 = document.getElementById('b-strip-meta').textContent;
+  boxNow = boxWas;
   run = null; paintRun();
   const b = await go(['preflight', 'arming the budget', 'provisioning instance', 'waiting for the box to join the tailnet',
                       'building the box', 'finishing up', 'moonlight pairing', 'waiting for Steam to finish installing'], 0);
   const st = [...document.querySelectorAll('#b-steps [data-step]')].map(r => r.dataset.state).join(',');
-  return 'failed=' + a + ' | done=' + b + ' | steps=' + st;
+  return 'failed=' + a + ' | left=' + a2 + ' | done=' + b + ' | steps=' + st;
 };"
 ENGINE="$B2"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "a failed rental: nothing was billed" "$(row AFTER)" "failed=Build failed / Nothing was billed"
+contains "  unless a machine is there after all: said, with what to do" "$(row AFTER)" "left=A machine is running - delete it to stop billing"
 contains "a finished build: ready to play"     "$(row AFTER)" "done=Ready to play / built in"
 contains "  with play, and delete"            "$(row AFTER)" "▶ Play,Delete machine"
 contains "  and all eight steps ticked"        "$(row AFTER)" "steps=done,done,done,done,done,done,done,done"

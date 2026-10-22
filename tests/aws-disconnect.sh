@@ -28,8 +28,12 @@ export HERE OLD S="$T/aws"
 # What is there: each a file in $S, gone once AWS is told to delete it.
 seed() {
   rm -f "$S"/*
-  printf 'i-1\trunning\tg6.xlarge\n' > "$S/machine"
-  touch "$S/here" "$S/old" "$S/vol" "$S/img" "$S/cw" "$S/budget" "$S/login"
+  # One machine where the settings say, one in another region they do not -
+  # as a laptop set to Hyderabad left one running in Mumbai.
+  printf 'i-1\trunning\tg6.xlarge\tap-south-2\ni-2\tstopped\tg4dn.xlarge\tap-south-1\n' > "$S/machine"
+  # A watchdog in each region - one a region move left behind - and the role
+  # they share, which is global.
+  touch "$S/here" "$S/old" "$S/vol" "$S/img" "$S/cw-ap-south-2" "$S/cw-ap-south-1" "$S/cwrole" "$S/budget" "$S/login"
   # cg's settings in SSM: a game's keep timer here, and one in the old region.
   printf 'ap-south-2 /cloud-gaming/gamevps/kept/%s/2\nap-south-1 /cloud-gaming/gamevps/kept/%s/1\nap-south-2 /cloud-gaming/gamevps/archive-last-seen\n' \
     "$HERE" "$OLD" > "$S/marks"
@@ -41,13 +45,23 @@ a="$*"
 q() { [[ $a == *"$1"* ]]; }
 case $a in
   *"sts get-caller-identity"*) echo 123456789012 ;;
+  *describe-regions*) printf 'ap-south-1\tap-south-2\n' ;;
   *describe-instances*)
+    r=$(sed -n 's/.*--region \([^ ]*\).*/\1/p' <<<"$a")
     if q instance-state-name; then
       [[ -f $S/machine ]] || exit 0
-      if q '[InstanceId,State.Name'; then cat "$S/machine"; else cut -f1 "$S/machine"; fi
+      if q '[InstanceId,State.Name'; then awk -F'\t' -v r="$r" '$4 == r {print $1 "\t" $2 "\t" $3}' "$S/machine"
+      else awk -F'\t' -v r="$r" '$4 == r {print $1}' "$S/machine"; fi
     elif q InstanceLifecycle; then echo None
-    else [[ -f $S/machine ]] && cut -f2 "$S/machine" || echo terminated; fi ;;
-  *terminate-instances*) rm -f "$S/machine" ;;
+    else
+      i=$(sed -n 's/.*--instance-ids \([^ ]*\).*/\1/p' <<<"$a")
+      st=$([[ -f $S/machine ]] && awk -F'\t' -v i="$i" '$1 == i {print $2}' "$S/machine")
+      echo "${st:-terminated}"
+    fi ;;
+  *terminate-instances*)
+    for i in $(sed -n 's/.*--instance-ids \(.*\)$/\1/p' <<<"$a" | sed 's/ --region.*//'); do
+      awk -F'\t' -v i="$i" '$1 != i' "$S/machine" > "$S/m.n"; mv "$S/m.n" "$S/machine"; done
+    [[ -s $S/machine ]] || rm -f "$S/machine" ;;
   *describe-volumes*)
     if q 'status,Values=available'; then
       [[ -f $S/vol ]] || exit 0
@@ -87,9 +101,10 @@ case $a in
     [[ -s $S/marks ]] || rm -f "$S/marks" ;;
   *"budgets describe-budget"*) [[ -f $S/budget ]] || exit 254 ;;
   *"budgets delete-budget"*) [[ -n ${BUDGET_STUCK:-} ]] || rm -f "$S/budget" ;;
-  *get-function-configuration*) [[ -f $S/cw ]] || exit 254 ;;
-  *"iam get-role"*) [[ $a == *-box* ]] && exit 254; [[ -f $S/cw ]] || exit 254 ;;
-  *delete-function*) rm -f "$S/cw" ;;
+  *get-function-configuration*) r=$(sed -n 's/.*--region \([^ ]*\).*/\1/p' <<<"$a"); [[ -f $S/cw-$r ]] || exit 254 ;;
+  *"iam get-role"*) [[ $a == *-box* ]] && exit 254; [[ -f $S/cwrole ]] || exit 254 ;;
+  *delete-function*) r=$(sed -n 's/.*--region \([^ ]*\).*/\1/p' <<<"$a"); rm -f "$S/cw-$r" ;;
+  *"iam delete-role "*) [[ $a == *-box* ]] || rm -f "$S/cwrole" ;;
   *) : ;;
 esac
 FAKE
@@ -108,13 +123,15 @@ echo "1. the inventory: everything cg has there, read live"
 env_reset; seed
 j=$(cgr aws inventory --json)
 kinds=$(sed '$d' <<<"$j" | python3 -c 'import json,sys; print(" ".join(i["kind"] for i in json.load(sys.stdin)["items"]))')
-check    "machine, both regions' games, disks, images, watchdog, budget, settings" "$kinds" "machine games games disks images watchdog budget settings"
+contains "the watchdog in both regions"   "$j" '"detail": "function, schedule, role, logs in ap-south-1, ap-south-2"'
+check    "both machines, both regions' games, disks, images, watchdog, budget, settings" "$kinds" "machine machine games games disks images watchdog budget settings"
+contains "  the one in another region, named so" "$j" '"detail": "g4dn.xlarge, stopped in ap-south-1"'
 contains "  the machine as it is"         "$j" '"detail": "g6.xlarge, running"'
 contains "  the games here, counted, and the Steam login with them" "$j" '"detail": "1 game, 1.0 GB and the saved Steam login"'
 contains "  every region's settings in SSM" "$j" '"detail": "3 settings in SSM"'
 contains "  and those in another region"  "$j" '"detail": "1 game, 2.0 GB in ap-south-1"'
 contains "  a running machine bills by the hour" "$j" '"hourly": true'
-check    "  and it is only a look"        "$(there)" "budget cw here img login machine marks old vol"
+check    "  and it is only a look"        "$(there)" "budget cw-ap-south-1 cw-ap-south-2 cwrole here img login machine marks old vol"
 contains "a laptop without AWS has nothing to show" "$(printf 'GAME_RES=x\n' > "$T/repo/.env"; CG_JSON_MODE= cgr aws inventory --json)" '"connected": false'
 
 echo "2. not confirmed: nothing deleted"
@@ -125,7 +142,7 @@ contains "  having said what goes"        "$out" "Saved games elsewhere"
 contains "  and what stays"               "$out" "region opt-ins and GPU quota stay"
 contains "anything else is a no"          "$out" "nothing was deleted"
 contains "  and fails"                    "$out" "rc=1"
-check    "  everything is still there"    "$(there)" "budget cw here img login machine marks old vol"
+check    "  everything is still there"    "$(there)" "budget cw-ap-south-1 cw-ap-south-2 cwrole here img login machine marks old vol"
 check    "  and AWS still set up"         "$(region)" "1"
 
 echo "3. confirmed: nothing of cg's is left"
@@ -135,6 +152,8 @@ contains "it ends well"                   "$out" "rc=0"
 contains "  saying nothing is left billing" "$out" "AWS disconnected - nothing of cg is left billing"
 check    "  and nothing is: the login and every region's settings went too" "$(there)" ""
 contains "the other region's games went too" "$(cat "$T/deleted.log")" "$OLD"
+contains "  and the machine in the other region was ended" "$out" "ending the machine i-2 in ap-south-1"
+contains "  and its watchdog, and the role they shared" "$out" "removing the cloud watchdog in ap-south-1"
 check    "the region leaves .env"         "$(region)" "0"
 check    "  and nothing else does"        "$(grep -c '^GAME_RES=1920x1080' "$T/repo/.env")" "1"
 check    "the access key is kept"         "$(grep -c AKIDEXAMPLE "$T/home/.aws/credentials")" "1"
@@ -144,7 +163,7 @@ env_reset; seed
 out=$(printf 'DELETE\n' | AWS_DOWN=1 CG_JSON_MODE=1 cgr aws disconnect)
 contains "it says so"                     "$out" "AWS could not be asked what is there - nothing was deleted"
 contains "  with its own code"            "$out" "rc=3"
-check    "  and everything is still there" "$(there)" "budget cw here img login machine marks old vol"
+check    "  and everything is still there" "$(there)" "budget cw-ap-south-1 cw-ap-south-2 cwrole here img login machine marks old vol"
 
 echo "5. something will not go: said, and AWS stays set up to see it"
 env_reset; seed

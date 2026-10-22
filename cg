@@ -1968,11 +1968,22 @@ aws_inventory_json() {
     printf '{"error": "AWS could not be asked what is there", "items": [], "usd_month": null}\n'
     rm -rf "$work"; return 0
   fi
-  # Machines cg launched, in any state that still bills or can come back.
-  ec2 describe-instances --filters "Name=tag:Name,Values=$TS_HOST" \
-      "Name=instance-state-name,Values=pending,running,stopping,stopped" \
-      --query 'Reservations[].Instances[].[InstanceId,State.Name,InstanceType]' --output text \
-      > "$work/machines" 2>/dev/null || echo ERR > "$work/machines"
+  # Machines cg launched, in any state that still bills or can come back - in
+  # every region, not only the one set here: a laptop whose settings say one
+  # region does not see a machine another launched in the next, and that one
+  # bills just the same. Listing is free.
+  local mr
+  for mr in $(aws ec2 describe-regions --query 'Regions[].RegionName' --output text 2>/dev/null || echo "$REGION"); do
+    # The watchdog is per region too (its role is global, and shared): one a
+    # region move left behind kept that role in use, and so in the account.
+    aws lambda get-function-configuration --region "$mr" --function-name "$CW_NAME" >/dev/null 2>&1 \
+      && echo "$mr" >> "$work/watchdogs"
+    aws ec2 describe-instances --region "$mr" --filters "Name=tag:Name,Values=$TS_HOST" \
+        "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+        --query 'Reservations[].Instances[].[InstanceId,State.Name,InstanceType]' --output text 2>/dev/null \
+      | awk -v r="$mr" 'NF >= 3 && $1 != "None" {print $0 "\t" r}' >> "$work/machines" \
+      || { [[ $mr == "$REGION" ]] && echo ERR > "$work/machines"; }
+  done
   # The saved games cg uses, and every other region's (library elsewhere).
   b=$(cg_bucket 2>/dev/null) || b=""
   if [[ -n $b ]] && aws s3api head-bucket --bucket "$b" >/dev/null 2>&1; then
@@ -2022,8 +2033,9 @@ def rows(f):
     t = read(f).strip()
     if t == "ERR": errors.append(f); return []
     return [l.split("\t") for l in t.splitlines() if l.strip() and l.strip() != "None"]
-for iid, state, typ in [(r + ["", "", ""])[:3] for r in rows("machines")]:
-    items.append({"kind": "machine", "label": "Machine", "detail": "%s, %s" % (typ, state),
+for iid, state, typ, mreg in [(r + ["", "", "", ""])[:4] for r in rows("machines")]:
+    items.append({"kind": "machine", "label": "Machine", "id": iid, "region": mreg,
+                  "detail": "%s, %s%s" % (typ, state, "" if mreg == os.environ["REGION"] else " in " + mreg),
                   "usd_month": None, "bills": True, "hourly": state in ("pending", "running")})
 here = read("here").strip()
 if here:
@@ -2056,7 +2068,11 @@ if imgs:
     gb = sum(num(i[1]) or 0 for i in imgs if len(i) > 1)
     items.append({"kind": "images", "label": "Disk images", "detail": "%d, with their snapshots" % len(imgs),
                   "usd_month": month(gb, SNAP), "bills": True})
-if read("watchdog").strip(): items.append({"kind": "watchdog", "label": "Cloud watchdog", "detail": "function, schedule, role, logs", "usd_month": 0, "bills": False})
+wd = sorted(set(read("watchdogs").split()))
+if read("watchdog").strip() or wd:
+    items.append({"kind": "watchdog", "label": "Cloud watchdog", "regions": wd,
+                  "detail": "function, schedule, role, logs" + (" in " + ", ".join(wd) if wd else " (the role)"),
+                  "usd_month": 0, "bills": False})
 if read("budget").strip():   items.append({"kind": "budget", "label": "Budget alert", "detail": "", "usd_month": 0, "bills": False})
 marks = [l.split("\t") for l in read("ssm").splitlines() if "\t" in l]
 if marks:
@@ -2107,6 +2123,34 @@ for i in json.loads(os.environ["INV"])["items"]: print("  %-22s %s" % (i["label"
   # The machine, this region's archive, IAM, the watchdog, the budget, leftovers.
   GAME_S3_BUCKET=$(cg_bucket 2>/dev/null || true) cmd_destroy --all --force \
     || die "the delete stopped - see above; what is left is still listed by cg aws disconnect --plan"
+  # The watchdog in any other region: each removed as this one was, and the
+  # last of them, finding none left that uses the shared role, takes it too.
+  while read -r r; do
+    [[ -n $r && $r != "$REGION" ]] || continue
+    say "removing the cloud watchdog in $r"
+    ( REGION=$r; cw_remove )
+  done < <(python3 -I -c 'import json,sys
+for i in json.load(sys.stdin)["items"]:
+    if i["kind"] == "watchdog":
+        for r in i.get("regions") or []: print(r)' <<<"$inv")
+  # A role left with no function anywhere: this region's removal takes it.
+  aws iam get-role --role-name "$CW_NAME" >/dev/null 2>&1 && cw_remove
+
+  # Machines in any other region: a spot request cancelled first, so it cannot
+  # launch another, then the machine ended - its disk goes with it.
+  while IFS=$'\t' read -r i r; do
+    [[ -n $i ]] || continue
+    say "ending the machine $i in $r"
+    local req
+    req=$(aws ec2 describe-spot-instance-requests --region "$r" --filters "Name=instance-id,Values=$i" \
+          --query 'SpotInstanceRequests[].SpotInstanceRequestId' --output text 2>/dev/null || true)
+    [[ -n $req && $req != None ]] && aws ec2 cancel-spot-instance-requests --region "$r" --spot-instance-request-ids $req >/dev/null 2>&1
+    aws ec2 terminate-instances --region "$r" --instance-ids "$i" >/dev/null 2>&1 \
+      && wait_instance_state "$r" "$i" terminated || log_as fail "could not end $i in $r"
+  done < <(REGION="$REGION" python3 -I -c 'import json,os,sys
+for i in json.load(sys.stdin)["items"]:
+    if i["kind"] == "machine" and i.get("region") and i["region"] != os.environ["REGION"]: print(i["id"] + "\t" + i["region"])' <<<"$inv")
+
   # Every other region's saved games.
   while IFS=$'\t' read -r b r; do
     [[ -n $b ]] || continue

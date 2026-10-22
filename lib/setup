@@ -1065,7 +1065,10 @@ touches it, and GAME_ARCHIVE_EXPIRY_DAYS=0 keeps it forever."
   # followed by a rebuild silently moved the rig to a different region, with a
   # different archive bucket, and said nothing. Everything else here is written
   # by provision and means nothing without the box it describes.
-  sed -i '/^GAME_INSTANCE_ID=/d;/^GAME_TS_HOST=/d;/^GAME_TS_NODE=/d;/^SUNSHINE_USER=/d;/^SUNSHINE_PASS=/d' .env 2>/dev/null || true
+  local k
+  for k in GAME_INSTANCE_ID GAME_TS_HOST GAME_TS_NODE SUNSHINE_USER SUNSHINE_PASS; do
+    cg_env_unset "$k" 2>/dev/null || true      # where cg keeps them, not a .env here
+  done
 
   if (( ! all )); then
     say "box deleted - security group, key pair and tailnet node kept for cg init"
@@ -1406,8 +1409,14 @@ else lib/provision.sh | cg_relay ''; fi
 prov_rc=$?
 set -e
 (( prov_rc == 0 )) || die "could not launch the instance - see the launch error above"
-# shellcheck disable=SC1091
-set -a; source .env; set +a
+# What provision.sh wrote, read back from where cg keeps it - cg_env_file, not
+# a .env beside the scripts. The installed app keeps its settings in
+# ~/.config/cg and runs from its own read-only copy, where there is no .env: a
+# bare `source .env` failed under set -e there, the build stopped with nothing
+# said, and the machine it had just launched went on billing. The keys
+# provision.sh writes are cleared first, as cg_env_load leaves a set key alone.
+unset GAME_INSTANCE_ID GAME_REGION GAME_TS_HOST
+cg_env_load GAME_
 
 # Confirm this BEFORE the build, not after. The watchdog arms on the box
 # within a minute and its only action is `shutdown -h`; whether that stops

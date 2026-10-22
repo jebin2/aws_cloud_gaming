@@ -229,7 +229,9 @@ echo "13. destroy clears what the BOX wrote, never what you chose"
 # the registry default, so destroy-then-rebuild silently moved the rig to a
 # different region with a different archive bucket - and the only clue was a
 # build that worked and billed in the wrong place.
-clean=$(grep -n "GAME_INSTANCE_ID=/d" "$REPO/lib/setup" | head -1)
+# The keys a destroy takes out of the settings, as lib/setup lists them (each
+# through cg_env_unset, where cg keeps them - not a .env beside the scripts).
+clean=$(grep -n "for k in GAME_INSTANCE_ID" "$REPO/lib/setup" | head -1)
 check "the instance id goes"       "$(grep -c 'GAME_INSTANCE_ID' <<<"$clean")" "1"
 check "  the tailnet node too"     "$(grep -c 'GAME_TS_NODE' <<<"$clean")" "1"
 check "  and the sunshine pair"    "$(grep -c 'SUNSHINE_PASS' <<<"$clean")" "1"

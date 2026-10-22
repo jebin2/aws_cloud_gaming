@@ -74,4 +74,24 @@ for script in cg lib/setup lib/game lib/aws-setup.sh; do
   fi
 done
 
+echo "7. nothing reads or writes a .env beside the scripts"
+# The installed app keeps its settings in ~/.config/cg and runs from its own
+# copy of the scripts, where there is no .env. A bare `source .env` stopped a
+# build there under set -e, silently, with a machine just launched and billing;
+# a bare `sed -i ... .env` left a deleted machine's id behind. Every path goes
+# through cg_env_file (or its loader and setters).
+bare=$(grep -nE '(source|\. |cat|sed -i[^|#]*|>>?) *\.env\b|\.env 2>' cg lib/*.sh lib/setup lib/game 2>/dev/null \
+       | grep -vE ':[0-9]+:[[:space:]]*#')
+if [[ -z $bare ]]; then echo "  ok   no bare .env path"; pass=$((pass+1))
+else echo "  FAIL a bare .env path:"; printf '%s\n' "$bare" | sed 's/^/    /'; fail=$((fail+1)); fi
+# And the one that stopped the build: after provisioning, the machine's id is
+# read from where cg keeps it - run here as the app runs, from a folder that
+# has no .env, over a stale id.
+got=$( d=$(mktemp -d); cd "$d" && printf 'GAME_INSTANCE_ID=i-new\nGAME_REGION=ap-south-1\nGAME_SPOT=1\n' > "$d/cfg.env"
+       env GAME_INSTANCE_ID=i-stale GAME_SPOT=0 CG_ENV_FILE="$d/cfg.env" bash -c '
+         set -e; source "$1/lib/env-file.sh"
+         '"$(sed -n '/^unset GAME_INSTANCE_ID GAME_REGION GAME_TS_HOST$/,/^cg_env_load GAME_$/p' "$REPO/lib/setup")"'
+         echo "$GAME_INSTANCE_ID $GAME_REGION $GAME_SPOT"' _ "$REPO" 2>&1; rm -rf "$d" )
+check "after provisioning, the new id is read from the settings, the rest kept" "$got" "i-new ap-south-1 0"
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]
