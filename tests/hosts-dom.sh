@@ -285,6 +285,13 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('ADDED CARD | ' + shown('d-hero') + ' ' + txt($$('d-machine-card')) + ' / '
              + [...$$('d-hero').querySelectorAll('button')].filter(b => !b.hidden).map(b => b.textContent.trim()).join(', '));
     out.push('ADDED ADD | ' + shown('d-add-aws'));
+    // Last on the Machine page for the server: Build machine still opens AWS's.
+    goHost('homebox');
+    await wait(50);
+    goView('dashboard');
+    $$('d-build').click();
+    await wait(50);
+    out.push('BUILD GOES | view=' + view + ' aws=' + shown('b-aws') + ' own=' + shown('b-own') + ' title=' + txt($$('view-title')));
     // A machine that is there is shown as itself, whatever the next build needs.
     statusNow = { box: { id: 'i-1', state: 'running', type: 'g6.xlarge', launched: new Date().toISOString(), ready: true, built: true },
                   rates: {}, budget: {}, config: {}, build: {} };
@@ -468,6 +475,7 @@ contains "its own steps"                         "$(row 'AWS DIALOG')" "Add AWS"
 contains "  the account, alerts and where"       "$(row 'AWS STAGES')" "email:"
 contains "  with the AWS CLI now needed"         "$(row 'AWS TOOLS')" "the AWS CLI"
 check    "added, its pages arrive"               "$(row 'ADDED NAV')" "ADDED NAV | dashboard,build,library,guards,cost,logs,settings"
+check    "Build machine opens the AWS machine, whatever was open last" "$(row 'BUILD GOES')" "BUILD GOES | view=build aws=shown own=hidden title=Machine"
 contains "needing something, its card says so"   "$(row 'ADDED CARD')" "AWS needs you"
 contains "  with the button that reopens it"     "$(row 'ADDED CARD')" "Finish setting up"
 check    "  and it is not offered again"         "$(row 'ADDED ADD')" "ADDED ADD | hidden"

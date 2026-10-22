@@ -1098,7 +1098,7 @@ function renderRecurring(box, { hint } = {}) {
     const st = res.instance.state;
     const hr = boxNow ? machineFacts().price : null;
     line(`Machine (${st})`, st === 'running' ? (hr != null ? `${rsh(hr)} an hour` : 'by the hour')
-                                             : `${r(standby.volumes_usd_month)} a month`, () => goView('build'));
+                                             : `${r(standby.volumes_usd_month)} a month`, () => goAws());
   } else if (res.volumes_gb) {
     line('Orphaned disk', `${res.volumes_gb} GB · ${r(standby.volumes_usd_month)} a month`);
   }
@@ -4414,6 +4414,12 @@ function paintMachineTab() {
   $('b-own').hidden = !host;
   if (view === 'build') $('view-title').textContent = host ? machineTab : 'Machine';
 }
+// The Machine page for the AWS machine - whichever machine it showed last.
+function goAws() {
+  machineTab = 'aws';
+  if (view === 'build') paintMachineTab(); else goView('build');
+  paintMachineTab();
+}
 function goHost(name) {
   machineTab = name;
   if (view === 'build') paintHostCards(); else goView('build');
@@ -6058,8 +6064,8 @@ $('cancel').onclick = async () => {
 mountMachineCard($('d-hero'), 'd');
 mountMachineCard($('b-machine'), 'b');
 $('d-fix').onclick = $('b-fix').onclick = () => openAdd('aws');
-$('d-build').onclick = () => goView('build');
-$('d-watch').onclick = () => goView('build');
+$('d-build').onclick = goAws;
+$('d-watch').onclick = goAws;
 $('d-ts-signin').onclick = signInTailscale;
 $('d-library').onclick = () => goView('library');
 applyLogFilter('all');           // the default is shown as chosen, not just in force
@@ -6250,7 +6256,7 @@ function startRun(args, opts = {}) {
   runKind = args[0];
   // A build picked up again by itself does not take you off the page you are
   // on; the machine card says it is building, and Watch the build opens it.
-  if (!opts.stay) { machineTab = 'aws'; goView('build'); paintMachineTab(); }
+  if (!opts.stay) goAws();
   $('b-log').dataset.fresh = 'yes';
   $('b-log').textContent = '';
   $('b-log-title').textContent = `${CgName(args)} · log`;
