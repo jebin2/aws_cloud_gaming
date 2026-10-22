@@ -390,6 +390,7 @@ const ASK = {
   sessionEnd: 'session-end',
   hostSudo:   'host-sudo',
   hostSshPw:  'host-ssh-password',
+  awsDisconnect: 'aws-disconnect',
 };
 const ASK_QUESTION = {
   [ASK.sessionEnd]: 'Session ended. What should happen to the machine?',
@@ -1873,8 +1874,11 @@ function runDlgStatus(text, tone) {
 //   done     the status when it succeeds (a string, or a function for one that
 //            has to be read off the state the run just changed)
 //   fail     the status when it does not, given the exit code
-//   confirm  optional { body, yes, danger }: the same dialog asks first, and the
-//            run happens in it - no confirm box that closes onto nothing
+//   confirm  optional { body, yes, danger, word }: the same dialog asks first,
+//            and the run happens in it - no confirm box that closes onto
+//            nothing. `word` must be typed before yes can be pressed. Given as
+//            an async function, it is read first, the dialog loading meanwhile
+//            (`checking` says what with), and { error } stops there.
 //   close    on success, close after a beat (given cg's output: false keeps it
 //            open, for a result worth reading)
 //   stoppable false for a run that is over in seconds and must not be left
@@ -1883,36 +1887,75 @@ function runDlgStatus(text, tone) {
 //            re-reading what the change touched - given cg's output; the
 //            dialog keeps loading until it has
 // Resolves true on success; `false` when it failed or was not confirmed.
-async function runInDialog({ title, args, starting, done, fail, confirm, close, stoppable = true, after }) {
+async function runInDialog(opts) {
+  const { title, args, starting, done, fail, close, stoppable = true, after, checking } = opts;
+  // typed: { askId, word } - cg's own typed confirmation, answered with the
+  // word already typed in this dialog rather than asked a second time.
+  const { typed } = opts;
+  let asking = opts.confirm;
   const log = $('rundlg-log'), link = $('rundlg-link'), go = $('rundlg-go');
+  const wordRow = $('rundlg-word-row'), word = $('rundlg-word');
   $('rundlg-title').textContent = title;
   link.hidden = true;
   go.hidden = true;
+  wordRow.hidden = true;
   $('rundlg-busy').hidden = true;
-  if (confirm) {
+  if (asking) {
     log.textContent = '';
-    $('rundlg-status').textContent = confirm.body;
-    $('rundlg-status').className = 'dlg-sub whitespace-pre-line mb-space-md';
     $('rundlg-done').hidden = true;
     $('rundlg-retry').hidden = true;
     $('rundlg-cancel').hidden = false;
     $('rundlg-cancel').textContent = 'Cancel';
-    go.hidden = false;
-    go.textContent = confirm.yes || 'Continue';
-    go.className = 'btn ' + (confirm.danger ? 'btn-danger' : 'btn-primary');
     keepOpen($('rundlg'));
     if (!$('rundlg').open) $('rundlg').showModal();
-    go.focus();
+    // What it would do has to be read before it can be asked: loading till then.
+    if (typeof asking === 'function') {
+      // A look, over in seconds: nothing to press while it reads.
+      runDlgStatus(checking || 'Checking\u2026');
+      $('rundlg-busy').hidden = false;
+      $('rundlg-cancel').hidden = true;
+      let c;
+      try { c = await asking(); } catch (e) { c = { error: String((e && e.message) || e) }; }
+      $('rundlg-busy').hidden = true;
+      if (!$('rundlg').open) return false;          // cancelled while it read
+      if (c.error) {
+        runDlgStatus(c.error, 'bad');
+        runDlgRetry = () => runInDialog(opts);
+        $('rundlg-retry').hidden = false;
+        $('rundlg-cancel').hidden = true;
+        $('rundlg-done').hidden = false;
+        $('rundlg-done').textContent = 'Close';
+        return false;
+      }
+      asking = c;
+      $('rundlg-cancel').hidden = false;
+    }
+    $('rundlg-status').textContent = asking.body;
+    $('rundlg-status').className = 'dlg-sub whitespace-pre-line mb-space-md';
+    go.hidden = false;
+    go.textContent = asking.yes || 'Continue';
+    go.className = 'btn ' + (asking.danger ? 'btn-danger' : 'btn-primary');
+    go.disabled = !!asking.word;
+    if (asking.word) {
+      wordRow.hidden = false;
+      $('rundlg-word-label').textContent = `Type ${asking.word} to confirm`;
+      word.value = '';
+      word.oninput = () => { go.disabled = word.value.trim() !== asking.word; };
+      word.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); if (!go.disabled) go.click(); } };
+      word.focus();
+    } else go.focus();
     const yes = await new Promise(resolve => {
       runDlgConfirm = resolve;
-      go.onclick = e => { e.preventDefault(); resolve(true); };
+      go.onclick = e => { e.preventDefault(); if (!go.disabled) resolve(true); };
     });
     runDlgConfirm = null;
     go.hidden = true;
+    wordRow.hidden = true;
+    go.disabled = false;
     if (!yes) return false;
   }
   runSurface = { link: 'rundlg-link', log: 'rundlg-log', status: runDlgStatus };
-  runDlgRetry = () => runInDialog({ title, args, starting, done, fail, close, stoppable, after });
+  runDlgRetry = () => runInDialog({ title, args, starting, done, fail, close, stoppable, after, typed });
   $('rundlg-done').hidden = true;
   $('rundlg-done').textContent = 'Done';
   $('rundlg-retry').hidden = true;
@@ -1925,8 +1968,10 @@ async function runInDialog({ title, args, starting, done, fail, confirm, close, 
   $('rundlg-busy').hidden = false;
   keepOpen($('rundlg'));
   if (!$('rundlg').open) $('rundlg').showModal();
+  if (typed) typedPending = typed;
   const { rc, err } = await runCg(args, { collect: 'rundlg-log', wantRc: true,
                                           onStart: id => { runDlgJob = id; } });
+  if (typed) typedPending = null;
   runDlgJob = null;
   runDlgRc = rc;
   link.hidden = true;
@@ -1987,7 +2032,10 @@ $('tskey-signin-go').onclick = signInTailscale;
 
 // The link, lifted out of whatever cg relayed. Only this host, and the main
 // process checks it again before anything opens.
-const SIGNIN_RE = /https:\/\/login\.tailscale\.com\/[^\s]+/;
+// A sign-in waiting on a browser is login.tailscale.com/a/<code>, as
+// `tailscale up` prints it. Not any page there: a delete that tells you where to
+// remove old devices by hand (/admin/...) is not a sign-in to wait for.
+const SIGNIN_RE = /https:\/\/login\.tailscale\.com\/a\/[^\s]+/;
 // Where the words of the run in flight go. Two surfaces now: the dialog, for a
 // run you asked for from a card, and the first-run pipeline's pane. The link
 // has to appear on whichever one is in front of you.
@@ -4553,27 +4601,49 @@ async function refreshHosts(name) {
 // Removing AWS: cg aws forget, which refuses while a machine or saved games are
 // still there and says which. When AWS cannot be asked (exit 3), whether
 // anything still bills is not known - that is said, and it is your call.
+// What is in AWS, as cg aws inventory reads it live - for the confirmation.
+async function awsInventory() {
+  const out = await runCg(['aws', 'inventory', '--json'], { capture: true });
+  try { return JSON.parse(out) || { error: 'Could not read what is in AWS.' }; }
+  catch { return { error: 'Could not read what is in AWS.' }; }
+}
+// Disconnecting AWS deletes everything cg has there, so nothing is left billing
+// - the machine, every region's saved games, leftovers, the watchdog, the
+// budget - in one dialog: what is there, read live; DELETE typed; the run; a
+// look that nothing is left; then Home, without AWS. What stays is free.
 async function removeAws() {
-  const ok = await askConfirm({
-    title: 'Disconnect AWS?',
-    body: 'AWS is removed from the app. Nothing in your AWS account is deleted, '
-        + 'and the access key is kept.\n\nNot allowed while a machine or saved games exist.',
-    yes: 'Disconnect', danger: true,
+  const ok = await runInDialog({
+    title: 'Disconnect AWS',
+    checking: 'Checking what is in AWS\u2026',
+    confirm: async () => {
+      const d = await awsInventory();
+      if (d.error) return { error: `${d.error} Nothing was deleted.` };
+      const inr = d.inr_per_usd;
+      const inrOf = usd => (usd == null || !inr ? null : rs(usd * inr));
+      const lines = (d.items || []).map(i => `\u2022 ${i.label}${i.detail ? ': ' + i.detail : ''}`
+        + (i.usd_month ? ` (${inrOf(i.usd_month)}/month)` : ''));
+      const now = d.hourly ? 'billing by the hour now' : d.usd_month != null ? `${inrOf(d.usd_month)}/month now` : null;
+      return {
+        body: (lines.length ? 'This deletes everything the app has in AWS:\n' + lines.join('\n')
+                            : 'Nothing the app made is left in AWS.')
+            + `\n\n${now ? now + ', ' : ''}\u20b90/month after.`
+            + (d.items.some(i => i.kind === 'games') ? ' Saved games cannot be recovered.' : '')
+            + '\nKept, at no cost: your AWS account, its access key, region opt-ins and GPU quota.',
+        yes: 'Disconnect', danger: true,
+        word: (d.items || []).length ? 'DELETE' : null,
+      };
+    },
+    args: ['aws', 'disconnect'],
+    typed: { askId: ASK.awsDisconnect, word: 'DELETE' },
+    starting: 'Deleting\u2026',
+    stoppable: false,
+    done: 'AWS disconnected. Nothing left billing.',
+    close: () => true,
+    after: async () => { await refreshAll(); goView('dashboard'); },
+    fail: rc => rc === 3 ? 'Could not reach AWS. Nothing was deleted.'
+                         : 'Not everything could be deleted. See details above; AWS stays connected so it can be seen.',
   });
-  if (!ok) return;
-  const done = 'AWS disconnected. Nothing in AWS was deleted.';
-  let removed = await runInDialog({ title: 'Disconnecting AWS', args: ['aws', 'forget'],
-    starting: 'Checking for billable resources in AWS.', done,
-    fail: rc => rc === 3 ? 'Could not check AWS for remaining resources.' : 'Not disconnected. See above.' });
-  if (!removed && runDlgRc === 3 && await askConfirm({
-        title: 'Disconnect anyway?',
-        body: 'Could not check AWS for a machine or saved games. '
-            + 'Anything left will keep billing and will no longer be shown.',
-        yes: 'Disconnect anyway', danger: true })) {
-    removed = await runInDialog({ title: 'Disconnecting AWS', args: ['aws', 'forget', '--anyway'],
-      starting: 'Disconnecting…', done, fail: () => 'Not disconnected. See above.' });
-  }
-  if (removed) { goView('dashboard'); await refreshAll(); }
+  return ok;
 }
 $('b-aws-remove').onclick = removeAws;
 

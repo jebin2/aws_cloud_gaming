@@ -42,14 +42,15 @@ while [[ ${1:-} == -* ]]; do
     ["creds", "set"],
     ["creds", "tailscale", "signin"],
     ["creds", "tailscale", "authkey"],
-    ["deps", "install"]
+    ["deps", "install"],
+    ["aws", "disconnect"]
   ],
   "asks": [
     "aws-access-key-id", "aws-secret-access-key",
     "tailscale-api-token", "tailscale-auth-key",
     "alert-email", "session-end", "fix-go-ahead", "steam-login",
     "clean-orphans", "delete-volume", "destroy-all", "forget-game", "forget-login",
-    "move-game", "host-sudo", "host-ssh-password"
+    "move-game", "host-sudo", "host-ssh-password", "aws-disconnect"
   ]
 }
 JSON
@@ -668,8 +669,13 @@ library_elsewhere_json() {
   local cur names b r work i=0 acct
   cur=$(cg_bucket 2>/dev/null) || cur=""
   acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || acct=""
-  names=$(aws s3api list-buckets --query 'Buckets[].Name' --output text 2>/dev/null) || names=""
-  if [[ -z $acct || -z $names ]]; then
+  # Whether AWS answered is the exit status, not the output: an account with no
+  # buckets at all lists nothing, and that is an answer - after a disconnect it
+  # is the answer.
+  local listed=1
+  names=$(aws s3api list-buckets --query 'Buckets[].Name' --output text 2>/dev/null) || listed=0
+  [[ $names == None ]] && names=""
+  if [[ -z $acct ]] || (( ! listed )); then
     printf '{"error": "could not list your buckets - AWS did not answer", "places": null}\n'
     return 0
   fi
@@ -1950,6 +1956,163 @@ print(sum(len(p.get("games") or []) for p in d.get("places") or []))' 2>/dev/nul
   log "nothing in AWS was deleted; your access key stays in ~/.aws/credentials"
 }
 
+# aws_inventory_json - everything of cg's in this AWS account that a disconnect
+# would delete, read live, with what each bills a month. An unknown price is
+# null, never 0; "error" says AWS could not be asked, and then nothing else in
+# it can be trusted.
+aws_inventory_json() {
+  local work acct b
+  work=$(mktemp -d)
+  acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || acct=""
+  if [[ -z $acct ]]; then
+    printf '{"error": "AWS could not be asked what is there", "items": [], "usd_month": null}\n'
+    rm -rf "$work"; return 0
+  fi
+  # Machines cg launched, in any state that still bills or can come back.
+  ec2 describe-instances --filters "Name=tag:Name,Values=$TS_HOST" \
+      "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+      --query 'Reservations[].Instances[].[InstanceId,State.Name,InstanceType]' --output text \
+      > "$work/machines" 2>/dev/null || echo ERR > "$work/machines"
+  # The saved games cg uses, and every other region's (library elsewhere).
+  b=$(cg_bucket 2>/dev/null) || b=""
+  if [[ -n $b ]] && aws s3api head-bucket --bucket "$b" >/dev/null 2>&1; then
+    printf '%s\t%s\n' "$b" "$REGION" > "$work/here"
+    aws s3 ls "s3://$b" --recursive --summarize 2>/dev/null | awk '/Total Size:/{print $3}' > "$work/here.bytes"
+    library_index 2>/dev/null > "$work/here.idx" || true
+  fi
+  library_elsewhere_json > "$work/elsewhere" 2>/dev/null || true
+  # Disks and disk images left over, which bill by the GB with nothing attached.
+  ec2 describe-volumes --filters Name=status,Values=available \
+      --query 'Volumes[].[VolumeId,Size]' --output text > "$work/volumes" 2>/dev/null || echo ERR > "$work/volumes"
+  ec2 describe-images --owners self --query 'Images[].[ImageId,BlockDeviceMappings[0].Ebs.VolumeSize]' \
+      --output text > "$work/images" 2>/dev/null || echo ERR > "$work/images"
+  cw_exists && echo yes > "$work/watchdog"
+  aws budgets describe-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" >/dev/null 2>&1 \
+    && echo yes > "$work/budget"
+  WORK="$work" GB_S3="${CG_S3_USD_GB_MONTH:-}" GB_EBS="${CG_EBS_USD_GB_MONTH:-}" \
+  GB_SNAP="${CG_SNAPSHOT_USD_GB_MONTH:-}" INR="${CG_INR_PER_USD:-}" REGION="$REGION" python3 -I -c '
+import json, os
+w = os.environ["WORK"]
+def read(f):
+    p = os.path.join(w, f)
+    return open(p).read() if os.path.exists(p) else ""
+def num(v):
+    try: return float(v)
+    except (TypeError, ValueError): return None
+S3, EBS, SNAP = num(os.environ["GB_S3"]), num(os.environ["GB_EBS"]), num(os.environ["GB_SNAP"])
+GB = 1073741824.0
+month = lambda gb, rate: None if rate is None or gb is None else round(gb * rate, 2)
+items, errors = [], []
+def rows(f):
+    t = read(f).strip()
+    if t == "ERR": errors.append(f); return []
+    return [l.split("\t") for l in t.splitlines() if l.strip() and l.strip() != "None"]
+for iid, state, typ in [(r + ["", "", ""])[:3] for r in rows("machines")]:
+    items.append({"kind": "machine", "label": "Machine", "detail": "%s, %s" % (typ, state),
+                  "usd_month": None, "bills": True, "hourly": state in ("pending", "running")})
+here = read("here").strip()
+if here:
+    bucket, region = here.split("\t")
+    size = num(read("here.bytes").strip()) or 0
+    try: n = len(json.loads(read("here.idx") or "{}").get("apps") or [])
+    except Exception: n = 0
+    items.append({"kind": "games", "label": "Saved games", "region": region, "bucket": bucket, "games": n,
+                  "detail": "%d game%s, %.1f GB" % (n, "" if n == 1 else "s", size / GB),
+                  "usd_month": month(size / GB, S3), "bills": True})
+try: el = json.loads(read("elsewhere") or "null")
+except Exception: el = None
+if not el or el.get("error"): errors.append("elsewhere")
+else:
+    for p in el.get("places") or []:
+        if p.get("error"): errors.append("elsewhere"); continue
+        n = len(p.get("games") or [])
+        items.append({"kind": "games", "label": "Saved games elsewhere", "region": p["region"], "bucket": p["bucket"],
+                      "games": n, "detail": "%d game%s, %.1f GB in %s" % (n, "" if n == 1 else "s", (p["bytes"] or 0) / GB, p["region"]),
+                      "usd_month": p.get("usd_month"), "bills": True})
+vols = rows("volumes")
+if vols:
+    gb = sum(num(v[1]) or 0 for v in vols if len(v) > 1)
+    items.append({"kind": "disks", "label": "Leftover disks", "detail": "%d, %d GB" % (len(vols), gb),
+                  "usd_month": month(gb, EBS), "bills": True})
+imgs = rows("images")
+if imgs:
+    gb = sum(num(i[1]) or 0 for i in imgs if len(i) > 1)
+    items.append({"kind": "images", "label": "Disk images", "detail": "%d, with their snapshots" % len(imgs),
+                  "usd_month": month(gb, SNAP), "bills": True})
+if read("watchdog").strip(): items.append({"kind": "watchdog", "label": "Cloud watchdog", "detail": "function, schedule, role, logs", "usd_month": 0, "bills": False})
+if read("budget").strip():   items.append({"kind": "budget", "label": "Budget alert", "detail": "", "usd_month": 0, "bills": False})
+known = [i["usd_month"] for i in items if i["usd_month"] is not None]
+print(json.dumps({"error": ("AWS could not be asked: " + ", ".join(sorted(set(errors)))) if errors else None,
+                  "region": os.environ["REGION"], "items": items,
+                  "hourly": any(i.get("hourly") for i in items),
+                  "usd_month": round(sum(known), 2) if len(known) == len(items) else None,
+                  "inr_per_usd": num(os.environ["INR"])}, indent=2))'
+  rm -rf "$work"
+}
+
+# cg aws disconnect [--plan] - this laptop stops playing on AWS, and leaves
+# nothing there that bills: the machine, every region's saved games, leftover
+# disks and images, the watchdog, the budget - cg destroy --all, every other
+# region's archive, then a look to make sure. What stays is free and yours:
+# the account, the access key it signs in with, region opt-ins and GPU quota.
+# --plan only says what is there (with --json, as data). Saved games cannot be
+# brought back, so it asks for DELETE first.
+cmd_aws_disconnect() {
+  local plan=0 inv left p
+  [[ ${1:-} == --plan ]] && plan=1
+  grep -q '^GAME_REGION=.' "$(cg_env_file)" 2>/dev/null \
+    || { (( plan && JSON )) && echo '{"connected": false, "items": []}'; log "AWS is not set up on this laptop - nothing to disconnect"; return 0; }
+  inv=$(aws_inventory_json)
+  if (( plan )); then
+    if (( JSON )); then printf '%s\n' "$inv"; return 0; fi
+    INV="$inv" python3 -I -c '
+import json, os
+d = json.loads(os.environ["INV"])
+if d["error"]: print("  " + d["error"])
+for i in d["items"]: print("  %-22s %s" % (i["label"], i["detail"]))
+if not d["items"]: print("  nothing of cg is left in AWS")'
+    return 0
+  fi
+  [[ $(python3 -I -c 'import json,sys; print(json.load(sys.stdin)["error"] or "")' <<<"$inv") == "" ]] \
+    || { ( die "AWS could not be asked what is there - nothing was deleted" ) || exit 3; }
+  say "this deletes everything cg has in AWS"
+  INV="$inv" python3 -I -c '
+import json, os
+for i in json.loads(os.environ["INV"])["items"]: print("  %-22s %s" % (i["label"], i["detail"]))' | cg_relay ''
+  log "your saved games cannot be brought back; the account, its access key, region opt-ins and GPU quota stay"
+  cg_ask_typed aws-disconnect "  type DELETE to confirm: " DELETE \
+    || { log "not confirmed - nothing was deleted"; return 1; }
+
+  # The machine, this region's archive, IAM, the watchdog, the budget, leftovers.
+  GAME_S3_BUCKET=$(cg_bucket 2>/dev/null || true) cmd_destroy --all --force \
+    || die "the delete stopped - see above; what is left is still listed by cg aws disconnect --plan"
+  # Every other region's saved games.
+  while IFS=$'\t' read -r b r; do
+    [[ -n $b ]] || continue
+    say "deleting the saved games in $r (s3://$b)"
+    aws s3 rb "s3://$b" --force --region "$r" >/dev/null 2>&1 || log_as fail "could not delete s3://$b"
+  done < <(python3 -I -c 'import json,sys
+for i in json.load(sys.stdin)["items"]:
+    if i["kind"] == "games" and i["label"] == "Saved games elsewhere": print(i["bucket"] + "\t" + i["region"])' <<<"$inv")
+
+  # A look, not a hope: anything that still bills is said, and AWS stays set
+  # up here so it can still be seen and deleted.
+  say "checking nothing is left billing"
+  inv=$(aws_inventory_json)
+  left=$(python3 -I -c 'import json,sys
+d = json.load(sys.stdin)
+if d["error"]: print("?\t" + d["error"])
+for i in d["items"]:
+    if i["bills"]: print(i["label"] + "\t" + i["detail"])' <<<"$inv")
+  if [[ -n $left ]]; then
+    while IFS=$'\t' read -r p d; do log_as fail "still there: $p${d:+ - $d}"; done <<<"$left"
+    die "not everything could be deleted - AWS is still set up here so it can be seen; try again"
+  fi
+  cg_env_unset GAME_REGION || die "could not write .env"
+  log_as ok "AWS disconnected - nothing of cg is left billing"
+  log "the account, its access key, region opt-ins and GPU quota were kept; they cost nothing"
+}
+
 cmd_watcher() {
   if (( WATCH )); then box 'journalctl -t idle-watchdog -f'; return; fi
   if (( JSON )); then watcher_json; return; fi
@@ -2018,6 +2181,9 @@ build (changes things)
   cg host list|remove <name>
   cg aws forget              stop playing on AWS from this laptop; deletes nothing,
                              refused while a machine or saved games are there
+  cg aws disconnect          stop playing on AWS and delete everything cg has there -
+                             machine, every region's saved games, leftovers - so
+                             nothing bills; asks for DELETE (cg aws inventory: what)
   cg stop                    mirror the games to S3, then stop - ends hourly billing
   cg status                  instance, disks, guards, tailnet, ping
   cg library                 what is on the box vs in S3, and what it costs
@@ -2138,7 +2304,11 @@ case "$CMD" in
   host)      cmd_host "$@" ;;
   aws)       case ${1:-} in
                forget) shift; cmd_aws_forget "$@" ;;
-               *) die "usage: cg aws forget [--anyway]" ;;
+               disconnect) shift; cmd_aws_disconnect "$@" ;;
+               # The same look as disconnect --plan, as a read of its own: a
+               # disconnect runs alone, and what it would delete must not.
+               inventory)  shift; cmd_aws_disconnect --plan ;;
+               *) die "usage: cg aws forget [--anyway] | cg aws disconnect | cg aws inventory [--json]" ;;
              esac ;;
   library|lib) cmd_library "$@" ;;
   watchdog)  cmd_watchdog "$@" ;;

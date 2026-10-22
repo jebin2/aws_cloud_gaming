@@ -260,7 +260,7 @@
       <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-wrap items-center justify-between gap-space-md">
         <div class="min-w-0">
           <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">AWS account</span>
-          <p class="font-code-sm text-code-sm text-outline mt-0.5">Disconnecting deletes nothing in AWS. Your access key is kept.</p>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5">Disconnecting deletes everything the app made in AWS, so nothing is left billing. Your account and access key are kept.</p>
         </div>
         <button class="btn btn-danger shrink-0" id="b-aws-remove">Disconnect</button>
       </div>
@@ -648,6 +648,11 @@ The ids are the old first-run screen's, whose steps these are. -->
   <p class="dlg-title" id="rundlg-title">Working</p>
   <p class="dlg-sub mb-space-md" id="rundlg-status">Starting…</p>
   <div class="onb-progress mb-space-md" id="rundlg-busy" hidden><i></i></div>
+  <label class="block mb-space-md" id="rundlg-word-row" hidden>
+    <span class="font-code-sm text-code-sm text-outline" id="rundlg-word-label"></span>
+    <input id="rundlg-word" autocomplete="off" spellcheck="false"
+           class="mt-space-xs w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
+  </label>
   <button class="btn btn-primary mb-space-md" id="rundlg-link" hidden>
     <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the sign-in page
   </button>

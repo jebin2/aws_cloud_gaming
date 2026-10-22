@@ -71,6 +71,19 @@ function reply(a) {
     afterAnswer: () => { S.hosts = [{ name: 'homebox', ssh: 'me@10.0.0.5', os: 'Linux', family: 'ubuntu', user: 'me' }];
                          return ["added 'homebox'. Next: cg host setup homebox"]; } };
   // Slow, as an ssh round trip and a Sunshine check are.
+  // What is in AWS, read slowly enough for the loading to be seen; then the
+  // disconnect, which asks for DELETE and leaves no AWS behind.
+  if (a === 'aws inventory --json') return { delay: 200, out: { error: null, region: 'ap-south-1', hourly: false,
+    usd_month: 4.5, inr_per_usd: 88, items: [
+      { kind: 'machine', label: 'Machine', detail: 'g6.xlarge, stopped', usd_month: null, bills: true },
+      { kind: 'games', label: 'Saved games', detail: '3 games, 162.8 GB', usd_month: 4.5, bills: true },
+      { kind: 'watchdog', label: 'Cloud watchdog', detail: 'function, schedule, role, logs', usd_month: 0, bills: false }] } };
+  if (a === 'aws disconnect') return {
+    ask: { t: 'ask', id: 'aws-disconnect', prompt: '  type DELETE to confirm: ', default: '' },
+    // cg says where old devices can be removed by hand: a page, not a sign-in.
+    // Held there, so the dialog can be looked at while it runs.
+    afterAnswer: Object.assign(() => { S.region = false; return ['  Or prune them by hand: https://login.tailscale.com/admin/machines',
+                                                    'AWS disconnected - nothing of cg is left billing']; }, { hold: true }) };
   if (a === 'host status homebox --json') return { out: STATUS, delay: 300 };
   // Removing it: cg says whether the key came off, and forgets it either way.
   if (a === 'host remove homebox') { S.hosts = [];
@@ -251,7 +264,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     await until(() => document.querySelector('#b-hosts [data-host="homebox"] [data-f="setup"]'));
     const runsBefore = window.__ran.filter(a => a === 'host setup homebox').length;
     document.querySelector('#b-hosts [data-host="homebox"] [data-f="setup"]').click();
-    await until(() => $$('pwdlg').open);
+    await until(() => $$('pwdlg').open && $$('pwdlg-title').textContent === 'Sudo password');
     out.push('RERUN | ' + $$('adddlg').open + ' ' + txt($$('onb-title')) + ' / ' + stages()
              + ' ran=' + (window.__ran.filter(a => a === 'host setup homebox').length - runsBefore)
              + ' log=' + !$$('onb-log-setup').hidden + ' popup=' + txt($$('pwdlg-title')));
@@ -384,6 +397,41 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('READD | ' + stages() + ' setups=' + (window.__ran.filter(a => a.startsWith('host setup')).length - setupsBefore));
     await until(() => !$$('adddlg').open);
     out.push('READD CLOSED | ' + $$('adddlg').open);
+
+    // Disconnecting AWS: what is there, read live; DELETE; then Home without it.
+    S.region = true;
+    paintConfig(CONFIG());
+    goAws();
+    await wait(50);
+    $$('b-aws-remove').click();
+    await wait(50);
+    out.push('DISC LOADING | ' + $$('rundlg').open + ' ' + txt($$('rundlg-title')) + ' / ' + txt($$('rundlg-status'))
+             + ' busy=' + !$$('rundlg-busy').hidden + ' go=' + !$$('rundlg-go').hidden
+             + ' buttons=' + [...$$('rundlg').querySelectorAll('button')].filter(b => !b.hidden).map(b => b.textContent.trim()).join(','));
+    await until(() => !$$('rundlg-word-row').hidden);
+    out.push('DISC ASK | ' + $$('rundlg-status').textContent.replace(/\n/g, ' / '));
+    out.push('DISC WORD | ' + txt($$('rundlg-word-label')) + ' go-off=' + $$('rundlg-go').disabled);
+    // Esc, typed where the cursor is - the DELETE box - closes nothing.
+    const escW = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    $$('rundlg-word').dispatchEvent(escW);
+    out.push('DISC ESC | stopped=' + escW.defaultPrevented + ' open=' + $$('rundlg').open
+             + ' focus=' + (document.activeElement && document.activeElement.id)
+             + ' buttons=' + [...$$('rundlg').querySelectorAll('button')].filter(b => !b.hidden).map(b => b.textContent.trim()).join(','));
+    $$('rundlg-word').value = 'delete';
+    $$('rundlg-word').dispatchEvent(new Event('input'));
+    out.push('DISC WRONG | go-off=' + $$('rundlg-go').disabled);
+    $$('rundlg-word').value = 'DELETE';
+    $$('rundlg-word').dispatchEvent(new Event('input'));
+    out.push('DISC RIGHT | go-off=' + $$('rundlg-go').disabled);
+    const answersBefore = window.__answers.length;
+    $$('rundlg-go').click();
+    await until(() => $$('rundlg-log').textContent.includes('prune them by hand'));
+    out.push('DISC LINK | signin=' + !$$('rundlg-link').hidden + ' status=' + txt($$('rundlg-status')));
+    window.__finish();
+    await until(() => !$$('rundlg').open);
+    out.push('DISC DONE | ' + $$('rundlg').open + ' answered=' + window.__answers.slice(answersBefore).join(',')
+             + ' ran=' + window.__ran.filter(a => a === 'aws disconnect').length
+             + ' view=' + view + ' aws-card=' + shown('d-hero') + ' add-aws=' + shown('d-add-aws'));
   } catch (e) { out.push('THREW | ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
   out.push('ERRS | ' + window.__errs.join(' ;; '));
   const pre = document.createElement('pre');
@@ -402,7 +450,7 @@ p.write_text(t)
 PY
 
 # Dumped to a file, not piped: see login-dom.sh for the 10-25 seconds a pipe costs.
-"$BROWSER" --headless --disable-gpu --no-sandbox --virtual-time-budget=20000 --window-size=1280,900 \
+"$BROWSER" --headless --disable-gpu --no-sandbox --virtual-time-budget=60000 --window-size=1280,900 \
   --user-data-dir="$T/chrome" --dump-dom "file://$T/r/index.html" > "$T/dom.html" 2>/dev/null
 OUT=$(python3 -I -c '
 import re, sys, html
@@ -518,6 +566,17 @@ check    "  until it is dismissed"              "$(row 'TOAST GONE')" "TOAST GON
 check    "a new add starts fresh: nothing left from the last" "$(row 'FRESH')" "FRESH | ||| log=true units=0"
 contains "added again, already set up: done as it is" "$(row 'READD')" "server:done setup:done setups=0"
 check    "  and the dialog closes by itself"     "$(row 'READD CLOSED')" "READD CLOSED | false"
+check    "disconnect reads what is in AWS first, loading" "$(row 'DISC LOADING')" "DISC LOADING | true Disconnect AWS / Checking what is in AWS… busy=true go=false buttons="
+contains "  then lists it, with what it costs"   "$(row 'DISC ASK')" "Saved games: 3 games, 162.8 GB (₹396/month)"
+contains "  the machine too"                     "$(row 'DISC ASK')" "Machine: g6.xlarge, stopped"
+contains "  and what it will cost after"         "$(row 'DISC ASK')" "₹396/month now, ₹0/month after. Saved games cannot be recovered."
+contains "  and what stays, free"                "$(row 'DISC ASK')" "Kept, at no cost: your AWS account, its access key, region opt-ins and GPU quota."
+check    "Esc in the DELETE box closes nothing; Cancel is the way out" "$(row 'DISC ESC')" "DISC ESC | stopped=true open=true focus=rundlg-word buttons=Cancel,Disconnect"
+check    "DELETE must be typed first"            "$(row 'DISC WORD')" "DISC WORD | Type DELETE to confirm go-off=true"
+check    "  exactly"                             "$(row 'DISC WRONG')" "DISC WRONG | go-off=true"
+check    "  then Disconnect can be pressed"      "$(row 'DISC RIGHT')" "DISC RIGHT | go-off=false"
+check    "an admin page in the log is no sign-in button" "$(row 'DISC LINK')" "DISC LINK | signin=false status=Deleting…"
+check    "it runs, cg's own DELETE answered, and closes onto Home without AWS" "$(row 'DISC DONE')" "DISC DONE | false answered=DELETE ran=1 view=dashboard aws-card=hidden add-aws=shown"
 check    "which reopens its steps"               "$(row 'FINISH')" "FINISH | true Finish setting up AWS"
 
 check "no errors on the page" "$(row 'ERRS')" "ERRS | "
