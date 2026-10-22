@@ -266,6 +266,14 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('AWS DIALOG | ' + txt($$('onb-title')));
     out.push('AWS STAGES | ' + stages());
     out.push('AWS TOOLS | ' + txt($$('onb-tools')));
+    // No key saved, but an access token that can make one: done, said as that.
+    const tsWas = tskeyNow;
+    tskeyNow = { ...tsWas, auth_key_stored: false, can_mint: true };
+    paintOnboard();
+    out.push('AWS AUTHKEY MINT | ' + txt(document.querySelector('[data-stage="authkey"]')));
+    tskeyNow = tsWas;
+    paintOnboard();
+    out.push('AWS AUTHKEY SAVED | ' + txt(document.querySelector('[data-stage="authkey"]')));
     $$('adddlg-close').click();
     await wait(50);
 
@@ -453,6 +461,9 @@ contains "  and removing it"                     "$(row 'DETAIL BUTTONS')" "Remo
 check    "not one read asked AWS"                "$(row 'NO AWS')" "NO AWS | "
 
 echo "5. adding AWS"
+contains "an auth key the token will make is not called saved" "$(row 'AWS AUTHKEY MINT')" "Generated from your access token at build time"
+lacks    "  not 'saved'"                         "$(row 'AWS AUTHKEY MINT')" "Auth key saved"
+contains "a key in the settings is"              "$(row 'AWS AUTHKEY SAVED')" "Auth key saved"
 contains "its own steps"                         "$(row 'AWS DIALOG')" "Add AWS"
 contains "  the account, alerts and where"       "$(row 'AWS STAGES')" "email:"
 contains "  with the AWS CLI now needed"         "$(row 'AWS TOOLS')" "the AWS CLI"

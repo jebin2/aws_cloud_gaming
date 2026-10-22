@@ -1833,9 +1833,7 @@ function paintTskey(ts) {
   // a node registration key, and the token has no business in EC2 user-data.
   // With a token here, nobody has to paste one.
   $('tskey-auth').textContent =
-      ts.auth_key_stored && ts.can_mint
-        ? 'Auth key saved'
-    : ts.auth_key_stored ? 'Auth key saved'
+      ts.auth_key_stored ? 'Auth key saved'
     : ts.can_mint        ? 'An auth key is generated from the access token at the next build'
     : 'No auth key. The next build asks for one.';
   btn.textContent = ts.present ? 'Update access token' : 'Add access token';
@@ -5530,7 +5528,11 @@ const ONB_COPY = {
       || 'The saved access key was rejected. Add a new one.') },
   tailnet: { name: 'Tailscale', done: () => 'Tailscale signed in',
     body: () => 'Sign in to Tailscale. Machines are reachable only over your tailnet.' },
-  authkey: { name: 'Auth key', done: () => 'Auth key saved',
+  // Done either way, said as what it is: a key in the settings, or one cg
+  // will make from the access token when a machine needs it.
+  authkey: { name: 'Auth key',
+    done: () => (tskeyNow && tskeyNow.auth_key_stored ? 'Auth key saved'
+                                                      : 'Generated from your access token at build time'),
     body: () => 'New machines use a Tailscale auth key to join your tailnet.' },
   email: { name: 'Budget alert',
     done: () => { const e = cfgVal('EMAIL_ALERTS'); return e ? `Alerts to ${e}` : 'Alerts on'; },
