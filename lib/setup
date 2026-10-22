@@ -691,6 +691,13 @@ cost() {
   esac
   ec2() { aws ec2 "$@" --region "$REGION"; }
 
+  # AWS asked first, and its refusal said. Every read below is an assignment
+  # under set -e with its error sent to /dev/null, so a key AWS rejects ended
+  # this report at the first one: `cg cost` printed nothing at all and exited.
+  local who
+  who=$(aws sts get-caller-identity --query Account --output text 2>&1) \
+    || die "AWS did not answer: $(grep . <<<"$who" | tail -1) - check the access key: cg creds"
+
   # Find the instance by tag rather than trusting .env: after a destroy the
   # variable is gone, and after a manual launch it may be stale. Either way
   # `cost` must still report, because the point is finding what still bills.

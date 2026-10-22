@@ -181,5 +181,14 @@ contains "it names it"                    "$out" "still there: Budget alert"
 contains "  and fails"                    "$out" "rc=1"
 check    "  AWS stays set up"             "$(region)" "1"
 
+echo "7. cg cost, with AWS refusing: says so, rather than nothing at all"
+# Every read in the report is an assignment under set -e with its error thrown
+# away: a key AWS rejected ended it at the first, printing nothing.
+env_reset; seed
+out=$(AWS_DOWN=1 cgr cost)
+contains "it says AWS did not answer"     "$out" "AWS did not answer"
+contains "  and where to look"            "$out" "check the access key: cg creds"
+contains "  and fails"                    "$out" "rc=1"
+
 echo; echo "aws-disconnect: $pass passed, $fail failed"
 (( fail == 0 ))
