@@ -315,9 +315,19 @@ cmd_host_setup() {
   fi
   # The auth key only when it has to join; already on the tailnet, it stays as
   # it is. It is the AWS boxes' reusable, non-ephemeral key: an ephemeral one
-  # would drop this machine whenever it slept.
-  [[ -n $(_fact "$facts" ts_ip) ]] || key="${TAILSCALE_AUTH_KEY:-${GAME_TS_AUTHKEY:-}}"
-  [[ -n $(_fact "$facts" ts_ip) || -n $key ]] || die "no Tailscale auth key in the settings - cg check --fix asks for one"
+  # would drop this machine whenever it slept. The stored one, one minted from
+  # the API token, or - with neither - one asked for now, and saved.
+  if [[ -z $(_fact "$facts" ts_ip) ]]; then
+    # shellcheck source=lib/laptop.sh
+    source lib/laptop.sh
+    key=$(tskey_auth_ensure "$name") || key=""
+    if [[ -z $key ]]; then
+      cg_can_ask || die "$name is not on your tailnet, and there is no Tailscale auth key to join it with - cg creds tailscale authkey saves one"
+      log "$name is not on your tailnet yet: it joins with a Tailscale auth key"
+      tskey_auth_set || die "no usable auth key - nothing was changed on $name"
+      key=$TAILSCALE_AUTH_KEY
+    fi
+  fi
 
   say "starting the build on $name"
   # shellcheck source=lib/render.sh

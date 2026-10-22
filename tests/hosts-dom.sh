@@ -78,12 +78,14 @@ function reply(a) {
       ? ["could not reach it to take cg's key off - that one line stays in its ~/.ssh/authorized_keys", "forgot 'homebox'"]
       : ["took cg's key off it", "forgot 'homebox' - nothing else on the machine was changed"] }; }
   // Setup asks for sudo, then keeps going until the probe lets it finish.
+  // ...and, not on the tailnet yet, a key to join it with.
   if (a === 'host setup homebox') return { ask: { t: 'ask', id: 'host-sudo', prompt: '  sudo password for me@10.0.0.5: ', default: '', secret: 1 },
+    then: { t: 'ask', id: 'tailscale-auth-key', prompt: '    paste auth key: ', default: '', secret: 1 },
     afterAnswer: Object.assign(() => ['>>> installing sunshine'], { hold: true }) };
   return { rc: 1, lines: ['the stub does not know: ' + a] };
 }
 let handler = null, next = 0;
-const waiting = new Map();
+const waiting = new Map(), asksAfter = new Map();
 const emit = (id, event) => handler && handler({ id, event });
 window.cg = {
   run: args => {
@@ -93,6 +95,7 @@ window.cg = {
       for (const text of r.lines || []) emit(id, { t: 'line', text });
       if (r.out !== undefined) emit(id, { t: 'raw', stream: 'stdout', text: JSON.stringify(r.out) });
       if (r.ask) emit(id, r.ask);
+      if (r.then) asksAfter.set(id, r.then);
       if (r.afterAnswer) { waiting.set(id, r.afterAnswer); return; }
       if (!r.stay) emit(id, { t: 'exit', rc: r.rc || 0 });
     }, r.delay || 5);
@@ -100,6 +103,8 @@ window.cg = {
   },
   answer: (id, v) => {
     window.__answers.push(v);
+    // A second question, asked once the first is answered.
+    if (asksAfter.has(id)) { const q = asksAfter.get(id); asksAfter.delete(id); setTimeout(() => emit(id, q), 5); return Promise.resolve(true); }
     const then = waiting.get(id);
     if (then) { waiting.delete(id);
       setTimeout(() => { for (const text of then()) emit(id, { t: 'line', text });
@@ -194,8 +199,16 @@ cat > "$T/r/probe.js" <<'PROBE'
     $$('pwdlg-input').dispatchEvent(new Event('input'));
     $$('pwdlg-yes').click();
     await wait(100);
-    out.push('SUDO ANSWER | ' + window.__answers.includes('hunter2') + ' closed=' + !$$('pwdlg').open
-             + ' cleared=' + ($$('pwdlg-input').value === ''));
+    out.push('SUDO ANSWER | ' + window.__answers.includes('hunter2') + ' cleared=' + ($$('pwdlg-input').value === ''));
+    // Then the auth key, in the same popup.
+    out.push('KEY POPUP | ' + $$('pwdlg').open + ' / ' + txt($$('pwdlg-title')) + ' / ' + txt($$('pwdlg-sub'))
+             + ' / ' + $$('pwdlg-input').placeholder);
+    out.push('KEY LIVE | ' + txt($$('onb-live-setup')));
+    $$('pwdlg-input').value = 'tskey-auth-PASTED';
+    $$('pwdlg-input').dispatchEvent(new Event('input'));
+    $$('pwdlg-yes').click();
+    await wait(100);
+    out.push('KEY ANSWER | ' + window.__answers.includes('tskey-auth-PASTED') + ' closed=' + !$$('pwdlg').open);
     out.push('SETUP LIVE | ' + txt($$('onb-live-setup')) + ' open=' + $$('adddlg').open);
     out.push('HOME WELCOME | ' + shown('d-welcome') + ' machines=' + shown('d-machines') + ' aws=' + shown('d-hero'));
     out.push('HOME NAV | ' + nav());
@@ -322,10 +335,10 @@ check    "  and AWS is asked nothing"            "$(row 'OPEN AWS')" "OPEN AWS |
 
 echo "2. adding a server of yours"
 contains "a dialog of its steps"                 "$(row 'ADD DIALOG')" "true Add a server"
-contains "  this laptop's, ticked"               "$(row 'ADD STAGES')" "tools:done tailnet:done authkey:done"
+contains "  this laptop's, ticked"               "$(row 'ADD STAGES')" "tools:done tailnet:done server:active"
 contains "  then the server"                     "$(row 'ADD STAGES')" "server:active setup:locked"
 check    "Install installs what a server needs, no AWS CLI" "$(row 'INSTALL RAN')" "INSTALL RAN | deps install moonlight"
-for gone in cli key email where; do
+for gone in cli key authkey email where; do
   lacks  "  no AWS step: $gone"                  "$(row 'ADD STAGES')" " $gone:"
 done
 check    "connecting is cg host add"             "$(row 'PW RAN')" "PW RAN | host add --ssh me@10.0.0.5"
@@ -354,7 +367,12 @@ check    "  one hidden field, focused; Continue waits for it" "$(row 'SUDO FIELD
 check    "  the step says what it waits for"     "$(row 'SUDO LIVE')" "SUDO LIVE | Waiting for the sudo password…"
 check    "  over the add dialog, still open"     "$(row 'SUDO BEHIND')" "SUDO BEHIND | true"
 check    "Esc does not close the add dialog"     "$(row 'ESC')" "ESC | stopped=true"
-check    "  handed to cg, not left in the field" "$(row 'SUDO ANSWER')" "SUDO ANSWER | true closed=true cleared=true"
+check    "  handed to cg, not left in the field" "$(row 'SUDO ANSWER')" "SUDO ANSWER | true cleared=true"
+contains "not on the tailnet: the auth key, in the same popup" "$(row 'KEY POPUP')" "KEY POPUP | true / Tailscale auth key / homebox is not on your tailnet yet."
+contains "  with where to make one"            "$(row 'KEY POPUP')" "Reusable on, Ephemeral off"
+contains "  and what one looks like"           "$(row 'KEY POPUP')" "/ tskey-auth-…"
+check    "  the step says what it waits for"    "$(row 'KEY LIVE')" "KEY LIVE | Waiting for a Tailscale auth key…"
+check    "  handed to cg"                       "$(row 'KEY ANSWER')" "KEY ANSWER | true closed=true"
 check    "its progress shows in the step"        "$(row 'SETUP LIVE')" "SETUP LIVE | >>> installing sunshine open=true"
 check    "done: the step ticks"                  "$(row 'SETUP DONE')" "SETUP DONE | done open=true"
 check    "  and then the dialog closes"          "$(row 'SETUP CLOSED')" "SETUP CLOSED | false"

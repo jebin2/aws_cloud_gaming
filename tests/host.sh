@@ -231,6 +231,26 @@ out=$(printf 'wrong\n' | EXTRA="CG_JSON=1" cgh setup mypc)
 contains "a wrong password is said at once" "$out" "sudo did not accept that password"
 check    "  and nothing was started"       "$(cat "$T/root.log" 2>/dev/null | wc -l)" "0"
 
+echo "4b. a machine not on the tailnet, and no key for it yet"
+# The key is asked for only here: a machine that is on the tailnet already is
+# never asked for one, and one that is not joins with a key pasted now - saved,
+# as every later build of a machine uses the same reusable key.
+facts <<<"$LINUX"; fresh
+out=$(printf 'tskey-auth-PASTED\n' | EXTRA="CG_JSON=1 CG_ENV_FILE=$T/env" cgh setup mypc)
+contains "it is asked for, as the app's own question" "$out" '"id":"tailscale-auth-key"'
+contains "  saying why"                    "$out" "mypc is not on your tailnet yet"
+check    "  saved for next time"           "$(grep -c '^TAILSCALE_AUTH_KEY=tskey-auth-PASTED$' "$T/env")" "1"
+contains "  and the build joins with it"   "$(cat "$T/script-1" 2>/dev/null)" "tskey-auth-PASTED"
+lacks    "  never on an ssh command line"  "$(cat "$T/ssh.log")" "PASTED"
+facts <<<"$LINUX"; fresh; rm -f "$T/env"
+out=$(EXTRA="CG_ENV_FILE=$T/env" cgh setup mypc </dev/null)
+contains "nobody to ask: said plainly"     "$out" "not on your tailnet, and there is no Tailscale auth key"
+check    "  and nothing was started"       "$(cat "$T/root.log" 2>/dev/null | wc -l)" "0"
+facts <<<"$LINUX"; sed -i 's/^ts_ip=.*/ts_ip=100.64.0.9/' "$T/facts"; fresh; rm -f "$T/env"
+out=$(EXTRA="CG_JSON=1 CG_ENV_FILE=$T/env" cgh setup mypc </dev/null)
+lacks    "on the tailnet already: never asked" "$out" '"id":"tailscale-auth-key"'
+contains "  and set up all the same"       "$(cat "$T/root.log" 2>/dev/null)" "STARTED"
+
 echo "5. the build steps of the AWS box that a machine of yours never runs"
 for m in 12-scratch 15-watchdog 22-library 50-xorg 80-firefox; do
   check "  $m only on the AWS box" "$(grep -c '^if aws_box; then' "lib/bootstrap.d/$m.sh")" "1"

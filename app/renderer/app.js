@@ -4624,11 +4624,12 @@ let setupDone = false;
 // A password asked in passing - sudo, while a machine is set up: a small popup
 // over whatever is running, one field, Continue. Resolves the password, or
 // null when it is cancelled.
-function askPassword({ title, sub }) {
+function askPassword({ title, sub, placeholder = '' }) {
   return new Promise(resolve => {
     const dlg = $('pwdlg'), input = $('pwdlg-input'), yes = $('pwdlg-yes');
     $('pwdlg-title').textContent = title;
     $('pwdlg-sub').textContent = sub || '';
+    input.placeholder = placeholder;
     input.value = '';
     yes.disabled = true;
     input.oninput = () => { yes.disabled = !input.value; };
@@ -4651,18 +4652,27 @@ function askPassword({ title, sub }) {
     input.focus();
   });
 }
-// cg asks for the sudo password of a machine it is setting up: the popup, and
-// an empty answer if it is cancelled - cg then stops, with nothing changed.
+// What cg asks while it sets a machine up - its sudo password, and the
+// Tailscale auth key when it is not on the tailnet yet: the popup, and an empty
+// answer if it is cancelled - cg then stops, with nothing changed.
+const SETUP_ASKS = {
+  [ASK.hostSudo]: name => ({ title: 'Sudo password', wait: 'Waiting for the sudo password…',
+    sub: `${name ? name + ': ' : ''}used once for setup. Not stored.` }),
+  [ASK.tsAuthKey]: name => ({ title: 'Tailscale auth key', wait: 'Waiting for a Tailscale auth key…',
+    placeholder: 'tskey-auth-…',
+    sub: `${name || 'This machine'} is not on your tailnet yet. login.tailscale.com → Settings → Keys → `
+       + 'Generate auth key (Reusable on, Ephemeral off). Saved for later builds.' }),
+};
 function sudoAnswer(job, askId) {
-  if (askId !== ASK.hostSudo) return false;
-  const j = jobs.get(job), name = j && j.cmd[2];
+  const j = jobs.get(job);
+  if (!SETUP_ASKS[askId] || !j || j.cmd[0] !== 'host' || j.cmd[1] !== 'setup') return false;
+  const q = SETUP_ASKS[askId](j.cmd[2]);
   const live = onbRunning === 'setup' ? $('onb-live-setup') : null;
-  if (live) live.textContent = 'Waiting for the sudo password…';
-  askPassword({ title: 'Sudo password', sub: `${name ? name + ': ' : ''}used once for setup. Not stored.` })
-    .then(v => {
-      window.cg.answer(job, v || '');
-      if (live && v) live.textContent = 'Continuing…';
-    });
+  if (live) live.textContent = q.wait;
+  askPassword(q).then(v => {
+    window.cg.answer(job, v || '');
+    if (live && v) live.textContent = 'Continuing…';
+  });
   return true;
 }
 async function onbSetupHost() {
@@ -4969,7 +4979,9 @@ function prereqs(kind = kindNow()) {
   ];
   if (kind === 'aws') return all;
   // A server of yours: this laptop's steps, then the server, then setting it up.
-  return [...all.filter(r => !['cli', 'key', 'email', 'where'].includes(r.key)),
+  // No auth key step: a server already on the tailnet never needs one, and one
+  // that is not is asked for it during its setup.
+  return [...all.filter(r => !['cli', 'key', 'authkey', 'email', 'where'].includes(r.key)),
     { key: 'server', reads: null, name: 'The server', ok: !!addedHost,
       problem: { blocking: false, title: 'The server', body: '', label: 'Connect', go: connectServer } },
     { key: 'setup', reads: null, name: 'Setup', ok: setupDone,
