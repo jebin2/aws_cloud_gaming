@@ -1838,12 +1838,16 @@ function runDlgStatus(text, tone) {
 //            open, for a result worth reading)
 //   stoppable false for a run that is over in seconds and must not be left
 //            half done: no Cancel while it runs
+//   after    on success, what has to happen before it is shown as done -
+//            re-reading what the change touched - given cg's output; the
+//            dialog keeps loading until it has
 // Resolves true on success; `false` when it failed or was not confirmed.
-async function runInDialog({ title, args, starting, done, fail, confirm, close, stoppable = true }) {
+async function runInDialog({ title, args, starting, done, fail, confirm, close, stoppable = true, after }) {
   const log = $('rundlg-log'), link = $('rundlg-link'), go = $('rundlg-go');
   $('rundlg-title').textContent = title;
   link.hidden = true;
   go.hidden = true;
+  $('rundlg-busy').hidden = true;
   if (confirm) {
     log.textContent = '';
     $('rundlg-status').textContent = confirm.body;
@@ -1866,7 +1870,7 @@ async function runInDialog({ title, args, starting, done, fail, confirm, close, 
     if (!yes) return false;
   }
   runSurface = { link: 'rundlg-link', log: 'rundlg-log', status: runDlgStatus };
-  runDlgRetry = () => runInDialog({ title, args, starting, done, fail, close, stoppable });
+  runDlgRetry = () => runInDialog({ title, args, starting, done, fail, close, stoppable, after });
   $('rundlg-done').hidden = true;
   $('rundlg-done').textContent = 'Done';
   $('rundlg-retry').hidden = true;
@@ -1876,6 +1880,7 @@ async function runInDialog({ title, args, starting, done, fail, confirm, close, 
   // under it - see the collect handler.
   log.dataset.fresh = 'yes';
   runDlgStatus(starting);
+  $('rundlg-busy').hidden = false;
   if (!$('rundlg').open) $('rundlg').showModal();
   const { rc, err } = await runCg(args, { collect: 'rundlg-log', wantRc: true,
                                           onStart: id => { runDlgJob = id; } });
@@ -1883,6 +1888,12 @@ async function runInDialog({ title, args, starting, done, fail, confirm, close, 
   runDlgRc = rc;
   link.hidden = true;
   $('rundlg-cancel').hidden = true;
+  if (rc === 0 && after) {
+    // Still loading: done is said once what it changed has been read again.
+    runDlgStatus('Updating…');
+    try { await after(err || ''); } catch { /* the screens say what they could not read */ }
+  }
+  $('rundlg-busy').hidden = true;
   if (rc === 0) {
     // Everything behind the dialog has already re-read: these are writes.
     runDlgStatus(typeof done === 'function' ? done(err || '') : done, 'ok');
@@ -4442,13 +4453,16 @@ async function removeHost(name) {
       : 'Removed.',
     close: out => !unreachable(out),
     stoppable: false,
+    // Before it says Removed: the list read again, and Home shown without it.
+    after: async () => {
+      hostStatus.delete(name);
+      hostLogs.delete(name);
+      await refreshHosts();
+      goView('dashboard');
+    },
     fail: () => 'Not removed. See details above.',
   });
-  if (!ok) return;
-  hostStatus.delete(name);
-  hostLogs.delete(name);
-  goView('dashboard');
-  await refreshHosts();
+  return ok;
 }
 
 // After anything changes a machine: the list, and that machine's status.
@@ -4615,6 +4629,16 @@ async function connectServer() {
   addedHost = added;
   connecting = false;
   paintOnboard();
+  // Connected: setup follows by itself - there is nothing to decide in between.
+  // Already set up (added again), it is done as it is.
+  if (!added || adding !== 'host') return;
+  if ((hostStatus.get(added) || {}).set_up) {
+    setupDone = true;
+    paintOnboard();
+    onbHandOver(() => { if (adding === 'host' && setupDone) { note(`${added} added`, 'text-primary'); closeAdd(); } });
+    return;
+  }
+  onbSetupHost();
 }
 
 // The setup step: run right here, its log open as it goes. Closes the dialog
@@ -5460,6 +5484,7 @@ function placeName(region) {
 const ONB_ACTION = {
   server:  () => [serverPwAsk ? { label: 'Continue', go: connectServer }
                              : { label: connecting ? 'Connecting…' : 'Connect', go: connectServer, busy: connecting }],
+  // Only after a setup that failed or was stopped: it starts by itself.
   setup:   () => [{ label: 'Set up', go: onbSetupHost },
                   { label: 'Later', go: closeAdd, plain: true }],
   // Installed but will not run is not something installing fixes - cg deps

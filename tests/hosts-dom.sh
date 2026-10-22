@@ -63,7 +63,7 @@ function reply(a) {
   if (a === 'creds --json') return { out: { cli: false, valid: null, reason: 'no-cli' } };
   if (a === 'creds tailscale --json') return { out: { signed_in: true, node: 'laptop', auth_key_stored: true, can_mint: false } };
   if (a === 'config --json') return { out: CONFIG() };
-  if (a === 'host list --json') return { out: S.hosts };
+  if (a === 'host list --json') return { out: S.hosts, delay: S.listDelay || 5 };
   if (a.startsWith('deps install')) return {};
   if (a === 'host add --ssh me@10.0.0.5') return {
     lines: ['reaching me@10.0.0.5 over ssh'],
@@ -94,9 +94,12 @@ window.cg = {
     setTimeout(() => {
       for (const text of r.lines || []) emit(id, { t: 'line', text });
       if (r.out !== undefined) emit(id, { t: 'raw', stream: 'stdout', text: JSON.stringify(r.out) });
-      if (r.ask) emit(id, r.ask);
+      // Listening before asking, as cg reads its stdin: an answer the window
+      // has ready is handed over the moment the question arrives.
       if (r.then) asksAfter.set(id, r.then);
-      if (r.afterAnswer) { waiting.set(id, r.afterAnswer); return; }
+      if (r.afterAnswer) waiting.set(id, r.afterAnswer);
+      if (r.ask) emit(id, r.ask);
+      if (r.afterAnswer) return;     // it ends once it is answered
       if (!r.stay) emit(id, { t: 'exit', rc: r.rc || 0 });
     }, r.delay || 5);
     return Promise.resolve({ ok: true, id, write: false });
@@ -179,9 +182,8 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('SERVER STAGES | ' + stages());
     out.push('SERVER DONE | ' + txt(document.querySelector('[data-stage="server"]')));
     out.push('SERVER BUTTONS | ' + buttons(document.querySelector('[data-stage="setup"]')));
-
-    button(document.querySelector('[data-stage="setup"]'), 'Set up').click();
-    await wait(300);
+    // Nothing pressed: setup starts by itself once the server is connected.
+    await wait(50);
     out.push('SETUP DIALOG | ' + $$('adddlg').open);
     out.push('SETUP RAN | ' + window.__ran.filter(a => a.startsWith('host setup')).join(', '));
     out.push('SETUP STATE | ' + document.querySelector('[data-stage="setup"]').dataset.state
@@ -272,16 +274,27 @@ cat > "$T/r/probe.js" <<'PROBE'
     removeBtn().click();
     await wait(50);
     out.push('REMOVE ASK | ' + $$('rundlg').open + ' ' + txt($$('rundlg-title')) + ' / ' + txt($$('rundlg-status')) + ' / ' + vis('rundlg'));
+    out.push('REMOVE ASK BUSY | ' + !$$('rundlg-busy').hidden);
+    const escR = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    $$('rundlg').dispatchEvent(escR);
+    out.push('REMOVE ESC | stopped=' + escR.defaultPrevented);
     $$('rundlg-cancel').click();
     await wait(50);
     out.push('REMOVE CANCEL | ' + $$('rundlg').open + ' ran=' + window.__ran.filter(a => a.startsWith('host remove')).length);
     removeBtn().click();
     await wait(50);
+    S.listDelay = 250;     // the list re-read after it, slow enough to be seen
     $$('rundlg-go').click();
     await wait(0);
-    out.push('REMOVE RUNNING | ' + $$('rundlg-status').textContent + ' / buttons=' + vis('rundlg'));
+    out.push('REMOVE RUNNING | ' + $$('rundlg-status').textContent + ' / buttons=' + vis('rundlg')
+             + ' busy=' + !$$('rundlg-busy').hidden);
     await wait(100);
-    out.push('REMOVE DONE | ' + $$('rundlg').open + ' ' + txt($$('rundlg-status')));
+    out.push('REMOVE UPDATING | ' + $$('rundlg').open + ' ' + txt($$('rundlg-status')) + ' busy=' + !$$('rundlg-busy').hidden
+             + ' view=' + view + ' buttons=' + vis('rundlg'));
+    await wait(300);
+    S.listDelay = 0;
+    out.push('REMOVE DONE | ' + $$('rundlg').open + ' ' + txt($$('rundlg-status')) + ' busy=' + !$$('rundlg-busy').hidden
+             + ' view=' + view + ' card=' + !!document.querySelector('#d-hosts [data-host="homebox"]'));
     await wait(1200);
     out.push('REMOVE CLOSED | ' + $$('rundlg').open + ' view=' + view + ' hosts=' + (hostsNow || []).length);
     // The machine was off: removed all the same, and that is left to be read.
@@ -295,6 +308,23 @@ cat > "$T/r/probe.js" <<'PROBE'
     $$('rundlg-go').click();
     await wait(1400);
     out.push('REMOVE DOWN | ' + $$('rundlg').open + ' ' + txt($$('rundlg-status')) + ' / ' + vis('rundlg'));
+    $$('rundlg-done').click();
+    await wait(50);
+
+    // Added again, already set up: nothing is run on it, and the dialog closes.
+    STATUS.set_up = true;
+    S.removeDown = false;
+    const setupsBefore = window.__ran.filter(a => a.startsWith('host setup')).length;
+    openAdd('host');
+    await wait(100);
+    $$('add-addr').value = '10.0.0.5';
+    $$('add-user').value = 'me';
+    $$('add-pw').value = 'letmein';
+    button(document.querySelector('[data-stage="server"]'), 'Connect').click();
+    await wait(600);
+    out.push('READD | ' + stages() + ' setups=' + (window.__ran.filter(a => a.startsWith('host setup')).length - setupsBefore));
+    await wait(1200);
+    out.push('READD CLOSED | ' + $$('adddlg').open);
   } catch (e) { out.push('THREW | ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
   out.push('ERRS | ' + window.__errs.join(' ;; '));
   const pre = document.createElement('pre');
@@ -354,9 +384,10 @@ check    "  and handed to cg"                    "$(row 'PW ANSWER')" "PW ANSWER
 check    "  and not left in the field"           "$(row 'PW CLEARED')" "PW CLEARED | "
 contains "added, it waits for what the machine is" "$(row 'SERVER MID')" "server:active setup:locked"
 contains "  still connecting"                    "$(row 'SERVER MID')" "Connecting…"
-contains "the server step is done"               "$(row 'SERVER STAGES')" "server:done setup:active"
+contains "the server step is done, setup already running" "$(row 'SERVER STAGES')" "server:done setup:running"
 contains "  naming what it found"                "$(row 'SERVER DONE')" "homebox · Linux Mint 22.2 · NVIDIA GeForce RTX 3060"
-check    "  now, or later"                       "$(row 'SERVER BUTTONS')" "SERVER BUTTONS | Set up, Later"
+contains "  with only Stop to press"             "$(row 'SERVER BUTTONS')" "Stop"
+lacks    "  no Set up button to click"           "$(row 'SERVER BUTTONS')" "Set up"
 
 echo "3. setting it up happens on its card"
 check    "setup runs in the dialog, which stays open" "$(row 'SETUP DIALOG')" "SETUP DIALOG | true"
@@ -404,10 +435,15 @@ lacks    "a running machine is never 'needs you'" "$(row 'RUNNING CARD')" "AWS n
 contains "  and offers no Finish over it"        "$(row 'RUNNING CARD')" "fix=hidden"
 check    "remove asks in its own dialog"         "$(row 'REMOVE ASK')" "REMOVE ASK | true Remove homebox / Revokes the app's SSH key on the machine and removes it from the app. Sunshine, Steam and games on it are not changed. / Cancel, Remove"
 check    "  Cancel runs nothing"                 "$(row 'REMOVE CANCEL')" "REMOVE CANCEL | false ran=0"
-check    "  while it runs, nothing to press - no Cancel" "$(row 'REMOVE RUNNING')" "REMOVE RUNNING | Revoking SSH key… / buttons="
-check    "  Remove runs it in the same dialog"   "$(row 'REMOVE DONE')" "REMOVE DONE | true Removed."
+check    "  while it runs, nothing to press - no Cancel" "$(row 'REMOVE RUNNING')" "REMOVE RUNNING | Revoking SSH key… / buttons= busy=true"
+check    "  asking shows no loading"             "$(row 'REMOVE ASK BUSY')" "REMOVE ASK BUSY | false"
+check    "  and Esc does not close it"           "$(row 'REMOVE ESC')" "REMOVE ESC | stopped=true"
+check    "removed, it keeps loading while the list is read again" "$(row 'REMOVE UPDATING')" "REMOVE UPDATING | true Updating… busy=true view=build buttons="
+check    "  then says Removed, with Home already without it" "$(row 'REMOVE DONE')" "REMOVE DONE | true Removed. busy=false view=dashboard card=false"
 check    "  which closes onto Home, machine gone" "$(row 'REMOVE CLOSED')" "REMOVE CLOSED | false view=dashboard hosts=0"
 check    "unreachable: said, and left to read"   "$(row 'REMOVE DOWN')" "REMOVE DOWN | true Removed from the app. The SSH key could not be revoked (machine unreachable). / Done"
+contains "added again, already set up: done as it is" "$(row 'READD')" "server:done setup:done setups=0"
+check    "  and the dialog closes by itself"     "$(row 'READD CLOSED')" "READD CLOSED | false"
 check    "which reopens its steps"               "$(row 'FINISH')" "FINISH | true Finish setting up AWS"
 
 check "no errors on the page" "$(row 'ERRS')" "ERRS | "
