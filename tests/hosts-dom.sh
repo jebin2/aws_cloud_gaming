@@ -228,6 +228,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     document.querySelector('#d-hosts [data-host="homebox"] [data-f="details"]').click();
     await wait(200);
     out.push('DETAIL VIEW | ' + view + ' aws=' + shown('b-aws') + ' own=' + shown('b-own') + ' title=' + txt($$('view-title')));
+    out.push('DETAIL PICK | ' + shown('machine-pick') + ' back=' + ($$('b-own-back') ? 'there' : 'none'));
     const card = document.querySelector('#b-hosts [data-host="homebox"]');
     out.push('DETAIL CARD | ' + txt(card));
     out.push('DETAIL BUTTONS | ' + buttons(card));
@@ -292,6 +293,22 @@ cat > "$T/r/probe.js" <<'PROBE'
     $$('d-build').click();
     await wait(50);
     out.push('BUILD GOES | view=' + view + ' aws=' + shown('b-aws') + ' own=' + shown('b-own') + ' title=' + txt($$('view-title')));
+    const pick = $$('machine-pick');
+    out.push('PICK | ' + shown('machine-pick') + ' ' + [...pick.options].map(o => o.text).join(',') + ' value=' + pick.value);
+    pick.value = 'homebox';
+    pick.dispatchEvent(new Event('change'));
+    out.push('PICKED | aws=' + shown('b-aws') + ' own=' + shown('b-own') + ' card=' + !!document.querySelector('#b-hosts [data-host="homebox"]'));
+    goView('dashboard');
+    out.push('PICK OFF PAGE | ' + shown('machine-pick'));
+    $$('d-build').click();
+    await wait(50);
+    document.querySelector('#d-hosts [data-host="homebox"] [data-f="details"]').click();
+    await wait(50);
+    out.push('DETAILS PICKS | ' + pick.value + ' own=' + shown('b-own'));
+    goView('dashboard');
+    document.querySelector('.nav-item[data-view="build"]').click();
+    await wait(50);
+    out.push('SIDEBAR | ' + pick.value + ' own=' + shown('b-own'));
     // A machine that is there is shown as itself, whatever the next build needs.
     statusNow = { box: { id: 'i-1', state: 'running', type: 'g6.xlarge', launched: new Date().toISOString(), ready: true, built: true },
                   rates: {}, budget: {}, config: {}, build: {} };
@@ -457,11 +474,12 @@ contains "  with its own Stop"                   "$(row 'HOME CARD')" "Stop"
 check    "AWS can still be added"                "$(row 'HOME ADD')" "HOME ADD | AWS, Your own server"
 contains "the private network names it"          "$(row 'HOME NET')" "homebox: connected"
 check    "nothing about money with no AWS"       "$(row 'HOME MONEY')" "HOME MONEY | hidden games=hidden safety=hidden"
-check    "  nor its pages; Settings, now there is a machine" "$(row 'HOME NAV')" "HOME NAV | dashboard,logs,settings"
+check    "  nor its pages; Settings, now there is a machine" "$(row 'HOME NAV')" "HOME NAV | dashboard,build,logs,settings"
 check    "Try again does not cancel the setup"   "$(row 'RETRY KEPT')" "RETRY KEPT | true"
 
 echo "4. its detail"
-check    "the Machine page, for it"              "$(row 'DETAIL VIEW')" "DETAIL VIEW | build aws=hidden own=shown title=homebox"
+check    "the Machine page, for it"              "$(row 'DETAIL VIEW')" "DETAIL VIEW | build aws=hidden own=shown title=Machine"
+check    "  one machine: nothing to pick, no way back to make" "$(row 'DETAIL PICK')" "DETAIL PICK | hidden back=none"
 contains "every check cg made"                   "$(row 'DETAIL CARD')" "Moonlight paired"
 contains "  where it is"                         "$(row 'DETAIL CARD')" "me@10.0.0.5"
 contains "  and removing it"                     "$(row 'DETAIL BUTTONS')" "Remove machine(off)"
@@ -475,6 +493,11 @@ contains "its own steps"                         "$(row 'AWS DIALOG')" "Add AWS"
 contains "  the account, alerts and where"       "$(row 'AWS STAGES')" "email:"
 contains "  with the AWS CLI now needed"         "$(row 'AWS TOOLS')" "the AWS CLI"
 check    "added, its pages arrive"               "$(row 'ADDED NAV')" "ADDED NAV | dashboard,build,library,guards,cost,logs,settings"
+check    "the picker lists every machine, on AWS's" "$(row 'PICK')" "PICK | shown AWS,homebox value=aws"
+check    "  picking one shows it"                "$(row 'PICKED')" "PICKED | aws=hidden own=shown card=true"
+check    "  only on the Machine page"            "$(row 'PICK OFF PAGE')" "PICK OFF PAGE | hidden"
+check    "Details picks that machine"            "$(row 'DETAILS PICKS')" "DETAILS PICKS | homebox own=shown"
+check    "the sidebar opens the one picked last" "$(row 'SIDEBAR')" "SIDEBAR | homebox own=shown"
 check    "Build machine opens the AWS machine, whatever was open last" "$(row 'BUILD GOES')" "BUILD GOES | view=build aws=shown own=hidden title=Machine"
 contains "needing something, its card says so"   "$(row 'ADDED CARD')" "AWS needs you"
 contains "  with the button that reopens it"     "$(row 'ADDED CARD')" "Finish setting up"

@@ -4229,7 +4229,8 @@ const kindNow = () => adding || (awsAdded() ? 'aws' : 'host');
 const AWS_JSON = new Set(['status', 'guards', 'library', 'elsewhere', 'machines', 'sweep', 'cost']);
 const forMode = reads => (reads && !awsInPlay() ? reads.filter(([, j]) => !AWS_JSON.has(j)) : reads);
 // The pages about the AWS machine alone, which leave the sidebar without one.
-const AWS_VIEWS = ['build', 'library', 'guards', 'cost'];
+// The Machine page is every machine's, AWS or yours.
+const AWS_VIEWS = ['library', 'guards', 'cost'];
 // The tools this laptop needs - the AWS CLI only for AWS.
 const neededTools = (kind = kindNow()) => ((depsNow && depsNow.tools) || []).filter(t => kind === 'aws' || t.for !== 'aws');
 
@@ -4406,14 +4407,29 @@ function paintHostCards() {
   paintDash();
 }
 
-// The Machine page: the AWS machine, or the one of yours that was opened.
+// The Machine page: whichever machine is picked - AWS, or one of yours - and
+// the picker beside Refresh, while there is more than one to choose from.
 function paintMachineTab() {
-  const host = machineTab !== 'aws' && (hostsNow || []).some(h => h.name === machineTab);
-  if (!host) machineTab = 'aws';
-  $('b-aws').hidden = !!host;
+  const choices = [...(awsAdded() ? [['aws', 'AWS']] : []), ...(hostsNow || []).map(h => [h.name, h.name])];
+  if (choices.length && !choices.some(([v]) => v === machineTab)) machineTab = choices[0][0];
+  const host = machineTab !== 'aws';
+  $('b-aws').hidden = host;
   $('b-own').hidden = !host;
-  if (view === 'build') $('view-title').textContent = host ? machineTab : 'Machine';
+  const pick = $('machine-pick');
+  pick.hidden = view !== 'build' || choices.length < 2;
+  const sig = choices.map(([v]) => v).join('\n');
+  if (pick.dataset.sig !== sig) {
+    pick.textContent = '';
+    for (const [v, label] of choices) pick.append(new Option(label, v));
+    pick.dataset.sig = sig;
+  }
+  pick.value = machineTab;
+  if (view === 'build') $('view-title').textContent = 'Machine';
 }
+$('machine-pick').onchange = e => {
+  machineTab = e.target.value;
+  paintHostCards();
+};
 // The Machine page for the AWS machine - whichever machine it showed last.
 function goAws() {
   machineTab = 'aws';
@@ -4425,7 +4441,6 @@ function goHost(name) {
   if (view === 'build') paintHostCards(); else goView('build');
   paintHostCards();
 }
-$('b-own-back').onclick = () => goView('dashboard');
 
 // Home and the sidebar, from which machines there are.
 function paintHome() {
@@ -4447,6 +4462,7 @@ function paintHome() {
     const link = document.querySelector(`.nav-item[data-view="${v}"]`);
     if (link) link.hidden = !aws;
   }
+  document.querySelector('.nav-item[data-view="build"]').hidden = !any;
   // Settings are about streaming from a machine and the machines themselves:
   // with none yet there is nothing in it worth a visit - this laptop's own
   // steps are part of adding one.
@@ -4457,7 +4473,8 @@ function paintHome() {
   const disk = settingEl('GAME_DISK_GB');
   if (disk && disk.parentElement) disk.parentElement.hidden = !aws;
   if (!aws && ['library', 'guards', 'cost'].includes(view)) goView('dashboard');
-  if (!aws && view === 'build' && machineTab === 'aws') goView('dashboard');
+  if (known && !any && view === 'build') goView('dashboard');
+  if (view === 'build') paintMachineTab();
 }
 for (const b of document.querySelectorAll('[data-add]')) b.onclick = () => openAdd(b.dataset.add);
 
@@ -6347,8 +6364,9 @@ for (const link of document.querySelectorAll('.nav-item')) {
     // out as an invisible character in "Refreshing <page>".
     $('view-title').textContent = link.querySelector('span:last-child').textContent.trim();
     view = link.dataset.view;
-    if (e.isTrusted && view === 'build') machineTab = 'aws';
-    if (view === 'build') paintMachineTab();
+    // The picker shows on the Machine page alone; that page opens on the
+    // machine picked last.
+    paintMachineTab();
     for (const sec of document.querySelectorAll('main section[data-view]'))
       sec.hidden = sec.dataset.view !== view;
     updateHeader();

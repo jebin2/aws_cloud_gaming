@@ -45,6 +45,9 @@
       </div>
     </div>
     <div class="flex items-center gap-space-sm">
+      <!-- Which machine the Machine page shows, when there is more than one. -->
+      <select id="machine-pick" aria-label="Machine" hidden
+              class="bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-body-sm text-body-sm text-on-surface"></select>
       <button id="refresh" class="btn"><span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span>Refresh<em id="refresh-cost" class="not-italic text-tertiary" hidden></em><span id="refresh-age" class="font-code-sm text-code-sm text-outline" hidden></span></button>
       <button id="goto" class="btn" hidden><span class="material-symbols-outlined text-[16px]" data-icon="bolt">&#xea0b;</span><span id="goto-label">running</span></button>
       <button id="cancel" class="btn btn-danger" hidden><span class="material-symbols-outlined text-[16px]" data-icon="error">&#xf8b6;</span><span id="cancel-label">Stop</span></button>
@@ -268,7 +271,6 @@
     <!-- One of your machines: everything cg read about it, its log, and what
          can be done to it. -->
     <div class="fit-view flex flex-col gap-space-md" id="b-own" hidden>
-      <div><button class="btn" id="b-own-back">&larr; Home</button></div>
       <div class="flex flex-col gap-space-md" id="b-hosts"></div>
     </div>
     <!-- Each machine's setup log lives here between paints, as the first-run
