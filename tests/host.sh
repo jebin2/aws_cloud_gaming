@@ -123,12 +123,24 @@ echo "1. adding a machine"
 facts <<<"$LINUX"
 contains "a bad name is refused"           "$(cgh add My_PC --ssh player@pc)" "lowercase letters"
 contains "the AWS boxes' name is refused"  "$(cgh add gamevps-1 --ssh player@pc)" "clean-up would delete it"
+out=$(timeout 10 bash -c 'cd "$1" && source lib/common.sh && source lib/session.sh && source lib/host.sh && cmd_host add mypc --ssh' _ "$PWD" 2>&1); rc=$?
+check    "--ssh with no address does not hang"    "$([[ $rc == 124 ]] && echo hung || echo ended)" "ended"
+contains "  it says how to use it"              "$out" "usage: cg host add [name] --ssh <user@address>"
 contains "no key-based ssh, a clear way out" "$(HOST_DOWN=1 cgh add mypc --ssh player@pc)" "ssh-copy-id player@pc"
 out=$(cgh add mypc --ssh player@pc)
 contains "it says what the machine is"     "$out" "CachyOS Linux (x86_64), signed in as player"
 contains "  and its GPU"                   "$out" "NVIDIA GeForce RTX 4070"
 check    "CachyOS is set up as Arch, from os-release" "$(field mypc family)" "arch"
 check    "the file is yours alone"          "$(stat -c %a "$XDG_CONFIG_HOME/cg/hosts.json")" "600"
+# Writers side by side - a setup saving its Sunshine login while another
+# command writes: every one of them lands, none is lost to the other's replace.
+( source lib/common.sh; source lib/host.sh
+  for i in $(seq 1 20); do host_set mypc "race$i" "v$i" & done; wait )
+check    "twenty writers at once: all twenty kept" \
+         "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["mypc"]; print(sum(1 for i in range(1,21) if d.get("race%d" % i) == "v%d" % i))' "$XDG_CONFIG_HOME/cg/hosts.json")" "20"
+check    "  and what was there stays"       "$(field mypc family)" "arch"
+check    "  no temp files left behind"      "$(ls -A "$XDG_CONFIG_HOME/cg" | grep -c '^\.hosts\.\|\.new$')" "0"
+check    "several fields, one write"        "$( (source lib/common.sh; source lib/host.sh; host_set mypc a 1 b 2); field mypc a)$(field mypc b)" "12"
 
 echo "1b. the first time, with the machine's password"
 # A server that takes passwords and has no key of cg's yet: its password once,
@@ -255,6 +267,58 @@ echo "5. the build steps of the AWS box that a machine of yours never runs"
 for m in 12-scratch 15-watchdog 22-library 50-xorg 80-firefox; do
   check "  $m only on the AWS box" "$(grep -c '^if aws_box; then' "lib/bootstrap.d/$m.sh")" "1"
 done
+# Arch: no partial upgrade. The lists are never refreshed without the upgrade,
+# which is the machine owner's to run - asked for, plainly, when it is needed.
+# Sunshine is found where it is, the same way for the install and its check.
+sun() { # sun <where native lives, or -> <flatpak app or -> -> native=? flatpak=?
+  local d; d=$(mktemp -d); mkdir -p "$d/bin" "$d/usr/bin" "$d/usr/local/bin"
+  [[ $1 != - ]] && { printf '#!/bin/sh\n' > "$d$1"; chmod +x "$d$1"; }
+  printf '#!/bin/sh\n[ "%s" = - ] || echo "%s"\n' "$2" "$2" > "$d/bin/flatpak"; chmod +x "$d/bin/flatpak"
+  printf '#!/bin/sh\nshift 2; exec "$@"\n' > "$d/bin/sudo"; chmod +x "$d/bin/sudo"
+  ( fns=$(sed -nE '/^sunshine_native\(\)/p;/^sunshine_flatpak\(\)/,/^}/p' lib/bootstrap.d/95-sunshine.sh)
+    fns=${fns//\/usr\/bin/$d\/usr\/bin}; fns=${fns//\/usr\/local\/bin/$d\/usr\/local\/bin}
+    ln -s "$(command -v grep)" "$d/bin/grep"
+    # Only the sandbox on PATH: this machine's own Sunshine must not answer.
+    PATH="$d/bin" USER_NAME=player "$BASH" -c "$fns"'
+    sunshine_native && n=yes || n=no; sunshine_flatpak && f=yes || f=no; echo "native=$n flatpak=$f"' )
+  rm -rf "$d"
+}
+check    "a build in /usr/local/bin is Sunshine"  "$(sun /usr/local/bin/sunshine -)" "native=yes flatpak=no"
+check    "  as is the package's /usr/bin"         "$(sun /usr/bin/sunshine -)" "native=yes flatpak=no"
+check    "the Flatpak is seen, not doubled"       "$(sun - dev.lizardbyte.app.Sunshine)" "native=no flatpak=yes"
+check    "  and nothing is nothing"               "$(sun - -)" "native=no flatpak=no"
+contains "a Flatpak alone stops setup, plainly"   "$(cat lib/bootstrap.d/95-sunshine.sh)" "Sunshine is installed here as a Flatpak"
+contains "the check is the install's own test"    "$(cat lib/bootstrap.d/95-sunshine.sh)" 'verify "sunshine binary installed" sunshine_native'
+# The build view says "reboots" only for the AWS box - told so by the build,
+# not guessed from the key (a machine of yours has cg's key too).
+contains "a machine of yours is said to be one"   "$(cat lib/host.sh)" 'BUILD_NAME="$name" BUILD_TARGET=host'
+contains "  and the view asks that, not the key"  "$(cat lib/common.sh)" '${BUILD_TARGET:-aws} == host'
+lacks    "  no guess from an empty key left"      "$(cat lib/common.sh)" '"finishing up" && -z $key'
+# Steam as the user has it, asked as root: Ubuntu's /usr/games, and a Flatpak
+# of the user's own.
+stm() { # stm <path or -> <user flatpak yes|no> -> present|absent
+  local d; d=$(mktemp -d); mkdir -p "$d/bin" "$d/usr/games" "$d/usr/bin" "$d/usr/local/bin"
+  [[ $1 != - ]] && { printf '#!/bin/sh\n' > "$d$1"; chmod +x "$d$1"; }
+  printf '#!/bin/sh\ncase "$*" in *--user*) [ "%s" = yes ] ;; *) exit 1 ;; esac\n' "$2" > "$d/bin/flatpak"
+  printf '#!/bin/sh\nshift 2; exec "$@"\n' > "$d/bin/sudo"; chmod +x "$d/bin/"*
+  ( fn=$(sed -nE '/^steam_present\(\)/,/^}/p' lib/bootstrap.d/70-steam-pkg.sh)
+    fn=${fn//\/usr\/games/$d\/usr\/games}; fn=${fn//\/usr\/local\/bin/$d\/usr\/local\/bin}; fn=${fn//\/usr\/bin/$d\/usr\/bin}
+    PATH="$d/bin" USER_NAME=player "$BASH" -c "$fn"'
+    steam_present && echo present || echo absent' )
+  rm -rf "$d"
+}
+check    "Ubuntu's Steam in /usr/games is Steam, asked as root" "$(stm /usr/games/steam no)" "present"
+check    "  as is the user's own Flatpak"           "$(stm - yes)" "present"
+check    "  and nothing is nothing"                 "$(stm - no)" "absent"
+# One copy of what release a machine is: the build's, which the facts include.
+check    "the Ubuntu release is told in one place"  "$(grep -rl 'upstream-release/lsb-release' lib cg | tr '\n' ' ')" "lib/bootstrap.d/01-release.sh "
+contains "  the Sunshine package asks it"           "$(cat lib/bootstrap.d/95-sunshine.sh)" 'uv=$(ubuntu_release)'
+contains "  and so do the facts, with its own text" "$(cat lib/host.sh)" "grep -vE '^[[:space:]]*#' lib/bootstrap.d/01-release.sh"
+check    "  read when the facts are asked, not when cg loads" "$(bash -c 'cd /tmp && source "$1/lib/common.sh" >/dev/null 2>&1; source "$1/lib/host.sh" 2>&1 | wc -l' _ "$PWD")" "0"
+check    "the Sunshine login is loaded once in a build" "$(grep -c '^ *source lib/sunshine-login.sh' lib/build.sh)" "1"
+check    "no pacman -Sy anywhere in the build" "$(grep -rhE 'pacman -Sy( |$)' lib/bootstrap.d | grep -vc 'run sudo pacman -Syu')" "0"
+contains "an install the old lists cannot make asks for an upgrade" "$(cat lib/bootstrap.d/00-header.sh)" "run sudo pacman -Syu, then run setup again"
+contains "multilib off is asked of you, not switched on behind your back" "$(cat lib/bootstrap.d/70-steam-pkg.sh)" "uncomment [multilib] in /etc/pacman.conf, run sudo pacman -Syu"
 check    "it is never rebooted by the build" \
          "$(awk '/^if aws_box; then/{a=1} /^else/{a=0} /^\s*reboot\s*$/{print a}' lib/bootstrap.d/99-finish.sh)" "1"
 
@@ -277,6 +341,15 @@ contains "  but every machine"             "$(cgh list --json)" '"name": "mypc"'
 cgh open mypc >/dev/null
 contains "it streams from the machine's tailnet address" "$(cat "$T/stream.log")" "stream"
 contains "  at 100.64.0.9"                 "$(cat "$T/stream.log")" "100.64.0.9 Desktop"
+# As cg runs it: a process whose command line is cg's, which is the only kind
+# the session lock believes - the test shell above is not one, and that is how
+# a session that ended by killing itself went unseen.
+cat > "$T/cg-open" <<'RUN'
+source lib/common.sh; source lib/session.sh; source lib/host.sh; cmd_host open mypc
+RUN
+( export PATH="$T/bin:$PATH" TS_HOST=gamevps CG_COLOR=never; bash "$T/cg-open" >/dev/null 2>&1 ); rc=$?
+check    "a session that ends normally exits 0, not killed by its own lock" "$rc" "0"
+check    "  and leaves no lock behind"     "$(ls "$XDG_RUNTIME_DIR"/cg-session-*.pid 2>/dev/null | wc -l)" "0"
 contains "forgetting changes nothing else there" "$(cgh remove mypc)" "nothing else on the machine was changed"
 check    "  and it is gone here"           "$(field mypc ssh)" ""
 

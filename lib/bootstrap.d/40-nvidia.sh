@@ -1,10 +1,37 @@
 # --- NVIDIA driver -----------------------------------------------------------
 # An NVIDIA card with no driver gets one: always on the AWS box; on a machine of
-# yours only when it has the card and not the driver, which is then loaded at
-# the next boot - this never reboots your machine.
+# yours only when it has the card and NO driver installed at all, which is then
+# loaded at the next boot - this never reboots your machine.
+#
+# Not "nvidia-smi does not answer": a driver that is installed and waiting on a
+# reboot, or that has hung, does not answer either - and installing another over
+# it left a machine with no working display. Whatever is installed is yours.
 NVIDIA_ADDED=""
-if aws_box || { lspci 2>/dev/null | grep -E " (VGA compatible|3D) controller: " | grep -qi nvidia \
-                && ! nvidia-smi >/dev/null 2>&1; }; then
+# The checks below read all of their input (no grep -q, no head): the build runs
+# under pipefail, and a reader that stops at its first match kills the writer
+# still writing - exit 141 - so a found driver read as none, and one was
+# installed over it. grep -m1 stops the reader too, so it reads a short lspci.
+nvidia_card() { lspci 2>/dev/null | grep -E " (VGA compatible|3D) controller: " | grep -i -m1 nvidia; }
+nvidia_driver_installed() {
+  case $FAMILY in
+    ubuntu|debian) dpkg-query -W -f '${Package} ${db:Status-Status}\n' 'nvidia-driver-*' 2>/dev/null \
+                     | awk '$2 == "installed"' | grep . >/dev/null ;;
+    arch) pacman -Qq 2>/dev/null | grep -E '^nvidia(-open)?(-dkms|-lts)?$|^nvidia-[0-9]+xx(-dkms)?$' >/dev/null ;;
+    *) return 1 ;;
+  esac || lsmod 2>/dev/null | grep '^nvidia ' >/dev/null
+}
+# The open kernel modules need a Turing chip or newer (TU, GA, GH, AD, GB): a
+# GTX 10xx and older have none. Told by the chip lspci names, never guessed -
+# an unnamed one counts as older.
+nvidia_open_ok() { nvidia_card | grep -E '\b(TU|GA|GH|AD|GB)[0-9]{3}\b' >/dev/null; }
+NVIDIA_OWN_OLD=""
+if ! aws_box && [[ -n $(nvidia_card) ]] && nvidia_driver_installed && ! nvidia-smi >/dev/null 2>&1; then
+  progress "an NVIDIA driver is installed but not answering yet (a reboot may load it) - leaving it as it is"
+fi
+if ! aws_box && [[ -n $(nvidia_card) ]] && ! nvidia_driver_installed && ! nvidia_open_ok; then
+  NVIDIA_OWN_OLD=1
+fi
+if aws_box || { [[ -n $(nvidia_card) ]] && ! nvidia_driver_installed; }; then
   case $FAMILY in
     ubuntu|debian)
       progress "installing nvidia driver (the slowest step, ~10 min)"
@@ -20,7 +47,12 @@ if aws_box || { lspci 2>/dev/null | grep -E " (VGA compatible|3D) controller: " 
       NVIDIA_MIN=610
       NEWEST=$(apt-cache search --names-only '^nvidia-driver-[0-9]+-open$' 2>/dev/null \
         | grep -oE 'nvidia-driver-[0-9]+-open' | sort -uV | tail -1 || true)
-      if [[ -n $NEWEST ]]; then
+      # An older card of yours: the driver Ubuntu recommends for it, and no
+      # floor - the newest open driver does not run on it at all.
+      if [[ -n $NVIDIA_OWN_OLD ]]; then
+        progress "installing nvidia driver (the one Ubuntu recommends for this older card)"
+        ubuntu-drivers install || ubuntu-drivers autoinstall
+      elif [[ -n $NEWEST ]]; then
         progress "installing $NEWEST"
         apt-get install -y "$NEWEST" || ubuntu-drivers install || ubuntu-drivers autoinstall
       else
@@ -49,9 +81,19 @@ if aws_box || { lspci 2>/dev/null | grep -E " (VGA compatible|3D) controller: " 
       # matches, so `|| echo none` would never fire and the line would read blank.
       NV_FOUND=$(nvidia_driver_version) || NV_FOUND=
       progress "installed nvidia driver: ${NV_FOUND:-none} (need $NVIDIA_MIN+)"
-      verify "nvidia driver $NVIDIA_MIN or newer installed" nvidia_driver_ok
+      if [[ -n $NVIDIA_OWN_OLD ]]; then
+        verify "nvidia driver installed (the one Ubuntu recommends for this card)" nvidia_driver_installed
+      else
+        verify "nvidia driver $NVIDIA_MIN or newer installed" nvidia_driver_ok
+      fi
       ;;
     arch)
+      # Arch carries the open driver only; an older card's is a legacy one from
+      # the AUR, which is yours to choose.
+      if [[ -n $NVIDIA_OWN_OLD ]]; then
+        echo ">>> FAILED: this NVIDIA card is older than Turing, and its driver is not in the Arch repositories - install its legacy driver from the AUR yourself, then run setup again"
+        exit 1
+      fi
       progress "installing nvidia driver"
       pkg nvidia-open-dkms nvidia-utils
       verify "nvidia driver installed" pacman -Q nvidia-utils ;;

@@ -660,11 +660,16 @@ build_stopped_lines() {
 }
 
 # The one ssh probe that answers build_aborted's second argument.
-# A machine of yours has no cloud-init: there the build's own result file (00-
-# header.sh writes it on exit) says the same - "error" when it stopped short.
-_build_state_cmd='s=$(cloud-init status 2>/dev/null | head -1); s=${s#status: };
-if [ -z "$s" ] && [ -f /var/lib/cloud-gaming-bootstrap.rc ]; then
-  [ "$(cat /var/lib/cloud-gaming-bootstrap.rc)" = 0 ] && s=done || s=exited; fi;
+# The build's own result file first (00-header.sh writes it on exit, and it and
+# cg host setup delete it before a run, so one there is this run's): it is the
+# script's own word. cloud-init only when there is none - a machine of yours
+# may have cloud-init too (Ubuntu does), and its "done" or "disabled" is about
+# that machine's own install, not this build: read first, it hid every failed
+# setup there until the 40-minute timeout.
+_build_state_cmd='s="";
+if [ -f /var/lib/cloud-gaming-bootstrap.rc ]; then
+  [ "$(cat /var/lib/cloud-gaming-bootstrap.rc)" = 0 ] && s=done || s=exited;
+else s=$(cloud-init status 2>/dev/null | head -1); s=${s#status: }; fi;
 grep -q "bootstrap complete" /var/log/cloud-gaming-bootstrap.log 2>/dev/null && f=yes || f=no;
 printf "%s|%s\n" "${s:-unknown}" "$f"'
 
@@ -796,9 +801,11 @@ _stream_build_styled() {
                                failed_seen=1; last_fail=${line#>>> FAILED: } ;;
               ">>> ok: "*)     _cg_line ok "${line#>>> ok: }" ;;
               ">>> "*)         step=${line#>>> }
-                               # Only the AWS box reboots - reached with cg's key; a
-                               # machine of yours (your own ssh, no key) never does.
-                               if [[ $step == "finishing up" && -z $key ]]; then
+                               # Only the AWS box reboots; a machine of yours never
+                               # does. Said by the build (BUILD_TARGET), not guessed
+                               # from the ssh key: a machine of yours has cg's own
+                               # key too, and every setup claimed it would reboot.
+                               if [[ $step == "finishing up" && ${BUILD_TARGET:-aws} == host ]]; then
                                  _cg_line step "finishing up"
                                elif [[ $step == "finishing up" ]]; then
                                  if (( ${CG_RESTORE_BYTES:-0} > 0 )); then

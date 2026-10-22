@@ -40,6 +40,18 @@ session_claim() {
   cg_on_exit "rm -f '$f'"
 }
 
+# session_release - drop the lock now, rather than on exit, and only if it is
+# this process's. Not session_end: that ends whoever holds the lock, and when
+# that is this process it sends TERM to itself - every `cg host open` ended
+# killed, exit 143, and the app called a normal session a failed one.
+session_release() {
+  local f pid
+  f=$(session_file)
+  read -r pid _ < "$f" 2>/dev/null || return 0
+  [[ $pid == "$$" ]] && rm -f "$f"
+  return 0
+}
+
 # session_age_s - how long the running session has been up, or nothing.
 session_age_s() {
   local pid started now

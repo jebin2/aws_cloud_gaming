@@ -104,6 +104,48 @@ bad=$(sed 's/\\\$//g' "$0" | grep -nE '^(contains|lacks|check) +"[^"]*" +"[^"]*"
 if [[ -z $bad ]]; then echo "  ok   every needle with a \$ is single-quoted"; pass=$((pass+1))
 else echo "  FAIL double-quoted needles bash will expand:"; echo "$bad"; fail=$((fail+1)); fi
 
+
+echo "8. a machine of yours: a driver there is left alone, and the open one only where it runs"
+# What the card and the system say, faked: lspci's line, dpkg's packages,
+# pacman's, and the kernel's loaded modules.
+cat > "$T/bin/lspci" <<'FAKE'
+#!/usr/bin/env bash
+[[ -n ${CARD:-} ]] && echo "01:00.0 VGA compatible controller: NVIDIA Corporation $CARD"
+FAKE
+cat > "$T/bin/pacman" <<'FAKE'
+#!/usr/bin/env bash
+for p in ${PACS:-}; do echo "$p"; done
+FAKE
+cat > "$T/bin/lsmod" <<'FAKE'
+#!/usr/bin/env bash
+echo "Module                  Size  Used by"; [[ -n ${LOADED:-} ]] && echo "nvidia 1 0"
+FAKE
+chmod +x "$T/bin/"*
+own() { # own <family> <card> <dpkg pkgs> <pacman pkgs> [loaded] -> installed=? open=?
+  env PATH="$T/bin:$PATH" FAMILY="$1" CARD="$2" PKGS="$3" PACS="$4" LOADED="${5:-}" bash -c '
+  set -o pipefail     # as the build runs
+  '"$(sed -nE '/^nvidia_card\(\)/p;/^nvidia_driver_installed\(\)/,/^}/p;/^nvidia_open_ok\(\)/p' "$MOD")"'
+  nvidia_driver_installed && i=yes || i=no; nvidia_open_ok && o=yes || o=no
+  echo "installed=$i open=$o"' 2>&1
+}
+check "an RTX 3060 with no driver: the open one runs on it" "$(own ubuntu 'GA106 [GeForce RTX 3060]' '' '')" "installed=no open=yes"
+check "a GTX 1080 with no driver: not the open one"         "$(own ubuntu 'GP104 [GeForce GTX 1080]' '' '')" "installed=no open=no"
+check "  nor a card lspci does not name the chip of"        "$(own ubuntu 'Device 2204' '' '')" "installed=no open=no"
+check "a proprietary 550 installed, not answering: there"   "$(own ubuntu 'GA106 [GeForce RTX 3060]' 'nvidia-driver-550:installed' '')" "installed=yes open=yes"
+# Arch with the driver among a thousand packages, under pipefail: a reader
+# that stops at its first match killed pacman mid-list, and a driver read as none.
+many="nvidia-dkms $(seq -f 'pkg-%04g' 1 3000 | tr '\n' ' ')"
+check "a driver among thousands of packages, under pipefail: still there" "$(own arch 'TU106 [GeForce RTX 2060]' '' "$many")" "installed=yes open=yes"
+check "  on Arch, the dkms one"                             "$(own arch 'TU106 [GeForce RTX 2060]' '' 'nvidia-dkms nvidia-utils')" "installed=yes open=yes"
+check "  a legacy AUR one"                                  "$(own arch 'GP104 [GeForce GTX 1080]' '' 'nvidia-470xx-dkms')" "installed=yes open=no"
+check "  or just a module loaded"                           "$(own debian 'GA106 [GeForce RTX 3060]' '' '' 1)" "installed=yes open=yes"
+check "nvidia-utils alone is not a driver"                  "$(own arch 'GA106 [GeForce RTX 3060]' '' 'nvidia-utils')" "installed=no open=yes"
+src=$(cat "$MOD")
+contains "a driver there is never installed over"           "$src" 'if aws_box || { [[ -n $(nvidia_card) ]] && ! nvidia_driver_installed; }; then'
+contains "an older card on Ubuntu gets what Ubuntu recommends" "$src" 'if [[ -n $NVIDIA_OWN_OLD ]]; then'
+contains "  on Arch, a clear stop"                          "$src" 'is older than Turing, and its driver is not in the Arch repositories'
+check    "the floor is set once, so the lifted copy above is the shipped one" "$(grep -c '^\s*NVIDIA_MIN=' "$MOD")" "1"
+
 echo ""
 echo "nvidia-driver: $pass passed, $fail failed"
 (( fail == 0 ))

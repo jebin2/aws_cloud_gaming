@@ -2,7 +2,17 @@
 # Sunshine ships a "Steam Big Picture" app entry by default whether or not Steam
 # exists, so the app list is not evidence it is installed. i386 is required:
 # the Steam bootstrap binary is still 32-bit.
-steam_present() { command -v steam >/dev/null 2>&1 || flatpak info com.valvesoftware.Steam >/dev/null 2>&1; }
+# Steam as the user has it: this runs as root, whose PATH (sudo's secure_path)
+# leaves out /usr/games where Ubuntu's own package puts it, and whose flatpak
+# sees only system-wide installs - so the places, and the user's own Flatpaks.
+# Asked as root alone, an Ubuntu Steam the user plays every day read as none,
+# and Valve's was installed over it.
+steam_present() {
+  command -v steam >/dev/null 2>&1 || test -x /usr/games/steam || test -x /usr/bin/steam \
+    || test -x /usr/local/bin/steam \
+    || flatpak info com.valvesoftware.Steam >/dev/null 2>&1 \
+    || { [ -n "${USER_NAME:-}" ] && sudo -u "$USER_NAME" flatpak info --user com.valvesoftware.Steam >/dev/null 2>&1; }
+}
 # Always on the AWS box; on a machine of yours only when it has no Steam.
 if aws_box || ! steam_present; then
   case $FAMILY in
@@ -94,11 +104,13 @@ if aws_box || ! steam_present; then
       ;;
     arch)
       # Steam is in multilib, which an Arch install may not have switched on.
+      # Switching it on needs its list fetched, and fetching lists without
+      # upgrading is a partial upgrade (see pkg) - so it is asked of you, with
+      # the upgrade, rather than done behind your back.
       progress "installing steam"
       if ! grep -q '^\[multilib\]' /etc/pacman.conf; then
-        printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /etc/pacman.conf
-        progress "enabled the multilib repository in /etc/pacman.conf (Steam needs it)"
-        pacman -Sy --noconfirm
+        echo ">>> FAILED: Steam is in the multilib repository, which is off on this machine - uncomment [multilib] in /etc/pacman.conf, run sudo pacman -Syu, then run setup again"
+        exit 1
       fi
       pkg steam
       verify "steam launcher present" steam_present ;;

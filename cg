@@ -1979,6 +1979,8 @@ aws_inventory_json() {
     printf '%s\t%s\n' "$b" "$REGION" > "$work/here"
     aws s3 ls "s3://$b" --recursive --summarize 2>/dev/null | awk '/Total Size:/{print $3}' > "$work/here.bytes"
     library_index 2>/dev/null > "$work/here.idx" || true
+    # The saved Steam login lives in the same bucket, and goes with it - said.
+    aws s3 ls "s3://$b/steam/account/" 2>/dev/null | grep . >/dev/null && echo yes > "$work/here.login"
   fi
   library_elsewhere_json > "$work/elsewhere" 2>/dev/null || true
   # Disks and disk images left over, which bill by the GB with nothing attached.
@@ -1986,6 +1988,19 @@ aws_inventory_json() {
       --query 'Volumes[].[VolumeId,Size]' --output text > "$work/volumes" 2>/dev/null || echo ERR > "$work/volumes"
   ec2 describe-images --owners self --query 'Images[].[ImageId,BlockDeviceMappings[0].Ebs.VolumeSize]' \
       --output text > "$work/images" 2>/dev/null || echo ERR > "$work/images"
+  # Its settings in SSM - the watchdog's marks and each game's keep timer -
+  # free, but cg's: in this region and every region that has saved games.
+  local r regions
+  regions=$(printf '%s\n' "$REGION"; python3 -I -c 'import json,sys
+try: d = json.load(open(sys.argv[1]))
+except Exception: sys.exit()
+for p in (d or {}).get("places") or []:
+    if p.get("region"): print(p["region"])' "$work/elsewhere" 2>/dev/null)
+  for r in $(sort -u <<<"$regions"); do
+    aws ssm get-parameters-by-path --region "$r" --path "/cloud-gaming/$TS_HOST" --recursive \
+        --query 'Parameters[].Name' --output text 2>/dev/null | tr '\t' '\n' \
+      | awk -v r="$r" 'NF && $0 != "None" {print r "\t" $0}' >> "$work/ssm"
+  done
   cw_exists && echo yes > "$work/watchdog"
   aws budgets describe-budget --account-id "$acct" --budget-name "${TS_HOST}-monthly" >/dev/null 2>&1 \
     && echo yes > "$work/budget"
@@ -2016,8 +2031,9 @@ if here:
     size = num(read("here.bytes").strip()) or 0
     try: n = len(json.loads(read("here.idx") or "{}").get("apps") or [])
     except Exception: n = 0
+    login = " and the saved Steam login" if read("here.login").strip() else ""
     items.append({"kind": "games", "label": "Saved games", "region": region, "bucket": bucket, "games": n,
-                  "detail": "%d game%s, %.1f GB" % (n, "" if n == 1 else "s", size / GB),
+                  "detail": "%d game%s, %.1f GB%s" % (n, "" if n == 1 else "s", size / GB, login),
                   "usd_month": month(size / GB, S3), "bills": True})
 try: el = json.loads(read("elsewhere") or "null")
 except Exception: el = None
@@ -2027,7 +2043,8 @@ else:
         if p.get("error"): errors.append("elsewhere"); continue
         n = len(p.get("games") or [])
         items.append({"kind": "games", "label": "Saved games elsewhere", "region": p["region"], "bucket": p["bucket"],
-                      "games": n, "detail": "%d game%s, %.1f GB in %s" % (n, "" if n == 1 else "s", (p["bytes"] or 0) / GB, p["region"]),
+                      "games": n, "detail": "%d game%s, %.1f GB in %s%s" % (n, "" if n == 1 else "s", (p["bytes"] or 0) / GB, p["region"],
+                                                                      " and a saved Steam login" if p.get("login") else ""),
                       "usd_month": p.get("usd_month"), "bills": True})
 vols = rows("volumes")
 if vols:
@@ -2041,6 +2058,10 @@ if imgs:
                   "usd_month": month(gb, SNAP), "bills": True})
 if read("watchdog").strip(): items.append({"kind": "watchdog", "label": "Cloud watchdog", "detail": "function, schedule, role, logs", "usd_month": 0, "bills": False})
 if read("budget").strip():   items.append({"kind": "budget", "label": "Budget alert", "detail": "", "usd_month": 0, "bills": False})
+marks = [l.split("\t") for l in read("ssm").splitlines() if "\t" in l]
+if marks:
+    items.append({"kind": "settings", "label": "Game timers", "detail": "%d setting%s in SSM" % (len(marks), "" if len(marks) == 1 else "s"),
+                  "usd_month": 0, "bills": False, "names": [{"region": r, "name": n} for r, n in marks]})
 known = [i["usd_month"] for i in items if i["usd_month"] is not None]
 print(json.dumps({"error": ("AWS could not be asked: " + ", ".join(sorted(set(errors)))) if errors else None,
                   "region": os.environ["REGION"], "items": items,
@@ -2095,21 +2116,34 @@ for i in json.loads(os.environ["INV"])["items"]: print("  %-22s %s" % (i["label"
 for i in json.load(sys.stdin)["items"]:
     if i["kind"] == "games" and i["label"] == "Saved games elsewhere": print(i["bucket"] + "\t" + i["region"])' <<<"$inv")
 
-  # A look, not a hope: anything that still bills is said, and AWS stays set
-  # up here so it can still be seen and deleted.
-  say "checking nothing is left billing"
+  # Its settings in SSM, every region they were found in - ten names a call,
+  # the most delete-parameters takes.
+  while IFS=$'\t' read -r r names; do
+    [[ -n $r ]] || continue
+    say "deleting cg's settings in $r"
+    # shellcheck disable=SC2086
+    aws ssm delete-parameters --region "$r" --names $names >/dev/null 2>&1 || log_as fail "could not delete settings in $r"
+  done < <(python3 -I -c 'import json,sys
+by = {}
+for i in json.load(sys.stdin)["items"]:
+    for m in i.get("names") or []: by.setdefault(m["region"], []).append(m["name"])
+for r, ns in by.items():
+    for k in range(0, len(ns), 10): print(r + "\t" + " ".join(ns[k:k + 10]))' <<<"$inv")
+
+  # A look, not a hope: anything of cg's still there - billing or not - is
+  # said, and AWS stays set up here so it can still be seen and deleted.
+  say "checking nothing is left"
   inv=$(aws_inventory_json)
   left=$(python3 -I -c 'import json,sys
 d = json.load(sys.stdin)
 if d["error"]: print("?\t" + d["error"])
-for i in d["items"]:
-    if i["bills"]: print(i["label"] + "\t" + i["detail"])' <<<"$inv")
+for i in d["items"]: print(i["label"] + "\t" + i["detail"])' <<<"$inv")
   if [[ -n $left ]]; then
     while IFS=$'\t' read -r p d; do log_as fail "still there: $p${d:+ - $d}"; done <<<"$left"
     die "not everything could be deleted - AWS is still set up here so it can be seen; try again"
   fi
   cg_env_unset GAME_REGION || die "could not write .env"
-  log_as ok "AWS disconnected - nothing of cg is left billing"
+  log_as ok "AWS disconnected - nothing of cg is left billing, nor anything else of cg's"
   log "the account, its access key, region opt-ins and GPU quota were kept; they cost nothing"
 }
 

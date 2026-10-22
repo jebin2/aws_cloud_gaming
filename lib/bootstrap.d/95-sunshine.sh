@@ -7,18 +7,33 @@ sunshine_package() {
   local uv=""
   case $FAMILY in
     ubuntu)
-      [ -r /etc/upstream-release/lsb-release ] && uv=$(sed -n 's/^DISTRIB_RELEASE=//p' /etc/upstream-release/lsb-release)
-      [ -z "$uv" ] && [ "${ID:-}" = ubuntu ] && uv=${VERSION_ID:-}
-      [ -z "$uv" ] && [ -n "${UBUNTU_CODENAME:-}" ] && [ -r /usr/share/distro-info/ubuntu.csv ] \
-        && uv=$(awk -F, -v c="$UBUNTU_CODENAME" '$3 == c {v = $1} END {print v}' /usr/share/distro-info/ubuntu.csv | sed 's/ LTS//')
+      uv=$(ubuntu_release)     # 01-release.sh, the one copy
       echo "+ubuntu${uv}_amd64.deb" ;;
     debian) echo "+debian${DEBIAN_CODENAME:-${VERSION_CODENAME:-}}_amd64.deb" ;;
     arch)   echo "-x86_64.pkg.tar.zst" ;;
     fedora) echo ".fc${VERSION_ID:-}.x86_64.rpm" ;;
   esac
 }
+# Sunshine, told one way everywhere: the native binary where a package or a
+# build puts it. Asked as root, whose PATH may not be the user's - so the places,
+# not command -v alone. A check that differed from the install's left a build in
+# /usr/local/bin installing nothing and then stopping at the /usr/bin verify.
+sunshine_native() { command -v sunshine >/dev/null || test -x /usr/bin/sunshine || test -x /usr/local/bin/sunshine; }
+# Sunshine as a Flatpak, system-wide or the user's own. cg sets its login with
+# sunshine --creds, which a Flatpak does not give it - and a native one beside
+# it would fight it for port 47990, with the login set on the wrong one.
+sunshine_flatpak() {
+  command -v flatpak >/dev/null || return 1
+  { flatpak list --app --columns=application 2>/dev/null
+    sudo -u "$USER_NAME" flatpak list --user --app --columns=application 2>/dev/null; } \
+    | grep -x 'dev.lizardbyte.app.Sunshine' >/dev/null     # all of it read: pipefail
+}
+if ! aws_box && ! sunshine_native && sunshine_flatpak; then
+  echo ">>> FAILED: Sunshine is installed here as a Flatpak, which cg cannot set a login on - remove it (flatpak uninstall dev.lizardbyte.app.Sunshine), then run setup again and cg installs the native one"
+  exit 1
+fi
 # Always on the AWS box; on a machine of yours only when it has no Sunshine.
-if aws_box || ! command -v sunshine >/dev/null; then
+if aws_box || ! sunshine_native; then
   progress "installing sunshine"
   WANT=$(sunshine_package)
   SUNSHINE_URL=$(curl -fsSL https://api.github.com/repos/LizardByte/Sunshine/releases/latest \
@@ -207,7 +222,7 @@ EOF
 fi
 chown -R "$USER_NAME:$USER_NAME" "$USER_HOME/.config/systemd"
 
-verify "sunshine binary installed" test -x /usr/bin/sunshine
+verify "sunshine binary installed" sunshine_native
 if aws_box; then verify "sunshine waits for X before starting" test -f "$DROPIN/wait-for-x.conf"; fi
 # A machine of yours does not reboot into it: started now, as you, so the laptop
 # can make the login and pair straight after.

@@ -42,6 +42,20 @@ check "exited, no FAILED seen"      "$(ab 0 'exited|no')"  "aborted"
 check "  exited, FAILED seen"       "$(ab 1 'exited|no')"  "aborted"
 check "  but done is done"          "$(ab 0 'done|yes')"   "waiting"
 contains "the result file is read where there is no cloud-init" "$(cat lib/common.sh)" 's=done || s=exited'
+# The probe itself, run: its two paths pointed at a sandbox, and a cloud-init
+# that says "done" - as Ubuntu's own install says on a machine of yours.
+probe() { # probe <rc file content, or "-" for none> -> what the probe prints
+  local d; d=$(mktemp -d); mkdir -p "$d/lib" "$d/log" "$d/bin"
+  printf '#!/bin/sh\necho "status: done"\n' > "$d/bin/cloud-init"; chmod +x "$d/bin/cloud-init"
+  [[ $1 != - ]] && printf '%s\n' "$1" > "$d/lib/cloud-gaming-bootstrap.rc"
+  ( source lib/common.sh >/dev/null 2>&1
+    cmd=${_build_state_cmd//\/var\/lib/$d\/lib}; cmd=${cmd//\/var\/log/$d\/log}
+    PATH="$d/bin:$PATH" sh -c "$cmd" )
+  rm -rf "$d"
+}
+check "a failed build's own word beats cloud-init's 'done'" "$(probe 1)" "exited|no"
+check "  and so does a good one"                            "$(probe 0)" "done|no"
+check "  with no result file, cloud-init is asked"          "$(probe -)" "done|no"
 contains "  and asked once a minute, not only after a FAILED" "$(cat lib/common.sh)" 'failed_seen || waited % 60 == 0'
 
 echo "2. a healthy build is never condemned"

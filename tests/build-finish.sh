@@ -53,13 +53,13 @@ build() {
   ( export PATH="$T/bin:$PATH" CG_COLOR=${COLOR:-never} CG_SLEEP_PCT=1
     source lib/common.sh; source lib/build.sh
     save() { echo "$1=$2" >> "$T/saved"; }
-    BUILD_SSH=$1 BUILD_KEY=$2 BUILD_IP=100.64.0.9 BUILD_SAVE=save BUILD_NAME=$3
+    BUILD_SSH=$1 BUILD_KEY=$2 BUILD_IP=100.64.0.9 BUILD_SAVE=save BUILD_NAME=$3 BUILD_TARGET=${TARGET:-aws}
     build_finish; echo "rc=$? paired=$PAIRED steam=$STEAM_OK" ) 2>&1
 }
 
 for kind in aws host; do
   if [[ $kind == aws ]]; then out=$(build ubuntu@gamevps "$T/key.pem" "the box")
-  else out=$(build me@homeserver "" homeserver); fi
+  else out=$(TARGET=host build me@homeserver "" homeserver); fi
   echo "$kind:"
   contains "  the build is followed to the end"    "$out" "sunshine installed"
   contains "  the Sunshine login is made"          "$out" "created; credentials saved"
@@ -75,7 +75,10 @@ for kind in aws host; do
   else
     check  "  with your own ssh setup, no key"     "$(grep -c -- "-i " "$T/ssh.log")" "0"
     contains "  named as your machine"              "$out" "building homeserver"
-    lacks    "  and never said to reboot"            "$(COLOR=always build me@homeserver "" homeserver)" "reboots"
+    lacks    "  and never said to reboot"            "$(TARGET=host COLOR=always build me@homeserver "" homeserver)" "reboots"
+    # cg's own key, as a machine of yours has once it is added: it is the
+    # target that says so, not the absence of a key.
+    lacks    "  not even reached with cg's own key"  "$(TARGET=host COLOR=always build me@homeserver "$T/key.pem" homeserver)" "reboots"
     contains "  (the AWS box still is)"               "$(COLOR=always build ubuntu@gamevps "$T/key.pem" "the box")" "reboots into the desktop"
   fi
 done

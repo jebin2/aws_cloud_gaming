@@ -74,9 +74,8 @@ build_finish() {
   done
 
   # The login: saved here first, checked against the box, set again on the box
-  # when they disagree - lib/sunshine-login.sh, shared with your own machines.
-  # shellcheck source=lib/sunshine-login.sh
-  source lib/sunshine-login.sh
+  # when they disagree - lib/sunshine-login.sh (loaded above), shared with your
+  # own machines.
   if (( ! SUN_UP )); then
     log "Sunshine is not answering on $IP:47990 - skipping account and pairing"
     log "check on the box: systemctl --user status app-dev.lizardbyte.app.Sunshine.service"

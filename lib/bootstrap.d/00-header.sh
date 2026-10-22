@@ -47,7 +47,13 @@ aws_box() { [ "$CG_TARGET" = aws ]; }
 pkg() {
   case $FAMILY in
     ubuntu|debian) apt-get install -y "$@" ;;
-    arch)          pacman -S --noconfirm --needed "$@" ;;
+    # Never -Sy first: a refreshed list installing beside an old system is a
+    # partial upgrade, which Arch does not support - new pipewire or steam
+    # against old libraries, and programs on the machine break. Upgrading a
+    # machine of yours is yours to do, so cg installs from the lists it has and
+    # asks for an upgrade when they are too old to install from.
+    arch)          pacman -S --noconfirm --needed "$@" \
+                     || { echo ">>> FAILED: pacman could not install $* - the system may be out of date: run sudo pacman -Syu, then run setup again"; return 1; } ;;
     fedora)        dnf install -y "$@" ;;
     *)             echo ">>> FAILED: no package manager known for '$FAMILY'"; return 1 ;;
   esac
@@ -66,7 +72,8 @@ rm -f /var/lib/cloud-gaming-bootstrap.rc /var/lib/cloud-gaming-ready
 trap 'echo $? > /var/lib/cloud-gaming-bootstrap.rc' EXIT
 
 export DEBIAN_FRONTEND=noninteractive
+# apt's lists are refreshed (a refresh alone changes nothing installed); Arch's
+# are not - see pkg.
 case $FAMILY in
   ubuntu|debian) apt-get update ;;
-  arch)          pacman -Sy --noconfirm ;;
 esac

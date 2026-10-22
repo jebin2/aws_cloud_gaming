@@ -29,19 +29,28 @@ if len(sys.argv) > 3: print(h.get(sys.argv[3], ""))
 else: print(json.dumps(h))' "$f" "$1" ${2:+"$2"}
 }
 
-# host_set <name> <field> <value> - written whole, atomically, mode 0600.
-host_set() {
+# _host_write <set|forget> <name> [field value]... - the one writer: read,
+# change and replace under an exclusive lock, through a temp file of its own,
+# mode 0600. Setup and a stream run beside other commands; two writers each
+# reading the old file and replacing it lost one's change - a Sunshine password
+# the machine had already been given, and every pairing after it failed.
+_host_write() {
   local f; f=$(host_file)
-  mkdir -p "${f%/*}" && (umask 077; python3 -c '
-import json, os, sys
-f, name, k, v = sys.argv[1:5]
-try: d = json.load(open(f))
-except Exception: d = {}
-d.setdefault(name, {})[k] = v
-tmp = f + ".new"
-with open(tmp, "w") as o: json.dump(d, o, indent=1, sort_keys=True)
-os.chmod(tmp, 0o600); os.replace(tmp, f)' "$f" "$1" "$2" "$3")
+  mkdir -p "${f%/*}" && (umask 077; python3 -I -c '
+import fcntl, json, os, sys, tempfile
+f, op, name, kv = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
+with open(f + ".lock", "a") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try: d = json.load(open(f))
+    except Exception: d = {}
+    if op == "forget": d.pop(name, None)
+    else: d.setdefault(name, {}).update(zip(kv[0::2], kv[1::2]))
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(f), prefix=".hosts.")
+    with os.fdopen(fd, "w") as o: json.dump(d, o, indent=1, sort_keys=True)
+    os.chmod(tmp, 0o600); os.replace(tmp, f)' "$f" "$@")
 }
+# host_set <name> <field> <value> [<field> <value>]... - one write for them all.
+host_set() { _host_write set "$@"; }
 
 host_names() {
   local f; f=$(host_file)
@@ -52,14 +61,8 @@ except Exception: pass' "$f"
 }
 
 host_forget() {
-  local f; f=$(host_file)
-  [[ -s $f ]] || return 0
-  (umask 077; python3 -c '
-import json, os, sys
-f, name = sys.argv[1:3]
-d = json.load(open(f)); d.pop(name, None)
-with open(f + ".new", "w") as o: json.dump(d, o, indent=1, sort_keys=True)
-os.chmod(f + ".new", 0o600); os.replace(f + ".new", f)' "$f" "$1")
+  [[ -s $(host_file) ]] || return 0
+  _host_write forget "$1"
 }
 
 # cg's own key for machines of yours: one per laptop, made the first time a
@@ -137,16 +140,9 @@ echo "os=${os:-unknown}"
 [ -r /etc/os-release ] && . /etc/os-release
 echo "id=${ID:-}"; echo "id_like=${ID_LIKE:-}"; echo "version_id=${VERSION_ID:-}"
 echo "codename=${VERSION_CODENAME:-}"; echo "pretty=${PRETTY_NAME:-}"
-# The Ubuntu or Debian release underneath, for a derivative: Linux Mint 22.2 is
-# Ubuntu 24.04, and Sunshine publishes its packages by the Ubuntu number. Read
-# from the system - Mint keeps the upstream release, distro-info maps a codename
-# - never from a table written here.
-uv=""
-[ -r /etc/upstream-release/lsb-release ] && uv=$(sed -n "s/^DISTRIB_RELEASE=//p" /etc/upstream-release/lsb-release)
-[ -z "$uv" ] && [ "${ID:-}" = ubuntu ] && uv=${VERSION_ID:-}
-[ -z "$uv" ] && [ -n "${UBUNTU_CODENAME:-}" ] && [ -r /usr/share/distro-info/ubuntu.csv ] \
-  && uv=$(awk -F, -v c="$UBUNTU_CODENAME" "\$3 == c {v = \$1} END {print v}" /usr/share/distro-info/ubuntu.csv | sed "s/ LTS//")
-echo "ubuntu_version=$uv"
+# The Ubuntu release underneath, for a derivative too - the function the build
+# itself uses (lib/bootstrap.d/01-release.sh), included below, so the two agree.
+echo "ubuntu_version=$(ubuntu_release)"
 echo "debian_codename=${DEBIAN_CODENAME:-${VERSION_CODENAME:-}}"
 echo "arch=$(uname -m)"; echo "user=$(id -un)"; echo "hostname=$(hostname 2>/dev/null)"
 # By device class, not anywhere on the line: "3d" also matched the PCI address
@@ -180,7 +176,11 @@ echo "flatpak=$(command -v flatpak || true)"
 # Windows answers uname with an error, so it is told apart by `ver`.
 host_facts() {
   local out
-  out=$(printf '%s' "$_HOST_FACTS" | host_ssh_raw --in "$1" "sh -s" 2>/dev/null) || out=""
+  # The build's own ubuntu_release ahead of the facts that call it - one copy,
+  # read when asked rather than when this file is loaded: cg loads it for every
+  # command, and a copy of cg without the build modules is still cg.
+  out=$( { grep -vE '^[[:space:]]*#' lib/bootstrap.d/01-release.sh 2>/dev/null; printf '%s' "$_HOST_FACTS"; } \
+         | host_ssh_raw --in "$1" "sh -s" 2>/dev/null) || out=""
   if [[ $out != *os=Linux* ]]; then
     host_ssh_raw "$1" ver 2>/dev/null | grep -qi windows && { echo "os=Windows"; return 0; }
     [[ -n $out ]] && printf '%s\n' "$out"
@@ -225,7 +225,11 @@ host_name_from() { # host_name_from <hostname>
 cmd_host_add() { # cmd_host_add [name] --ssh <target>
   local name="" target="" why facts pw rc
   while (( $# )); do
-    case $1 in --ssh) target=${2:-}; shift 2 ;; -*) shift ;; *) name=$1; shift ;; esac
+    # --ssh with nothing after it: `shift 2` with one argument shifts none, and
+    # the loop spun forever at full CPU instead of saying how to use it.
+    case $1 in --ssh) (( $# >= 2 )) || die "usage: cg host add [name] --ssh <user@address>"
+                      target=$2; shift 2 ;;
+               -*) shift ;; *) name=$1; shift ;; esac
   done
   [[ -n $target ]] || die "usage: cg host add [name] --ssh <user@address>"
   if [[ -n $name ]]; then
@@ -256,14 +260,12 @@ cmd_host_add() { # cmd_host_add [name] --ssh <target>
     why=$(host_name_ok "$name") || die "its own name, '$name', will not do ($why) - give it one"
     [[ -z $(host_get "$name" ssh) ]] || die "there is already a machine called '$name' - give this one another name"
   fi
-  host_set "$name" ssh "$target"
-  host_set "$name" os "$(_fact "$facts" os)"
+  host_set "$name" ssh "$target" os "$(_fact "$facts" os)"
   if [[ $(_fact "$facts" os) == Windows ]]; then
     log "Windows - added. Setting a Windows machine up is not built yet (docs/own-machine-plan.md)."
     return 0
   fi
-  host_set "$name" family "$(host_family "$facts")"
-  host_set "$name" user "$(_fact "$facts" user)"
+  host_set "$name" family "$(host_family "$facts")" user "$(_fact "$facts" user)"
   log "$(_fact "$facts" pretty) ($(_fact "$facts" arch)), signed in as $(_fact "$facts" user)"
   log "GPU: $(_fact "$facts" nvidia)$( [[ -z $(_fact "$facts" nvidia) ]] && _fact "$facts" gpu)"
   [[ $(host_family "$facts") == unsupported ]] \
@@ -366,7 +368,7 @@ cmd_host_setup() {
   }
   _host_save_login() { case $1 in SUNSHINE_USER) host_set "$name" sunshine_user "$2" ;; SUNSHINE_PASS) host_set "$name" sunshine_pass "$2" ;; esac; }
   SUNSHINE_USER=$(host_get "$name" sunshine_user); SUNSHINE_PASS=$(host_get "$name" sunshine_pass)
-  BUILD_SSH="$t" BUILD_KEY="" BUILD_IP="" BUILD_SAVE=_host_save_login BUILD_NAME="$name"
+  BUILD_SSH="$t" BUILD_KEY="" BUILD_IP="" BUILD_SAVE=_host_save_login BUILD_NAME="$name" BUILD_TARGET=host
   [[ -f $(host_key) ]] && BUILD_KEY=$(host_key)
   build_finish || die "the build on $name did not finish - its log is /var/log/cloud-gaming-bootstrap.log there"
 
@@ -392,8 +394,9 @@ cmd_host_status() {
     # it, whatever one ping said - a single tailscale ping can go unanswered on
     # a path that streams fine, and the card said "not connected" beside Play.
     ts_on=yes
+    # Once a process: a status read stands alone, and nothing loaded it before.
     # shellcheck source=lib/sunshine-login.sh
-    source lib/sunshine-login.sh
+    declare -F sun_login_ok >/dev/null || source lib/sunshine-login.sh
     sun_login_ok "$ip" "$(host_get "$name" sunshine_user)" "$(host_get "$name" sunshine_pass)" && login=yes
     command -v moonlight >/dev/null && timeout 20 moonlight list "$ip" 2>/dev/null | grep -q . && paired=yes
   fi
@@ -440,7 +443,7 @@ cmd_host_open() {
     || die "Sunshine is not answering on $name ($ip) - is it on, and a desktop signed in?"
   session_claim
   stream_play "$ip" "${GAME_APP:-Desktop}"
-  session_end 2>/dev/null || true
+  session_release
 }
 
 cmd_host() {

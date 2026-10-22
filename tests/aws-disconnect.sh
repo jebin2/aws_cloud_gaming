@@ -29,7 +29,10 @@ export HERE OLD S="$T/aws"
 seed() {
   rm -f "$S"/*
   printf 'i-1\trunning\tg6.xlarge\n' > "$S/machine"
-  touch "$S/here" "$S/old" "$S/vol" "$S/img" "$S/cw" "$S/budget"
+  touch "$S/here" "$S/old" "$S/vol" "$S/img" "$S/cw" "$S/budget" "$S/login"
+  # cg's settings in SSM: a game's keep timer here, and one in the old region.
+  printf 'ap-south-2 /cloud-gaming/gamevps/kept/%s/2\nap-south-1 /cloud-gaming/gamevps/kept/%s/1\nap-south-2 /cloud-gaming/gamevps/archive-last-seen\n' \
+    "$HERE" "$OLD" > "$S/marks"
 }
 cat > "$T/bin/aws" <<'FAKE'
 #!/usr/bin/env bash
@@ -71,10 +74,19 @@ case $a in
     else echo "An error occurred (NoSuchBucket)" >&2; exit 1; fi ;;
   *"s3 rb"*)
     if q "$OLD"; then [[ -n ${OLD_STUCK:-} ]] && exit 1; rm -f "$S/old"; fi
-    q "$HERE" && rm -f "$S/here"
+    q "$HERE" && rm -f "$S/here" "$S/login"
     echo "rb $a" >> "$S/../deleted.log" ;;
+  *"s3 ls"*steam/account/*) q "$HERE" && [[ -f $S/login && -f $S/here ]] && echo "2026-01-01 00:00:00 22528 steam-account.tgz" ;;
+  *"ssm get-parameters-by-path"*)
+    r=$(sed -n 's/.*--region \([^ ]*\).*/\1/p' <<<"$a")
+    [[ -s $S/marks ]] && awk -v r="$r" '$1 == r {print $2}' "$S/marks" | paste -sd '\t' ;;
+  *"ssm delete-parameters"*)
+    r=$(sed -n 's/.*--region \([^ ]*\).*/\1/p' <<<"$a")
+    for n in $(sed -n 's/.*--names \(.*\)$/\1/p' <<<"$a"); do
+      grep -vxF "$r $n" "$S/marks" > "$S/marks.n"; mv "$S/marks.n" "$S/marks"; done
+    [[ -s $S/marks ]] || rm -f "$S/marks" ;;
   *"budgets describe-budget"*) [[ -f $S/budget ]] || exit 254 ;;
-  *"budgets delete-budget"*) rm -f "$S/budget" ;;
+  *"budgets delete-budget"*) [[ -n ${BUDGET_STUCK:-} ]] || rm -f "$S/budget" ;;
   *get-function-configuration*) [[ -f $S/cw ]] || exit 254 ;;
   *"iam get-role"*) [[ $a == *-box* ]] && exit 254; [[ -f $S/cw ]] || exit 254 ;;
   *delete-function*) rm -f "$S/cw" ;;
@@ -86,7 +98,7 @@ chmod +x "$T/bin/aws"
 cgr() { # cgr <args...> - cg in the sandbox, its output, then rc=N
   ( cd "$T/repo" && env -i PATH="$T/bin:$PATH" HOME="$T/home" CG_COLOR=never CG_INR_PER_USD=88 CG_SLEEP_PCT=1 \
       CG_PRICES_FILE="$OLDPWD/tests/prices.env" S="$S" HERE="$HERE" OLD="$OLD" \
-      AWS_DOWN="${AWS_DOWN:-}" OLD_STUCK="${OLD_STUCK:-}" CG_JSON="${CG_JSON_MODE:-}" bash ./cg "$@" 2>&1; echo "rc=$?" )
+      AWS_DOWN="${AWS_DOWN:-}" OLD_STUCK="${OLD_STUCK:-}" BUDGET_STUCK="${BUDGET_STUCK:-}" CG_JSON="${CG_JSON_MODE:-}" bash ./cg "$@" 2>&1; echo "rc=$?" )
 }
 env_reset() { printf 'GAME_REGION=ap-south-2\nGAME_INSTANCE_ID=i-1\nGAME_RES=1920x1080\n' > "$T/repo/.env"; }
 region() { grep -c '^GAME_REGION=' "$T/repo/.env"; }
@@ -96,12 +108,13 @@ echo "1. the inventory: everything cg has there, read live"
 env_reset; seed
 j=$(cgr aws inventory --json)
 kinds=$(sed '$d' <<<"$j" | python3 -c 'import json,sys; print(" ".join(i["kind"] for i in json.load(sys.stdin)["items"]))')
-check    "machine, both regions' games, disks, images, watchdog, budget" "$kinds" "machine games games disks images watchdog budget"
+check    "machine, both regions' games, disks, images, watchdog, budget, settings" "$kinds" "machine games games disks images watchdog budget settings"
 contains "  the machine as it is"         "$j" '"detail": "g6.xlarge, running"'
-contains "  the games here, counted"      "$j" '"detail": "1 game, 1.0 GB"'
+contains "  the games here, counted, and the Steam login with them" "$j" '"detail": "1 game, 1.0 GB and the saved Steam login"'
+contains "  every region's settings in SSM" "$j" '"detail": "3 settings in SSM"'
 contains "  and those in another region"  "$j" '"detail": "1 game, 2.0 GB in ap-south-1"'
 contains "  a running machine bills by the hour" "$j" '"hourly": true'
-check    "  and it is only a look"        "$(there)" "budget cw here img machine old vol"
+check    "  and it is only a look"        "$(there)" "budget cw here img login machine marks old vol"
 contains "a laptop without AWS has nothing to show" "$(printf 'GAME_RES=x\n' > "$T/repo/.env"; CG_JSON_MODE= cgr aws inventory --json)" '"connected": false'
 
 echo "2. not confirmed: nothing deleted"
@@ -112,7 +125,7 @@ contains "  having said what goes"        "$out" "Saved games elsewhere"
 contains "  and what stays"               "$out" "region opt-ins and GPU quota stay"
 contains "anything else is a no"          "$out" "nothing was deleted"
 contains "  and fails"                    "$out" "rc=1"
-check    "  everything is still there"    "$(there)" "budget cw here img machine old vol"
+check    "  everything is still there"    "$(there)" "budget cw here img login machine marks old vol"
 check    "  and AWS still set up"         "$(region)" "1"
 
 echo "3. confirmed: nothing of cg's is left"
@@ -120,7 +133,7 @@ env_reset; seed; rm -f "$T/deleted.log"
 out=$(printf 'DELETE\n' | CG_JSON_MODE=1 cgr aws disconnect)
 contains "it ends well"                   "$out" "rc=0"
 contains "  saying nothing is left billing" "$out" "AWS disconnected - nothing of cg is left billing"
-check    "  and nothing is"               "$(there)" ""
+check    "  and nothing is: the login and every region's settings went too" "$(there)" ""
 contains "the other region's games went too" "$(cat "$T/deleted.log")" "$OLD"
 check    "the region leaves .env"         "$(region)" "0"
 check    "  and nothing else does"        "$(grep -c '^GAME_RES=1920x1080' "$T/repo/.env")" "1"
@@ -131,7 +144,7 @@ env_reset; seed
 out=$(printf 'DELETE\n' | AWS_DOWN=1 CG_JSON_MODE=1 cgr aws disconnect)
 contains "it says so"                     "$out" "AWS could not be asked what is there - nothing was deleted"
 contains "  with its own code"            "$out" "rc=3"
-check    "  and everything is still there" "$(there)" "budget cw here img machine old vol"
+check    "  and everything is still there" "$(there)" "budget cw here img login machine marks old vol"
 
 echo "5. something will not go: said, and AWS stays set up to see it"
 env_reset; seed
@@ -140,7 +153,14 @@ contains "it names what is still there"   "$out" "still there: Saved games elsew
 contains "  and fails"                    "$out" "rc=1"
 lacks    "  never claiming nothing is left" "$out" "nothing of cg is left billing"
 check    "  AWS stays set up, to see it"  "$(region)" "1"
-check    "  the rest went"                "$(there)" "old"
+check    "  the rest went, its settings too - only the stuck bucket stays" "$(there)" "old"
+
+echo "6. something free will not go: not done either - nothing of cg's is meant to stay"
+env_reset; seed
+out=$(printf 'DELETE\n' | BUDGET_STUCK=1 CG_JSON_MODE=1 cgr aws disconnect)
+contains "it names it"                    "$out" "still there: Budget alert"
+contains "  and fails"                    "$out" "rc=1"
+check    "  AWS stays set up"             "$(region)" "1"
 
 echo; echo "aws-disconnect: $pass passed, $fail failed"
 (( fail == 0 ))
