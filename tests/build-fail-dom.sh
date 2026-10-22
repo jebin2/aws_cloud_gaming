@@ -133,7 +133,7 @@ contains "the panel starts hidden"     "$(row BEFORE)" "hidden"
 echo "2. spot capacity, the one that keeps happening"
 contains "cg's headline is the headline" "$(row 'SPOT HEAD')" "no spare g6.xlarge at the spot price"
 # First, because it is the only fact that matters before reading anything else.
-contains "it leads with the reassurance" "$(row 'SPOT WHY')"  "Nothing was launched, and nothing is billing"
+contains "it leads with the reassurance" "$(row 'SPOT WHY')"  "Nothing was launched. No charges."
 contains "  then AWS's own words"        "$(row 'SPOT WHY')"  "Insufficient capacity"
 contains "  and the code, in brackets"   "$(row 'SPOT WHY')"  "(InsufficientInstanceCapacity)"
 # One answer, as a button. Full price, another location and another machine

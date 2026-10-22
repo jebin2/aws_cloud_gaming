@@ -166,17 +166,9 @@ up() {
 
   echo "disk:"; disks
 
-  local t0=$SECONDS
-  # Stream settings come from .env as launch flags rather than by rewriting
-  # Moonlight's config: the flags win for this session and leave whatever you
-  # set in the GUI untouched. A variable left unset passes no flag at all, so
-  # Moonlight's own saved setting remains the default.
-  local mlf=()
-  moonlight_flags mlf
-  (( ${#mlf[@]} )) && cg_echo "    stream: ${mlf[*]}" || true
-  moonlight stream ${mlf[@]+"${mlf[@]}"} "$ip" "$APP" || true
-  if _cg_styled; then _cg_line ok "session ended after $(_cg_dur $(( SECONDS - t0 )))"
-  else printf 'session ended after %dm\n' $(( (SECONDS - t0) / 60 )); fi
+  # The stream itself is every machine's (lib/session.sh); what is the AWS
+  # box's - starting it above, offering to delete it below - stays here.
+  stream_play "$ip" "$APP"
 
   end_session
 }

@@ -73,7 +73,9 @@ cat > "$T/r/probe.js" <<'PROBE'
       { key: 'GAME_BUDGET_INR', kind: 'number', secret: false, is_set: true, value: '5000', default: '5000',
         note: 'Monthly budget. It emails you; it stops nothing.', label: 'monthly budget (INR)', group: 'The guards' },
       { key: 'GAME_WATCHDOG_IDLE_MIN', kind: 'number', secret: false, is_set: true, value: idle, default: '30',
-        note: 'n', label: 'cloud watchdog idle (min)', group: 'The guards' }];
+        note: 'n', label: 'cloud watchdog idle (min)', group: 'The guards' },
+      // A laptop that plays on AWS: a region chosen is what makes it one.
+      { key: 'GAME_REGION', kind: 'region', secret: false, is_set: true, value: 'ap-south-2', default: 'ap-south-2', effective: 'ap-south-2', note: 'n', label: 'region', group: 'The box' }];
     window.__CFG = CFG;
     paintConfig([
       { key: 'GAME_BUDGET_INR', kind: 'number', secret: false, is_set: true, value: '5000', default: '5000',
@@ -84,6 +86,7 @@ cat > "$T/r/probe.js" <<'PROBE'
         note: 'n', label: 'phone notifications', group: 'Notifications' },
       { key: 'GAME_WATCHDOG_STUCK_MIN', kind: 'number', secret: false, is_set: false, value: null, default: '60',
         note: 'n', label: 'stuck shutdown forced after (min)', group: 'The guards' },
+      { key: 'GAME_REGION', kind: 'region', secret: false, is_set: true, value: 'ap-south-2', default: 'ap-south-2', effective: 'ap-south-2', note: 'n', label: 'region', group: 'The box' },
     ]);
     paintGuards(W('none', { armed: null, state: 'no box' },
                   { armed: true, state: 'armed', last_decision: 'nothing running - nothing to do', last_decision_age_s: 1500 }));
@@ -186,14 +189,14 @@ print(html.unescape(m.group(1)) if m else "NO PROBE OUTPUT")')
 row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
 echo "1. no machine: nothing to stop, and the nets say why they wait"
-contains "the headline says so"          "$(row 'IDLE HEAD')" "No machine is running · nothing to stop"
-contains "the last AWS check, aged"      "$(row 'IDLE SUB')"  'Last check 25m ago: nothing running.'
+contains "the headline says so"          "$(row 'IDLE HEAD')" "No machine running"
+contains "the last AWS check, aged"      "$(row 'IDLE SUB')"  'Last check 25m ago: idle.'
 contains "nothing to warn about"         "$(row 'IDLE WARN')" "hidden"
 contains "net 1 is the quit"             "$(row 'IDLE NET1')" "When you quit Closing Moonlight ends the session."
 contains "  always on"                   "$(row 'IDLE NET1')" "Always on"
-contains "net 2 waits for a machine"     "$(row 'IDLE NET2')" "Waits for a machine"
-contains "  with its own minutes"        "$(row 'IDLE NET2')" "15 min with nobody connected"
-contains "net 3 has the minutes as set"  "$(row 'IDLE NET3')" "45 min with no stream, or a shutdown stuck for 90 min"
+contains "net 2 waits for a machine"     "$(row 'IDLE NET2')" "Idle"
+contains "  with its own minutes"        "$(row 'IDLE NET2')" "Shuts down after 15 min with no connection"
+contains "net 3 has the minutes as set"  "$(row 'IDLE NET3')" "ends the machine after 45 min without a stream, or a shutdown stuck for 90 min"
 contains "  and it is on"                "$(row 'IDLE NET3')" "On"
 lacks    "  no 1 h left over"            "$(row 'IDLE NET3')" "1 h"
 
@@ -203,7 +206,7 @@ contains "a minute setting in minutes"   "$(row 'IDLE KNOBS')" "45 min"
 contains "  and an unset one says it is the default" "$(row 'IDLE KNOBS')" "60 min (default)"
 
 # The topic is shown, like every other row's value, and Edit opens on it.
-contains "phone notifications show the topic" "$(row 'IDLE KNOBS')" "Phone alerts Your ntfy topic. Leave empty to turn phone alerts off. my-topic-q7 Edit"
+contains "phone notifications show the topic" "$(row 'IDLE KNOBS')" "Phone alerts ntfy topic. Empty disables phone alerts. my-topic-q7 Edit"
 lacks    "  not 'set'"                   "$(row 'IDLE KNOBS')" "alerts off. Set"
 lacks    "  nor Replace"                 "$(row 'IDLE KNOBS')" "Replace"
 check    "  and Edit opens on it"        "$(row 'NTFY EDIT')" "NTFY EDIT | text my-topic-q7"
@@ -232,18 +235,18 @@ for w in tier armed ARMED '$' 'dies with' 'box' 'audit' 'archive line' 'shutdown
 done
 
 echo "4. a running machine with things wrong says each one, in red, on top"
-contains "a count, not all"              "$(row 'BAD HEAD')" "Machine running · 1 of 3 safety nets on"
-contains "the AWS check is off"          "$(row 'BAD WARN')" "Auto-stop in AWS is disabled"
+contains "a count, not all"              "$(row 'BAD HEAD')" "Machine running · 1 of 3 safeguards on"
+contains "the AWS check is off"          "$(row 'BAD WARN')" "AWS auto-stop is disabled"
 contains "the machine's check is off"    "$(row 'BAD WARN')" "The machine's own check is off"
-contains "the wrong shutdown"            "$(row 'BAD WARN')" "AWS is set to stop the machine when it shuts down; it should delete it."
-contains "no spending alert"             "$(row 'BAD WARN')" "No budget alert is set up in AWS"
+contains "the wrong shutdown"            "$(row 'BAD WARN')" "Shutdown behavior is "stop"; expected "delete"."
+contains "no spending alert"             "$(row 'BAD WARN')" "No budget alert set in AWS"
 contains "net 2 off"                     "$(row 'BAD NET2')" "Off"
 contains "net 3 off"                     "$(row 'BAD NET3')" "Off"
 
 echo "5. a running machine with everything on"
-contains "all of them"                   "$(row 'GOOD HEAD')" "Machine running · all 3 safety nets on"
+contains "all of them"                   "$(row 'GOOD HEAD')" "Machine running · all 3 safeguards on"
 contains "  no warnings"                 "$(row 'GOOD WARN')" "hidden"
-contains "a spot machine is deleted"     "$(row 'GOOD NET2')" "When it shuts down, the machine is deleted."
+contains "a spot machine is deleted"     "$(row 'GOOD NET2')" "Then deleted."
 
 echo "6. nothing threw"
 check "no painter threw"                 "$(grep -c '^THREW' <<<"$OUT")" "0"

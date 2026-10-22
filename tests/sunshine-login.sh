@@ -52,8 +52,9 @@ printf '%s %s' "$u" "$p" > "$T/box"
 FAKE
 chmod +x "$T/bin/fakessh"
 
-check "the AWS build uses it"          "$(grep -c 'sun_login_ensure "$IP" "$WELCOME" cg_env_set' lib/setup)" "1"
-check "  and no copy of its own"        "$(grep -c 'api/password' lib/setup)" "0"
+check "every build uses it (lib/build.sh)" "$(grep -c 'sun_login_ensure "$IP" "$WELCOME" "$BUILD_SAVE"' lib/build.sh)" "1"
+check "  the AWS build through that"     "$(grep -c '^build_finish ||' lib/setup)" "1"
+check "  and no copy of its own anywhere" "$(cat lib/setup lib/build.sh lib/host.sh | grep -c 'api/password')" "0"
 
 run() { # run <welcome> ; the box state in $T/box, the laptop's in $ENVF
   : > "$T/log"; : > "$T/order"; : > "$T/ssh"

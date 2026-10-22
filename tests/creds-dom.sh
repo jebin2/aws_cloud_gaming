@@ -77,7 +77,7 @@ cat > "$T/r/probe.js" <<'PROBE'
   });
   try {
     paintCreds({ cli: false, source: null, key_id: null, account: null, arn: null,
-                 valid: null, error: 'A required Amazon tool is not installed - cg check --fix installs it' });
+                 valid: null, error: 'The AWS CLI is not installed - cg check --fix installs it' });
     read('NOCLI');
     window.__ran = [];
     document.getElementById('creds-set').click();
@@ -305,7 +305,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     paintTskey({ present: false, valid: null, state: 'absent', detail: null,
                  signed_in: true, node: 'laptop', auth_key_stored: false, can_mint: false });
     paintCreds({ cli: false, source: null, key_id: null, account: null, arn: null,
-                 valid: null, error: 'A required Amazon tool is not installed' });
+                 valid: null, error: 'The AWS CLI is not installed' });
     paintStatus(status('no-cli'));
     // On a screen other than the dashboard, with the CLI gone and then the key
     // rejected: no strip appears above the page - setup checked these once.
@@ -350,8 +350,8 @@ print(html.unescape(m.group(1)) if m else "NO PROBE OUTPUT")')
 row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
 echo "1. no AWS CLI: the card says so, and offers the install"
-contains "the state names the CLI"      "$(row 'NOCLI STATE')" "A required Amazon tool is not installed"
-contains "  and that it is installed here" "$(row 'NOCLI DETAIL')" "Install it, then add your key here"
+contains "the state names the CLI"      "$(row 'NOCLI STATE')" "The AWS CLI is not installed"
+contains "  and that it is installed here" "$(row 'NOCLI DETAIL')" "Install it, then add your key."
 # Installed right here, through the same password dialog setup uses - there is
 # no Dependencies page to send anyone to any more. Drawing the card runs nothing.
 contains "the button installs it"      "$(row 'NOCLI BTN')"    "Install "
@@ -391,11 +391,11 @@ echo "4b. the key is one form, and it says what happened"
 # behind them - so a rejected key looked like nothing had happened at all.
 check    "the button opens a form"     "$(row 'FORM OPEN')"    "FORM OPEN | true"
 contains "  with both halves"          "$(row 'FORM FIELDS')"  "id=text secret=password"
-contains "an empty form says so"       "$(row 'EMPTY ERR')"    "Both are needed"
+contains "an empty form says so"       "$(row 'EMPTY ERR')"    "are both required"
 check    "  and runs nothing"          "$(row 'EMPTY RAN')"    "EMPTY RAN | "
 check    "  staying open"              "$(row 'EMPTY OPEN')"   "EMPTY OPEN | true"
 check    "submitting runs cg creds set" "$(row 'SUBMIT RAN')"  "SUBMIT RAN | creds set"
-contains "  the button shows it is working" "$(row 'SUBMIT BTN')" "Checking with Amazon"
+contains "  the button shows it is working" "$(row 'SUBMIT BTN')" "Checking with AWS"
 contains "  and cannot be pressed twice"    "$(row 'SUBMIT BTN')" "disabled=true"
 # cg still asks its two questions; the form answers them, so no second modal
 # appears on top of the one being looked at.
@@ -413,14 +413,14 @@ echo "4c. Tailscale is its own card, and fails in two ways"
 # Signed in with no token is normal; a token with no sign-in is useless. They
 # are separate facts and the card shows both.
 contains "no token says what is given up" "$(row 'TSNONE TS')" "No access token"
-contains "  while signed in is fine"      "$(row 'TSNONE TS')" "signed in as laptop"
+contains "  while signed in is fine"      "$(row 'TSNONE TS')" "Signed in as laptop"
 contains "  and the button offers to set" "$(row 'TSNONE TS')" "Add access token"
 contains "a rejected token says so"       "$(row 'TSBAD TS')"  "Access token was rejected"
 contains "  offering to replace it"       "$(row 'TSBAD TS')"  "Update access token"
 # Unreachable is not rejected: a new token is not the fix for a flat network.
-contains "unreachable is not rejected"    "$(row 'TSDOWN TS')" "did not answer"
+contains "unreachable is not rejected"    "$(row 'TSDOWN TS')" "Tailscale did not respond"
 lacks    "  and is not called rejected"   "$(row 'TSDOWN TS')" "rejected"
-contains "  signed out is said plainly"   "$(row 'TSDOWN TS')" "not signed in"
+contains "  signed out is said plainly"   "$(row 'TSDOWN TS')" "Not signed in"
 contains "a working token"                "$(row 'TSOK TS')"   "Access token is working"
 
 echo "4c2. the box's own key, which is not the token"
@@ -428,13 +428,13 @@ echo "4c2. the box's own key, which is not the token"
 # and the token must not travel in user-data where the auth key has to live. So
 # the card says where the box's key comes from, which is what decides whether a
 # build stops to ask for one.
-contains "no token: the build will ask"  "$(row 'TSNONE TS')"  "The next build will ask for one"
-contains "a token mints it"              "$(row 'TSOK TS')"    "made from your access token at the next build"
-contains "a stored key is checked"       "$(row 'TSKEPT TS')"  "Machine key saved"
+contains "no token: the build will ask"  "$(row 'TSNONE TS')"  "The next build asks for one"
+contains "a token mints it"              "$(row 'TSOK TS')"    "generated from the access token at the next build"
+contains "a stored key is checked"       "$(row 'TSKEPT TS')"  "Auth key saved"
 
 echo "4d. the token form, like the key form"
 contains "it opens, as a password field"  "$(row 'TSFORM OPEN')" "true type=password"
-contains "an empty one says so"           "$(row 'TSEMPTY')"     "Paste it first"
+contains "an empty one says so"           "$(row 'TSEMPTY')"     "Required."
 contains "  running nothing"              "$(row 'TSEMPTY')"     "ran="
 check    "submitting runs the set"        "$(row 'TSSUBMIT RAN')" "TSSUBMIT RAN | creds set tailscale"
 check    "  answering cg's question"      "$(row 'TSSUBMIT ANSWERS')" "TSSUBMIT ANSWERS | tskey-api-nope"
@@ -462,25 +462,25 @@ echo "4f. a sign-in that goes nowhere says so"
 # complaint is plain stderr, not a cg event, so the panel never showed it.
 contains "stderr reaches the panel"    "$(row 'SIGNIN DEAD')"    "No authentication agent found"
 lacks    "  with no stale starting line" "$(row 'SIGNIN DEAD')"  "starting -"
-contains "  the status says it failed" "$(row 'SIGNIN DEADSTATUS')" "Sign-in did not finish"
+contains "  the status says it failed" "$(row 'SIGNIN DEADSTATUS')" "Sign-in failed"
 contains "  offering another go"        "$(row 'SIGNIN DEADBUTTONS')" "retry=false"
 contains "  and a way out"              "$(row 'SIGNIN DEADBUTTONS')" "done=Close"
 # A write is refused outright while anything else runs - it is not queued - and
 # the only sign of that used to be a line in the header.
 # Named, not spelled: "cg init" is the command, "the build" is the thing that
 # is keeping you waiting - see CG_WORDS.
-contains "a refusal says what holds it" "$(row 'SIGNIN BUSY')"   "The build is still running"
-contains "  and the dialog says so too" "$(row 'SIGNIN BUSY')" "The build is still running"
+contains "a refusal says what holds it" "$(row 'SIGNIN BUSY')"   "Waiting for the build to finish"
+contains "  and the dialog says so too" "$(row 'SIGNIN BUSY')" "Waiting for the build to finish"
 lacks    "  without spelling the command" "$(row 'SIGNIN BUSY')" "cg init is still"
 
 echo "4g. the sign-in dialog, start to end"
 # `tailscale up` prints a link and then waits for a browser. That is a thing
 # happening, not a state to read, so it is in front of you while it happens.
 check    "the button opens a dialog"   "$(row 'SIGNIN DIALOG')"  "SIGNIN DIALOG | true"
-contains "  saying what comes first"   "$(row 'SIGNIN STATUS')"  "password prompt opens first"
+contains "  saying what comes first"   "$(row 'SIGNIN STATUS')"  "password prompt may open behind this window"
 contains "  warning it can be behind"  "$(row 'SIGNIN STATUS')"  "behind this window"
 contains "only Cancel while it runs"   "$(row 'SIGNIN BUTTONS')" "cancel=false done=true retry=true"
-contains "the wait is explained"       "$(row 'SIGNIN WAITING')" "Waiting for you to finish in your browser"
+contains "the wait is explained"       "$(row 'SIGNIN WAITING')" "Complete sign-in in your browser"
 contains "signed in says who"          "$(row 'SIGNIN OKSTATUS')" "signed in as laptop"
 contains "  Cancel goes away"          "$(row 'SIGNIN OKBUTTONS')" "cancel=true"
 contains "  Done appears"              "$(row 'SIGNIN OKBUTTONS')" "done=false label=Done"

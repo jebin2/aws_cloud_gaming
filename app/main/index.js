@@ -158,6 +158,11 @@ function createWindow() {
     },
   });
   win.once('ready-to-show', () => win.show());
+  // Or once the page has loaded, whichever is first: drawn in software, a
+  // window still hidden is never painted, so ready-to-show waited for the
+  // 5 s below every time. The window is the page's own colour, so showing it
+  // a frame before the paint shows nothing amiss.
+  win.webContents.once('did-finish-load', () => { if (win && !win.isDestroyed() && !win.isVisible()) win.show(); });
   // ready-to-show waits on the first paint. If the GPU stalls that paint
   // never comes and the app runs with no window and no error, so show it
   // anyway and say why.
@@ -177,6 +182,13 @@ function createWindow() {
     if (input.key === 'F12') { win.webContents.toggleDevTools(); e.preventDefault(); }
   });
 }
+
+// Drawn in software, always. A page of text and cards gains nothing from the
+// GPU, and the GPU is what kept the window from appearing: a VM's emulated card
+// (QEMU's, no 3D - "Exiting GPU process due to errors during initialization",
+// then a page that never painted) and, on a real laptop, an NVIDIA driver that
+// had hung. CG_GPU=1 puts the GPU back, for trying it.
+if (process.env.CG_GPU !== '1') app.disableHardwareAcceleration();
 
 // No File / Edit / View menu: this window runs cg and shows what it says.
 // Electron's default menu offers nothing here except ways to confuse.

@@ -148,7 +148,7 @@ contains "  and drafts the appeal"     "$app" "'quota', 'appeal'"
 # What matters here is that the pieces it needs exist at all.
 contains "  reads the state"           "$app" "quotaCmd('quota', '--json')"
 contains "  with the region in it"     "$app" "quotaWhere ? ['--region', quotaWhere"
-contains "  labels the appeal with when to use it" "$app" "If AWS refuses, reply to them with this"
+contains "  labels the appeal with when to use it" "$app" "If denied, reply with:"
 contains "  and reads back rather than believing the submit" "$app" "await quotaRead();"
 main=$(cat app/main/index.js)
 contains "the case link is allowed"    "$main" "console.aws.amazon.com"

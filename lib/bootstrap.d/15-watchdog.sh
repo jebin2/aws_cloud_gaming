@@ -9,6 +9,8 @@
 #
 # host/ stays the single source of truth - provision.sh uploads it to S3 and
 # this fetches it, rather than duplicating the scripts in this module.
+# The AWS box's idle shutdown. A machine of yours must never switch itself off.
+if aws_box; then
 progress "installing the idle watchdog"
 mkdir -p /opt/cloud-gaming-host
 # Fetched from S3 with a presigned URL rather than carried inline as base64:
@@ -33,3 +35,4 @@ fi
 
 verify "idle watchdog armed" systemctl is-enabled idle-watchdog.timer
 verify "disk monitor armed" systemctl is-enabled disk-monitor.timer
+fi

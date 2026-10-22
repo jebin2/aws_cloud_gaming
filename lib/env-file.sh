@@ -109,6 +109,15 @@ cg_env_load() { # cg_env_load [key-prefix]
   done < "$f"
 }
 
+# Take one key out, keeping every other line and the file's mode.
+cg_env_unset() { # cg_env_unset <KEY>
+  local f tmp
+  f=$(cg_env_ensure) || return 1
+  tmp=$(mktemp) || return 1
+  grep -v "^$1=" "$f" 2>/dev/null > "$tmp" || true
+  cat "$tmp" > "$f" && rm -f "$tmp" && chmod 600 "$f"
+}
+
 # Replace one key in place, keeping every other line and the file's mode.
 # Every writer used to open-code this against a relative path.
 cg_env_set() { # cg_env_set <KEY> <value>

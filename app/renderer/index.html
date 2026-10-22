@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="tailwind.css">
 </head>
-<body class="setup bg-surface font-body-md text-body-md text-on-surface min-h-screen">
+<body class="bg-surface font-body-md text-body-md text-on-surface min-h-screen">
 
 <header class="fixed top-0 left-0 right-0 h-12 z-50 bg-surface-container-lowest flex items-center justify-between px-margin select-none border-b border-surface-variant">
   <div class="flex items-center gap-space-sm">
@@ -53,56 +53,47 @@
 
   <!-- Dashboard -->
   <section data-view="dashboard">
-    <!-- The first-run pipeline. One stage at a time, in the order they have to be
-         met, with the stage that is active carrying the only button on screen and
-         the pane beside it carrying cg's own output.
-
-         This is the dashboard, not a screen of its own and not a dialog: on a
-         laptop that is not ready there is nothing else worth showing, and on one
-         that is, it collapses to the single line below and the cards take over.
-         What used to be here instead: a banner naming one problem at a time, and
-         a popup that had to be shoved into a corner to stop it blocking a window
-         you could not use yet. -->
-    <div id="onb" class="onb">
-      <!-- The whole window while setup runs: no sidebar, no header, one column.
-           A person who has never used AWS sees this and nothing else until the
-           rig works, so every word in it is written for them. -->
-      <div class="onb-col" id="onb-col">
-        <div class="flex items-center gap-space-sm mb-space-xl">
-          <span class="material-symbols-outlined text-primary text-[44px]" data-icon="sports_esports">&#xea28;</span>
-          <span class="font-headline-lg text-headline-lg font-semibold tracking-tight">Cloud Gaming</span>
-          <span class="ml-auto font-code-sm text-code-sm text-outline" id="onb-count"></span>
-        </div>
-        <div id="onb-head" hidden>
-          <div class="flex items-baseline justify-between gap-space-md mb-space-xs">
-            <span class="font-headline-lg text-headline-lg" id="onb-title">Let&rsquo;s get your games machine ready</span>
+    <!-- Home: your machines, a card each, and adding another. There is no setup
+         screen in front of it any more: setting a machine up is adding it
+         (the add dialog), and a machine that needs something says so on its
+         own card rather than locking the whole window. -->
+    <div id="d-main">
+      <!-- No machines yet: the one question worth asking. -->
+      <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop" id="d-welcome" hidden>
+        <p class="font-headline-lg text-headline-lg">Add a machine</p>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mt-space-lg">
+          <div class="p-space-lg rounded-lg bg-surface-container flex flex-col">
+            <span class="font-headline-md text-headline-md">AWS</span>
+            <p class="font-body-md text-body-md text-on-surface-variant mt-space-xs">A GPU instance billed by the hour. Requires an AWS account.</p>
+            <div class="mt-auto pt-space-md"><button class="btn btn-primary" data-add="aws">Choose</button></div>
           </div>
-          <p class="font-body-md text-body-md text-on-surface-variant mb-space-xl" id="onb-sub">
-            A few one-time steps. None of them cost anything.
-          </p>
+          <div class="p-space-lg rounded-lg bg-surface-container flex flex-col">
+            <span class="font-headline-md text-headline-md">Your own server</span>
+            <p class="font-body-md text-body-md text-on-surface-variant mt-space-xs">A Linux machine you own, connected over SSH.</p>
+            <div class="mt-auto pt-space-md"><button class="btn btn-primary" data-add="host">Choose</button></div>
+          </div>
         </div>
-        <div class="flex flex-col" id="onb-steps"></div>
       </div>
-      <!-- Each step's own log lives here between paints. The steps are redrawn
-           whenever a read lands; the logs are not, so a half-read install
-           keeps its lines, its count and where you had scrolled to. -->
-      <div id="onb-logs" hidden></div>
-    </div>
-    <!-- The dashboard proper. Hidden until the pipeline above has handed over:
-         a box, an archive and a bill are not worth showing to someone who
-         cannot build one yet, and they were sitting underneath the setup
-         flow saying "No box" as though that were the news. -->
-    <div id="d-main" hidden>
+
       <!-- The dashboard answers three questions, in order: can I play, what is
            it costing, and are my games and my money safe. Every word in it is
            drawn by paintDash() from what cg has already said. -->
 
-      <!-- The machine: one status, one line about it, and the next action. -->
-      <div class="p-space-lg rounded-lg bg-surface-container-low mb-gutter-desktop" id="d-hero">
-        <!-- Filled by mountMachineCard: the same card as the Machine page's. -->
+      <!-- The machines: the AWS one (mountMachineCard - the same card as the
+           Machine page's), each of yours (paintHostCards), and adding another. -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mb-gutter-desktop" id="d-machines" hidden>
+        <div class="p-space-lg rounded-lg bg-surface-container-low" id="d-hero"></div>
+        <div class="contents" id="d-hosts"></div>
+        <div class="p-space-lg rounded-lg border border-dashed border-surface-variant flex flex-col" id="d-addcard">
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Add a machine</span>
+          <div class="flex flex-wrap gap-space-sm mt-auto pt-space-md">
+            <button class="btn" data-add="aws" id="d-add-aws">AWS</button>
+            <button class="btn" data-add="host">Your own server</button>
+          </div>
+        </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mb-gutter-desktop">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mb-gutter-desktop" id="d-money">
         <!-- The same two cards as Spending's, from the same last bill check, so
              the pages cannot disagree. -->
         <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
@@ -127,21 +118,21 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter-desktop">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter-desktop" id="d-cards">
         <!-- The games: the only copy is in the archive, so how long it is kept
              is the news, not the bucket name. -->
-        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Your games</span>
+        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col" id="d-games-card">
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Games</span>
           <div class="flex flex-col gap-0.5 mt-space-md font-body-md text-body-md" id="d-games"></div>
           <div class="mt-auto pt-space-md">
-            <button id="d-library" class="btn">Manage games</button>
+            <button id="d-library" class="btn">Manage</button>
           </div>
         </div>
 
         <!-- The private network the machine is reached over: this laptop, the
              machine, and - while it is up - whether the path between them is
              direct or relayed, which is what decides how a stream feels. -->
-        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
+        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col" id="d-net-card">
           <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Private network</span>
           <div class="flex flex-col gap-space-sm mt-space-md" id="d-ts"></div>
           <div class="mt-auto pt-space-md">
@@ -150,7 +141,7 @@
         </div>
 
         <!-- What stops a forgotten machine, and what warns about the bill. -->
-        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
+        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col" id="d-protect-card">
           <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Safety</span>
           <div class="flex flex-col gap-space-sm mt-space-md" id="d-protect"></div>
           <div class="mt-auto pt-space-md">
@@ -168,10 +159,13 @@
          build: the same vertical steps as setup, in plain words, with the bill
          in the heading from the moment the machine is rented. -->
 
+    <!-- One machine: the AWS one (b-aws), or one of yours (b-own) - whichever
+         card on Home was opened. -->
+    <div id="b-aws">
     <!-- Mode B: a run - a build, a delete, a session - as steps. -->
     <div class="p-space-lg rounded-lg bg-surface-container-low fit-view" id="b-strip" hidden>
       <div class="flex items-baseline justify-between gap-space-md">
-        <p class="font-headline-md text-headline-md" id="b-strip-title">Building your machine</p>
+        <p class="font-headline-md text-headline-md" id="b-strip-title">Building</p>
         <span class="font-code-sm text-code-sm text-outline shrink-0" id="b-strip-meta"></span>
       </div>
       <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-run-sum"></p>
@@ -237,7 +231,7 @@
         </table>
         <div class="mt-space-md" id="b-alloc">
           <div class="flex items-center justify-between font-code-sm text-code-sm">
-            <span id="b-fit" class="text-outline">Space on the machine</span>
+            <span id="b-fit" class="text-outline">Disk space</span>
             <span id="b-fit-pct" class="text-on-surface-variant"></span>
           </div>
           <div class="h-1.5 rounded-full bg-surface-container mt-space-xs overflow-hidden">
@@ -258,7 +252,28 @@
         <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-login-note"></p>
       </div>
 
+      <!-- Stopping using AWS from this laptop: cg aws forget, which refuses
+           while a machine or saved games are still there. -->
+      <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-wrap items-center justify-between gap-space-md">
+        <div class="min-w-0">
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">AWS account</span>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5">Disconnecting deletes nothing in AWS. Your access key is kept.</p>
+        </div>
+        <button class="btn btn-danger shrink-0" id="b-aws-remove">Disconnect</button>
+      </div>
+
     </div>
+    </div>
+
+    <!-- One of your machines: everything cg read about it, its log, and what
+         can be done to it. -->
+    <div class="fit-view flex flex-col gap-space-md" id="b-own" hidden>
+      <div><button class="btn" id="b-own-back">&larr; Home</button></div>
+      <div class="flex flex-col gap-space-md" id="b-hosts"></div>
+    </div>
+    <!-- Each machine's setup log lives here between paints, as the first-run
+         steps' logs do: the cards are redrawn, the logs are not. -->
+    <div id="h-logs" hidden></div>
   </section>
 
   <!-- Library -->
@@ -335,8 +350,8 @@
       </div>
 
       <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Three safety nets</span>
-        <p class="font-code-sm text-code-sm text-outline mt-0.5">In the order they act. Each one still works when the one before it cannot.</p>
+        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Safeguards</span>
+        <p class="font-code-sm text-code-sm text-outline mt-0.5">Applied in order. Each works if the one before it fails.</p>
         <div class="flex flex-col mt-space-sm" id="g-nets"></div>
       </div>
 
@@ -389,7 +404,7 @@
           <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm" id="c-egress-note">
             Streaming is free up to AWS's monthly allowance; the bill says how much is left.
           </p>
-          <button class="font-code-sm text-code-sm text-primary hover:underline text-left mt-space-xs" id="c-egress-settings">Change quality in Settings &rarr;</button>
+          <button class="font-code-sm text-code-sm text-primary hover:underline text-left mt-space-xs" id="c-egress-settings">Stream quality &rarr;</button>
         </div>
       </div>
       <div class="p-space-lg rounded-lg bg-surface-container-low">
@@ -409,7 +424,7 @@
                 <th class="py-space-xs pl-space-md font-normal text-right">Total</th>
               </tr>
             </thead>
-            <tbody id="c-rows"><tr><td class="py-space-sm text-outline" colspan="6">Nothing loaded yet. Press Refresh to load this month&rsquo;s bill.</td></tr></tbody>
+            <tbody id="c-rows"><tr><td class="py-space-sm text-outline" colspan="6">No data. Refresh to load this month&rsquo;s bill.</td></tr></tbody>
             <tfoot id="c-foot" class="border-t border-surface-variant"></tfoot>
           </table>
         </div>
@@ -428,7 +443,7 @@
     <div class="p-space-lg rounded-lg bg-surface-container-low mt-space-md" id="s-creds-card">
       <div class="flex items-start justify-between gap-space-md">
         <div class="min-w-0 flex-1">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Amazon account</span>
+          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">AWS account</span>
           <p class="font-code-sm text-code-sm text-outline mt-0.5">
             The key this app uses to start and stop your machine. Kept on this laptop only.
           </p>
@@ -463,7 +478,7 @@
           </button>
           <!-- The box's own key, for a tailnet that will not let the token make
                one. Hidden when the token can. -->
-          <button id="tskey-authkey" class="btn" hidden>Add machine key</button>
+          <button id="tskey-authkey" class="btn" hidden>Add auth key</button>
         </div>
       </div>
     </div>
@@ -515,7 +530,7 @@
             <span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span><span id="log-cloud-label">Load</span>
           </button>
         </div>
-        <pre class="font-code-sm text-code-sm whitespace-pre-wrap flex-1 min-h-[200px] max-h-[62vh] overflow-auto rounded bg-surface-container-lowest p-space-md" id="log-cloud-out">Not loaded yet. The auto-stop checks every 5 minutes.</pre>
+        <pre class="font-code-sm text-code-sm whitespace-pre-wrap flex-1 min-h-[200px] max-h-[62vh] overflow-auto rounded bg-surface-container-lowest p-space-md" id="log-cloud-out">Not loaded. Auto-stop runs every 5 minutes.</pre>
       </div>
     </div>
   </section>
@@ -552,6 +567,20 @@
   </form>
 </dialog>
 
+<!-- A password, asked in passing: small, one field, and gone once answered. -->
+<dialog id="pwdlg" class="dlg w-[24rem] max-w-[calc(100vw-2rem)]">
+  <form method="dialog">
+    <p class="dlg-title" id="pwdlg-title">Password</p>
+    <p class="dlg-sub" id="pwdlg-sub"></p>
+    <input id="pwdlg-input" type="password" autocomplete="off" spellcheck="false"
+           class="mt-space-md w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
+    <menu class="dlg-actions">
+      <button value="no" class="btn" id="pwdlg-no">Cancel</button>
+      <button value="yes" class="btn btn-primary" id="pwdlg-yes" disabled>Continue</button>
+    </menu>
+  </form>
+</dialog>
+
 <dialog id="ask" class="dlg min-w-[420px]">
   <form method="dialog">
     <p class="dlg-title mb-space-md" id="ask-prompt"></p>
@@ -572,10 +601,10 @@
      it is believed. It used to be two separate prompts with the failure landing
      in the log pane behind them. -->
 <dialog id="awskey" class="dlg min-w-[460px] max-w-[560px]">
-  <p class="dlg-title">Connect your Amazon account</p>
+  <p class="dlg-title">Connect AWS</p>
   <p class="dlg-sub mb-space-md">
-    On the Amazon website: your name &rarr; Security credentials &rarr; Create access key.
-    It&rsquo;s checked with Amazon before it&rsquo;s saved, and kept on this laptop only.
+    In the AWS console: your name &rarr; Security credentials &rarr; Create access key.
+    It&rsquo;s checked with AWS before it&rsquo;s saved, and kept on this laptop only.
   </p>
   <label class="font-code-sm text-code-sm text-outline" for="awskey-id">Access key ID</label>
   <input id="awskey-id" autocomplete="off" spellcheck="false" placeholder="AKIA…"
@@ -594,6 +623,25 @@
      runs in front of you, it can be cancelled, and it ends one of two ways.
      Used by the Tailscale sign-in (which prints a link and then WAITS for a
      browser) and by installing a missing tool (which asks polkit first). -->
+<!-- Adding a machine: the steps it needs, in order, each ticking as its check
+comes back - for AWS the laptop, the AWS account and where it runs; for a
+server of yours the laptop, the server and setting it up. The laptop's steps
+come first and are asked only once: on a later add they arrive ticked.
+The ids are the old first-run screen's, whose steps these are. -->
+<dialog id="adddlg" class="dlg w-[640px] max-w-[92vw]">
+  <div class="flex items-baseline justify-between gap-space-md mb-space-lg">
+    <p class="dlg-title" id="onb-title">Add a machine</p>
+    <span class="font-code-sm text-code-sm text-outline" id="onb-count"></span>
+  </div>
+  <div class="flex flex-col max-h-[70vh] overflow-y-auto" id="onb-steps"></div>
+  <!-- Each step's own log lives here between paints. -->
+  <div id="onb-logs" hidden></div>
+  <menu class="dlg-actions">
+    <button class="btn" id="adddlg-close">Close</button>
+  </menu>
+</dialog>
+
+
 <dialog id="rundlg" class="dlg min-w-[520px] max-w-[46rem]">
   <p class="dlg-title" id="rundlg-title">Working</p>
   <p class="dlg-sub mb-space-md" id="rundlg-status">Starting…</p>
@@ -607,6 +655,7 @@
          nothing. -->
     <button class="btn" id="rundlg-cancel">Cancel</button>
     <button class="btn" id="rundlg-retry" hidden>Try again</button>
+    <button class="btn btn-primary" id="rundlg-go" hidden>Continue</button>
     <button class="btn btn-primary" id="rundlg-done" hidden>Done</button>
   </menu>
 </dialog>
@@ -616,7 +665,7 @@
      looks the same whether this window made it or found it. -->
 <dialog id="quota" class="dlg min-w-[600px] max-w-[54rem]">
   <div class="flex items-baseline justify-between gap-space-md">
-    <p class="dlg-title" id="quota-title">Ask AWS for a higher GPU limit</p>
+    <p class="dlg-title" id="quota-title">Request a GPU quota increase</p>
     <p class="font-code-sm text-code-sm text-outline" id="quota-region"></p>
   </div>
 
@@ -633,8 +682,8 @@
     <select id="quota-kind"
             class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-md text-code-md text-on-surface">
       <option value="">Pick one…</option>
-      <option value="ondemand">Standard machines</option>
-      <option value="spot">Spot machines (cheaper)</option>
+      <option value="ondemand">On-demand</option>
+      <option value="spot">Spot</option>
     </select>
   </div>
 
@@ -647,7 +696,7 @@
     <button class="btn" id="quota-case">
       <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the case
     </button>
-    <button class="btn" id="quota-copy">Copy the reply</button>
+    <button class="btn" id="quota-copy">Copy reply</button>
     <span class="font-code-sm text-code-sm text-outline break-all" id="quota-case-url"></span>
   </div>
 
@@ -657,7 +706,7 @@
   <menu class="dlg-actions">
     <button class="btn" id="quota-cancel">Close</button>
     <button class="btn" id="quota-refresh" hidden>Refresh</button>
-    <button class="btn btn-primary" id="quota-go" disabled>Send the request</button>
+    <button class="btn btn-primary" id="quota-go" disabled>Submit request</button>
   </menu>
 </dialog>
 
@@ -673,7 +722,7 @@
     <div id="s-machine-card">
       <div class="flex flex-wrap items-baseline justify-between gap-space-md pb-space-md">
         <div>
-          <p class="dlg-title">Choose a machine</p>
+          <p class="dlg-title">Machine type</p>
           <!-- One table, not three dropdowns. Region, instance type and purchase
                model are not three decisions - they are one, and the whole point
                is comparing the combinations. Picking a PRICE picks all three. -->
@@ -697,7 +746,7 @@
 </dialog>
 
 <dialog id="whereto" class="dlg min-w-[560px] max-w-[48rem]">
-  <p class="dlg-title">Where should it run?</p>
+  <p class="dlg-title">Region</p>
   <p class="dlg-sub mb-space-md" id="whereto-sub">
     Measured from this laptop.
   </p>
@@ -719,12 +768,12 @@
   <menu class="dlg-actions">
     <button class="btn" id="whereto-measure">Measure again</button>
     <button class="btn" id="whereto-cancel">Cancel</button>
-    <button class="btn btn-primary" id="whereto-use">Use it</button>
+    <button class="btn btn-primary" id="whereto-use">Select</button>
   </menu>
 </dialog>
 
 <dialog id="optin" class="dlg min-w-[600px] max-w-[54rem]">
-  <p class="dlg-title">Switch on a location</p>
+  <p class="dlg-title">Enable a region</p>
   <p class="dlg-sub mb-space-md">
     Some AWS locations must be switched on for your account before they can be used.
     It&rsquo;s free and creates nothing.
@@ -745,7 +794,7 @@
   <menu class="dlg-actions">
     <button class="btn" id="optin-cancel">Close</button>
     <button class="btn" id="optin-refresh" hidden>Refresh</button>
-    <button class="btn btn-primary" id="optin-go" disabled>Switch it on</button>
+    <button class="btn btn-primary" id="optin-go" disabled>Enable</button>
   </menu>
 </dialog>
 

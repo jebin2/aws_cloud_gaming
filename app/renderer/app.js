@@ -33,7 +33,7 @@ const byCommand = (table, cmd) => {
 const RUN_NAME = {
   init: 'the build', destroy: 'deleting', open: 'the session', check: 'the check',
   status: 'the refresh', watcher: 'the refresh', 'library list': 'the refresh',
-  cost: 'loading the bill',
+  cost: 'loading the bill', 'host list': 'the refresh', 'host status': 'the refresh',
   'library push': 'the games change', 'library pull': 'the games change',
   'library clean': 'the games change', 'library forget': 'the games change',
   'library move': 'the games change', 'library reset': 'the games change',
@@ -50,7 +50,7 @@ const runName = cmd => byCommand(RUN_NAME, cmd) || cmd[0];
 //         "the build is still running", "the mirror to S3 finished".
 const CG_WORDS = {
   deps: { name: 'the tool check' },
-  creds: { name: 'the Amazon key check' },
+  creds: { name: 'the AWS key check' },
   'creds tailscale': { name: 'the Tailscale check' },
   config: { name: 'reading your settings' },
   status: { name: 'the machine check' },
@@ -77,13 +77,19 @@ const CG_WORDS = {
   'library reset':           { name: 'keeping a game' },
   'library keep-for':        { name: 'changing how long games are kept' },
   'library account':         { name: 'changing the Steam login' },
-  'creds set':               { name: 'saving your Amazon key' },
+  'creds set':               { name: 'saving your AWS key' },
   // Longer than 'creds set', which is the AWS key: without this, saving a
   // Tailscale token was announced as saving an AWS one.
   'creds set tailscale':     { name: 'saving the Tailscale token' },
   'creds tailscale signin':  { name: 'signing in to Tailscale' },
-  'creds tailscale authkey': { name: 'saving the machine key' },
+  'creds tailscale authkey': { name: 'saving the auth key' },
   'deps install':            { name: 'installing tools' },
+  'host list':               { name: 'reading your machines' },
+  'host status':             { name: 'checking your machine' },
+  'host add':                { name: 'adding a machine' },
+  'host remove':             { name: 'removing a machine' },
+  'host setup':              { name: 'setting up your machine' },
+  'host open':               { name: 'the game session on your machine' },
 };
 const cgWords = cmd => byCommand(CG_WORDS, cmd) || {};
 // Falls back to the command itself: a name nobody wrote down is better said in
@@ -109,6 +115,22 @@ const jobsHere = () => [...jobs.values()].filter(j => j.view === view);
 const writing = () => [...jobs.values()].some(j => j.write);
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
+// Setting up or streaming from a machine of yours: minutes to hours, and
+// nothing to do with AWS, so they are not reads to cancel or wait out. They
+// have their own Stop, on the machine's card.
+const hostRun = j => j.cmd[0] === 'host' && (j.cmd[1] === 'setup' || j.cmd[1] === 'open');
+// Woken each time a job ends - see readsSettled.
+const jobEnded = [];
+// Until the reads in flight have landed. A step's own command runs alone (cg
+// --contract), so it is refused while anything else runs - and a step's button
+// is offered the moment its own read lands, with the rest still landing: the
+// Tailscale sign-in after an install was refused that way, every time, by the
+// reads the install had set off. Waits on the jobs ending, never on a timer.
+// A machine of yours setting up or streaming is not waited for: it can take
+// hours, and the refusal then says so.
+async function readsSettled() {
+  while ([...jobs.values()].some(j => !hostRun(j))) await new Promise(r => jobEnded.push(r));
+}
 
 // A read that failed, keyed by the read, so a later success for the same read
 // clears it. The screens show their own unknowns; this is what the pipeline
@@ -143,7 +165,7 @@ function updateHeader() {
 
   // Cost has a Refresh like every screen, but it carries its price: one Cost
   // Explorer call, $0.01. It is never fetched automatically - only this click.
-  $('refresh').hidden = (!NEEDS[view] && view !== 'cost') || !!mine.length;
+  $('refresh').hidden = (!NEEDS[view] && view !== 'cost') || mine.some(j => !hostRun(j));
   $('refresh').disabled = busy;                    // only a build or destroy blocks a read
   $('refresh-cost').hidden = view !== 'cost' || !$('refresh-cost').textContent;
   if ($('refresh-age')) $('refresh-age').hidden = view !== 'cost' || !costNowAt;
@@ -323,13 +345,17 @@ const ASK = {
   tsToken:    'tailscale-api-token',
   tsAuthKey:  'tailscale-auth-key',
   sessionEnd: 'session-end',
+  hostSudo:   'host-sudo',
+  hostSshPw:  'host-ssh-password',
 };
 const ASK_QUESTION = {
-  [ASK.sessionEnd]: 'The game session ended. What should happen to the machine?',
+  [ASK.sessionEnd]: 'Session ended. What should happen to the machine?',
+  [ASK.hostSudo]: 'Sudo password for this machine. Used once for setup. Not stored.',
+  [ASK.hostSshPw]: 'SSH password. Used once to install a key. Not stored.',
 };
 const ASK_CHOICE_LABEL = {
-  [`${ASK.sessionEnd}:d`]: 'Delete the machine (recommended - your games are saved first)',
-  [`${ASK.sessionEnd}:n`]: 'Keep it running (it keeps costing by the hour)',
+  [`${ASK.sessionEnd}:d`]: 'Delete it (recommended; games are saved first)',
+  [`${ASK.sessionEnd}:n`]: 'Keep it running (billed hourly)',
 };
 // Any id the window pre-answers but cg no longer asks under is a modal waiting
 // to appear in the middle of a build - which is exactly what this replaced.
@@ -341,8 +367,8 @@ async function checkAsks() {
   if (gone.length) {
     console.error('This app and its scripts are different versions. The scripts no longer ask: ' + gone.join(', ')
                   + ' - the app cannot answer it.');
-    note(`The app expected to be asked for ${gone.join(', ')}, and was not. `
-         + 'Update the app and its scripts to the same version.', 'text-error');
+    note(`Version mismatch: the scripts no longer ask for ${gone.join(', ')}. `
+         + 'Update the app and the scripts together.', 'text-error');
   }
 }
 
@@ -506,9 +532,9 @@ function machineFacts() {
   return { s, box, cur, rows, hit, region, type, spot, price, priceMax, priceText, room,
            what: [type, gpu ? gpuName(gpu, vram) : null, room].filter(Boolean).join(' · ') || '—',
            where: [region ? placeName(region) : null,
-                   box || cfgVal('GAME_SPOT') === '1' ? (spot ? 'Spot' : 'Standard')
-                     : cfgVal('GAME_SPOT') === '0' ? 'Standard' : 'Spot when available',
-                   priceText ? `${priceText} an hour while it runs` : null].filter(Boolean).join(' · ') };
+                   box || cfgVal('GAME_SPOT') === '1' ? (spot ? 'Spot' : 'On-demand')
+                     : cfgVal('GAME_SPOT') === '0' ? 'On-demand' : 'Spot, else on-demand',
+                   priceText ? `${priceText}/hour` : null].filter(Boolean).join(' · ') };
 }
 
 function renderMachineCard(card) {
@@ -524,20 +550,20 @@ function renderMachineCard(card) {
   let title, sub = '', note = '';
   if (credErr) {
     title = 'Status unknown';
-    sub = 'AWS could not be reached, so nothing below is known.';
+    sub = 'AWS is unreachable.';
   } else if (building) {
-    title = 'Building your machine';
+    title = 'Building';
     // How long the last build took, as cg measured it; no number until one has.
     const took = (s.build || {}).last_min;
-    const last = took != null ? `the last one took ${took} min` : '';
+    const last = took != null ? `last build took ${took} min` : '';
     sub = box && box.launched ? [`Started ${uptime(box.launched)} ago`, last].filter(Boolean).join(' · ')
                               : (last ? last[0].toUpperCase() + last.slice(1) : 'Starting');
   } else if (running) {
     title = sessionNow ? 'Playing' : 'Ready to play';
     sub = `Up ${uptime(box.launched)} · ${rs(price != null ? price * upHours : null)} so far`;
-    note = sessionNow ? 'Closing Moonlight asks whether to keep the machine or delete it.'
-                      : idleAfter ? `Stops by itself after ${idleAfter} with nobody playing.`
-                                  : 'Stops by itself when nobody is playing.';
+    note = sessionNow ? 'Closing Moonlight prompts to keep or delete the machine.'
+                      : idleAfter ? `Auto-stops after ${idleAfter} idle.`
+                                  : 'Auto-stops when idle.';
   } else if (box) {
     title = `Machine ${box.state}`;
     sub = box.state === 'pending' ? 'Starting.' : box.state === 'stopping' || box.state === 'shutting-down'
@@ -548,16 +574,15 @@ function renderMachineCard(card) {
   // What stands in the way of the choice, said where the choice is shown.
   const warn = [];
   if (box && (cur.type !== f.type || cur.region !== f.region))
-    warn.push('Your change applies to the next machine you build.');
+    warn.push('Changes apply to the next build.');
   else if (!box && hit && cur.spot && hit.score != null && hit.score <= 2)
-    warn.push(`AWS rates spare ${cur.type} machines here ${hit.score}/10, so a spot start will `
-            + 'likely be refused');
+    warn.push(`Low spot capacity for ${cur.type} here (${hit.score}/10). A spot launch will likely fail.`);
   else if (!box && hit && cur.spot && hit.fitsSpot === false)
-    warn.push('Your spot limit here is 0, so this cannot start on spot');
+    warn.push('Spot quota here is 0.');
   else if (!box && !hit && rows.length)
-    warn.push('This machine is not offered here. Change the machine before building.');
+    warn.push('This machine type is not offered in this region.');
   if (sessionNow && !running)
-    warn.push('A game session is already open on this laptop. Switch to that Moonlight window; only one can be open.');
+    warn.push('A session is already open in Moonlight. Only one can run at a time.');
 
   card.textContent = '';
   const top = el('div', 'flex items-start justify-between gap-space-md');
@@ -609,6 +634,7 @@ function mountMachineCard(box, p) {
     row.append(b);
     return b;
   };
+  btn('fix', 'btn btn-primary', null, null, 'Finish setting up').hidden = true;
   btn('build', 'btn btn-primary', 'rocket_launch', '\ueb9b', 'Build machine');
   btn('open', 'btn btn-primary', 'stadia_controller', '\uf135', 'Play').hidden = true;
   btn('watch', 'btn', null, null, 'Watch the build').hidden = true;
@@ -617,10 +643,39 @@ function mountMachineCard(box, p) {
 }
 
 function paintMachineCards() {
+  // AWS added but something it needs is missing - a key AWS rejects, a tool
+  // gone: the card says what, with the button that reopens its steps. Never
+  // over a machine that is there or being built: that one is shown as itself,
+  // whatever the next build would need.
+  const there = statusNow && statusNow.box && statusNow.box.state !== 'terminated';
+  const stuck = awsAdded() && !there && !jobsFor('init') ? prereqs('aws').find(r => r.ok === false) : null;
   for (const p of ['d', 'b']) {
     if (!$(`${p}-build`)) continue;
+    $(`${p}-fix`).hidden = !stuck;
+    if (stuck) {
+      const card = $(`${p}-machine-card`);
+      card.textContent = '';
+      const t = el('p', 'font-headline-lg text-headline-lg', 'AWS needs you'); t.dataset.f = 'title';
+      card.append(t, el('p', 'font-body-md text-body-md text-on-surface-variant mt-space-xs', stuck.problem.title));
+      for (const b of ['build', 'open', 'watch', 'destroy']) $(`${p}-${b}`).hidden = true;
+      $(`${p}-busy`).hidden = true;
+      continue;
+    }
     const { box, s } = renderMachineCard($(`${p}-machine-card`)) || {};
-    if (!s) continue;
+    if (!s) {
+      const card = $(`${p}-machine-card`);
+      if (card.dataset.state !== 'loading') {
+        card.textContent = '';
+        card.dataset.state = 'loading';
+        card.append(el('p', 'font-body-sm text-body-sm font-medium text-on-surface-variant', 'AWS'),
+                    el('span', 'skel mt-space-xs h-9 w-48'), el('span', 'skel mt-space-sm h-4 w-72'));
+      }
+      for (const b of ['build', 'open', 'watch', 'destroy']) $(`${p}-${b}`).hidden = true;
+      $(`${p}-busy`).hidden = false;
+      continue;
+    }
+    const card = $(`${p}-machine-card`);
+    if (card.dataset.state === 'loading') { delete card.dataset.state; card.classList.add('card-in'); }
     const building = jobsFor('init') || unfinished(box);
     const running = !!(box && box.state === 'running');
     $(`${p}-busy`).hidden = !building;
@@ -632,8 +687,10 @@ function paintMachineCards() {
 }
 
 function paintDash() {
-  const s = statusNow;
-  if (!s || !$('d-main')) return;
+  // ── the machine: the Machine page's own card ──
+  paintMachineCards();
+  const s = awsAdded() ? statusNow : null;
+  if (!s) return paintNetwork(null);
   const inr = inrRate();
   const credErr = s.error && s.error.credentials;
   const box = s.box && !['terminated'].includes(s.box.state) ? s.box : null;
@@ -642,15 +699,12 @@ function paintDash() {
   const idleGuard = ((watcher && watcher.guards) || []).find(g => g.layer === 2);
   const idleAfter = idleGuard && idleGuard.idle_min != null ? `${idleGuard.idle_min} min` : null;
 
-  // ── the machine: the Machine page's own card ──
-  paintMachineCards();
-
   // ── recurring cost and this month: the Spending page's own cards ──
-  renderRecurring($('d-recurring-card'), { hint: 'Exact cost checks the bill.' });
+  renderRecurring($('d-recurring-card'), { hint: 'Exact cost reads the bill.' });
   // The same card on Spending, redrawn with it: its play line reads the
   // machine's status, which changes without a Refresh.
   if (costNow) renderRecurring($('c-recurring-card'));
-  renderMonth($('d-month-card'), { hint: 'Press Exact cost to see it.' });
+  renderMonth($('d-month-card'), { hint: 'Use Exact cost to load it.' });
   const b = s.budget || {};
   const limit = b.limit == null ? null
     : isFinite(Number(setting('GAME_BUDGET_INR', NaN))) ? Number(setting('GAME_BUDGET_INR', NaN))
@@ -673,58 +727,19 @@ function paintDash() {
   const say = (text, cls) => gl.append(Object.assign(document.createElement('p'),
     { className: cls || 'text-on-surface', textContent: text }));
   if (credErr || a.error || (libNow && libNow.error)) {
-    say('Your saved games could not be read.', 'text-outline');
+    say('Could not read saved games.', 'text-outline');
   } else if (!libNow) {
     say('Reading…', 'text-outline');
   } else {
     const names = [...(libNow.games || []), ...elsewherePlaces().flatMap(p => p.games || [])]
       .map(g => g.name || g.installdir).filter(Boolean);
-    if (!names.length) say('No games saved yet', 'text-on-surface-variant');
+    if (!names.length) say('No saved games', 'text-on-surface-variant');
     for (const n of names.slice(0, 5)) say(n);
     if (names.length > 5) say(`and ${names.length - 5} more`, 'text-outline');
   }
 
-  // ── tailscale ──
-  const ts = $('d-ts');
-  ts.textContent = '';
-  const tn = s.tailnet || {};
-  const tsLines = [];
-  // This laptop. null is "not read yet", not "signed out".
-  const me = tskeyNow ? tskeyNow.signed_in : null;
-  tsLines.push([me === true ? true : me === false ? false : null,
-    me === true ? `This laptop is signed in${tskeyNow.node ? ` as ${tskeyNow.node}` : ''}`
-      : me === false ? 'This laptop is not signed in' : 'Checking this laptop']);
-  // The machine, only if there is one.
-  if (!box) {
-    tsLines.push([undefined, building ? 'Your machine is connecting…' : 'Your machine joins when you build it']);
-  } else if (tn.node && tn.online) {
-    tsLines.push([true, 'Your machine is connected']);
-  } else if (tn.node) {
-    tsLines.push([false, 'Your machine is not connected']);
-  } else {
-    tsLines.push(building ? [null, 'Your machine is connecting…'] : [false, 'Your machine has not connected']);
-  }
-  // The path, while the machine is online.
-  if (box && tn.online) {
-    const ms = pingNow && pingNow.median_ms != null ? ` · ${pingNow.median_ms} ms` : '';
-    tsLines.push(!pingNow ? [null, 'Checking the connection']
-      : pingNow.path === 'direct' ? [true, `Direct connection${ms}`]
-      : pingNow.path === 'DERP' ? ['warn', `Relayed${ms} · slower for streaming`]
-      : [null, 'The connection could not be measured']);
-  }
-  for (const [ok, text] of tsLines) {
-    const row = document.createElement('div');
-    row.className = 'flex items-baseline gap-space-sm';
-    row.append(Object.assign(document.createElement('span'), {
-      className: 'font-code-md text-code-md w-4 shrink-0 '
-        + (ok === true ? 'text-primary' : ok === false ? 'text-error' : ok === 'warn' ? 'text-tertiary' : 'text-outline'),
-      textContent: ok === true ? '✓' : ok === false ? '✗' : ok === 'warn' ? '!' : ok === undefined ? '·' : '…' }),
-      Object.assign(document.createElement('span'), {
-      className: 'font-body-md text-body-md ' + (ok === false ? 'text-error' : ok === undefined ? 'text-outline' : 'text-on-surface'),
-      textContent: text }));
-    ts.append(row);
-  }
-  $('d-ts-signin').hidden = me !== false;
+  paintNetwork(s);
+
 
   // ── protection ──
   const prot = $('d-protect');
@@ -735,11 +750,11 @@ function paintDash() {
     // Installed with every build: with no machine there is nothing for it to
     // watch, which is not the same as it being off.
     [g2 ? (g2.armed === false ? false : true) : null,
-     idleAfter ? `Stops by itself after ${idleAfter} idle` : 'Stops by itself when idle'],
+     idleAfter ? `Auto-stop after ${idleAfter} idle` : 'Auto-stop when idle'],
     [g3 ? g3.armed : null,
-     g3 && g3.armed ? 'Auto-stop in AWS: stops a forgotten machine' : 'Auto-stop in AWS is off'],
+     g3 && g3.armed ? 'AWS auto-stop: on' : 'AWS auto-stop: off'],
     [b.limit != null ? true : (statusNow ? false : null),
-     b.limit != null ? `Budget alert at ${rs(limit)} · ${b.alerts ? `emails ${b.alerts} address${b.alerts === 1 ? '' : 'es'}` : 'no email address set'}`
+     b.limit != null ? `Budget alert at ${rs(limit)} · ${b.alerts ? `emails ${b.alerts} address${b.alerts === 1 ? '' : 'es'}` : 'no email set'}`
                      : 'No budget alert is set'],
   ];
   for (const [ok, text] of lines) {
@@ -756,6 +771,63 @@ function paintDash() {
   }
 }
 
+// The private network: this laptop, the AWS machine when there is one, and
+// each machine of yours. Own machines only, there is no AWS status at all.
+function paintNetwork(s) {
+  const box = s && s.box && !['terminated'].includes(s.box.state) ? s.box : null;
+  const building = !!s && (jobsFor('init') || unfinished(box));
+  // "Your machine" is the AWS one only while it is the only one.
+  const it = (hostsNow || []).length ? 'AWS machine' : 'Machine';
+  const ts = $('d-ts');
+  ts.textContent = '';
+  const tn = (s && s.tailnet) || {};
+  const tsLines = [];
+  // This laptop. null is "not read yet", not "signed out".
+  const me = tskeyNow ? tskeyNow.signed_in : null;
+  tsLines.push([me === true ? true : me === false ? false : null,
+    me === true ? `This device: signed in${tskeyNow.node ? ` as ${tskeyNow.node}` : ''}`
+      : me === false ? 'This device: not signed in' : 'Checking this device']);
+  // The machine, only if there is one.
+  if (!s) {
+    // No AWS machine on this laptop: nothing to say about one.
+  } else if (!box) {
+    tsLines.push([undefined, building ? `${it}: connecting…` : `${it}: joins on build`]);
+  } else if (tn.node && tn.online) {
+    tsLines.push([true, `${it}: connected`]);
+  } else if (tn.node) {
+    tsLines.push([false, `${it}: not connected`]);
+  } else {
+    tsLines.push(building ? [null, `${it}: connecting…`] : [false, `${it}: not connected`]);
+  }
+  // The path, while the machine is online.
+  if (box && tn.online) {
+    const ms = pingNow && pingNow.median_ms != null ? ` · ${pingNow.median_ms} ms` : '';
+    tsLines.push(!pingNow ? [null, 'Checking the connection']
+      : pingNow.path === 'direct' ? [true, `Direct connection${ms}`]
+      : pingNow.path === 'DERP' ? ['warn', `Relayed${ms} · higher latency`]
+      : [null, 'Connection not measured']);
+  }
+  for (const h of hostsNow || []) {
+    const hs = hostStatus.get(h.name);
+    tsLines.push(!hs ? [null, `Checking ${h.name}`]
+      : hs.online ? [true, `${h.name}: connected`]
+      : [hs.set_up ? false : undefined, hs.set_up ? `${h.name}: not connected` : `${h.name}: joins on setup`]);
+  }
+  for (const [ok, text] of tsLines) {
+    const row = document.createElement('div');
+    row.className = 'flex items-baseline gap-space-sm';
+    row.append(Object.assign(document.createElement('span'), {
+      className: 'font-code-md text-code-md w-4 shrink-0 '
+        + (ok === true ? 'text-primary' : ok === false ? 'text-error' : ok === 'warn' ? 'text-tertiary' : 'text-outline'),
+      textContent: ok === true ? '✓' : ok === false ? '✗' : ok === 'warn' ? '!' : ok === undefined ? '·' : '…' }),
+      Object.assign(document.createElement('span'), {
+      className: 'font-body-md text-body-md ' + (ok === false ? 'text-error' : ok === undefined ? 'text-outline' : 'text-on-surface'),
+      textContent: text }));
+    ts.append(row);
+  }
+  $('d-ts-signin').hidden = me !== false;
+}
+
 // Play, on both screens, says what it would do - and says no when a stream is
 // already up, which is what cg itself does.
 function paintSession() {
@@ -766,10 +838,11 @@ function paintSession() {
     const label = b.lastChild;
     if (label && label.nodeType === 3) label.textContent = live ? 'Streaming' : 'Play';
     b.title = live
-      ? `a game session is already open on this laptop`
+      ? `a session is already open`
       : 'Opens Moonlight and connects to your machine';
   }
   paintMachineCards();
+  paintHostCards();
 }
 
 
@@ -826,9 +899,8 @@ function showChecked(el, iso, bill = false) {
   el.title = !iso ? ''
     : since.length ? `Checked ${whenChecked(iso)}. Since then: `
         + since.map(c => `${c.what} (${whenChecked(c.at)})`).join(', ')
-        + '. Refresh to see the new total. AWS\'s bill runs about a day behind, '
-        + 'so today\'s changes may take a day to show.'
-    : old ? `Checked ${whenChecked(iso)}, more than a day ago. Refresh to see the current total.`
+        + '. Refresh for the new total. The AWS bill lags about a day.'
+    : old ? `Checked ${whenChecked(iso)}. Over a day old.`
     : '';
 }
 
@@ -919,9 +991,9 @@ function renderMonth(box, { hint } = {}) {
   const now = new Date();
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
   total.textContent = m.total_usd != null ? r(m.total_usd) : '—';
-  sub.textContent = m.total_usd == null ? 'AWS did not answer.'
-    : `so far${(d.rates || {}).tax_pct ? `, with ${d.rates.tax_pct}% GST` : ''} · ${hours.toFixed(1)} h of machine time`
-      + (projected != null ? ` · on pace for ${r(projected)} by ${monthEnd.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : '');
+  sub.textContent = m.total_usd == null ? 'No response from AWS.'
+    : `so far${(d.rates || {}).tax_pct ? `, with ${d.rates.tax_pct}% GST` : ''} · ${hours.toFixed(1)} h runtime`
+      + (projected != null ? ` · projected ${r(projected)} by ${monthEnd.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : '');
   // Your number, in rupees, as you set it. AWS keeps it in dollars, converted
   // when it was made; turned back at today's rate it read Rs 5,412 for 5,000.
   const budget = Number(setting('GAME_BUDGET_INR', NaN));
@@ -933,14 +1005,14 @@ function renderMonth(box, { hint } = {}) {
     bar.style.width = Math.min(100, (projected * inr / budget) * 100) + '%';
     bar.dataset.f = 'bar';
     wrap.append(bar);
-    const chip = el('span', 'pill ml-space-xs ' + (over ? 'pill-bad' : 'pill-ok'), over ? 'over the budget' : 'under the budget');
+    const chip = el('span', 'pill ml-space-xs ' + (over ? 'pill-bad' : 'pill-ok'), over ? 'over budget' : 'under budget');
     chip.dataset.f = 'chip';
     box.append(wrap);
     sub.append(' ', chip);
   }
   const note = el('p', 'font-code-sm text-code-sm mt-space-sm ' + (inAws ? 'text-outline' : 'text-error'),
-    !inAws ? 'No budget alert is set up in AWS, so nothing will email you.'
-      : isFinite(budget) ? `Budget ${rs(budget)} a month. AWS emails you if you pass it; it stops nothing.` : '');
+    !inAws ? 'No budget alert set in AWS.'
+      : isFinite(budget) ? `Budget ${rs(budget)}/month. Alert by email only; nothing is stopped.` : '');
   note.dataset.f = 'note';
   box.append(note);
 }
@@ -950,7 +1022,7 @@ function renderRecurring(box, { hint } = {}) {
   const p = billParts();
   const head = el('p', 'font-headline-md text-headline-md mt-space-sm');
   head.dataset.f = 'total';
-  const sub = el('p', 'font-code-sm text-code-sm text-on-surface-variant mt-0.5', 'Charged every month, whether or not you play.');
+  const sub = el('p', 'font-code-sm text-code-sm text-on-surface-variant mt-0.5', 'Billed monthly, whether or not you play.');
   sub.dataset.f = 'sub';
   box.append(head, sub);
   if (!p) { head.textContent = '—'; sub.textContent = hint || ''; return; }
@@ -985,11 +1057,11 @@ function renderRecurring(box, { hint } = {}) {
     line(`Machine (${st})`, st === 'running' ? (hr != null ? `${rsh(hr)} an hour` : 'by the hour')
                                              : `${r(standby.volumes_usd_month)} a month`, () => goView('build'));
   } else if (res.volumes_gb) {
-    line('Disk left by a deleted machine', `${res.volumes_gb} GB · ${r(standby.volumes_usd_month)} a month`);
+    line('Orphaned disk', `${res.volumes_gb} GB · ${r(standby.volumes_usd_month)} a month`);
   }
-  if (res.snapshots_gb) line('Disk copies', `${res.snapshots_gb} GB · ${r(standby.snapshots_usd_month)} a month`);
+  if (res.snapshots_gb) line('Snapshots', `${res.snapshots_gb} GB · ${r(standby.snapshots_usd_month)} a month`);
   if (!list.children.length) {
-    const none = el('p', 'font-code-sm text-code-sm text-outline', 'Nothing is stored, so nothing is charged.');
+    const none = el('p', 'font-code-sm text-code-sm text-outline', 'Nothing stored.');
     none.dataset.f = 'none';
     list.append(none);
   }
@@ -999,8 +1071,8 @@ function renderRecurring(box, { hint } = {}) {
   if (play != null) {
     const pl = el('p', 'font-code-sm text-code-sm text-on-surface-variant mt-space-sm',
       res.instance && res.instance.state === 'running'
-        ? `A machine is running now: ${play} an hour on top.`
-        : `Playing adds ${play} an hour for the machine.`);
+        ? `Running now: +${play}/hour.`
+        : `Playing adds ${play}/hour.`);
     pl.dataset.f = 'play';
     box.append(pl);
   }
@@ -1022,17 +1094,17 @@ function paintCostPage() {
 
   const hours = m.hours ? m.hours.on_demand + m.hours.spot : 0;
   const projected = m.projected_usd ?? null;
-  renderMonth($('c-month-card'), { hint: 'Press Refresh to load this month\'s bill.' });
+  renderMonth($('c-month-card'), { hint: 'Refresh to load this month\'s bill.' });
 
   // ── credits ──
   const credits = d.credits_usd;
   $('c-credits').textContent = credits != null ? `${r(credits)} left` : '—';
-  $('c-credits-note').textContent = credits == null ? 'AWS did not say.'
-    : 'Spent before your card is charged'
-      + (projected ? ` · about ${Math.round(credits / projected)} months at this pace.` : '.');
+  $('c-credits-note').textContent = credits == null ? 'Not reported by AWS.'
+    : 'Applied before your card is charged'
+      + (projected ? ` · about ${Math.round(credits / projected)} months at this rate.` : '.');
 
   // ── day by day: what you played, the machine, storage, and the rest ──
-  $('c-days-note').textContent = 'Days with nothing billed are left out. AWS\'s bill runs about a day behind.'
+  $('c-days-note').textContent = 'Days with no charges are omitted. The AWS bill lags about a day.'
     + (inr ? ` ₹${inr} to the dollar.` : '');
   paintRefreshAge();
   const parts = x => ({ machine: x.compute || 0, storage: (x.s3 || 0) + (x.disk || 0),
@@ -1072,7 +1144,7 @@ function paintCostPage() {
   const gbPerHour = (kbps * 3600) / 8 / 1e6;
   if (e.gb_used != null) {
     $('c-egress').textContent = `${e.gb_used.toFixed(1)} of ${e.gb_free} GB used this month`;
-    $('c-egress-src').textContent = 'From your bill.';
+    $('c-egress-src').textContent = 'From the AWS bill.';
     const pct = Math.min(100, (e.gb_used / e.gb_free) * 100);
     $('c-egress-pct').hidden = false;
     $('c-egress-pct').textContent = `${pct.toFixed(0)}% used`;
@@ -1082,12 +1154,10 @@ function paintCostPage() {
     // The used figure is measured; the hours are the worst case - what the
     // quality setting would use flat out - so they are said as "at least".
     const fps = setting('GAME_FPS', '60'), res = setting('GAME_RES', null);
-    const quality = `${(kbps / 1000).toFixed(0)} Mbps, ${fps} fps, ${res || "Moonlight's own resolution"}`;
+    const quality = `${(kbps / 1000).toFixed(0)} Mbps, ${fps} fps, ${res || 'native resolution'}`;
     $('c-egress-note').textContent = e.gb_left > 0
-      ? `Even at your full quality (${quality}: about ${gbPerHour.toFixed(0)} GB an hour), `
-        + `at least ${Math.floor(e.gb_left / gbPerHour)} more hours are free. After that, ${r(rate.egress_gb)} a GB.`
-      : `The free ${e.gb_free} GB is used up. Streaming now costs ${r(rate.egress_gb)} a GB - `
-        + `at most ${r(gbPerHour * rate.egress_gb)} an hour at your quality (${quality}).`;
+      ? `At ${quality} (~${gbPerHour.toFixed(0)} GB/hour): at least ${Math.floor(e.gb_left / gbPerHour)} free hours left, then ${r(rate.egress_gb)}/GB.`
+      : `Free ${e.gb_free} GB used. Streaming costs ${r(rate.egress_gb)}/GB, up to ${r(gbPerHour * rate.egress_gb)}/hour at ${quality}.`;
   }
 }
 // Games cg saved in a region the machine is no longer built in. They bill like
@@ -1130,8 +1200,7 @@ function paintLibraryPage() {
   rows.textContent = ''; foot.textContent = '';
   $('lib-error').hidden = !d.error;
   if (d.error) {
-    $('lib-error').textContent = `Your saved games could not be read: ${d.error}. `
-      + 'That does not mean there are none.';
+    $('lib-error').textContent = `Could not read saved games: ${d.error}`;
     $('lib-keep').textContent = '';
     $('lib-keepfor-row').hidden = true;
     $('lib-orphan-box').hidden = true;
@@ -1150,7 +1219,7 @@ function paintLibraryPage() {
   const marks = d.marks_read !== false;
   if (!games.length) {
     const tr = document.createElement('tr');
-    cell(tr, 'No games saved. A game is saved when its machine is deleted.', 'py-space-sm text-outline').colSpan = 6;
+    cell(tr, 'No saved games. Games are saved when a machine is deleted.', 'py-space-sm text-outline').colSpan = 6;
     rows.append(tr);
   }
   for (const g of games) {
@@ -1179,7 +1248,7 @@ function paintLibraryPage() {
   for (const p of e.places || []) {
     if (!p.error) continue;
     const tr = document.createElement('tr');
-    cell(tr, `What is saved in ${p.region ? placeName(p.region) : 'another place'} could not be read: ${p.error}`,
+    cell(tr, `Could not read saved games in ${p.region ? placeName(p.region) : 'another region'}: ${p.error}`,
          'py-space-sm text-error').colSpan = 6;
     rows.append(tr);
   }
@@ -1208,14 +1277,14 @@ function paintLibraryPage() {
     sel.value = String(days);
   }
   $('lib-keep').textContent = !games.length ? ''
-    : !days ? 'Kept until you forget them.'
-    : `Saved games are deleted ${days} days after you last play. Keep restarts the countdown for one game.`;
+    : !days ? 'Kept until deleted.'
+    : `Deleted ${days} days after last played. Keep resets the timer.`;
 
   $('lib-orphan-box').hidden = !d.orphan_bytes;
   if (d.orphan_bytes) {
     $('lib-orphans').textContent =
-      `${(d.orphan_bytes / 1073741824).toFixed(1)} GB of leftover files from a save that did not finish`
-      + ` · ${r(d.orphan_usd_month)} a month, and no game can use them.`;
+      `${(d.orphan_bytes / 1073741824).toFixed(1)} GB of files from an incomplete save`
+      + ` · ${r(d.orphan_usd_month)}/month, unused.`;
   }
 }
 
@@ -1224,7 +1293,7 @@ function paintLibraryPage() {
 function deleteOn(g, days, seen, marks) {
   if (days === 0) return 'never';
   if (days == null || !marks) return '—';
-  if (boxNow) return 'Kept while a machine runs';
+  if (boxNow) return 'Kept while running';
   if (!seen) return '—';
   const from = Math.max(Date.parse(seen), g.kept ? Date.parse(g.kept) : 0);
   const when = new Date(from + days * 86400000);
@@ -1238,12 +1307,12 @@ const fromArgs = g => (g.bucket ? ['--from', g.bucket] : []);
 
 async function resetGame(g) {
   const name = g.name || g.appid;
-  await libraryRun(['library', 'reset', String(g.appid), ...fromArgs(g)], `Keeping ${name} from today`);
+  await libraryRun(['library', 'reset', String(g.appid), ...fromArgs(g)], `Resetting timer for ${name}`);
 }
 
 async function moveGame(g, here, inr) {
   const name = g.name || g.appid;
-  const to = here ? placeName(here) : 'where your machine runs';
+  const to = here ? placeName(here) : 'the machine region';
   // Billed where the bytes leave, at that place's own price; inside one
   // location a copy has no transfer charge at all.
   const place = elsewherePlaces().find(p => p.bucket === g.bucket) || {};
@@ -1252,10 +1321,10 @@ async function moveGame(g, here, inr) {
   const cost = !same && rate && isFinite(inr) ? rs((g.bytes / 1073741824) * rate * inr) : null;
   const ok = await askConfirm({
     title: `Move ${name} to ${to}?`,
-    body: `${GB(g.bytes)} is copied from ${placeName(g.region)} to ${to}, checked, then deleted from ${placeName(g.region)}.\n\n`
-        + (same ? 'Both are in the same location, so there is no transfer charge. '
-           : cost ? `Costs about ${cost} once (AWS charges to copy between regions). ` : '')
-        + 'After that your builds download it free. Keeping it costs the same as now.',
+    body: `${GB(g.bytes)} is copied from ${placeName(g.region)} to ${to}, verified, then removed from ${placeName(g.region)}.\n\n`
+        + (same ? 'Same region: no transfer charge. '
+           : cost ? `One-time transfer: about ${cost}. ` : '')
+        + 'Storage cost is unchanged.',
     yes: 'Move',
   });
   if (ok) await libraryRun(['library', 'move', String(g.appid), ...fromArgs(g)], `Moving ${name} to ${to}`, 'move-game', 'MOVE');
@@ -1276,8 +1345,8 @@ async function forgetGame(g) {
   const name = g.name || g.appid;
   const ok = await askConfirm({
     title: `Delete ${name}?`,
-    body: `Its ${GB(g.bytes)} saved copy is deleted for good. There is no undo.\n\n`
-        + 'Playing it again means Steam downloads it onto a new machine.',
+    body: `Permanently deletes the ${GB(g.bytes)} saved copy.\n\n`
+        + 'Steam will re-download it next time.',
     yes: 'Delete', danger: true, word: 'DELETE',
   });
   // cg asks for FORGET; the word typed here is the app's own, and the answer
@@ -1376,13 +1445,13 @@ function paintBuildLogin() {
   if (fresh) {
     line.textContent = 'You sign in on the machine';
     note.textContent = loginNow.present
-      ? 'Your saved login is kept, but not used this time.'
-      : 'There is no saved login to use.';
+      ? 'Saved login kept, not used.'
+      : 'No saved login.';
     return;
   }
   if (!loginNow.present) {
     line.textContent = 'You sign in on the machine';
-    note.textContent = 'No login saved yet. It is saved when a machine shuts down.';
+    note.textContent = 'No saved login. Saved when a machine shuts down.';
     return;
   }
   // Which account, when the archive says: a key that signs in as someone you
@@ -1390,8 +1459,8 @@ function paintBuildLogin() {
   const who = (loginNow.accounts || []).find(a => a.most_recent) || (loginNow.accounts || [])[0];
   line.textContent = who ? `Signs in as ${who.account || who.steamid}` : 'Signs in with your saved login';
   note.textContent = loginNow.accounts === null
-    ? 'Uses your saved login (the account name could not be read).'
-    : 'Steam opens already signed in.';
+    ? 'Uses the saved login (account name unavailable).'
+    : 'Steam starts signed in.';
 }
 
 function paintLogin(l) {
@@ -1440,8 +1509,8 @@ function paintLoginTable() {
     cell(tr, text, 'py-space-sm ' + (cls || 'text-outline')).colSpan = 6;
     rows.append(tr);
   };
-  if (!l) say('The saved login could not be read. That does not mean there is none.', 'text-error');
-  else if (!l.present) say('No Steam login saved. The next machine asks you to sign in once.');
+  if (!l) say('Could not read the saved login.', 'text-error');
+  else if (!l.present) say('No saved Steam login. You sign in once on the next machine.');
   else line(l, here, 'In use', null);
   for (const p of (elsewhereNow && elsewhereNow.places) || []) {
     if (p.error || !p.login_detail || !p.login_detail.present) continue;
@@ -1451,7 +1520,7 @@ function paintLoginTable() {
     const accts = l.accounts || [];
     const next = accts.find(r => r.most_recent) || accts[0];
     note.textContent = (next ? `A new machine signs in as ${next.account || next.persona || next.steamid}. ` : '')
-      + 'Removing it does not save money. The next machine will just ask you to sign in.'
+      + 'Removing it does not reduce cost.'
       + (accts.length > 1 ? ` ${accts.length} accounts are saved together and come back together; to keep `
         + 'only one, sign in as it on the machine and it is saved when the machine shuts down.' : '');
   }
@@ -1463,15 +1532,13 @@ async function forgetLogin(l, bucket, place) {
   const where = place ? placeName(place) : '';
   const ok = await askConfirm(bucket ? {
     title: `Remove the old Steam login in ${where}?`,
-    body: `An old copy for ${who} that no machine uses. There is no undo.\n\n`
-        + 'The login a new machine signs in as is not affected, and neither are your games.',
+    body: `An unused copy for ${who}. This cannot be undone.\n\n`
+        + 'The active login and your games are not affected.',
     yes: 'Remove', word: 'REMOVE',
   } : {
     title: 'Remove the saved Steam login?',
-    body: `This deletes the saved login for ${who}. There is no undo.\n\n`
-        + 'Your games are not affected. What you lose is being signed in: the next machine '
-        + 'asks for your password and Steam Guard code.\n\n'
-        + 'It does not save money. Do it to change which account a new machine uses.',
+    body: `Deletes the saved login for ${who}. This cannot be undone.\n\n`
+        + 'Games are not affected. The next machine asks for your password and Steam Guard code.',
     yes: 'Remove', danger: true, word: 'REMOVE',
   });
   if (ok) await libraryRun(['library', 'account', 'forget', ...(bucket ? ['--from', bucket] : [])],
@@ -1487,25 +1554,25 @@ function paintGuardStrip() { paintDash(); }
 // the watchdogs run with; the wording around them is the page's.
 const NET_NAME = { 1: 'When you quit', 2: 'On the machine', 3: 'In AWS' };
 function netWords(g, d) {
-  if (g.layer === 1) return ['Closing Moonlight ends the session.', 'Needs your laptop.'];
+  if (g.layer === 1) return ['Closing Moonlight ends the session.', 'Runs on this device.'];
   if (g.layer === 2) {
     const sd = d.shutdown_action || {};
     const end = sd.expected
-      ? ` When it shuts down, the machine is ${sd.value === 'terminate' ? 'deleted' : 'stopped'}.` : '';
+      ? ` Then ${sd.value === 'terminate' ? 'deleted' : 'stopped'}.` : '';
     // Every number is cg's (cg watcher), none is a fallback written here.
-    return [`${g.idle_min != null ? `${g.idle_min} min` : 'A while'} with nobody connected, and it shuts itself down.${end}`,
-            'Runs on the machine itself.'];
+    return [`Shuts down after ${g.idle_min != null ? `${g.idle_min} min` : 'a period'} with no connection.${end}`,
+            'Runs on the machine.'];
   }
-  return [`${g.every_min != null ? `Every ${g.every_min} min: ` : ''}${g.idle_min ?? '?'} min with no stream, or a shutdown stuck for `
-          + `${g.stuck_min ?? '?'} min, and AWS ends the machine.`,
-          'Works with your laptop and the machine both gone.'];
+  return [`${g.every_min != null ? `Every ${g.every_min} min: ` : ''}ends the machine after ${g.idle_min ?? '?'} min without a stream, or a shutdown stuck for `
+          + `${g.stuck_min ?? '?'} min.`,
+          'Runs in AWS, independent of this device and the machine.'];
 }
 function netState(g) {
   if (g.layer === 1) return ['Always on', 'pill-ok'];
   if (g.armed === true) return ['On', 'pill-ok'];
   if (g.armed === false) return ['Off', 'pill-bad'];
   // Layer 2 with no machine to live on is waiting, not failing.
-  return [g.state === 'no box' ? 'Waits for a machine' : "Can't reach the machine", ''];
+  return [g.state === 'no box' ? 'Idle' : 'Unreachable', ''];
 }
 
 function paintGuards(d) {
@@ -1518,20 +1585,20 @@ function paintGuards(d) {
   const on = guards.filter(g => g.layer === 1 || g.armed === true).length;
 
   $('g-head').textContent = running
-    ? `Machine running · ${on === guards.length ? `all ${on}` : `${on} of ${guards.length}`} safety nets on`
-    : gone ? 'No machine is running · nothing to stop' : `Machine ${d.instance_state}`;
+    ? `Machine running · ${on === guards.length ? `all ${on}` : `${on} of ${guards.length}`} safeguards on`
+    : gone ? 'No machine running' : `Machine ${d.instance_state}`;
   const cloud = by(3);
   $('g-sub').textContent = cloud.last_decision
-    ? `Last check ${ago(cloud.last_decision_age_s)}: ${/nothing to do/.test(cloud.last_decision) ? 'nothing running.' : cloud.last_decision}`
-    : cloud.armed ? 'Auto-stop checks every 5 minutes. Nothing recorded in the last hour.' : '';
+    ? `Last check ${ago(cloud.last_decision_age_s)}: ${/nothing to do/.test(cloud.last_decision) ? 'idle.' : cloud.last_decision}`
+    : cloud.armed ? 'Runs every 5 minutes. No activity in the last hour.' : '';
 
   // What is wrong, in red, on top - not three cards down.
   const warn = [];
-  if (cloud.armed === false) warn.push(`Auto-stop in AWS is ${cloud.state || 'off'}. A machine left running can only stop itself.`);
+  if (cloud.armed === false) warn.push(`AWS auto-stop is ${cloud.state || 'off'}.`);
   if (running && by(2).armed === false) warn.push("The machine's own check is off - only AWS will stop it.");
   const sd = d.shutdown_action || {};
-  if (sd.expected && !sd.ok) warn.push(`AWS is set to ${sd.value === 'terminate' ? 'delete' : 'stop'} the machine when it shuts down; it should ${sd.expected === 'terminate' ? 'delete' : 'stop'} it.`);
-  if ((d.budget || {}).usd == null) warn.push('No budget alert is set up in AWS, so nothing will email you.');
+  if (sd.expected && !sd.ok) warn.push(`Shutdown behavior is ${sd.value === 'terminate' ? 'delete' : 'stop'}; expected ${sd.expected === 'terminate' ? 'delete' : 'stop'}.`);
+  if ((d.budget || {}).usd == null) warn.push('No budget alert set in AWS.');
   $('g-warn').textContent = '';
   for (const w of warn) {
     const el = document.createElement('span');
@@ -1574,9 +1641,11 @@ function paintGuards(d) {
     const r = config.find(x => x.key === key);
     if (!r) continue;
     const row = document.createElement('div');
-    row.className = 'row border-b border-surface-variant/40 last:border-b-0 items-start';
+    // Wraps rather than squeezes, as settingRow's do.
+    row.className = 'row flex-wrap border-b border-surface-variant/40 last:border-b-0 items-start';
     row.dataset.key = key;          // so anything can send you to this one row
     const left = document.createElement('div');
+    left.className = 'min-w-[12rem] flex-1';
     const n = document.createElement('p');
     n.className = 'font-code-md text-code-md';
     n.textContent = PLAIN[key] || label(r);
@@ -1585,9 +1654,9 @@ function paintGuards(d) {
     note.textContent = PLAIN_NOTE[key] || r.note;
     left.append(n, note);
     const right = document.createElement('div');
-    right.className = 'flex items-center gap-space-sm shrink-0';
+    right.className = 'flex items-center gap-space-sm min-w-0 max-w-full ml-auto';
     const val = document.createElement('span');
-    val.className = 'font-code-md text-code-md text-on-surface-variant';
+    val.className = 'font-code-md text-code-md text-on-surface-variant text-right min-w-0 [overflow-wrap:anywhere]';
     const v = r.value != null ? r.value : r.default;
     val.textContent = key === 'GAME_BUDGET_INR' && v != null ? `${rs(Number(v))} a month`
       : /_MIN$/.test(key) && v != null ? `${v} min${r.value == null ? ' (default)' : ''}`
@@ -1630,7 +1699,7 @@ function paintDeps(d) {
 // that cannot install anything is worse than none.
 function toolAction(tools) {
   const all = (depsNow && depsNow.tools) || [];
-  const rows = tools.map(t => all.find(x => x.tool === t) || { tool: t, label: t === 'aws' ? 'the Amazon tool' : t });
+  const rows = tools.map(t => all.find(x => x.tool === t) || { tool: t, label: t === 'aws' ? 'the AWS CLI' : t });
   const names = rows.map(x => x.label || x.tool).join(', ');
   // Not read yet: offer it, and cg says so if it cannot.
   if (!depsNow || (depsNow.package_manager && depsNow.root)) {
@@ -1638,9 +1707,9 @@ function toolAction(tools) {
   }
   return { label: `How to install ${names}`, go: () => askConfirm({
     title: `Install ${names} by hand`,
-    body: (depsNow && !depsNow.package_manager ? 'This laptop has no installer the app can use. '
-           : `The app cannot get permission to install here${depsNow && depsNow.root_blocked ? ` (${depsNow.root_blocked})` : ''}. `)
-      + 'Run this, then press Refresh:\n\n' + rows.map(x => x.manual || x.plan || x.tool).join('\n'),
+    body: (depsNow && !depsNow.package_manager ? 'No supported package manager found. '
+           : `Install permission denied${depsNow && depsNow.root_blocked ? ` (${depsNow.root_blocked})` : ''}. `)
+      + 'Run the following, then Refresh:\n\n' + rows.map(x => x.manual || x.plan || x.tool).join('\n'),
     yes: 'OK', no: null,
   }) };
 }
@@ -1650,9 +1719,9 @@ function installDeps(tools) {
   return runInDialog({
     title: `Installing ${what}`,
     args: ['deps', 'install', ...tools],
-    starting: 'Asking for your password first. The prompt may open behind this window.',
+    starting: 'Waiting for your password. The prompt may open behind this window.',
     done: 'Installed',
-    fail: rc => 'The install did not finish.',
+    fail: rc => 'Install failed.',
   });
 }
 
@@ -1665,9 +1734,9 @@ function paintCreds(c) {
   const state = $('creds-state'), detail = $('creds-detail'), btn = $('creds-set');
   btn.hidden = false;
   if (!c.cli) {
-    state.textContent = 'A required Amazon tool is not installed';
+    state.textContent = 'The AWS CLI is not installed';
     state.className = 'font-code-md text-code-md text-error mt-space-sm';
-    detail.textContent = 'Install it, then add your key here.';
+    detail.textContent = 'Install it, then add your key.';
     const act = toolAction(['aws']);
     btn.textContent = act.label;
     btn.onclick = act.go;
@@ -1680,13 +1749,13 @@ function paintCreds(c) {
     state.className = 'font-code-md text-code-md text-on-surface mt-space-sm';
     // The account is the thing worth seeing on a new laptop: a key that works
     // for the WRONG account reads as "fine" everywhere else in the app.
-    detail.textContent = [c.account && `Amazon account ${c.account}`]
+    detail.textContent = [c.account && `AWS account ${c.account}`]
       .filter(Boolean).join('  \u00b7  ');
     return;
   }
-  state.textContent = c.key_id ? `Key ${c.key_id} was rejected` : 'No key added yet';
+  state.textContent = c.key_id ? `Key ${c.key_id} was rejected` : 'No key added';
   state.className = 'font-code-md text-code-md text-error mt-space-sm';
-  detail.textContent = c.error || 'AWS would not accept it.';
+  detail.textContent = c.error || 'Rejected by AWS.';
 }
 
 // cg asks for the two halves of the key as events; the dialog answers them, and
@@ -1702,9 +1771,9 @@ function paintTskey(ts) {
   paintOnboardSoon();
   const state = $('tskey-state'), detail = $('tskey-detail'), btn = $('tskey-set');
   const canRootNow = Boolean(depsNow && depsNow.root);
-  const signed = ts.signed_in === true ? `This laptop is signed in${ts.node ? ' as ' + ts.node : ''}`
+  const signed = ts.signed_in === true ? `Signed in${ts.node ? ' as ' + ts.node : ''}`
     : ts.signed_in === false
-      ? (canRootNow ? 'This laptop is not signed in' : 'This laptop is not signed in. In a terminal, run: sudo tailscale up')
+      ? (canRootNow ? 'Not signed in' : 'Not signed in. Run: sudo tailscale up')
     : 'Tailscale is not installed';
   const token =
       !ts.present      ? 'No access token (optional)'
@@ -1712,7 +1781,7 @@ function paintTskey(ts) {
     : ts.valid === false ? 'Access token was rejected'
     // Unreachable says nothing about the token, so it must not be drawn as a
     // bad one: the fix for a flat network is not a new token.
-    : 'Access token saved, but Tailscale did not answer';
+    : 'Access token saved; Tailscale did not respond';
   state.textContent = signed;
   state.className = 'font-code-md text-code-md mt-space-sm '
     + (ts.signed_in === true ? 'text-on-surface' : 'text-error');
@@ -1722,10 +1791,10 @@ function paintTskey(ts) {
   // With a token here, nobody has to paste one.
   $('tskey-auth').textContent =
       ts.auth_key_stored && ts.can_mint
-        ? 'Machine key saved'
-    : ts.auth_key_stored ? 'Machine key saved'
-    : ts.can_mint        ? 'A machine key is made from your access token at the next build'
-    : 'No machine key yet. The next build will ask for one.';
+        ? 'Auth key saved'
+    : ts.auth_key_stored ? 'Auth key saved'
+    : ts.can_mint        ? 'An auth key is generated from the access token at the next build'
+    : 'No auth key. The next build asks for one.';
   btn.textContent = ts.present ? 'Update access token' : 'Add access token';
   btn.onclick = openTskey;
   // Pasting the box's key is for when the token cannot make one: no token, or
@@ -1733,7 +1802,7 @@ function paintTskey(ts) {
   // there is nothing to type, so there is no button.
   const authBtn = $('tskey-authkey');
   authBtn.hidden = ts.can_mint && !ts.auth_key_stored;
-  authBtn.textContent = ts.auth_key_stored ? 'Update machine key' : 'Add machine key';
+  authBtn.textContent = ts.auth_key_stored ? 'Update auth key' : 'Add auth key';
   authBtn.onclick = setAuthKey;
   // Signing in is root's business - systemctl, then `tailscale up` - which in a
   // window means polkit. Where polkit cannot be reached the card says what to
@@ -1747,7 +1816,8 @@ function paintTskey(ts) {
 // The sign-in, as a dialog, because it is a thing that happens rather than a
 // state to read: polkit asks for a password, `tailscale up` prints a link and
 // then WAITS for someone to visit it, and none of that is over until it is.
-let runDlgJob = null, runDlgRetry = null;
+let runDlgJob = null, runDlgRetry = null, runDlgRc = null;
+let runDlgConfirm = null;   // the confirm step's answer, while it is asking
 function runDlgStatus(text, tone) {
   const el = $('rundlg-status');
   el.textContent = text;
@@ -1762,35 +1832,66 @@ function runDlgStatus(text, tone) {
 //   done     the status when it succeeds (a string, or a function for one that
 //            has to be read off the state the run just changed)
 //   fail     the status when it does not, given the exit code
-async function runInDialog({ title, args, starting, done, fail }) {
-  runSurface = { link: 'rundlg-link', log: 'rundlg-log', status: runDlgStatus };
-  const log = $('rundlg-log'), link = $('rundlg-link');
-  runDlgRetry = () => runInDialog({ title, args, starting, done, fail });
+//   confirm  optional { body, yes, danger }: the same dialog asks first, and the
+//            run happens in it - no confirm box that closes onto nothing
+//   close    on success, close after a beat (given cg's output: false keeps it
+//            open, for a result worth reading)
+//   stoppable false for a run that is over in seconds and must not be left
+//            half done: no Cancel while it runs
+// Resolves true on success; `false` when it failed or was not confirmed.
+async function runInDialog({ title, args, starting, done, fail, confirm, close, stoppable = true }) {
+  const log = $('rundlg-log'), link = $('rundlg-link'), go = $('rundlg-go');
   $('rundlg-title').textContent = title;
   link.hidden = true;
+  go.hidden = true;
+  if (confirm) {
+    log.textContent = '';
+    $('rundlg-status').textContent = confirm.body;
+    $('rundlg-status').className = 'dlg-sub whitespace-pre-line mb-space-md';
+    $('rundlg-done').hidden = true;
+    $('rundlg-retry').hidden = true;
+    $('rundlg-cancel').hidden = false;
+    $('rundlg-cancel').textContent = 'Cancel';
+    go.hidden = false;
+    go.textContent = confirm.yes || 'Continue';
+    go.className = 'btn ' + (confirm.danger ? 'btn-danger' : 'btn-primary');
+    if (!$('rundlg').open) $('rundlg').showModal();
+    go.focus();
+    const yes = await new Promise(resolve => {
+      runDlgConfirm = resolve;
+      go.onclick = e => { e.preventDefault(); resolve(true); };
+    });
+    runDlgConfirm = null;
+    go.hidden = true;
+    if (!yes) return false;
+  }
+  runSurface = { link: 'rundlg-link', log: 'rundlg-log', status: runDlgStatus };
+  runDlgRetry = () => runInDialog({ title, args, starting, done, fail, close, stoppable });
   $('rundlg-done').hidden = true;
   $('rundlg-done').textContent = 'Done';
   $('rundlg-retry').hidden = true;
-  $('rundlg-cancel').hidden = false;
+  $('rundlg-cancel').hidden = !stoppable;
   log.textContent = '';
   // The first line cg sends replaces the placeholder rather than appending
   // under it - see the collect handler.
   log.dataset.fresh = 'yes';
   runDlgStatus(starting);
   if (!$('rundlg').open) $('rundlg').showModal();
-  const { rc } = await runCg(args, { collect: 'rundlg-log', wantRc: true,
-                                     onStart: id => { runDlgJob = id; } });
+  const { rc, err } = await runCg(args, { collect: 'rundlg-log', wantRc: true,
+                                          onStart: id => { runDlgJob = id; } });
   runDlgJob = null;
+  runDlgRc = rc;
   link.hidden = true;
   $('rundlg-cancel').hidden = true;
   if (rc === 0) {
     // Everything behind the dialog has already re-read: these are writes.
-    runDlgStatus(typeof done === 'function' ? done() : done, 'ok');
+    runDlgStatus(typeof done === 'function' ? done(err || '') : done, 'ok');
     $('rundlg-done').hidden = false;
     $('rundlg-done').focus();
+    if (close && close(err || '')) afterBeat(() => { if ($('rundlg').open) $('rundlg').close(); });
     return true;
   }
-  runDlgStatus(rc === null ? 'Could not start: something else is running.'
+  runDlgStatus(rc === null ? 'Another task is running.'
                            : (typeof fail === 'function' ? fail(rc) : fail), 'bad');
   $('rundlg-retry').hidden = false;
   $('rundlg-done').hidden = false;
@@ -1798,12 +1899,15 @@ async function runInDialog({ title, args, starting, done, fail }) {
   return false;
 }
 $('rundlg-done').onclick = e => { e.preventDefault(); $('rundlg').close(); };
+// Closed while it is still asking: a no.
+$('rundlg').addEventListener('close', () => { if (runDlgConfirm) runDlgConfirm(false); });
 $('rundlg-retry').onclick = e => { e.preventDefault(); if (runDlgRetry) runDlgRetry(); };
 // Cancelling has to reach cg: `tailscale up` is waiting on a browser that is
 // never going to answer, and a package manager can be sitting on a lock.
 // Closing a dialog does not tell either of them that.
 $('rundlg-cancel').onclick = e => {
   e.preventDefault();
+  if (runDlgConfirm) runDlgConfirm(false);
   if (runDlgJob !== null) window.cg.cancel(runDlgJob);
   runDlgJob = null;
   $('rundlg').close();
@@ -1812,9 +1916,9 @@ function signInTailscale() {
   return runInDialog({
     title: 'Signing in to Tailscale',
     args: ['creds', 'tailscale', 'signin'],
-    starting: 'Starting. A password prompt opens first and may appear behind this window.',
+    starting: 'Starting. A password prompt may open behind this window.',
     done: () => (tskeyNow && tskeyNow.node) ? `signed in as ${tskeyNow.node}` : 'signed in',
-    fail: rc => 'Sign-in did not finish.',
+    fail: rc => 'Sign-in failed.',
   });
 }
 $('tskey-signin-go').onclick = signInTailscale;
@@ -1834,7 +1938,7 @@ function watchForSignInLink(text) {
   link.onclick = () => window.cg.openSignIn(m[0]);
   // What is being waited for, in words: the command is not stuck, it is
   // waiting for a browser - and that distinction is the whole dialog.
-  runSurface.status('Waiting for you to finish in your browser.');
+  runSurface.status('Complete sign-in in your browser.');
 }
 
 // Same shape as the AWS form, for the same reasons: one field, one Save, the
@@ -1851,16 +1955,15 @@ function watchForSignInLink(text) {
 // was granted on appeal rather than on the first ask.
 const QUOTA_STATE = {
   PENDING: ['Sent',
-            'AWS has your request. It shows up within a couple of minutes; press Refresh to check.'],
+            'Submitted. It appears within a few minutes.'],
   CASE_OPENED: ['Being reviewed',
-            'AWS usually refuses the first request. When it does, reply with the text below '
-          + 'and a person reviews it, usually within two to four days.'],
-  DENIED: ['Refused (this is normal)',
-            'Reply to AWS with the text below. Every limit this setup has was granted on the second ask.'],
+            'First requests are usually denied. Reply with the text below to get a manual review (2-4 days).'],
+  DENIED: ['Denied',
+            'Reply to the case with the text below to request a review.'],
   CASE_CLOSED: ['Closed',
-            'Closed without raising the limit. Send a new request and reply to that one.'],
+            'Closed without an increase. Submit a new request.'],
   APPROVED: ['granted',
-            'It can take up to an hour to show. Press Refresh to check.'],
+            'May take up to an hour to appear.'],
 };
 const QUOTA_LABEL = { ondemand: 'standard', spot: 'spot' };
 let quotaNow = null, quotaKind = '', quotaAppeal = '', quotaCase = null, quotaWhere = '';
@@ -1875,7 +1978,7 @@ function quotaClear() {
   $('quota-log').textContent = '';
   $('quota-case-row').hidden = true;
   $('quota-case-url').textContent = '';
-  $('quota-copy').textContent = 'Copy the reply';
+  $('quota-copy').textContent = 'Copy reply';
   quotaAppeal = '';
   quotaCase = null;
 }
@@ -1919,18 +2022,18 @@ async function quotaRender() {
   $('quota-where').disabled = false;
   $('quota-go').hidden = false;
   $('quota-go').disabled = true;
-  $('quota-go').textContent = 'Send the request';
+  $('quota-go').textContent = 'Submit request';
   if (!kind) {
-    quotaSay('', 'Pick one to see what it would ask for.');
+    quotaSay('', 'Select a quota.');
     return;
   }
   const q = (quotaNow || {})[kind];
-  if (!q) { quotaSay('Could not read this limit', '', 'bad'); return; }
+  if (!q) { quotaSay('Could not read this quota', '', 'bad'); return; }
   const need = quotaNow.vcpus_needed, type = quotaNow.instance_type;
 
   // Nothing to ask for. Offering the button here gets a duplicate refused.
   if (q.enough) {
-    quotaSay(`Your limit already covers one ${type}`, 'Nothing to ask for.', 'ok');
+    quotaSay(`Current quota covers one ${type}`, 'No increase needed.', 'ok');
     $('quota-go').hidden = true;
     return;
   }
@@ -1946,33 +2049,32 @@ async function quotaRender() {
     quotaCase = r.case_id || null;
     $('quota-case-row').hidden = false;
     $('quota-case').hidden = !quotaCase;
-    $('quota-case-url').textContent = quotaCase ? quotaCaseUrl(quotaCase) : 'It has not appeared yet. Press Refresh.';
+    $('quota-case-url').textContent = quotaCase ? quotaCaseUrl(quotaCase) : 'Not available yet. Refresh shortly.';
     // A closed case cannot be appealed, so asking again is the only way on.
     $('quota-go').hidden = r.status !== 'CASE_CLOSED';
     $('quota-go').disabled = r.status !== 'CASE_CLOSED';
-    if (r.status === 'CASE_CLOSED') $('quota-go').textContent = 'Send it again';
+    if (r.status === 'CASE_CLOSED') $('quota-go').textContent = 'Resubmit';
     const appeal = await runCg(quotaCmd('quota', 'appeal', kind), { capture: true });
     quotaAppeal = (appeal || '').trim();
     $('quota-copy').hidden = !quotaAppeal;
     if (quotaAppeal) {
       $('quota-pre-label').hidden = false;
-      $('quota-pre-label').textContent = 'If AWS refuses, reply to them with this:';
+      $('quota-pre-label').textContent = 'If denied, reply with:';
       $('quota-log').textContent = quotaAppeal;
     }
     return;
   }
 
   // Nothing asked for yet: say exactly what the case would contain.
-  quotaSay(`Your limit: ${q.value === null ? 'unknown' : q.value} vCPU. One ${type} needs ${need}.`, '');
+  quotaSay(`Quota: ${q.value === null ? 'unknown' : q.value} vCPU. One ${type} needs ${need}.`, '');
   $('quota-pre-label').hidden = false;
-  $('quota-pre-label').textContent = 'This sends AWS a request for:';
+  $('quota-pre-label').textContent = 'Request:';
   $('quota-log').textContent =
       `Service:    EC2 Instances\n`
     + `Region:     ${quotaNow.region}\n`
-    + `Limit:      ${kind === 'spot' ? 'Spot GPU machines' : 'Standard GPU machines'}\n`
-    + `New value:  ${need} vCPU (one machine)\n\n`
-    + `Free. AWS usually refuses within minutes; replying to that refusal\n`
-    + `is what gets it approved.`;
+    + `Quota:      ${kind === 'spot' ? 'Spot GPU instances' : 'On-demand GPU instances'}\n`
+    + `New value:  ${need} vCPU (one instance)\n\n`
+    + `No charge. First requests are usually denied; reply to the case for a review.`;
   $('quota-go').disabled = false;
 }
 
@@ -2062,16 +2164,16 @@ $('quota-go').onclick = async e => {
   $('quota-go').disabled = true;
   $('quota-go').textContent = 'Creating\u2026';
   $('quota-kind').disabled = true;
-  quotaSay('Sending the request\u2026', 'AWS answers in a few seconds.');
+  quotaSay('Submitting\u2026', '');
   $('quota-pre-label').hidden = true;
   const { rc, err } = await runCg(quotaCmd('quota', 'request', quotaKind), { wantRc: true });
   $('quota-kind').disabled = false;
   if (rc !== 0) {
-    quotaSay('The request was not sent', (err || '').trim().split('\n')[0]
+    quotaSay('Request not submitted', (err || '').trim().split('\n')[0]
       || '', 'bad');
     $('quota-log').textContent = (err || '').trim();
     $('quota-go').disabled = false;
-    $('quota-go').textContent = 'Send the request';
+    $('quota-go').textContent = 'Submit request';
     return;
   }
   // Read it back rather than believing the submit: the case id lags the
@@ -2080,7 +2182,7 @@ $('quota-go').onclick = async e => {
   await quotaRender();
   if (!quotaCase) {
     $('quota-case-row').hidden = false;
-    $('quota-case-url').textContent = 'It has not appeared yet. Press Refresh in a moment.';
+    $('quota-case-url').textContent = 'Not available yet. Refresh shortly.';
   }
 };
 
@@ -2088,10 +2190,10 @@ $('quota-go').onclick = async e => {
 // quota. What it needs instead is care, because it is account-wide and undoing
 // it is slower than doing it.
 const OPTIN_STATE = {
-  ENABLING: ['enabling', 'AWS is working on it. A few minutes is normal - Refresh to look again.'],
-  ENABLED: ['enabled', 'This location is ready. You can pick it now.'],
-  ENABLED_BY_DEFAULT: ['enabled', 'This location is already on.'],
-  DISABLING: ['being disabled', 'AWS is turning it off. Wait for that to finish first.'],
+  ENABLING: ['enabling', 'In progress. Usually a few minutes.'],
+  ENABLED: ['enabled', 'Enabled. Ready to use.'],
+  ENABLED_BY_DEFAULT: ['enabled', 'Already enabled.'],
+  DISABLING: ['being disabled', 'Being disabled. Wait for it to finish.'],
 };
 let optinNow = null, optinPick = '';
 
@@ -2156,13 +2258,13 @@ function optinOptions() {
       : code;
     into.append(o);
   };
-  const off = group('Not on yet');
+  const off = group('Not enabled');
   for (const code of (optinNow && optinNow.disabled) || []) if (measured.has(code)) add(off, code, measured.get(code));
   for (const code of (optinNow && optinNow.disabled) || []) add(off, code, null);
   for (const code of (optinNow && optinNow.enabling) || []) add(off, code, measured.get(code));
   // Only the measured ones: every account has a dozen enabled by default, and
   // listing all of them would bury the one you came to check.
-  const on = group('Already on');
+  const on = group('Enabled');
   for (const r of (optinNow && optinNow.regions) || [])
     if (ON_ALREADY.has(r.status) && measured.has(r.region)) add(on, r.region, measured.get(r.region));
   if (!off.children.length) off.remove();
@@ -2175,19 +2277,17 @@ const ON_ALREADY = new Set(['ENABLED', 'ENABLED_BY_DEFAULT']);
 // G instances, and the opt-in does not carry any across from another region.
 function optinBlocker(code) {
   const m = ((sweepNow && sweepNow.regions) || []).find(r => r.region === code);
-  if (!m) return 'This location has not been checked yet.\n'
-                + 'Check all locations under Choose a machine to see its numbers.';
+  if (!m) return 'Not measured yet. Check all regions under Machine type.';
   const ms = (m.machines || []);
   const fits = ms.filter(x => x.fits_spot || x.fits_ondemand);
-  if (fits.length) return `${code} is on, and ${fits.length} machine`
-    + `${fits.length > 1 ? 's here are' : ' here is'} already pickable in the table.`;
-  if (!ms.length) return `${code} is on, but AWS offers none of the machines this app uses here.`;
+  if (fits.length) return `${code} is enabled; ${fits.length} machine type`
+    + `${fits.length > 1 ? 's are' : ' is'} available.`;
+  if (!ms.length) return `${code} is enabled but offers no supported machine types.`;
   const q = m.quota || {};
-  return `${code} is on. What stops it being picked is the GPU limit:\n`
+  return `${code} is enabled, but its GPU quota is too low:\n`
     + `  on demand  ${q.ondemand_vcpu ?? '?'} vCPU\n`
     + `  spot       ${q.spot_vcpu ?? '?'} vCPU\n`
-    + 'A new location starts at 0, so it needs its own request -\n'
-    + '"Ask AWS for a higher GPU limit" under Choose a machine. It is free.';
+    + 'New regions start at 0. Request an increase under Machine type.';
 }
 
 function optinRender() {
@@ -2197,7 +2297,7 @@ function optinRender() {
   $('optin-go').disabled = true;
   $('optin-go').textContent = 'Confirm \u00b7 enable';
   if (!code) {
-    optinSay('', 'Pick one to see what switching it on means.');
+    optinSay('', 'Select a region.');
     return;
   }
   const row = ((optinNow && optinNow.regions) || []).find(r => r.region === code);
@@ -2217,10 +2317,9 @@ function optinRender() {
     + (m ? ` \u00b7 ${Math.round(m.rtt_ms)}ms` : '')
     + (best ? ` \u00b7 ${best.type} at ${best.score}/10` : ''), '');
   $('optin-log').textContent =
-      'This applies to your whole AWS account. Nothing is created or charged.\n'
+      'Applies to the whole AWS account. No charge.\n'
     + '\n'
-    + 'It takes a few minutes. Switching it back off is slower, so treat it\n'
-    + 'as permanent.';
+    + 'Takes a few minutes. Disabling is slow; treat it as permanent.';
   $('optin-go').disabled = false;
 }
 
@@ -2263,13 +2362,13 @@ $('optin-go').onclick = async e => {
   $('optin-go').disabled = true;
   $('optin-go').textContent = 'Enabling\u2026';
   optinBusy(true);
-  optinSay(`Enabling ${code}\u2026`, 'AWS takes a few minutes. This watches until it is done.');
+  optinSay(`Enabling ${code}\u2026`, 'Takes a few minutes.');
   $('optin-log').textContent = '';
   const { rc, err } = await runCg(['regions', 'enable', code], { wantRc: true });
   $('optin-log').textContent = (err || '').trim();
   optinBusy(false);
   if (rc !== 0) {
-    optinSay('AWS refused', (err || '').trim().split('\n')[0] || '', 'bad');
+    optinSay('Rejected by AWS', (err || '').trim().split('\n')[0] || '', 'bad');
     $('optin-go').disabled = false;
     $('optin-go').textContent = 'Confirm \u00b7 enable';
     return;
@@ -2323,7 +2422,7 @@ function openOneField({ title, note, label, placeholder, args, askId, save = 'Sa
   $('onefield-go').onclick = async e => {
     e.preventDefault();
     const value = $('onefield-input').value.trim();
-    if (!value) return oneFieldFail('Paste it first.', save);
+    if (!value) return oneFieldFail('Required.', save);
     const argv = typeof args === 'function' ? args(value) : args;
     if (askId) oneFieldPending = { askId, value };
     $('onefield-err').hidden = true;
@@ -2354,8 +2453,8 @@ $('onefield-cancel').onclick = e => {
 function openTskey() {
   openOneField({
     title: 'Tailscale access token',
-    note: 'From login.tailscale.com: Settings, then Keys, then Generate access token. '
-        + 'Optional: it lets the app tidy away old devices for you.',
+    note: 'Optional. login.tailscale.com → Settings → Keys → Generate access token. '
+        + 'Used to remove stale devices.',
     label: 'Access token', placeholder: 'tskey-api-…',
     args: ['creds', 'set', 'tailscale'], askId: ASK.tsToken,
     save: 'Save token', working: 'Checking with Tailscale…',
@@ -2368,11 +2467,11 @@ function openTskey() {
 // only then, and the dialog says what kind of key to make.
 function setAuthKey(log) {
   openOneField({
-    title: 'A key for your games machine',
-    note: 'In Tailscale: Settings \u2192 Keys \u2192 Generate auth key. Turn Reusable on and '
-        + 'Ephemeral off, so the machine is remembered between sessions.'
+    title: 'Tailscale auth key',
+    note: 'login.tailscale.com \u2192 Settings \u2192 Keys \u2192 Generate auth key. '
+        + 'Reusable on, Ephemeral off.'
         + '',
-    label: 'Machine key', placeholder: 'tskey-auth-…', log,
+    label: 'Auth key', placeholder: 'tskey-auth-…', log,
     args: ['creds', 'tailscale', 'authkey'], askId: ASK.tsAuthKey,
     save: 'Save key', working: 'Checking with Tailscale…',
     strip: 'Machine key',
@@ -2388,10 +2487,8 @@ function setAuthKey(log) {
 // argument, validates it against the registry rule and writes .env.
 function openAlertEmail(log) {
   openOneField({
-    title: 'Where should bill alerts go?',
-    note: 'Amazon emails this address if the month passes your budget - it is also what tells '
-        + 'you a machine is still running when you thought it was not. Several? Separate them '
-        + 'with commas.',
+    title: 'Budget alert email',
+    note: 'Notified when spending passes the budget. Separate multiple addresses with commas.',
     label: 'Email', placeholder: 'you@example.com', secret: false, log,
     args: v => ['config', 'set', 'EMAIL_ALERTS', v],
     save: 'Save address', working: 'Saving\u2026',
@@ -2435,11 +2532,11 @@ $('awskey-cancel').onclick = e => { e.preventDefault(); awsKeyPending = null; $(
 $('awskey-go').onclick = async e => {
   e.preventDefault();
   const id = $('awskey-id').value.trim(), secret = $('awskey-secret').value.trim();
-  if (!id || !secret) return awsKeyFail('Both are needed: the access key ID and the secret.');
+  if (!id || !secret) return awsKeyFail('Access key ID and secret are both required.');
   awsKeyPending = { id, secret };
   $('awskey-err').hidden = true;
   $('awskey-go').disabled = true;
-  $('awskey-go').textContent = 'Checking with Amazon\u2026';
+  $('awskey-go').textContent = 'Checking with AWS\u2026';
   const { rc, err } = await runCg(['creds', 'set'], { wantRc: true, collect: awsKeyLog });
   awsKeyPending = null;
   if (rc === 0) {
@@ -2450,16 +2547,16 @@ $('awskey-go').onclick = async e => {
   }
   // cg's own words, minus the line that only tells you where to find a key -
   // you are holding one.
-  awsKeyFail((err || 'The key could not be saved.').split('\n')
+  awsKeyFail((err || 'Could not save the key.').split('\n')
     .filter(l => l.trim() && !l.startsWith('AWS credentials: paste'))
-    .join('\n').trim() || 'The key could not be saved.');
+    .join('\n').trim() || 'Could not save the key.');
 };
 
 function setCreds() { openAwsKey(); }
 
 // "1" means nothing to a person: a choice shows what it chose.
 const CHOICE_LABEL = {
-  GAME_SPOT: { '1': 'Spot', '0': 'Standard', auto: 'Spot when available' },
+  GAME_SPOT: { '1': 'Spot', '0': 'On-demand', auto: 'Spot, else on-demand' },
   GAME_STEAM_LOGIN: { use: 'Use the saved login', fresh: 'Ask me to sign in' },
 };
 const choiceLabel = (key, v) => (CHOICE_LABEL[key] || {})[v] || v;
@@ -2476,6 +2573,10 @@ function settingValue(r) {
 function paintConfig(rows) {
   paintOnboardSoon();
   config = rows;
+  // Which machines there are is read from the settings (a region chosen is
+  // an AWS machine), so Home and its cards follow them.
+  paintHome();
+  paintDash();
   paintBuildLogin();
   if (watcher) paintGuards(watcher);
   const wrap = $('s-groups');
@@ -2505,7 +2606,7 @@ function paintConfig(rows) {
 // how long games are kept on Library - and three copies of one setting is how
 // this page used to read.
 const SETTINGS_CARDS = [
-  ['Stream', 'Passed to Moonlight when you play, so its own saved settings stay as they are.',
+  ['Stream', 'Applied per session. Moonlight settings are not changed.',
    ['GAME_RES', 'GAME_FPS', 'GAME_BITRATE_KBPS']],
   ['Machine disk', '', ['GAME_DISK_GB']],
 ];
@@ -2516,18 +2617,18 @@ const PLAIN = { GAME_RES: 'Resolution', GAME_FPS: 'Frame rate', GAME_BITRATE_KBP
                 GAME_WATCHDOG_IDLE_MIN: 'Stop after idle', GAME_WATCHDOG_STUCK_MIN: 'Force stop after',
                 GAME_NTFY_URL: 'Phone alerts' };
 const PLAIN_NOTE = {
-  GAME_RES: 'For example 1920x1080. Leave empty to let Moonlight decide.',
-  GAME_DISK_GB: 'Applies at the next build, and cannot be shrunk later.',
-  GAME_BUDGET_INR: 'AWS emails you if you pass it. It does not stop anything.',
-  EMAIL_ALERTS: 'Where budget alerts go. Separate several with commas.',
-  GAME_WATCHDOG_IDLE_MIN: 'How long a machine can sit unused before auto-stop ends it.',
-  GAME_WATCHDOG_STUCK_MIN: 'If shutting down hangs, auto-stop forces it after this long.',
-  GAME_NTFY_URL: 'Your ntfy topic. Leave empty to turn phone alerts off.',
+  GAME_RES: 'e.g. 1920x1080. Empty uses Moonlight default.',
+  GAME_DISK_GB: 'Applies at next build. Cannot be reduced later.',
+  GAME_BUDGET_INR: 'Email alert only. Nothing is stopped.',
+  EMAIL_ALERTS: 'Comma-separated.',
+  GAME_WATCHDOG_IDLE_MIN: 'Idle time before auto-stop.',
+  GAME_WATCHDOG_STUCK_MIN: 'Forces a stuck shutdown after this long.',
+  GAME_NTFY_URL: 'ntfy topic. Empty disables phone alerts.',
 };
 // The value, said the way the row means it.
 function plainValue(r) {
   const v = r.value != null ? r.value : r.default;
-  if (r.key === 'GAME_RES') return v || "Moonlight's own";
+  if (r.key === 'GAME_RES') return v || 'Default';
   if (r.key === 'GAME_FPS') return v ? `${v} fps` : '—';
   if (r.key === 'GAME_DISK_GB') return v ? `${v} GB` : '—';
   if (r.key === 'GAME_BITRATE_KBPS') {
@@ -2535,9 +2636,9 @@ function plainValue(r) {
     const gbHour = (Number(v) * 3600) / 8 / 1e6;
     const rate = (statusNow && statusNow.rates) || {};
     const inr = inrRate();
-    const after = rate.egress_gb && isFinite(inr) ? `, then ${rs(gbHour * rate.egress_gb * inr)} an hour` : '';
+    const after = rate.egress_gb && isFinite(inr) ? `, then ${rs(gbHour * rate.egress_gb * inr)}/hour` : '';
     return `${(Number(v) / 1000).toFixed(0)} Mbps · about ${gbHour.toFixed(1)} GB an hour`
-      + (rate.egress_free_gb ? ` · the first ${rate.egress_free_gb} GB a month free${after}` : '');
+      + (rate.egress_free_gb ? ` · first ${rate.egress_free_gb} GB/month free${after}` : '');
   }
   return settingValue(r);
 }
@@ -2549,11 +2650,15 @@ const CHOSEN_IN_TABLE = new Set(['GAME_REGION', 'GAME_INSTANCE_TYPE', 'GAME_SPOT
 // One row: what it is, what it is for, what it says now, and how to change it.
 function settingRow(r) {
   const row = document.createElement('div');
-  row.className = 'row border-b border-surface-variant/40 items-start';
+  // Wraps rather than squeezes: a narrow card - a 1000px window, the sidebar
+  // beside it - put the value and its button on a line of their own, at the
+  // right where every row's button is, instead of crushing the label to 62px
+  // and pushing Edit past the card's edge.
+  row.className = 'row flex-wrap border-b border-surface-variant/40 items-start';
   row.dataset.key = r.key;          // so anything can send you to this one row
 
   const left = document.createElement('div');
-  left.className = 'min-w-0 flex-1';
+  left.className = 'min-w-[12rem] flex-1';
   const name = document.createElement('p');
   name.className = 'font-code-md text-code-md';
   name.textContent = PLAIN[r.key] || label(r);
@@ -2563,9 +2668,11 @@ function settingRow(r) {
   left.append(name, note);
 
   const right = document.createElement('div');
-  right.className = 'flex items-center gap-space-sm shrink-0';
+  right.className = 'flex items-center gap-space-sm min-w-0 max-w-full ml-auto';
   const val = document.createElement('span');
-  val.className = 'font-code-md text-code-md text-right max-w-[22rem] break-words '
+  // Anywhere: two addresses joined by a comma are one word to the browser,
+  // and break-words would not break it.
+  val.className = 'font-code-md text-code-md text-right max-w-[22rem] min-w-0 [overflow-wrap:anywhere] '
     + (r.is_set ? 'text-on-surface-variant' : 'text-outline');
   val.textContent = plainValue(r);
 
@@ -2581,7 +2688,7 @@ function settingRow(r) {
   if (CHOSEN_IN_TABLE.has(r.key) && !chooserDead()) {
     const where = document.createElement('span');
     where.className = 'font-code-sm text-code-sm text-outline';
-    where.textContent = 'set in Machine, above';
+    where.textContent = 'set under Machine';
     right.append(val, where);
     row.append(left, right);
     return row;
@@ -2666,7 +2773,7 @@ function editSetting(r, row) {
     const value = input.value.trim();
     if (r.secret && !value && r.is_set && !(await askConfirm({
           title: `Clear ${label(r)}?`,
-          body: 'It is cleared, and you will not be asked for it again.',
+          body: 'The value is removed and will not be asked for again.',
           yes: 'Clear', danger: true,
         }))) return;
     save.disabled = true;
@@ -2732,8 +2839,8 @@ function paintPicker(d) {
     td.colSpan = 4;
     td.className = 'py-space-md ' + (failed ? 'text-error' : 'text-outline');
     td.textContent = failed
-      ? `Your saved games could not be read: ${d.error}`
-      : 'No games are saved yet. The machine starts empty, and Steam installs games as usual.';
+      ? `Could not read saved games: ${d.error}`
+      : 'No saved games. The machine starts empty.';
     tr.append(td); body.append(tr);
   }
   for (const g of d.games || []) {
@@ -2756,7 +2863,7 @@ function paintPicker(d) {
     nameCell.textContent = g.name || g.installdir || g.appid;
     if (tooBig) {
       nameCell.append(el('span', 'block font-code-sm text-code-sm text-error',
-        `Too big for a ${d.disk_type || 'machine'} (${cap} GB for games). Pick a machine with a bigger disk.`));
+        `Exceeds ${d.disk_type || 'machine'} capacity (${cap} GB). Choose a larger disk.`));
       tr.className = tr.className.replace('cursor-pointer', 'opacity-60');
     }
     cell('py-space-sm px-space-md text-right text-on-surface-variant').textContent = GB(g.bytes);
@@ -2780,12 +2887,12 @@ function paintFit() {
   const gb = selectedGb(), cap = archive.selectable_gb;
   const over = cap != null && gb > cap;
   // Whose disk: the machine the next build makes, as cg read it.
-  $('b-fit').textContent = archive.disk_type ? `Space on a ${archive.disk_type}` : 'Space on the machine';
+  $('b-fit').textContent = archive.disk_type ? `Disk space (${archive.disk_type})` : 'Disk space';
   $('b-fit').className = 'font-code-sm text-code-sm text-outline';
   const pct = cap != null ? Math.min(100, (gb / cap) * 100) : 0;
-  $('b-fit-pct').textContent = over ? `Too big by ${(gb - cap).toFixed(1)} GB. Untick a game.`
+  $('b-fit-pct').textContent = over ? `${(gb - cap).toFixed(1)} GB over. Deselect a game.`
     : cap != null ? `${gb.toFixed(1)} of ${cap} GB`
-    : picked.size ? `${gb.toFixed(1)} GB · the machine's space is not known yet` : '';
+    : picked.size ? `${gb.toFixed(1)} GB · capacity unknown` : '';
   $('b-fit-pct').className = 'font-code-sm text-code-sm ' + (over ? 'text-error' : 'text-on-surface-variant');
   $('b-bar').style.width = pct + '%';
   $('b-bar').className = 'h-full ' + (over ? 'bg-error' : 'bg-primary');
@@ -2797,8 +2904,8 @@ function paintFit() {
   // Nothing here applies while a box is up: what it holds was chosen at build.
   $('b-alloc').hidden = up;
   $('b-hint').textContent = up
-    ? 'A machine is already running. Its games were chosen when it was built.'
-    : 'Downloaded from your saved games while the machine starts.';
+    ? 'A machine is running. Games were selected at build time.'
+    : 'Restored from saved games during startup.';
 }
 
 // The machine strip: the type you asked for, and what AWS says that type is.
@@ -2976,13 +3083,13 @@ function priceCell(tr, mount, row, spot, inr, cur) {
 
 // Said once, under the table, instead of a sentence in every cell.
 // How a reason reads on screen; the keys stay the code's.
-const REASON_LABEL = { 'no quota': 'Over your GPU limit', 'needs opt-in': 'Not switched on',
+const REASON_LABEL = { 'no quota': 'Over GPU quota', 'needs opt-in': 'Region not enabled',
                        'no spot market': 'No spot price', 'no price': 'No price' };
 const PICK_WHY = {
-  'no quota': 'your GPU limit here does not cover this machine. Asking for more is free.',
-  'needs opt-in': 'this location is not switched on for your account yet. Switching it on is free.',
-  'no spot market': 'AWS sells no spot machine of this kind here. Standard may still work.',
-  'no price': 'AWS gave no price for this machine here.',
+  'no quota': 'GPU quota here is too low for this machine. Increases are free to request.',
+  'needs opt-in': 'this region is not enabled for your account. Enabling is free.',
+  'no spot market': 'no spot market for this type here. On-demand may be available.',
+  'no price': 'no price from AWS for this type here.',
 };
 
 let lastDead = null;
@@ -3019,15 +3126,15 @@ function paintChooser() {
       td.className = 'why';
       td.textContent = !machinesAnswered ? 'Reading prices…'
         : machinesNow && machinesNow.error ? machinesNow.error
-        : 'No machine here fits your GPU limit. Check all locations to compare.';
+        : 'No machine type fits your GPU quota here. Check all regions to compare.';
     } else {
       const head = table.createTHead().insertRow();
       // The price headers do NOT get text-right: the cells under them lead with
       // a radio at the cell's left edge, so a right-aligned header sat over
       // nothing. capacity is the only genuinely right-aligned column.
-      for (const [label, cls] of [['Location', ''], ['Distance', ''], ['Machine', ''], ['Graphics', ''],
-                                  ['Game disk', 'num'], ['Chance of a spare one', 'num'],
-                                  ['Spot, an hour', ''], ['Standard, an hour', '']]) {
+      for (const [label, cls] of [['Region', ''], ['Latency', ''], ['Machine', ''], ['GPU', ''],
+                                  ['Game disk', 'num'], ['Spot availability', 'num'],
+                                  ['Spot/hour', ''], ['On-demand/hour', '']]) {
         const th = document.createElement('th');
         th.textContent = label; th.className = cls;
         head.append(th);
@@ -3070,18 +3177,16 @@ function paintChooser() {
 
     // What the table cannot show on its own: how old it is, and what is missing.
     const parts = [];
-    if (boxNow) parts.push('A machine is running. Delete it before changing machines.');
-    else if (sweeping) parts.push('Checking all locations, about 90 seconds');
-    else if (!swept && rows.length) parts.push('Showing this location only. Check all locations '
-      + 'to compare every AWS location (free).');
+    if (boxNow) parts.push('Delete the running machine before changing type.');
+    else if (sweeping) parts.push('Checking all regions (~90 s)');
+    else if (!swept && rows.length) parts.push('Showing this region only.');
     if (swept) {
       // Two numbers in a spot cell are the cheapest and dearest zone, and the
       // zone is not pinned, so the bill can be either.
       if (rows.some(r => r.spotMax != null && r.spot != null && r.spotMax > r.spot))
-        parts.push('A spot price range is the cheapest and dearest it can be');
+        parts.push('Spot ranges show the lowest and highest zone price');
       const far = (sweepNow.too_far || []).length;
-      if (far) parts.push(`${far} more location${far === 1 ? ' is' : 's are'} too far to stream `
-        + `(${sweepNow.max_ms != null ? `over ${sweepNow.max_ms} ms` : 'too slow'}) and ${far === 1 ? 'is' : 'are'} not listed.`);
+      if (far) parts.push(`${far} region${far === 1 ? '' : 's'} hidden (${sweepNow.max_ms != null ? `over ${sweepNow.max_ms} ms` : 'too slow'})`);
     }
     $(mount.note).textContent = parts.join(' · ');
 
@@ -3096,7 +3201,7 @@ function paintChooser() {
       if (!rows.length && machinesAnswered && !(machinesNow && machinesNow.error)) {
         const b = document.createElement('button');
         b.className = 'btn mt-space-xs';
-        b.textContent = 'Ask AWS for a higher GPU limit';
+        b.textContent = 'Request quota increase';
         b.onclick = () => openQuota(null, machinesNow ? machinesNow.region : undefined);
         legend.append(b);
       }
@@ -3110,36 +3215,35 @@ function paintChooser() {
       // at the top of a long screen, and the question is asked at the table.
       if (sweeping && rows.length) {
         const line = document.createElement('div');
-        line.textContent = 'Checking every location (about 90 seconds). Showing '
-          + `${machinesNow ? placeName(machinesNow.region) : 'one location'} until then.`;
+        line.textContent = 'Checking all regions (~90 s). Showing '
+          + `${machinesNow ? placeName(machinesNow.region) : 'one region'} until then.`;
         legend.append(line);
       } else if (!swept && rows.length) {
         const line = document.createElement('div');
-        line.textContent = `Showing ${machinesNow ? placeName(machinesNow.region) : 'one location'} only. `
-          + 'Checking all locations takes about 90 seconds and is free.';
+        line.textContent = `Showing ${machinesNow ? placeName(machinesNow.region) : 'one region'} only. `
+          + 'Checking all regions takes ~90 s. No charge.';
         legend.append(line);
         // The button, here, rather than the name of a button elsewhere: this
         // line is where the question gets asked, and the answer was two
         // scrolls away at the top of the screen.
         const b = document.createElement('button');
         b.className = 'btn mt-space-xs';
-        b.textContent = 'Check all locations';
+        b.textContent = 'Check all regions';
         b.onclick = () => scanRegions($('s-sweep'));
         legend.append(b);
       }
       const hidden = hiddenByQuota();
       if (hidden) {
         const line = document.createElement('div');
-        line.textContent = `${hidden} more GPU machine${hidden === 1 ? ' is' : 's are'} offered here, `
-          + 'all over your GPU limit. Ask AWS for more, or pick another location.';
+        line.textContent = `${hidden} more GPU type${hidden === 1 ? '' : 's'} here exceed${hidden === 1 ? 's' : ''} your quota.`;
         legend.append(line);
       }
       if (rows.length) {
         const line = document.createElement('div');
         // What each price holds, so it can be checked against the bill.
         const tax = ((statusNow && statusNow.rates) || {}).tax_pct;
-        line.textContent = 'Spot is much cheaper, but AWS can take the machine back mid-game. '
-          + 'Standard is never taken back. Each price includes the machine\'s address and disk'
+        line.textContent = 'Spot is cheaper but can be reclaimed mid-session. On-demand is not. '
+          + 'Prices include the IP address and disk'
           + (tax ? `, and ${tax}% GST.` : '.');
         legend.append(line);
       }
@@ -3274,13 +3378,13 @@ let buildSteps = 0;
 const BUILD_STEPS = [
   { doing: 'Checking your setup', done: 'Checked your setup', match: /cloud watchdog|preflight/i },
   { doing: 'Setting the budget alert', done: 'Budget alert set', match: /budget/i },
-  { doing: 'Renting the machine', done: 'Machine rented', bills: true,
+  { doing: 'Launching the machine', done: 'Machine launched', bills: true,
     match: /provisioning|launching|confirming what shutdown|starting the existing|reusing the existing/i },
   { doing: 'Connecting to Tailscale', done: 'Connected to Tailscale',
     match: /join the tailnet|on the tailnet|key expiry/i },
   { doing: 'Installing the software', done: 'Software installed', parts: true,
     match: /building the box|^installing|^installed |^configuring|^setting up|^disabling|nvidia/i },
-  { doing: 'Downloading your games', done: 'Games downloaded', games: true, match: /finishing up|restor/i },
+  { doing: 'Restoring games', done: 'Games restored', games: true, match: /finishing up|restor/i },
   { doing: 'Connecting Moonlight', done: 'Moonlight connected', match: /on-host watchdog|sunshine account|pairing/i },
   { doing: 'Starting Steam', done: 'Steam started', match: /waiting for steam/i },
 ];
@@ -3294,7 +3398,7 @@ const OPEN_STEPS = [
     end: /waiting for tailscale ok|tailscale is up|^\s*pong|\bvia\b/i },
   { doing: 'Starting the game stream', done: 'Game stream ready', end: /waiting for sunshine ok|sunshine is up|^disk:/i },
   { doing: 'Playing', done: 'Played', end: /session ended/i, stream: true,
-    note: 'Close Moonlight to stop. You are then asked whether to keep the machine or delete it.' },
+    note: 'Close Moonlight to end the session, then choose to keep or delete the machine.' },
 ];
 // What the machine installs, in the order it does it, each matched to the
 // progress line the box prints when it starts that piece (lib/bootstrap.d).
@@ -3423,10 +3527,10 @@ const mins = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 1
 const took = (a, b) => { const s = Math.round((b - a) / 1000); return s < 60 ? `${s} s` : `${Math.round(s / 60)} min`; };
 
 const RUN_HEAD = {
-  init: { running: 'Building your machine', done: 'Ready to play', failed: 'The build stopped' },
-  destroy: { running: 'Deleting the machine', done: 'Machine deleted', failed: 'The delete stopped' },
-  open: { running: 'Starting the game session', done: 'Session ended', failed: 'The session stopped' },
-  library: { running: 'Changing your saved games', done: 'Saved games changed', failed: 'The change stopped' },
+  init: { running: 'Building', done: 'Ready to play', failed: 'Build failed' },
+  destroy: { running: 'Deleting the machine', done: 'Machine deleted', failed: 'Delete failed' },
+  open: { running: 'Starting session', done: 'Session ended', failed: 'Session failed' },
+  library: { running: 'Updating saved games', done: 'Saved games updated', failed: 'Update failed' },
 };
 
 // Which card the Build screen shows is decided by the machine, never by where
@@ -3500,8 +3604,8 @@ function paintBuildMode() {
 async function cancelBuild() {
   const ok = await askConfirm({
     title: 'Cancel the build?',
-    body: 'The machine is deleted and billing stops. Your saved games are not touched.',
-    yes: 'Cancel the build', no: 'Keep building', danger: true,
+    body: 'The machine is deleted and billing stops. Saved games are not affected.',
+    yes: 'Cancel build', no: 'Keep building', danger: true,
   });
   if (!ok || !run || run.kind !== 'init' || run.state !== 'running') return;
   run.cancelling = true;
@@ -3517,7 +3621,7 @@ function paintRun() {
   const machine = r.state === 'done' && (r.kind === 'init' || r.kind === 'machine');
   const now = r.state === 'running' ? Date.now() : (r.steps.reduce((t, x) => Math.max(t, x && x.end || 0), 0) || Date.now());
   const title = $('b-strip-title');
-  title.textContent = r.cancelling ? 'Cancelling the build' : machine ? machineTitle()
+  title.textContent = r.cancelling ? 'Cancelling' : machine ? machineTitle()
     : r.kind === 'open' && r.state === 'running' && OPEN_STEPS[r.idx] && OPEN_STEPS[r.idx].stream
       ? (r.streamEnded ? 'Session ended' : 'Playing') : head[r.state];
   title.className = 'font-headline-md text-headline-md ' + (r.state === 'failed' ? 'text-error' : '');
@@ -3532,7 +3636,7 @@ function paintRun() {
   const s = statusNow || {};
   $('b-run-sum').textContent = r.kind === 'init' || r.kind === 'machine' || r.kind === 'open'
     ? [r.kind !== 'init' && liveBox() ? liveBox().type : s.instance_type, s.region ? placeName(s.region) : null,
-       (r.kind !== 'init' && liveBox() ? liveBox().lifecycle !== 'spot' : (s.config || {}).spot === '0') ? 'Standard' : 'Spot',
+       (r.kind !== 'init' && liveBox() ? liveBox().lifecycle !== 'spot' : (s.config || {}).spot === '0') ? 'On-demand' : 'Spot',
        r.kind !== 'init' ? null
          : r.games ? `${r.games} game${r.games === 1 ? '' : 's'}, ${r.gamesGb.toFixed(1)} GB` : 'no games']
         .filter(Boolean).join(' · ')
@@ -3654,7 +3758,7 @@ function paintRun() {
     det.ontoggle = () => { builtOpen = det.open; };
     det.append(Object.assign(document.createElement('summary'), {
       className: 'font-code-sm text-code-sm text-outline cursor-pointer mb-space-sm',
-      textContent: `How it was built · ${mins(now - r.start)}` }), ...wrap.children);
+      textContent: `Build details · ${mins(now - r.start)}` }), ...wrap.children);
     wrap.append(det);
   }
 
@@ -3764,8 +3868,8 @@ const FAIL_ACTS = {
   // The region is not switched on for this account: another location is the
   // answer, and it is picked where the machine is.
   OptInRequired: () => [['Choose another location', () => openMachines()]],
-  AuthFailure: () => [['Connect Amazon again', () => openAwsKey()]],
-  UnauthorizedOperation: () => [['Connect Amazon again', () => openAwsKey()]],
+  AuthFailure: () => [['Connect AWS again', () => openAwsKey()]],
+  UnauthorizedOperation: () => [['Connect AWS again', () => openAwsKey()]],
 };
 
 // cg's own words, read back: the marked line is the headline, and the two
@@ -3821,7 +3925,7 @@ function buildFail(text) {
   // is a command to type at someone who is looking at a window.
   const { head, code, said, safe } = failSummary(whole);
   $('b-fail-head').textContent = head || 'the build stopped';
-  $('b-fail-why').textContent = [safe ? 'Nothing was launched, and nothing is billing.' : '',
+  $('b-fail-why').textContent = [safe ? 'Nothing was launched. No charges.' : '',
                                  said ? `AWS said: ${said}` : '',
                                  code ? `(${code})` : ''].filter(Boolean).join('  ');
   buildFailActions(code);
@@ -3880,7 +3984,7 @@ window.cg.onEvent(({ id, event }) => {
       // beats a bare status label the eye slides over.
       if (event.rc !== 0 && !buildFailures.length && !(run && run.cancelling)
           && !(job.cmd[0] === 'open' && event.rc === 130))
-        buildFail(`${CgName(job.cmd)} stopped without saying why. The log above is all there is.`);
+        buildFail(`${CgName(job.cmd)} exited without an error message. See the log above.`);
     }
   }
   if (event.t === 'step' && job.onStep) job.onStep(event.text);
@@ -3890,7 +3994,7 @@ window.cg.onEvent(({ id, event }) => {
     // person is looking at.
     const pre = awsKeyAnswer(event.id) ?? oneFieldAnswer(event.id) ?? typedAnswer(event.id);
     if (pre !== null) window.cg.answer(id, pre);
-    else ask(id, event);
+    else if (!serverPwAnswer(id, event.id) && !sudoAnswer(id, event.id)) ask(id, event);
   }
   // JSON comes back on stdout as the command's own data; reports arrive as events.
   if (event.t === 'raw' && event.stream === 'stdout' && (job.json || job.capture)) job.out.push(event.text);
@@ -3932,7 +4036,9 @@ window.cg.onEvent(({ id, event }) => {
         const paint = { cost: paintCost, library: paintLibrary, guards: paintGuards,
                         config: paintConfig, status: paintStatus, machines: paintMachines,
                         sweep: paintSweep, creds: paintCreds, deps: paintDeps,
-                        tskey: paintTskey, ping: paintPing, elsewhere: paintElsewhere }[job.json];
+                        tskey: paintTskey, ping: paintPing, elsewhere: paintElsewhere,
+                        hosts: paintHosts }[job.json]
+          || (job.json.startsWith('host:') && (d => paintHostStatus(job.json.slice(5), d)));
         if (!paint) throw new Error(`no painter for ${job.json}`);
         paint(data);
       } catch (err) {
@@ -3941,6 +4047,7 @@ window.cg.onEvent(({ id, event }) => {
     }
     if (job.age) $(job.age).textContent = new Date().toLocaleTimeString();
     jobs.delete(id);
+    for (const wake of jobEnded.splice(0)) wake();
     updateHeader();
     // A FAILED read used to be silent: note() and the follow-up refresh are
     // behind job.write, so a read that could not run at all left the screen empty
@@ -3964,6 +4071,8 @@ window.cg.onEvent(({ id, event }) => {
     // Not every painter repaints the pipeline, and the opening list is a line
     // per read: it ticks as each one lands, not all at once at the end.
     if (job.json && readingBehindGate) paintOnboardSoon();
+    // A machine's check that failed: its card leaves the loading state to say so.
+    if (job.json && job.json.startsWith('host:') && readFailures.has(job.json)) paintHostCards();
     // The read that judges a step that has just been done: it has answered, so
     // the step shows what it says - ticked, or back to what is still missing.
     if (onbVerifying && job.json && onbPending.has(job.json)) {
@@ -3994,7 +4103,7 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart,
   return new Promise(async resolve => {
     const res = await window.cg.run(args, env);
     if (!res.ok) {
-      const why = `${CgName(res.args)} is still running. This has to wait for it.`;
+      const why = `Waiting for ${cgName(res.args)} to finish.`;
       if (collect) $(collect).textContent = why + '\n';
       if (panel) $(panel).textContent = why;
       return resolve(wantRc ? { rc: null, err: why } : undefined);
@@ -4010,10 +4119,576 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart,
   });
 }
 
+// --- Machines ------------------------------------------------------------------
+// Home is the machines: the AWS one when this laptop plays on AWS, and each of
+// yours (`cg host`). Every fact on a card is cg's - `cg host list` for what is
+// saved, `cg host status <name>` for what each is ready for, over ssh and
+// Tailscale - and every button is a cg command. Setting a machine up is adding
+// it: the add dialog walks the steps it needs (prereqs), and a machine that
+// needs something afterwards says so on its own card.
+// What Home showed last time, kept in this window's storage: which machines
+// there are, what each is, and whether AWS is one - so Home opens in its final
+// layout while the reads that confirm it are on their way. Never a status: a
+// machine's state and its buttons appear only once a live check has answered.
+const HOME_KEY = 'cg.home';
+const homeBoot = (() => {
+  try { const v = JSON.parse(localStorage.getItem(HOME_KEY) || 'null'); return v && Array.isArray(v.hosts) ? v : null; }
+  catch { return null; }
+})();
+const hostIdentity = (homeBoot && homeBoot.identity) || {};   // name -> { os_name, gpu }
+function homeRemember() {
+  try {
+    localStorage.setItem(HOME_KEY, JSON.stringify({
+      hosts: hostsNow || [], identity: hostIdentity,
+      aws: config.length ? awsAdded() : !!(homeBoot && homeBoot.aws) }));
+  } catch { /* this window only */ }
+}
+// Machines whose card has shown its loading state, so the answer fades in.
+const hostWasLoading = new Set();
+let hostsNow = homeBoot ? homeBoot.hosts : null;   // `cg host list --json`, as last read
+const hostStatus = new Map();     // name -> `cg host status <name> --json`
+const hostLogs = new Map();       // name -> its setup log <pre>, kept across paints
+let machineTab = 'aws';           // what the Machine page shows: 'aws', or one of yours by name
+let adding = null;                // 'aws' | 'host' while the add dialog is open
+let addedHost = null;             // the machine that dialog has just added
+
+// "An AWS machine" is a laptop set up to play on AWS: a region chosen, which is
+// the last step of adding it. cg aws forget takes it away again.
+const awsAdded = () => regionChosen();
+// AWS is asked something only when there is an AWS machine, or one is being added.
+const awsInPlay = () => awsAdded() || adding === 'aws';
+// What the steps are judged for: the machine being added, else the AWS one.
+const kindNow = () => adding || (awsAdded() ? 'aws' : 'host');
+// The reads that ask AWS. A laptop with no AWS machine never asks them: each
+// would come back "no key", and the pages would fill with it.
+const AWS_JSON = new Set(['status', 'guards', 'library', 'elsewhere', 'machines', 'sweep', 'cost']);
+const forMode = reads => (reads && !awsInPlay() ? reads.filter(([, j]) => !AWS_JSON.has(j)) : reads);
+// The pages about the AWS machine alone, which leave the sidebar without one.
+const AWS_VIEWS = ['build', 'library', 'guards', 'cost'];
+// The tools this laptop needs - the AWS CLI only for AWS.
+const neededTools = (kind = kindNow()) => ((depsNow && depsNow.tools) || []).filter(t => kind === 'aws' || t.for !== 'aws');
+
+const HOSTS_READ = [['host', 'list', '--json'], 'hosts'];
+const hostRead = name => [['host', 'status', name, '--json'], `host:${name}`];
+const hostReads = () => (hostsNow || []).map(h => hostRead(h.name));
+const hostJob = (name, sub) => [...jobs.values()].find(j => j.cmd[0] === 'host' && j.cmd[1] === sub && j.cmd[2] === name);
+
+function paintHosts(list) {
+  hostsNow = Array.isArray(list) ? list : [];
+  for (const name of [...hostStatus.keys()]) if (!hostsNow.some(h => h.name === name)) hostStatus.delete(name);
+  // Each one's status, once: ssh, a tailnet ping and a look at Sunshine -
+  // seconds each - so it is asked for machines not already known or being
+  // read, never again on every list.
+  for (const h of hostsNow)
+    if (!hostStatus.has(h.name) && !readOut(`host:${h.name}`)) {
+      const [args, json] = hostRead(h.name);
+      runCg(args, { json, group: 'refresh' });
+    }
+  for (const name of Object.keys(hostIdentity)) if (!hostsNow.some(h => h.name === name)) delete hostIdentity[name];
+  homeRemember();
+  paintOnboardSoon();
+  paintHostCards();
+}
+function paintHostStatus(name, d) {
+  hostStatus.set(name, d);
+  if (d && (d.os_name || d.gpu)) { hostIdentity[name] = { os_name: d.os_name || '', gpu: d.gpu || '' }; homeRemember(); }
+  paintHostCards();
+  // The add dialog's server step names what was found.
+  if (name === addedHost) paintOnboardSoon();
+}
+
+// What a machine is ready for, in one line and a tone, from what cg said.
+function hostState(h) {
+  const s = hostStatus.get(h.name);
+  if (hostJob(h.name, 'setup')) return { title: 'Setting up', tone: 'run', sub: 'Installing missing components.' };
+  if (hostJob(h.name, 'open')) return { title: 'Playing', tone: 'ok', sub: 'Close Moonlight to end the session.' };
+  if (h.os === 'Windows') return { title: 'Windows not supported', tone: 'off', sub: 'Only Linux machines can be set up.' };
+  if (!s) return { title: readFailures.has(`host:${h.name}`) ? 'Check failed' : 'Checking…', tone: 'off',
+                   sub: (readFailures.get(`host:${h.name}`) || '').replace(/^.*? could not run: /, '') };
+  if (!s.set_up) return { title: 'Not set up', tone: 'warn',
+                          sub: s.reachable ? 'Run setup to enable streaming.' : 'No SSH response.' };
+  if (!s.reachable && !s.online) return { title: 'Offline', tone: 'bad', sub: 'Powered off, asleep or disconnected.' };
+  if (!s.sunshine) return { title: 'Not streaming', tone: 'bad', sub: 'Sunshine is not responding. Re-run setup to restart it.' };
+  if (s.reachable && !s.desktop) return { title: 'No user session', tone: 'warn', sub: 'Sign in on the machine to start a desktop session.' };
+  return { title: 'Ready to play', tone: 'ok', sub: '' };
+}
+
+// One machine's card. Home shows what it is ready for and its one next
+// action; the Machine page adds the checks, the log, and removing it.
+// A card before its first live answer: what the machine is, as remembered,
+// and a loading line - no status, no buttons, nothing to press yet.
+function hostCardLoading(h, full) {
+  const id = hostIdentity[h.name] || {};
+  const card = el('div', 'p-space-lg rounded-lg bg-surface-container-low');
+  card.dataset.host = h.name;
+  card.dataset.state = 'loading';
+  card.append(el('p', 'font-body-sm text-body-sm font-medium text-on-surface-variant', h.name));
+  const t = el('span', 'skel mt-space-xs ' + (full ? 'h-9' : 'h-7') + ' w-40'); t.dataset.f = 'title';
+  card.append(t, el('span', 'skel mt-space-sm h-4 w-64'));
+  const what = [id.os_name || h.os, id.gpu, full ? h.ssh : null].filter(Boolean).join(' · ');
+  card.append(el('p', 'font-code-sm text-code-sm text-outline mt-space-md', what || '\u00a0'));
+  const bar = el('div', 'onb-progress mt-space-lg'); bar.append(el('i'));
+  const line = el('p', 'font-code-sm text-code-sm text-outline mt-space-xs', `Connecting to ${h.name}…`);
+  line.dataset.f = 'sub';
+  card.append(bar, line);
+  return card;
+}
+function hostCard(h, full) {
+  const failed = readFailures.has(`host:${h.name}`);
+  if (!hostStatus.has(h.name) && !failed && !hostJob(h.name, 'setup') && !hostJob(h.name, 'open')) {
+    hostWasLoading.add(h.name);
+    return hostCardLoading(h, full);
+  }
+  const s = hostStatus.get(h.name) || {};
+  const st = hostState(h);
+  const setting = !!hostJob(h.name, 'setup');
+  const playing = !!hostJob(h.name, 'open');
+  const card = el('div', 'p-space-lg rounded-lg bg-surface-container-low');
+  card.dataset.host = h.name;
+  card.dataset.state = st.title;
+  // The first answer after loading fades in where the loading state was.
+  if (hostWasLoading.delete(h.name)) card.classList.add('card-in');
+  const top = el('div', 'flex items-start justify-between gap-space-md');
+  const head = el('div', 'min-w-0');
+  head.append(el('p', 'font-body-sm text-body-sm font-medium text-on-surface-variant', h.name));
+  const t = el('p', (full ? 'font-headline-lg text-headline-lg' : 'font-headline-md text-headline-md') + ' mt-space-xs', st.title);
+  t.dataset.f = 'title';
+  head.append(t);
+  if (st.sub) { const p = el('p', 'font-body-md text-body-md text-on-surface-variant mt-space-xs', st.sub); p.dataset.f = 'sub'; head.append(p); }
+  top.append(head);
+  const tag = { ok: ['pill-ok', playing ? 'streaming' : 'ready'], run: ['pill-ok', 'setting up'],
+                warn: ['pill-warn', 'needs you'], bad: ['pill-bad', 'offline'] }[st.tone];
+  if (tag) top.append(el('span', `pill shrink-0 ${tag[0]}`, tag[1]));
+  card.append(top);
+  const what = [s.os_name || s.os || h.os, s.gpu, full ? h.ssh : null].filter(Boolean).join(' · ');
+  card.append(el('p', 'font-code-sm text-code-sm text-outline mt-space-md', what));
+
+  if (full && hostStatus.has(h.name)) {
+    // The checks, each a fact cg read just now.
+    const checks = el('div', 'flex flex-wrap gap-space-xs mt-space-md');
+    checks.dataset.f = 'checks';
+    for (const [ok, text] of [[s.reachable, 'SSH'], [s.online, 'Tailscale'], [s.sunshine, 'Sunshine'],
+                              [s.login_ok, 'Sunshine login'], [s.paired, 'Moonlight paired'],
+                              [s.steam, 'Steam']]) {
+      if (ok == null) continue;
+      checks.append(el('span', 'pill ' + (ok ? 'pill-ok' : 'pill-bad'), (ok ? '✓ ' : '✗ ') + text));
+    }
+    card.append(checks);
+  }
+
+  const row = el('div', 'flex flex-wrap items-center gap-space-sm mt-space-lg');
+  const btn = (label, cls, go, f) => { const b = el('button', cls, label); b.dataset.f = f; b.onclick = go; row.append(b); return b; };
+  const linux = h.os !== 'Windows';
+  // Not known: nothing it could do is offered - only asking again.
+  const unknown = failed && !hostStatus.has(h.name);
+  if (unknown) {
+    btn('Try again', 'btn btn-primary', () => { readFailures.delete(`host:${h.name}`); refreshHosts(h.name); }, 'retry');
+  }
+  if (!unknown && s.set_up && linux) {
+    const p = btn(playing ? 'Streaming' : 'Play', 'btn btn-primary', () => playOn(h.name), 'play');
+    p.disabled = playing || setting || !!sessionNow || !s.sunshine;
+    p.title = sessionNow ? 'a session is already open' : '';
+  }
+  if (!unknown && linux && (full || !s.set_up)) {
+    const b = btn(setting ? 'Setting up…' : s.set_up ? 'Re-run setup' : 'Set up',
+                  s.set_up ? 'btn' : 'btn btn-primary', () => setUpHost(h.name), 'setup');
+    b.disabled = setting || playing;
+  }
+  if (setting || playing) {
+    // Ends it here; a setup stopped part-way carries on from there next time.
+    btn('Stop', 'btn', () => {
+      const j = [...jobs].find(([, x]) => hostRun(x) && x.cmd[2] === h.name);
+      if (j) window.cg.cancel(j[0]);
+    }, 'stop');
+  }
+  if (full) {
+    const r = btn('Remove machine', 'btn btn-danger', () => removeHost(h.name), 'remove');
+    r.disabled = setting || playing;
+  } else {
+    // The gear: this machine's detail - checks, log, removing it.
+    const g = btn('', 'btn ml-auto', () => goHost(h.name), 'details');
+    g.title = 'Details';
+    g.append(Object.assign(el('span', 'material-symbols-outlined text-[16px]', ICON.settings), { ariaHidden: 'true' }), document.createTextNode('Details'));
+  }
+  card.append(row);
+
+  // The setup's own words, while it runs and after: folded once it is over.
+  const log = hostLogs.get(h.name);
+  if (full && log) {
+    const box = el('details', 'mt-space-md');
+    box.open = setting || log.dataset.failed === 'yes';
+    box.append(el('summary', 'font-code-sm text-code-sm text-outline cursor-pointer',
+                  setting ? 'Progress' : log.dataset.failed === 'yes' ? 'Error details' : 'Setup log'));
+    box.append(log);
+    card.append(box);
+  }
+  return card;
+}
+
+function paintHostCards() {
+  const list = hostsNow || [];
+  // The logs go back to their parking place before the cards are rebuilt.
+  for (const log of hostLogs.values()) $('h-logs').append(log);
+  const home = $('d-hosts');
+  home.textContent = '';
+  for (const h of list) home.append(hostCard(h, false));
+  const page = $('b-hosts');
+  page.textContent = '';
+  const open = list.find(h => h.name === machineTab);
+  if (open) page.append(hostCard(open, true));
+  paintMachineTab();
+  paintHome();
+  paintDash();
+}
+
+// The Machine page: the AWS machine, or the one of yours that was opened.
+function paintMachineTab() {
+  const host = machineTab !== 'aws' && (hostsNow || []).some(h => h.name === machineTab);
+  if (!host) machineTab = 'aws';
+  $('b-aws').hidden = !!host;
+  $('b-own').hidden = !host;
+  if (view === 'build') $('view-title').textContent = host ? machineTab : 'Machine';
+}
+function goHost(name) {
+  machineTab = name;
+  if (view === 'build') paintHostCards(); else goView('build');
+  paintHostCards();
+}
+$('b-own-back').onclick = () => goView('dashboard');
+
+// Home and the sidebar, from which machines there are.
+function paintHome() {
+  // Until the settings are read, whether AWS is one of the machines is what it
+  // was last time - so its card is in place from the first frame.
+  const aws = (config || []).length ? awsAdded() : !!(homeBoot && homeBoot.aws), hosts = hostsNow || [];
+  const any = aws || hosts.length > 0;
+  // Nothing is said until both have been read - or remembered: a laptop with
+  // machines must not flash the welcome while the list is on its way.
+  const known = ((config || []).length > 0 || !!homeBoot) && hostsNow !== null;
+  $('d-welcome').hidden = !known || any;
+  $('d-machines').hidden = !any;
+  $('d-hero').hidden = !aws;
+  $('d-add-aws').hidden = aws;
+  $('d-money').hidden = !aws;
+  $('d-cards').hidden = !any;
+  for (const id of ['d-games-card', 'd-protect-card']) $(id).hidden = !aws;
+  for (const v of AWS_VIEWS) {
+    const link = document.querySelector(`.nav-item[data-view="${v}"]`);
+    if (link) link.hidden = !aws;
+  }
+  // Settings are about streaming from a machine and the machines themselves:
+  // with none yet there is nothing in it worth a visit - this laptop's own
+  // steps are part of adding one.
+  document.querySelector('.nav-item[data-view="settings"]').hidden = known && !any;
+  if (known && !any && view === 'settings') goView('dashboard');
+  // What only AWS needs, in Settings: the AWS key, the machine's disk.
+  if ($('s-creds-card')) $('s-creds-card').hidden = !aws;
+  const disk = settingEl('GAME_DISK_GB');
+  if (disk && disk.parentElement) disk.parentElement.hidden = !aws;
+  if (!aws && ['library', 'guards', 'cost'].includes(view)) goView('dashboard');
+  if (!aws && view === 'build' && machineTab === 'aws') goView('dashboard');
+}
+for (const b of document.querySelectorAll('[data-add]')) b.onclick = () => openAdd(b.dataset.add);
+
+function hostLog(name) {
+  let log = hostLogs.get(name);
+  if (!log) {
+    log = el('pre', 'font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[40vh] overflow-auto mt-space-sm');
+    log.id = `h-log-${name}`;
+    hostLogs.set(name, log);
+    $('h-logs').append(log);
+  }
+  return log;
+}
+
+// Setting one up: the same build an AWS machine gets, run on yours (cg host
+// setup). It asks for the sudo password itself, once - the ask dialog - and
+// saves nothing of it.
+async function setUpHost(name) {
+  const log = hostLog(name);
+  log.textContent = '';
+  log.dataset.fresh = 'yes';
+  delete log.dataset.failed;
+  const { rc } = await runCg(['host', 'setup', name], { collect: log.id, wantRc: true, onStart: paintHostCards });
+  if (rc !== 0) log.dataset.failed = 'yes';
+  note(rc === 0 ? `${name} set up` : `Setup of ${name} failed`, rc === 0 ? 'text-primary' : 'text-error');
+  await refreshHosts(name);
+}
+
+// Streaming from it. Nothing to start and nothing billed by the hour: it is
+// already there.
+async function playOn(name) {
+  const log = hostLog(name);
+  log.textContent = '';
+  log.dataset.fresh = 'yes';
+  const { rc } = await runCg(['host', 'open', name], { collect: log.id, wantRc: true, onStart: paintHostCards });
+  if (rc !== 0 && rc !== 130) { log.dataset.failed = 'yes'; note(`Stream from ${name} failed to start`, 'text-error'); }
+  await refreshHosts(name);
+}
+
+// Removing a machine of yours: asked, run and reported in one dialog. cg says
+// when the machine could not be reached to revoke the key; that result stays
+// on screen to be read, anything else closes by itself.
+async function removeHost(name) {
+  const unreachable = out => /could not reach it/.test(out);
+  const ok = await runInDialog({
+    title: `Remove ${name}`,
+    confirm: { body: 'Revokes the app\'s SSH key on the machine and removes it from the app.\n'
+                   + 'Sunshine, Steam and games on it are not changed.', yes: 'Remove', danger: true },
+    args: ['host', 'remove', name],
+    starting: 'Revoking SSH key…',
+    done: out => unreachable(out)
+      ? 'Removed from the app. The SSH key could not be revoked (machine unreachable).'
+      : 'Removed.',
+    close: out => !unreachable(out),
+    stoppable: false,
+    fail: () => 'Not removed. See details above.',
+  });
+  if (!ok) return;
+  hostStatus.delete(name);
+  hostLogs.delete(name);
+  goView('dashboard');
+  await refreshHosts();
+}
+
+// After anything changes a machine: the list, and that machine's status.
+async function refreshHosts(name) {
+  if (name) hostStatus.delete(name);
+  await runCg(HOSTS_READ[0], { json: HOSTS_READ[1], group: 'refresh' });
+}
+
+// Removing AWS: cg aws forget, which refuses while a machine or saved games are
+// still there and says which. When AWS cannot be asked (exit 3), whether
+// anything still bills is not known - that is said, and it is your call.
+async function removeAws() {
+  const ok = await askConfirm({
+    title: 'Disconnect AWS?',
+    body: 'AWS is removed from the app. Nothing in your AWS account is deleted, '
+        + 'and the access key is kept.\n\nNot allowed while a machine or saved games exist.',
+    yes: 'Disconnect', danger: true,
+  });
+  if (!ok) return;
+  const done = 'AWS disconnected. Nothing in AWS was deleted.';
+  let removed = await runInDialog({ title: 'Disconnecting AWS', args: ['aws', 'forget'],
+    starting: 'Checking for billable resources in AWS.', done,
+    fail: rc => rc === 3 ? 'Could not check AWS for remaining resources.' : 'Not disconnected. See above.' });
+  if (!removed && runDlgRc === 3 && await askConfirm({
+        title: 'Disconnect anyway?',
+        body: 'Could not check AWS for a machine or saved games. '
+            + 'Anything left will keep billing and will no longer be shown.',
+        yes: 'Disconnect anyway', danger: true })) {
+    removed = await runInDialog({ title: 'Disconnecting AWS', args: ['aws', 'forget', '--anyway'],
+      starting: 'Disconnecting…', done, fail: () => 'Not disconnected. See above.' });
+  }
+  if (removed) { goView('dashboard'); await refreshAll(); }
+}
+$('b-aws-remove').onclick = removeAws;
+
+// --- Adding a machine ----------------------------------------------------------
+// The add dialog: the steps the machine needs (prereqs), the active one with
+// the one button that meets it. AWS ends when a location is chosen; a server
+// of yours ends with setting it up, now or later.
+function openAdd(kind) {
+  // No engine: the dialog already says so, and there is nothing to add with.
+  if (engineGone) return paintOnboard();
+  adding = kind;
+  addedHost = null;
+  setupDone = false;
+  onbNote = ''; onbTone = '';
+  $('onb-title').textContent = kind === 'aws'
+    ? (awsAdded() ? 'Finish setting up AWS' : 'Add AWS') : 'Add a server';
+  paintOnboard();
+  if (!$('adddlg').open) $('adddlg').showModal();
+  // Everything its steps are judged on was read when the window opened, except
+  // what only AWS answers: AWS not added yet, the reads behind the gate go now -
+  // or, with a step still to do, as soon as it is (gateMayOpen).
+  if (kind === 'aws' && !awsAdded()) { gateShut = true; gateMayOpen(); }
+}
+function closeAdd() {
+  if (onbHandover) { clearTimeout(onbHandover); onbHandover = null; }
+  adding = null;
+  // Closed while it waits for the password: an empty answer, and cg stops with
+  // nothing changed on the server.
+  if (serverPwAsk) { window.cg.answer(serverPwAsk, ''); serverPwAsk = null; }
+  serverForm.querySelector('#add-pw').value = '';
+  if ($('adddlg').open) $('adddlg').close();
+  paintHome();
+}
+$('adddlg-close').onclick = e => { e.preventDefault(); closeAdd(); };
+// Esc closes neither the add dialog nor the run dialog: each is a flow under
+// way, and leaving one is its own button - Close, Cancel, Later, Done. Stopped
+// at the key, because a cancel event the dialog has already been sent is not
+// reliably stoppable.
+for (const id of ['adddlg', 'rundlg']) {
+  $(id).addEventListener('keydown', e => { if (e.key === 'Escape') e.preventDefault(); });
+  $(id).addEventListener('cancel', e => e.preventDefault());
+}
+// Closed any other way, it is closed all the same. A close event is queued, so
+// it can land after the dialog was opened again; only one that finds it still
+// closed is a close.
+$('adddlg').addEventListener('close', () => { if (adding && !$('adddlg').open) closeAdd(); });
+
+// The server step's form. Built once and kept, so a repaint while you type -
+// every read that lands repaints the steps - never loses what was typed.
+const serverForm = (() => {
+  const wrap = el('div', 'flex flex-col gap-space-sm mt-space-sm');
+  const field = (label, id, placeholder, note) => {
+    const l = el('label', 'block font-body-sm text-body-sm text-on-surface-variant', label);
+    const i = el('input', 'mt-space-xs w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface');
+    i.id = id; i.placeholder = placeholder; i.autocomplete = 'off'; i.spellcheck = false;
+    l.append(i);
+    if (note) l.append(el('span', 'block font-code-sm text-code-sm text-outline mt-0.5', note));
+    wrap.append(l);
+    return i;
+  };
+  field('Host', 'add-addr', 'IP address or hostname');
+  field('Username', 'add-user', 'SSH user');
+  // Its password, here in the form rather than in a dialog on top of it. Only
+  // asked of it when no key of the app's gets in yet - so empty is fine for a
+  // server that already takes your key.
+  const pw = field('Password', 'add-pw', '', 'Used once to install an SSH key. Not stored.');
+  pw.type = 'password';
+  pw.parentElement.id = 'add-pw-row';
+  field('Display name', 'add-name', 'Defaults to its hostname');
+  const log = el('pre', 'font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[20vh] overflow-auto');
+  log.id = 'add-log'; log.hidden = true;
+  wrap.append(log);
+  for (const i of wrap.querySelectorAll('input'))
+    i.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); connectServer(); } });
+  return wrap;
+})();
+let connecting = false;
+// Until a machine's status has answered once, or failed - asking for it if no
+// read of it is under way.
+async function hostAnswered(name) {
+  const key = `host:${name}`;
+  while (!hostStatus.has(name) && !readFailures.has(key)) {
+    if (readOut(key)) { await new Promise(r => jobEnded.push(r)); continue; }
+    const [args, json] = hostRead(name);
+    await runCg(args, { json, group: 'refresh' });
+    break;
+  }
+}
+let serverPwAsk = null;   // the job whose password question the form is holding
+// cg's password question while connecting: answered from the form - at once
+// when it is filled in already, otherwise when you press Continue.
+function serverPwAnswer(job, askId) {
+  if (askId !== ASK.hostSshPw || !connecting) return false;
+  const pw = $('add-pw');
+  if (pw.value) { window.cg.answer(job, pw.value); pw.value = ''; return true; }
+  serverPwAsk = job;
+  $('add-log').textContent = 'Password required.';
+  paintOnboard();
+  pw.focus();
+  return true;
+}
+async function connectServer() {
+  if (serverPwAsk) {
+    const pw = $('add-pw');
+    if (!pw.value) { pw.focus(); return; }
+    const job = serverPwAsk;
+    serverPwAsk = null;
+    window.cg.answer(job, pw.value); pw.value = '';
+    $('add-log').textContent = 'Installing key…';
+    paintOnboard();
+    return;
+  }
+  if (connecting) return;
+  const addr = $('add-addr').value.trim(), user = $('add-user').value.trim(), name = $('add-name').value.trim();
+  const log = $('add-log');
+  log.hidden = false;
+  log.classList.remove('text-error');
+  if (!addr || !user) { log.textContent = 'Host and username are required.'; log.classList.add('text-error'); return; }
+  connecting = true;
+  log.textContent = 'Connecting…';
+  log.dataset.fresh = 'yes';
+  paintOnboard();
+  const before = new Set((hostsNow || []).map(h => h.name));
+  const { rc } = await runCg(['host', 'add', ...(name ? [name] : []), '--ssh', `${user}@${addr}`],
+                             { collect: 'add-log', wantRc: true });
+  if (rc !== 0) { connecting = false; log.classList.add('text-error'); paintOnboard(); return; }
+  await refreshHosts();
+  const added = (hostsNow || []).map(h => h.name).find(n => !before.has(n)) || name || null;
+  // The step is done with what the machine is, not before: its first status
+  // has to answer, or the summary filled in under the next step.
+  if (added) await hostAnswered(added);
+  addedHost = added;
+  connecting = false;
+  paintOnboard();
+}
+
+// The setup step: run right here, its log open as it goes. Closes the dialog
+// once it is done; a failure keeps it open, with the reason.
+let setupDone = false;
+
+// A password asked in passing - sudo, while a machine is set up: a small popup
+// over whatever is running, one field, Continue. Resolves the password, or
+// null when it is cancelled.
+function askPassword({ title, sub }) {
+  return new Promise(resolve => {
+    const dlg = $('pwdlg'), input = $('pwdlg-input'), yes = $('pwdlg-yes');
+    $('pwdlg-title').textContent = title;
+    $('pwdlg-sub').textContent = sub || '';
+    input.value = '';
+    yes.disabled = true;
+    input.oninput = () => { yes.disabled = !input.value; };
+    // Enter would submit the form's first button, which is Cancel.
+    input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); if (input.value) yes.click(); } };
+    // Answered by the buttons themselves, not the close event: that one is
+    // queued, and can land after whatever runs next. Esc is a Cancel.
+    let done = false;
+    const finish = v => {
+      if (done) return;
+      done = true;
+      input.value = '';
+      if (dlg.open) dlg.close();
+      resolve(v);
+    };
+    yes.onclick = e => { e.preventDefault(); if (input.value) finish(input.value); };
+    $('pwdlg-no').onclick = e => { e.preventDefault(); finish(null); };
+    dlg.onclose = () => finish(null);
+    dlg.showModal();
+    input.focus();
+  });
+}
+// cg asks for the sudo password of a machine it is setting up: the popup, and
+// an empty answer if it is cancelled - cg then stops, with nothing changed.
+function sudoAnswer(job, askId) {
+  if (askId !== ASK.hostSudo) return false;
+  const j = jobs.get(job), name = j && j.cmd[2];
+  const live = onbRunning === 'setup' ? $('onb-live-setup') : null;
+  if (live) live.textContent = 'Waiting for the sudo password…';
+  askPassword({ title: 'Sudo password', sub: `${name ? name + ': ' : ''}used once for setup. Not stored.` })
+    .then(v => {
+      window.cg.answer(job, v || '');
+      if (live && v) live.textContent = 'Continuing…';
+    });
+  return true;
+}
+async function onbSetupHost() {
+  const name = addedHost;
+  if (!name || onbRunning) return;
+  onbUnit('setup');
+  onbLogOpen('setup', true);
+  const ok = await runInPipeline('setup', ['host', 'setup', name], 'Starting setup…', paintHostCards);
+  // Nothing to re-read for this step: its own exit is the verdict.
+  if (onbVerifying === 'setup') onbVerifying = null;
+  $('onb-prog-setup').hidden = true;
+  await refreshHosts(name);
+  if (!ok) { onbLogOpen('setup', true); paintOnboard(); return; }
+  setupDone = true;
+  paintOnboard();
+  onbHandOver(() => {
+    if (adding !== 'host' || !setupDone) return;
+    note(`${name} set up`, 'text-primary');
+    closeAdd();
+  });
+}
+
 // Refresh means "this screen", and the reads behind it are independent, so
 // they run together rather than one after another.
 const NEEDS = {
-  dashboard: [[['status', '--json'], 'status'], [['watcher', '--json'], 'guards']],
+  dashboard: [[['status', '--json'], 'status'], [['watcher', '--json'], 'guards'], HOSTS_READ],
   // machines too: the instance-type row is a picker, and its options are
   // whatever this region rents - see editSetting.
   settings:  [[['config', '--json'], 'config'], [['machines', '--json'], 'machines'],
@@ -4022,7 +4697,8 @@ const NEEDS = {
   // Build reads status too: if a box is already up there is nothing to build,
   // and its own Refresh must be able to find that out.
   build:     [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status'],
-              [['machines', '--json'], 'machines'], [['sweep', '--cached', '--json'], 'sweep']],
+              [['machines', '--json'], 'machines'], [['sweep', '--cached', '--json'], 'sweep'],
+              HOSTS_READ],
   library:   [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status'],
               [['library', 'elsewhere', '--json'], 'elsewhere']],
   // config too: the settings card is edited here, and a save has to come back
@@ -4033,7 +4709,10 @@ const loaded = new Set();
 
 // What a screen reads when it refreshes. Cost is not in NEEDS, so opening that
 // tab fetches nothing: it bills, and only its Refresh asks.
-const readsFor = v => (v === 'cost' ? [[['cost', '--json'], 'cost']] : NEEDS[v]);
+// Home and Machine also read each machine of yours; a laptop with no AWS reads
+// nothing that asks AWS.
+const readsFor = v => forMode(v === 'cost' ? [[['cost', '--json'], 'cost']]
+  : NEEDS[v] && [...NEEDS[v], ...(v === 'dashboard' || v === 'build' ? hostReads() : [])]);
 async function refresh(each, need = readsFor(view)) {
   if (!need) return;               // logs need nothing
   if (view !== 'cost') loaded.add(view);
@@ -4043,11 +4722,13 @@ async function refresh(each, need = readsFor(view)) {
 
 // Each read, in the words the page uses for what it shows.
 const READ_NAME = {
-  status: 'Your machine and the bill', guards: 'Protection', library: 'Your saved games',
-  elsewhere: 'Games saved in other locations',
-  machines: 'Machines and prices', sweep: 'Locations', config: 'Settings',
-  creds: 'Amazon key', tskey: 'Tailscale', deps: 'Tools on this laptop', cost: 'Exact cost this month',
+  status: 'Machine and billing', guards: 'Safeguards', library: 'Saved games',
+  elsewhere: 'Games in other regions',
+  machines: 'Machine types and prices', sweep: 'Regions', config: 'Settings',
+  creds: 'AWS key', tskey: 'Tailscale', deps: 'Local tools', cost: 'Exact cost this month',
+  hosts: 'Servers',
 };
+const readName = json => (json.startsWith('host:') ? `${json.slice(5)}, your machine` : READ_NAME[json] || json);
 // The top Refresh, as a popup: what is being read, each ticking as it lands,
 // closed once the page has been redrawn. A read that failed keeps it open with
 // the reason, because a popup that vanished would say it all worked.
@@ -4059,7 +4740,7 @@ async function refreshShown(reads = readsFor(view), read = each => refresh(each,
   const price = $('d-cost-price').textContent;
   $('refdlg-sub').textContent = view === 'cost'
     ? `Loading this month\'s bill${price ? `, ${price}` : ''}.`
-    : 'Reading the latest from AWS and this laptop.';
+    : 'Loading latest status.';
   $('refdlg-menu').hidden = true;
   const paint = () => {
     const list = $('refdlg-list');
@@ -4076,7 +4757,7 @@ async function refreshShown(reads = readsFor(view), read = each => refresh(each,
             textContent: st === 'done' ? '✓' : '✗' }));
       const text = document.createElement('div');
       text.className = 'min-w-0';
-      text.append(Object.assign(document.createElement('div'), { textContent: READ_NAME[json] || json }));
+      text.append(Object.assign(document.createElement('div'), { textContent: readName(json) }));
       if (st === 'failed') text.append(Object.assign(document.createElement('div'), {
         className: 'font-code-sm text-code-sm text-on-surface-variant break-words',
         textContent: readFailures.get(json) || 'could not be read' }));
@@ -4112,7 +4793,7 @@ function afterWrite(job, rc) {
   // read all over again. Keep for also rewrites a setting and the watchdog.
   if (job.cmd[0] === 'library')
     return refreshShown(job.cmd[1] === 'keep-for' ? KEEP_FOR_READS : LIBRARY_READS);
-  return refreshShown([...GATE_READS, ...ALL_READS], each => refreshAll(each));
+  return refreshShown(forMode([...GATE_READS, ...ALL_READS]), each => refreshAll(each));
 }
 const LIBRARY_READS = [[['library', 'list', '--json'], 'library'],
                        [['library', 'elsewhere', '--json'], 'elsewhere']];
@@ -4138,6 +4819,8 @@ const GATE_READS = [
   [['creds', 'tailscale', '--json'], 'tskey'],
   // Reads .env and nothing else, and carries the alert address a build needs.
   [['config', '--json'], 'config'],
+  // A file on this laptop: the machines of yours it knows.
+  [['host', 'list', '--json'], 'hosts'],
 ];
 // The rest. Every one of them needs AWS, a tailnet, or both, so on a laptop
 // that is not ready yet they would all come back unknown and the screen would
@@ -4181,24 +4864,24 @@ const ALL_READS = [
 function keyProblem() {
   switch (credsNow && credsNow.reason) {
     case 'unreachable':
-      return { title: 'This laptop could not reach AWS',
-               body: 'Nothing was rejected; AWS just could not be reached. Your key may be fine.',
+      return { title: 'Cannot reach AWS',
+               body: 'Network error. The key was not rejected.',
                label: 'Try again', go: retryReads };
     case 'no-key':
-      return { title: 'There is no AWS access key on this laptop',
-               body: 'Nothing can be shown until this is fixed.',
-               label: 'Add your key', go: () => goSetting($('s-creds-card')) };
+      return { title: 'No AWS access key',
+               body: 'Required to continue.',
+               label: 'Add key', go: () => goSetting($('s-creds-card')) };
     default:
       return { title: 'AWS rejected this access key',
-               body: 'Nothing can be shown until this is fixed.',
-               label: 'Add your key', go: () => goSetting($('s-creds-card')) };
+               body: 'Required to continue.',
+               label: 'Add key', go: () => goSetting($('s-creds-card')) };
   }
 }
 
 // The done line for the region stage, which names the place rather than the
 // setting: "ap-south-2" means nothing to someone who has not read .env.
 function whereDone() {
-  if (!machinesNow) return 'Location';
+  if (!machinesNow) return 'Region';
   const city = ((sweepNow && sweepNow.regions) || [])
     .find(r => r.region === machinesNow.region);
   return city && city.city ? `Runs in ${shortCity(city.city)}` : `Runs in ${machinesNow.region}`;
@@ -4210,51 +4893,51 @@ const regionChosen = () => {
   return !!(r && r.is_set);
 };
 
-function prereqs() {
-  const missing = depsNow ? (depsNow.tools || []).filter(x => !x.present).map(x => x.label) : [];
+function prereqs(kind = kindNow()) {
+  const missing = depsNow ? neededTools(kind).filter(x => !x.present).map(x => x.label) : [];
   const email = (config || []).find(r => r.key === 'EMAIL_ALERTS');
-  return [
+  const all = [
     // Installed is not enough for the AWS CLI: it also has to run, which only
     // cg creds can say. Both answers decide this one step - the pipeline used
     // to show the second as a row of its own, also called Tools, that came and
     // went as the two answers landed a second apart.
-    { key: 'tools', reads: 'deps', name: 'The tools this app needs are installed',
+    { key: 'tools', reads: 'deps', name: 'Required tools installed',
       ok: depsNow ? !missing.length && !cliBroken() : null,
       problem: { blocking: true,
                  title: `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not installed`,
-                 body: 'The app cannot work without them.',
+                 body: 'Required to continue.',
                  ...toolAction(missing) } },
-    { key: 'cli', reads: 'creds', name: 'The Amazon tool is installed',
+    { key: 'cli', reads: 'creds', name: 'AWS CLI installed',
       // Shown only when the tools stage is happy: when it is not, this is the
       // same missing package and the same button, one row further down.
       sameAs: 'tools',
       ok: credsNow ? !!credsNow.cli : null,
-      problem: { blocking: true, title: 'A required Amazon tool is not installed',
-                 body: 'Nothing can be shown until this is fixed.',
+      problem: { blocking: true, title: 'The AWS CLI is not installed',
+                 body: 'Required to continue.',
                  ...toolAction(['aws']) } },
     // Judged only once there is a CLI to ask with: "AWS rejected this key" is a
     // lie about a laptop that could not ask AWS anything.
-    { key: 'key', reads: 'creds', name: 'Amazon accepts this access key',
+    { key: 'key', reads: 'creds', name: 'AWS access key valid',
       ok: !credsNow ? null : credsNow.cli ? credsNow.valid === true : null,
       problem: { blocking: true, ...keyProblem() } },
-    { key: 'tailnet', reads: 'tskey', name: 'This laptop is signed in to Tailscale',
+    { key: 'tailnet', reads: 'tskey', name: 'Tailscale signed in',
       // Only a clear yes. cg says null when it cannot tell - Tailscale is not
       // installed - and "not false" read that as signed in: an empty laptop
       // showed this step ticked before it had Tailscale at all.
       ok: tskeyNow ? tskeyNow.signed_in === true : null,
-      problem: { blocking: true, title: 'This laptop is not signed in to Tailscale',
-                 body: 'Your machine is only reachable over Tailscale.',
+      problem: { blocking: true, title: 'Tailscale not signed in',
+                 body: 'Machines are reachable only over Tailscale.',
                  label: 'Sign in', go: signInTailscale } },
-    { key: 'authkey', reads: 'tskey', name: 'Your machine has a key to join your private network',
+    { key: 'authkey', reads: 'tskey', name: 'Tailscale auth key saved',
       ok: tskeyNow ? !!(tskeyNow.auth_key_stored || tskeyNow.can_mint) : null,
-      problem: { blocking: true, title: 'Your machine has no key to join your private network',
-                 body: 'A new machine cannot connect without one.',
-                 label: 'Paste a key', go: setAuthKey } },
-    { key: 'email', reads: 'config', name: 'Billing alerts have somewhere to go',
+      problem: { blocking: true, title: 'No Tailscale auth key',
+                 body: 'Required for new machines to join the network.',
+                 label: 'Add auth key', go: setAuthKey } },
+    { key: 'email', reads: 'config', name: 'Alert email set',
       ok: email ? !!email.is_set : null,
-      problem: { blocking: true, title: 'No address for billing alerts',
-                 body: 'A build sets a budget alarm and needs somewhere to send it.',
-                 label: 'Add an address', go: () => goSetting(settingEl('EMAIL_ALERTS')) } },
+      problem: { blocking: true, title: 'No alert email',
+                 body: 'Required for the budget alert created at build time.',
+                 label: 'Add email', go: () => goSetting(settingEl('EMAIL_ALERTS')) } },
     { key: 'where', reads: 'machines', name: whereDone(),
       // Not "did you click a button": whether the region .env names can rent
       // the machine it names. A laptop pointed at a region with no GPU quota
@@ -4276,15 +4959,21 @@ function prereqs() {
           && !machinesNow.error && (machinesNow.machines || []).some(m => m.fits_spot || m.fits_ondemand),
       problem: regionChosen()
         ? { blocking: true,
-            title: machinesNow ? `${placeName(machinesNow.region)} cannot run this machine` : 'Nowhere to run it yet',
-            body: 'AWS gives you no GPU limit there, or none of its machines fit. '
-                + 'Closer is smoother, and measuring every location is free.',
-            label: 'Choose where', go: openWhereTo }
-        : { blocking: true, title: 'Pick where it runs',
-            body: 'Closer is smoother. This measures every Amazon location from here - free, '
-                + 'about 90 seconds.',
-            label: 'Choose where', go: openWhereTo } },
+            title: machinesNow ? `${placeName(machinesNow.region)} cannot run this machine` : 'No region selected',
+            body: 'No GPU quota there, or no supported machine type. '
+                + 'Measure all regions to pick another (free).',
+            label: 'Choose region', go: openWhereTo }
+        : { blocking: true, title: 'Choose a region',
+            body: 'Lower latency is better. Measuring all regions takes ~90 s (free).',
+            label: 'Choose region', go: openWhereTo } },
   ];
+  if (kind === 'aws') return all;
+  // A server of yours: this laptop's steps, then the server, then setting it up.
+  return [...all.filter(r => !['cli', 'key', 'email', 'where'].includes(r.key)),
+    { key: 'server', reads: null, name: 'The server', ok: !!addedHost,
+      problem: { blocking: false, title: 'The server', body: '', label: 'Connect', go: connectServer } },
+    { key: 'setup', reads: null, name: 'Setup', ok: setupDone,
+      problem: { blocking: false, title: 'Setup', body: '', label: 'Set up', go: () => {} } }];
 }
 
 // Where it runs. A dialog, because changing it later is this same question
@@ -4321,7 +5010,7 @@ function paintWhereTo() {
   table.textContent = '';
   const rows = whereToRows();
   const head = document.createElement('tr');
-  for (const h of ['', 'Location', 'Distance', 'Machine', 'Spot, an hour', 'Standard, an hour']) {
+  for (const h of ['', 'Region', 'Latency', 'Machine', 'Spot/hour', 'On-demand/hour']) {
     const th = document.createElement('th');
     th.textContent = h;
     head.append(th);
@@ -4366,15 +5055,14 @@ function paintWhereTo() {
   }
   const usable = rows.filter(r => r.usable).length;
   $('whereto-sub').textContent = rows.length
-    ? `Measured from this laptop \u00b7 ${usable} of ${rows.length} can run your machine`
-    : 'Nearer means lower latency.';
+    ? `Measured from this device \u00b7 ${usable} of ${rows.length} available`
+    : 'Lower latency is better.';
   $('whereto-note').textContent = rows.length && !usable
-    ? 'None can yet. A new location starts with no GPU limit; asking for one is free, '
-      + 'under Choose a machine.'
+    ? 'None available. New regions start with no GPU quota; request one under Machine type.'
     : '';
   $('whereto-use').disabled = !whereToPick || !rows.some(r => r.region === whereToPick && r.usable);
   // The button names the place, so what it does is never in doubt.
-  $('whereto-use').textContent = whereToPick ? `Use ${placeName(whereToPick)}` : 'Use it';
+  $('whereto-use').textContent = whereToPick ? `Use ${placeName(whereToPick)}` : 'Select';
 
   // Three ways for there to be nothing to list, and each says which it is:
   // still measuring, the measurement failed, or nothing answered.
@@ -4385,15 +5073,15 @@ function paintWhereTo() {
   // out of reach, under a spinner, until the new numbers replace it.
   $('whereto-busy').hidden = !sweeping;
   $('whereto-busy-text').textContent = rows.length
-    ? 'Measuring again from this laptop. About 90 seconds.'
-    : 'Measuring every AWS location from this laptop. About 90 seconds, and free.';
+    ? 'Measuring again (~90 s).'
+    : 'Measuring all AWS regions (~90 s, free).';
   $('whereto-list').hidden = !rows.length;
   $('whereto-list').classList.toggle('stale', sweeping);
   $('whereto-err').hidden = sweeping || rows.length > 0;
   $('whereto-err').textContent = failed
-    ? `The measurement did not finish: ${readFailures.get('sweep')}`
-    : 'No AWS location answered from this laptop. Check the internet connection and try again.';
-  if (sweeping) $('whereto-sub').textContent = 'Nearer means lower latency.';
+    ? `Measurement failed: ${readFailures.get('sweep')}`
+    : 'No AWS region responded. Check your connection.';
+  if (sweeping) $('whereto-sub').textContent = 'Lower latency is better.';
   $('whereto-measure').hidden = sweeping;
   $('whereto-measure').textContent = rows.length ? 'Measure again' : 'Try again';
   $('whereto-use').hidden = !rows.length || sweeping;
@@ -4450,7 +5138,6 @@ $('whereto-use').onclick = async e => {
 // someone who is using the app would be worse than the problem. A prerequisite
 // that breaks later is not announced - setup made sure of it once, and a strip
 // above every page for a rare breakage was judged not worth its place.
-let onbPhase = 'setup';
 // How many sets of the reads behind the gate are in flight. The pipeline's
 // stages are judged on the fast ones, so it used to finish and hand over while
 // the box, the archive and the guards were still being read - and the first
@@ -4458,8 +5145,15 @@ let onbPhase = 'setup';
 // handover waits for this to reach zero instead: the dashboard arrives filled.
 let readingBehindGate = 0;
 let onbHandover = null;
-let onbBeatDone = false;
 const ONB_HANDOVER_MS = 900;
+// The dialog's last step is done: a beat, so the tick is seen landing, then
+// `then` - closing it, for AWS and for a server set up alike.
+function onbHandOver(then) {
+  onbHandover = afterBeat(() => { onbHandover = null; then(); });
+}
+// The one delay in the app: a finished thing is held on screen for a beat, so
+// it is seen to finish, then `then`. It starts no command.
+function afterBeat(then) { return setTimeout(then, ONB_HANDOVER_MS); }
 
 // The stage that is running something, and the job it started - so it can be
 // stopped, which matters: a sign-in waits on a browser that may never answer.
@@ -4600,7 +5294,7 @@ function onbLogGrew(box, text) {
 
 // A stage's command, run inside the stage itself. Same shape as runInDialog;
 // the difference is where the words go.
-async function runInPipeline(key, args, status) {
+async function runInPipeline(key, args, status, started) {
   onbUnit(key);
   const pre = $(onbLogId(key));
   pre.dataset.fresh = 'yes';
@@ -4615,8 +5309,13 @@ async function runInPipeline(key, args, status) {
   onbNote = '';
   onbTone = '';
   paintOnboard();
-  const { rc } = await runCg(args, { collect: onbLogId(key), wantRc: true,
-                                     onStart: id => { onbJob = id; } });
+  if ([...jobs.values()].some(j => !hostRun(j))) {
+    $('onb-live-' + key).textContent = 'Waiting for the last checks to finish…';
+    await readsSettled();
+    $('onb-live-' + key).textContent = status || 'Starting…';
+  }
+  const { rc, err } = await runCg(args, { collect: onbLogId(key), wantRc: true,
+                                          onStart: id => { onbJob = id; if (started) started(); } });
   onbJob = null;
   onbRunning = null;
   onbWaiting = false;
@@ -4629,9 +5328,9 @@ async function runInPipeline(key, args, status) {
   }
   else $('onb-prog-' + key).hidden = true;
   if (rc !== 0) {
-    onbNote = rc === null ? 'Something else is running - this waits for it to finish.'
+    onbNote = rc === null ? (err || 'Another task is running.')
       : rc === 130 ? 'Stopped.'
-      : (ONB_FAIL[key] || 'That did not finish. The details below say why.');
+      : (ONB_FAIL[key] || 'Failed. See details below.');
     onbTone = 'bad';
     // The reason is in cg's words, and nobody should have to find the toggle
     // to read why the thing they just pressed did not work.
@@ -4643,21 +5342,23 @@ async function runInPipeline(key, args, status) {
   return rc === 0;
 }
 const ONB_FAIL = {
-  tools: 'The install did not finish. The details below say why.',
-  cli: 'The Amazon tool did not install. The details below say why.',
-  tailnet: 'Sign-in did not finish. The details below say why.',
-  where: 'The location could not be saved. The details below say why.',
+  tools: 'Install failed. See details below.',
+  cli: 'AWS CLI install failed. See details below.',
+  tailnet: 'Sign-in failed. See details below.',
+  where: 'Could not save the region. See details below.',
 };
 
 // Installing the tools runs here rather than opening something: it needs no
 // answer from you beyond the password your OS asks for.
 function onbInstall() {
-  const missing = depsNow ? (depsNow.tools || []).filter(x => !x.present).map(x => x.tool) : [];
+  // What THIS machine needs: a server of yours never needs the AWS CLI, and
+  // the button used to install it anyway.
+  const missing = depsNow ? neededTools().filter(x => !x.present).map(x => x.tool) : [];
   onbWasMissing = new Set(missing);
-  return runInPipeline('tools', ['deps', 'install', ...missing], 'Asking for your password…');
+  return runInPipeline('tools', ['deps', 'install', ...missing], 'Waiting for password…');
 }
 function onbInstallCli() {
-  return runInPipeline('cli', ['deps', 'install', 'aws'], 'Asking for your password…');
+  return runInPipeline('cli', ['deps', 'install', 'aws'], 'Waiting for password…');
 }
 function onbSignIn() {
   return runInPipeline('tailnet', ['creds', 'tailscale', 'signin'], 'Opening your browser…');
@@ -4672,13 +5373,13 @@ function onbSignIn() {
 //   done  what is now true, said once it is
 //   body  why it matters, and what pressing the button will do
 const missingTools = () => depsNow
-  ? (depsNow.tools || []).filter(x => !x.present).map(x => x.label) : [];
+  ? neededTools().filter(x => !x.present).map(x => x.label) : [];
 // Short and plain: what is needed and what it is for, in one or two sentences.
 // The Tools step has no sentence at all - it shows the tools themselves.
 // The AWS CLI is installed - cg deps found it - but does not run: cg creds
 // says there is no CLI. Shown on its own chip, not as a second Tools row.
 function cliBroken() {
-  if (!depsNow || !credsNow || credsNow.cli !== false) return false;
+  if (kindNow() !== 'aws' || !depsNow || !credsNow || credsNow.cli !== false) return false;
   const aws = (depsNow.tools || []).find(t => t.tool === 'aws');
   return !!(aws && aws.present);
 }
@@ -4696,10 +5397,10 @@ function onbVerified() {
   const rung = prereqs().find(x => x.key === key);
   if (rung && rung.ok === false) {
     const still = key === 'tools' || key === 'cli'
-      ? [...missingTools(), ...(cliBroken() ? ['the Amazon tool (installed, but not working)'] : [])]
+      ? [...missingTools(), ...(cliBroken() ? ['the AWS CLI (installed, but not working)'] : [])]
       : [];
-    onbNote = still.length ? `Still missing: ${still.join(', ')}. The details below say why.`
-      : (ONB_FAIL[key] || 'That did not finish. The details below say why.');
+    onbNote = still.length ? `Still missing: ${still.join(', ')}. See details below.`
+      : (ONB_FAIL[key] || 'Failed. See details below.');
     onbTone = 'bad';
     onbLogOpen(key, true);
   }
@@ -4707,29 +5408,34 @@ function onbVerified() {
 }
 
 const ONB_COPY = {
-  open: { name: 'Loading the app', done: () => 'App ready', body: () => '' },
+  open: { name: 'Loading', done: () => 'Ready', body: () => '' },
+  server: { name: 'The server',
+    done: () => { const s = hostStatus.get(addedHost) || {};
+                  return [addedHost, s.os_name, s.gpu].filter(Boolean).join(' · ') || 'The server'; },
+    body: () => 'Connect over SSH.' },
+  setup: { name: 'Setup', done: () => 'Set up',
+    body: () => 'Installs Tailscale, Sunshine and Steam if missing, and pairs Moonlight. '
+              + 'Requires sudo. Can also be run later from the machine card.' },
   tools: { name: 'Tools', done: () => 'Tools installed', body: () => '' },
   cli: { name: 'Tools', done: () => 'Tools installed',
-    body: () => 'A required Amazon tool is not installed.' },
-  key: { name: 'Amazon account', done: () => 'Amazon account connected',
+    body: () => 'AWS CLI not installed.' },
+  key: { name: 'AWS account', done: () => 'AWS account connected',
     body: () => ({
-      unreachable: 'AWS could not be reached from this laptop, so the key was not checked. '
-                 + 'It may be fine.',
-      'no-key': 'Add an AWS access key. The app uses it to start and stop your games machine.',
+      unreachable: 'Cannot reach AWS. The key was not verified.',
+      'no-key': 'An AWS access key is used to launch and stop machines.',
     }[credsNow && credsNow.reason]
-      || 'AWS rejected the saved access key. Add a new one.') },
-  tailnet: { name: 'Private network', done: () => 'Private network ready',
-    body: () => 'Sign this laptop in to Tailscale. Your games machine is reachable only over '
-              + 'your private Tailscale network.' },
-  authkey: { name: 'Machine key', done: () => 'Machine key saved',
-    body: () => 'Paste a Tailscale auth key. Each new machine uses it to join your private network.' },
-  email: { name: 'Budget alerts',
-    done: () => { const e = cfgVal('EMAIL_ALERTS'); return e ? `Budget alerts go to ${e}` : 'Budget alerts on'; },
-    body: () => 'Set the address AWS emails when spending passes your budget.' },
-  where: { name: 'Location', done: () => whereDone(),
+      || 'The saved access key was rejected. Add a new one.') },
+  tailnet: { name: 'Tailscale', done: () => 'Tailscale signed in',
+    body: () => 'Sign in to Tailscale. Machines are reachable only over your tailnet.' },
+  authkey: { name: 'Auth key', done: () => 'Auth key saved',
+    body: () => 'New machines use a Tailscale auth key to join your tailnet.' },
+  email: { name: 'Budget alert',
+    done: () => { const e = cfgVal('EMAIL_ALERTS'); return e ? `Alerts to ${e}` : 'Alerts on'; },
+    body: () => 'Email address for budget alerts.' },
+  where: { name: 'Region', done: () => whereDone(),
     body: () => regionChosen() && machinesNow
-      ? `${placeName(machinesNow.region)} has no GPU limit for your machine. Choose another location.`
-      : 'Choose where your games machine runs. Nearer means lower latency.' },
+      ? `${placeName(machinesNow.region)} has no GPU quota for this machine. Choose another region.`
+      : 'Choose a region. Lower latency is better.' },
 };
 // The city, when the scan knows it; the code otherwise.
 function placeName(region) {
@@ -4740,22 +5446,26 @@ function placeName(region) {
 // The one button a step offers, in the same words. Each opens its dialog right
 // here or runs right here: nothing in the first run sends you to another screen.
 const ONB_ACTION = {
+  server:  () => [serverPwAsk ? { label: 'Continue', go: connectServer }
+                             : { label: connecting ? 'Connecting…' : 'Connect', go: connectServer, busy: connecting }],
+  setup:   () => [{ label: 'Set up', go: onbSetupHost },
+                  { label: 'Later', go: closeAdd, plain: true }],
   // Installed but will not run is not something installing fixes - cg deps
   // install skips a tool it can find - so that case offers a fresh look.
   tools:   () => [!missingTools().length && cliBroken()
                     ? { label: 'Check again', go: retryReads }
-                    : { label: 'Install them', go: onbInstall }],
-  cli:     () => [{ label: 'Install it', go: onbInstallCli }],
+                    : { label: 'Install', go: onbInstall }],
+  cli:     () => [{ label: 'Install', go: onbInstallCli }],
   tailnet: () => [{ label: 'Sign in to Tailscale', go: onbSignIn }],
   // A read that never reached AWS is not a request for a key, so it keeps the
   // rung's own Try again rather than opening the key form.
   key: r => r.problem.go === retryReads
     ? [{ label: 'Try again', go: retryReads }]
-    : [{ label: credsNow && credsNow.reason === 'no-key' ? 'Connect Amazon' : 'Connect again',
+    : [{ label: credsNow && credsNow.reason === 'no-key' ? 'Connect AWS' : 'Connect again',
          go: () => openAwsKey(onbLogFresh('key')) }],
-  authkey: () => [{ label: 'Paste a key', go: () => setAuthKey(onbLogFresh('authkey')) }],
-  email:   () => [{ label: 'Add your email', go: () => openAlertEmail(onbLogFresh('email')) }],
-  where:   () => [{ label: 'Choose a location', go: openWhereTo }],
+  authkey: () => [{ label: 'Add auth key', go: () => setAuthKey(onbLogFresh('authkey')) }],
+  email:   () => [{ label: 'Add email', go: () => openAlertEmail(onbLogFresh('email')) }],
+  where:   () => [{ label: 'Choose region', go: openWhereTo }],
 };
 const onbActions = r =>
   (ONB_ACTION[r.key] || (x => [{ label: x.problem.label, go: x.problem.go }]))(r);
@@ -4764,21 +5474,6 @@ const onbActions = r =>
 // paint where a step CHANGED and not on every repaint after it.
 const onbSeen = {};
 
-// The last step: loading the app. Every tab shows something cg has to read
-// first - the box, the archive, the guards, the machines - and on real AWS that
-// takes seconds. Without this step the dashboard opened on empty cards and
-// "Stop refresh", and the other tabs were empty until visited.
-//
-// One chip per TAB, not per read: "Cost guards" and "Game archive" meant
-// nothing on their own, and two of the five said what the Location step had
-// already said. A tab is ticked when every read it shows has landed; which
-// reads those are is NEEDS, the same table its own Refresh uses. Cost is not
-// here: its read is a paid Cost Explorer call, made only when you press Fetch.
-// Named as the sidebar names them, read from it, so a renamed page cannot
-// leave its old name here - which is how "Build, Library, Guards" outlived
-// the rename to Machine, Games, Safety.
-const OPENING = ['dashboard', 'build', 'library', 'guards', 'settings'].map(v => [v,
-  (document.querySelector(`.nav-item[data-view="${v}"] span:last-child`) || {}).textContent || v]);
 const readOut = json => [...jobs.values()].some(j => j.json === json);
 
 const ONB_MARK = {
@@ -4810,18 +5505,14 @@ function paintOnboard() {
   // identically without cg, and six broken reads is not what happened. One
   // thing did, and only the main process can see it.
   if (engineGone) {
-    document.body.classList.add('setup');
-    $('onb').hidden = false;
-    $('onb-head').hidden = false;
-    wrap.hidden = false;
-    $('d-main').hidden = true;
-    $('onb-title').textContent = 'This app cannot find its scripts';
+    if (!$('adddlg').open) $('adddlg').showModal();
+    $('onb-title').textContent = 'Scripts not found';
     $('onb-count').textContent = '';
-    $('onb-sub').textContent = 'Cloud Gaming runs on a set of scripts that are not on this laptop yet. '
-      + 'Nothing can run until they are.';
     wrap.textContent = '';
+    wrap.append(el('p', 'font-body-md text-body-md text-on-surface-variant mb-space-md',
+      'Cloud Gaming requires its scripts, which are not installed.'));
     for (const [state, text, note] of [
-      ['failed', `Looked for it at ${engineGone.cg}`, ''],
+      ['failed', `Expected at ${engineGone.cg}`, ''],
       ['locked', 'Install them with:',
        'git clone https://github.com/jebin2/aws_cloud_gaming ~/cloud_gaming'],
     ]) {
@@ -4859,56 +5550,28 @@ function paintOnboard() {
     return;
   }
 
-  // A rung that is the same fix as another is its own step only in the one case
-  // the other cannot cover: the tools are all there and the AWS CLI alone is
-  // not. Met, it is part of "Tools installed" - drawn as a second identical
-  // line, it was, and the count read "of 7" on one laptop and "of 6" on the next.
+  paintHome();
+  if (!adding) return;
   // A rung that is the same fix as another is never a row of its own: the AWS
-  // CLI is judged inside Tools. Six steps, every time.
-  const setup = prereqs().filter(r => !r.sameAs);
-  // Setup is done when the six are; the dashboard step is done when, on top of
-  // that, everything it shows has been read.
-  const ready = setup.every(r => r.ok === true);
-  const rungs = [...setup, { key: 'open', reads: null, name: 'Loading the app',
-                             ok: ready && !readingBehindGate ? true : null }];
+  // CLI is judged inside Tools.
+  const rungs = prereqs().filter(r => !r.sameAs);
+  const ready = rungs.every(r => r.ok === true);
   const firstOpen = rungs.findIndex(r => r.ok !== true);
   const done = rungs.filter(r => r.ok === true).length;
-
-  // Every open is the same flow: the six steps, each ticking as its check comes
-  // back, stopping at the first that is not met. There was a "Checking your
-  // rig" splash in front of them that stayed up until something was found
-  // missing - so a laptop with five steps done sat on it for as long as the
-  // slow reads behind Location took, instead of watching five ticks land.
-  //
-  // The handover has a beat first: six ticks replaced in 200ms reads as a
-  // glitch rather than as "that is all done".
-  if (ready && onbPhase === 'setup' && !readingBehindGate) {
-    onbPhase = 'handover';
-    onbHandover = setTimeout(() => {
-      onbHandover = null;
-      onbBeatDone = true;
-      paintOnboard();
-    }, ONB_HANDOVER_MS);
+  // AWS is added once its last step is met: a beat first, so the ticks are seen
+  // landing - six replaced in 200ms read as a glitch - then the dialog closes on
+  // the new card. Reads that started meanwhile are waited for, so the card
+  // arrives filled rather than reading.
+  if (adding === 'aws' && ready && !readingBehindGate && !onbHandover) {
+    onbHandOver(() => {
+      if (adding !== 'aws') return;
+      if (prereqs().every(x => x.ok === true) && !readingBehindGate) { note('AWS added', 'text-primary'); closeAdd(); }
+      else paintOnboard();
+    });
   }
-  // The beat is a minimum, not a deadline: reads that started during it are
-  // waited for too, or the dashboard opens on "Stop refresh".
-  if (onbPhase === 'handover' && onbBeatDone && !readingBehindGate) {
-    enterDashboard();
-    return;
-  }
-  const showPipeline = onbPhase !== 'dashboard';
-  document.body.classList.toggle('setup', showPipeline);
-  $('onb').hidden = !showPipeline;
-  $('d-main').hidden = showPipeline;
-  if (!showPipeline) {
-    return;
-  }
-
   wrap.hidden = false;
-
-  // The count is the only heading: the steps say the rest.
+  // The count is the only heading besides the title: the steps say the rest.
   $('onb-count').textContent = `${done} of ${rungs.length} done`;
-  $('onb-head').hidden = true;
 
   // The log units are kept, not rebuilt: park them before the rows go.
   for (const u of [...wrap.querySelectorAll('[id^="onb-unit-"]')]) {
@@ -5010,27 +5673,6 @@ function paintOnboard() {
       pre.scrollTop = unit.dataset.follow === 'no' ? Number(unit.dataset.scroll || 0) : pre.scrollHeight;
     };
 
-    if (state === 'loading') {
-      const list = document.createElement('div');
-      list.className = 'flex flex-wrap gap-space-xs mt-space-sm';
-      list.id = 'onb-reads';
-      for (const [tab, label] of OPENING) {
-        const reads = (NEEDS[tab] || []).map(([, json]) => json);
-        const st = reads.some(readOut) ? 'checking'
-          : reads.some(j => readFailures.has(j)) ? 'failed' : 'done';
-        const chip = document.createElement('span');
-        chip.className = 'pill ' + (st === 'done' ? 'pill-ok' : st === 'failed' ? 'pill-bad' : '');
-        chip.dataset.tab = tab;
-        chip.dataset.state = st;
-        chip.textContent = ({ done: '\u2713 ', failed: '\u2717 ', checking: '\u2026 ' })[st] + label;
-        list.append(chip);
-      }
-      const sweep = document.createElement('div');
-      sweep.className = 'onb-progress mt-space-sm';
-      sweep.append(document.createElement('i'));
-      body.append(list, sweep);
-      row.append(rail, body); wrap.append(row); return;
-    }
     if (quiet || state === 'checking') { row.append(rail, body); wrap.append(row); return; }
     if (state === 'done') {
       // What it did stays, folded: you can still look at what the install said.
@@ -5040,7 +5682,7 @@ function paintOnboard() {
     if (state === 'unknown') {
       const why = document.createElement('div');
       why.className = 'font-body-sm text-body-sm text-on-surface-variant mt-0.5';
-      why.textContent = 'This couldn’t be checked just now.';
+      why.textContent = 'Check failed.';
       body.append(why);
       const b = document.createElement('button');
       b.className = 'btn mt-space-sm';
@@ -5055,7 +5697,7 @@ function paintOnboard() {
     if (justOpened) motion(inner, 'onb-open', 260);
     const said = state === 'verifying' ? ONB_VERIFY[r.key] || 'Done. Checking\u2026'
       : state === 'running' && onbWaiting
-      ? 'Finish signing in in your browser. This continues by itself when you are done.'
+      ? 'Complete sign-in in your browser. Setup continues automatically.'
       : copy.body();
     if (said) {
       const why = document.createElement('div');
@@ -5069,7 +5711,7 @@ function paintOnboard() {
       const list = document.createElement('div');
       list.className = 'flex flex-wrap gap-space-xs mt-space-sm';
       list.id = 'onb-tools';
-      for (const t of depsNow.tools || []) {
+      for (const t of neededTools()) {
         const chip = document.createElement('span');
         const broken = t.tool === 'aws' && cliBroken();
         const recheck = state === 'verifying' && onbWasMissing.has(t.tool);
@@ -5083,6 +5725,8 @@ function paintOnboard() {
       }
       inner.append(list);
     }
+    // The server: the form, kept across paints so nothing typed is lost.
+    if (r.key === 'server') inner.append(serverForm);
     if (onbNote && state === 'failed') {
       const note = document.createElement('div');
       note.className = 'font-body-sm text-body-sm text-error mt-space-sm';
@@ -5107,7 +5751,8 @@ function paintOnboard() {
     } else {
       for (const a of onbActions(r)) {
         const b = document.createElement('button');
-        b.className = 'btn btn-primary';
+        b.className = a.plain ? 'btn' : 'btn btn-primary';
+        b.disabled = !!a.busy;
         b.textContent = state === 'failed' && a.go !== retryReads ? 'Try again' : a.label;
         b.onclick = () => { onbNote = ''; onbTone = ''; a.go(); };
         bar.append(b);
@@ -5125,15 +5770,6 @@ function paintOnboard() {
   });
 }
 
-// Setup is over: the sidebar slides in, the header drops in, the cards come up.
-// Only ever forwards.
-function enterDashboard() {
-  if (onbPhase === 'dashboard') return;
-  onbPhase = 'dashboard';
-  document.body.classList.remove('setup');
-  document.body.classList.add('arriving');
-  paintOnboard();
-}
 
 // What cg is doing, for the pipeline's log pane and for the refusal when
 // something else holds the lock. The nine reads each have a sentence; see
@@ -5163,7 +5799,7 @@ async function engineReady() {
 // where they were - in `jobs`, where a job in flight is what disables Build,
 // Play and Destroy.
 async function retryReads() {
-  for (const [id, job] of [...jobs]) if (!job.write) await window.cg.cancel(id);
+  for (const [id, job] of [...jobs]) if (!job.write && !hostRun(job)) await window.cg.cancel(id);
   if (!(await engineReady())) return;
   return refreshAll();
 }
@@ -5202,7 +5838,7 @@ async function refreshAll(each) {
 // gate would stop the very read that answers it, and leave the region popup
 // with nothing to list.
 const GATE_JSON = new Set(GATE_READS.map(([, json]) => json));
-const gateBlocked = () => prereqs().some(r => r.ok === false && GATE_JSON.has(r.reads));
+const gateBlocked = () => awsInPlay() && prereqs('aws').some(r => r.ok === false && GATE_JSON.has(r.reads));
 function gateMayOpen() {
   if (gateBlocked()) return;
   gateShut = false;
@@ -5214,7 +5850,7 @@ async function readBehindGate(each) {
   // In parallel, because they share nothing and each screen paints when its own
   // answer lands. cg cost is not among them: it bills.
   try {
-    await Promise.all(ALL_READS.map(([args, json]) =>
+    await Promise.all(forMode(ALL_READS).map(([args, json]) =>
       runCg(args, { json, group: 'refresh' }).then(() => each && each(json))));
   } finally { readingBehindGate--; }
   paintOnboard();
@@ -5232,6 +5868,8 @@ async function readBehindGate(each) {
 let scanOffered = false;
 async function firstScan() {
   if (scanOffered || sweeping) return;
+  // Locations are AWS's: with no AWS machine, there is nothing to measure.
+  if (!awsInPlay()) return;
   if (sweepNow && (sweepNow.regions || []).length) return;
   // Something is running: a scan can wait, and cg would refuse to start one
   // underneath a build anyway.
@@ -5243,11 +5881,11 @@ async function firstScan() {
 $('refresh').onclick = () => refreshShown();
 // What Stop costs depends on what is running, so say it before doing it.
 const STOP_WARNING = {
-  init: 'The machine may already exist and be costing money. Delete it from Home, '
+  init: 'The machine may already be running and billing. Delete it from Home, '
       + 'or auto-stop ends it after 30 idle minutes.',
-  destroy: 'Your games are being saved right now. Stopping can lose anything installed since '
-         + 'the last save, and the machine may be left running.',
-  open: 'This only ends the game session on this laptop. The machine keeps running.',
+  destroy: 'Games are being saved. Stopping may lose changes since the last save '
+         + 'and leave the machine running.',
+  open: 'Ends the session only. The machine keeps running.',
 };
 // Settings is a long screen, and arriving on it is not the same as finding the
 // thing you came for: the first instance-type picker went unnoticed entirely
@@ -5296,14 +5934,15 @@ $('cancel').onclick = async () => {
   const ok = await askConfirm({
     title: `Stop ${names}?`,
     body: mine.map(j => STOP_WARNING[j.cmd[0]]).find(Boolean)
-       || 'These only read; stopping them changes nothing.',
+       || 'Read-only. Stopping them changes nothing.',
     yes: 'Stop', danger: true,
   });
   if (!ok) return;
-  for (const [id, j] of jobs) if (j.view === view) window.cg.cancel(id);
+  for (const [id, j] of jobs) if (j.view === view && !hostRun(j)) window.cg.cancel(id);
 };
 mountMachineCard($('d-hero'), 'd');
 mountMachineCard($('b-machine'), 'b');
+$('d-fix').onclick = $('b-fix').onclick = () => openAdd('aws');
 $('d-build').onclick = () => goView('build');
 $('d-watch').onclick = () => goView('build');
 $('d-ts-signin').onclick = signInTailscale;
@@ -5374,16 +6013,16 @@ function watchdogDigest(text) {
 $('lib-keepfor').onchange = async ev => {
   const n = Number(ev.target.value);
   await libraryRun(['library', 'keep-for', String(n)],
-                   n ? `Keeping saved games for ${n} days` : 'Keeping saved games until you forget them');
+                   n ? `Retention set to ${n} days` : 'Retention set to forever');
 };
 $('lib-clean').onclick = async () => {
   const ok = await askConfirm({
-    title: 'Clean up the leftover files?',
-    body: 'They are left over from a save that did not finish, and no game can use them.\n\n'
-        + 'Your saved games are not touched.',
+    title: 'Delete leftover files?',
+    body: 'Files from an incomplete save. No game uses them.\n\n'
+        + 'Saved games are not affected.',
     yes: 'Clean up', danger: true, word: 'CLEAN',
   });
-  if (ok) await libraryRun(['library', 'clean'], 'Cleaning up leftover files', 'clean-orphans', 'CLEAN');
+  if (ok) await libraryRun(['library', 'clean'], 'Deleting leftover files', 'clean-orphans', 'CLEAN');
 };
 // Changing the machine is a `config set` - .env is where cg keeps it, and the
 // next build reads it from there. Re-read afterwards rather than assuming the
@@ -5402,15 +6041,15 @@ async function chooseMachine(row, spot) {
   // a location, and a machine elsewhere cannot reach them.
   const body = [
     [row.type, row.gpu && gpuName(row.gpu, row.vram), row.store != null && `${row.store} GB game disk`].filter(Boolean).join(' · '),
-    `${spot ? 'Spot' : 'Standard'}${price != null
+    `${spot ? 'Spot' : 'On-demand'}${price != null
       ? ` · ${hourText(perHour(price), spot && row.spotMax != null ? perHour(row.spotMax) : null)} an hour while it runs` : ''}`,
-    spot ? 'Much cheaper, but AWS can take it back mid-game.' : 'Never taken back mid-game.',
+    spot ? 'Cheaper; can be reclaimed mid-session.' : 'Not reclaimed.',
     spot && row.score != null && row.score <= 2
-      ? `Spare machines are scarce here (${row.score}/10), so a spot start will likely be refused.` : '',
+      ? `Low spot capacity (${row.score}/10). A spot launch will likely fail.` : '',
     moving
-      ? `Games saved in ${cur.region ? placeName(cur.region) : 'other locations'} will not be on a machine in `
-        + `${placeName(row.region)}. Move them on the Games page, or Steam downloads them again.` : '',
-    boxNow ? 'The machine running now is not changed. This is for the next build.' : '',
+      ? `Games saved in ${cur.region ? placeName(cur.region) : 'other regions'} are not available in `
+        + `${placeName(row.region)}. Move them on the Games page, or Steam re-downloads them.` : '',
+    boxNow ? 'Applies to the next build. The running machine is not changed.' : '',
   ].filter(Boolean).join('\n\n');
   const ok = await askConfirm({
     title: `Use ${row.type} in ${placeName(row.region)}?`,
@@ -5419,9 +6058,9 @@ async function chooseMachine(row, spot) {
   if (!ok) { paintChooser(); return; }            // put the old choice back
   choosing = true;
   paintChooser();
-  const pop = busyPopup('Saving your choice',
-    `${row.type}, ${spot ? 'spot' : 'standard'}, in ${placeName(row.region)}. Applies to the next build.`,
-    'Saving it');
+  const pop = busyPopup('Saving',
+    `${row.type}, ${spot ? 'spot' : 'on-demand'}, ${placeName(row.region)}. Applies to the next build.`,
+    'Saving');
   let saved = false;
   try {
   // Type and model first, then the region. A half-applied change is possible
@@ -5441,7 +6080,7 @@ async function chooseMachine(row, spot) {
   } finally {
     choosing = false;
     paintChooser();
-    saved ? pop.done() : pop.fail('The new choice was not saved; nothing changed. Activity has the details.');
+    saved ? pop.done() : pop.fail('Not saved. See Activity for details.');
   }
 }
 
@@ -5451,13 +6090,13 @@ async function chooseMachine(row, spot) {
 // Every call it makes is free.
 async function scanRegions(btn) {
   const was = btn && btn.textContent;
-  if (btn) { btn.disabled = true; btn.textContent = 'Checking all locations…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking all regions…'; }
   sweeping = true;
   paintChooser();                 // the table says what it is waiting for
   repaintWhereTo();
   const pop = $('machdlg').open
-    ? busyPopup('Checking every location', 'Measuring distance and prices from here. About 90 seconds, and free.',
-                'Checking all locations')
+    ? busyPopup('Checking all regions', 'Measuring latency and prices (~90 s, free).',
+                'Checking all regions')
     : null;
   try {
     await runCg(['sweep', '--json'], { json: 'sweep' });
@@ -5496,7 +6135,7 @@ function startRun(args, opts = {}) {
   runKind = args[0];
   // A build picked up again by itself does not take you off the page you are
   // on; the machine card says it is building, and Watch the build opens it.
-  if (!opts.stay) goView('build');
+  if (!opts.stay) { machineTab = 'aws'; goView('build'); paintMachineTab(); }
   $('b-log').dataset.fresh = 'yes';
   $('b-log').textContent = '';
   $('b-log-title').textContent = `${CgName(args)} · log`;
@@ -5555,11 +6194,11 @@ $('b-destroy').onclick = () => $('d-destroy').onclick();
 $('d-destroy').onclick = async () => {
   const ok = await askConfirm({
     title: 'Delete the machine?',
-    body: (sessionNow ? 'The game session on this laptop is closed first.\n\n' : '')
-        + 'Your games are saved first, and nothing is deleted if that fails.\n\n'
-        + 'The machine and its disk go.'
+    body: (sessionNow ? 'The current session is closed first.\n\n' : '')
+        + 'Games are saved first; nothing is deleted if saving fails.\n\n'
+        + 'The machine and its disk are deleted.'
         + (((statusNow || {}).build || {}).last_min != null
-           ? ` Building a new one took ${statusNow.build.last_min} minutes last time.` : ''),
+           ? ` The last build took ${statusNow.build.last_min} min.` : ''),
     yes: 'Delete machine', danger: true,
   });
   if (ok) await startRun(['destroy']);
@@ -5571,8 +6210,8 @@ $('b-build').onclick = async () => {
   const ok = await askConfirm({
     title: 'Build the machine?',
     body: `${picked.size ? `${picked.size} game${picked.size === 1 ? '' : 's'}, ${gb.toFixed(1)} GB, will be`
-                         : 'No games will be'} downloaded while it builds.\n\n`
-        + `It costs ${rate != null ? `${rate} an hour` : 'by the hour'} while it runs.`,
+                         : 'No games will be'} restored during the build.\n\n`
+        + `Billed ${rate != null ? `${rate}/hour` : 'hourly'} while running.`,
     yes: 'Build',
   });
   if (!ok) return;
@@ -5582,13 +6221,13 @@ $('b-build').onclick = async () => {
 for (const link of document.querySelectorAll('.nav-item')) {
   link.onclick = e => {
     e.preventDefault();
-    // The arrival from setup plays once; coming back to Home is not arriving.
-    document.body.classList.remove('arriving');
     document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('on', n === link));
     // The label only: the link's text also holds its icon's glyph, which came
     // out as an invisible character in "Refreshing <page>".
     $('view-title').textContent = link.querySelector('span:last-child').textContent.trim();
     view = link.dataset.view;
+    if (e.isTrusted && view === 'build') machineTab = 'aws';
+    if (view === 'build') paintMachineTab();
     for (const sec of document.querySelectorAll('main section[data-view]'))
       sec.hidden = sec.dataset.view !== view;
     updateHeader();
@@ -5605,6 +6244,16 @@ checkAsks();
 // The steps are drawn at once, all of them still being checked, so the window
 // never opens on a blank page while the first answers come back.
 paintOnboard();
+// The remembered layout, filled with loading cards, from the first frame.
+if (hostsNow) paintHostCards();
+if (homeBoot && homeBoot.aws) paintMachineCards();
 (async () => {
-  if (await engineReady()) await refreshAll();
+  if (!(await engineReady())) return;
+  // The remembered machines are checked at once, beside the startup reads,
+  // not after the list comes back: their cards are already on screen.
+  for (const h of hostsNow || []) {
+    const [args, json] = hostRead(h.name);
+    runCg(args, { json, group: 'refresh' });
+  }
+  await refreshAll();
 })();

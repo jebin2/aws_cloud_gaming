@@ -281,7 +281,7 @@ contains "  a price cell is the control"     "$js" "function priceCell"
 # obviously so, because nothing visibly breaks until the next build reinstalls
 # 163GB it could have kept.
 contains "moving region asks first"          "$js" 'Use ${row.type} in ${placeName(row.region)}?'
-contains "  and says the archive stays put"  "$js" "will not be on a machine in "
+contains "  and says the archive stays put"  "$js" "are not available in "
 contains "  and that nothing is deleted"     "$js" "Move them on the Games page"
 contains "  and is marked destructive"       "$js" "danger: moving"
 # Three settings, one decision - written together, region last.
@@ -295,7 +295,7 @@ lacks "the app never calls AWS itself"       "$js" "enable-region"
 lacks "  nor does the main process"          "$main" "enable-region"
 contains "it asks cg instead"                "$js" "'regions', 'enable'"
 contains "  behind a confirm"                "$js" "Confirm \u00b7 enable"
-contains "  that says it is account-wide"    "$js" "applies to your whole AWS account"
+contains "  that says it is account-wide"    "$js" "Applies to the whole AWS account"
 contains "  and slow to undo"                "$js" "treat it"
 contains "  it says so in the cell"          "$js" "needs opt-in"
 

@@ -523,12 +523,13 @@ deps_json() {
   local root why=""; root=$(laptop_root 2>/dev/null) || { root=""; why=$(laptop_root_why); }
   {
     for t in "${LAPTOP_TOOLS[@]}"; do
-      printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$t" "$(laptop_label "$t")" \
         "$(grep -qx "$t" <<<"$miss" && echo no || echo yes)" \
         "$(laptop_why "$t")" \
         "$([[ -n $pm ]] && laptop_plan "$pm" "$t")" \
-        "$(laptop_manual "$t")"
+        "$(laptop_manual "$t")" \
+        "$(laptop_for "$t")"
     done
   } | PM="$pm" ROOT="$root" WHY="$why" \
       TS_SIGNED="$(laptop_has tailscale && { laptop_tailscale_down && echo no || echo yes; } || echo -)" \
@@ -537,9 +538,10 @@ import json, os, sys
 tools = []
 for line in sys.stdin.read().splitlines():
     if not line.strip(): continue
-    tool, label, present, why, plan, manual = (line.split("\t") + [""] * 6)[:6]
+    tool, label, present, why, plan, manual, need = (line.split("\t") + [""] * 7)[:7]
     tools.append({"tool": tool, "label": label, "present": present == "yes",
-                  "why": why or None, "plan": plan or None, "manual": manual or None})
+                  "why": why or None, "plan": plan or None, "manual": manual or None,
+                  "for": need or "all"})
 g = os.environ.get
 ts = g("TS_SIGNED")
 print(json.dumps({
@@ -554,6 +556,10 @@ print(json.dumps({
   "tailscale_signed_in": None if ts == "-" else ts == "yes",
 }, indent=2))'
 }
+
+# Which machines need it: "aws" when only a box rented from AWS does - a laptop
+# that plays on machines of its own never talks to AWS - "all" otherwise.
+laptop_for() { [[ $1 == aws ]] && echo aws || echo all; }
 
 # What each tool is FOR. A list of names tells you nothing about which ones you
 # can live without, and the honest answer is that cg needs all of them.

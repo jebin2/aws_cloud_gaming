@@ -619,14 +619,52 @@ wait_instance_state() {
 #
 # So: a FAILED was seen, cloud-init says error, and the log never reached
 # "bootstrap complete". Pure, so it can be tested without a box.
+# mssh <user@machine> <key-file or ""> <command> - the one way cg reaches a
+# machine it builds on: its own key for an AWS box, your own ssh setup for a
+# machine of yours (no key: ~/.ssh/config and your agent decide). The command
+# runs under sh whatever the login shell is - fish cannot read sh - quoted as
+# 'it'\''s', the form sh, bash, zsh and fish all read alike. stdin is closed:
+# cg's own stdin is where the app's answers arrive.
+# With --in first, stdin is passed through instead - for data piped on purpose.
+mssh() {
+  local in=0; [[ $1 == --in ]] && { in=1; shift; }
+  local t=$1 k=$2; shift 2
+  local o=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 -o BatchMode=yes)
+  [[ -n $k ]] && o=(-i "$k" "${o[@]}")
+  local q="'\\''" c="$*"
+  if (( in )); then ssh "${o[@]}" "$t" "sh -c '${c//\'/$q}'"
+  else ssh "${o[@]}" "$t" "sh -c '${c//\'/$q}'" < /dev/null; fi
+}
+
 build_aborted() {  # build_aborted <failed-seen> <"<cloud-init status>|<reached-finish>">
   local seen=$1 ci=${2%%|*} finished=${2##*|}
+  # A machine of yours says it outright: the build script ended, and not well.
+  # No reboot follows there and no FAILED line is owed - set -e stops a build
+  # without printing one - so this alone is the end.
+  [[ $ci == exited ]] && return 0
   (( seen )) || return 1
   [[ -n $2 && $ci == error && $finished == no ]]
 }
 
+# build_stopped_lines <target> <key> <last FAILED line> - what to say when a
+# build has stopped: the step, the end of its log, and how to look yourself.
+# Printed one line at a time for the caller to style.
+build_stopped_lines() {
+  local t=$1 k=$2 f=$3
+  if [[ -n $f ]]; then echo "the build STOPPED here: $f"
+  else echo "the build STOPPED before it finished - the end of its log:"; fi
+  mssh "$t" "$k" 'tail -n 8 /var/log/cloud-gaming-bootstrap.log' 2>/dev/null | sed 's/^/    /'
+  echo "  nothing after that step ran."
+  echo "  ssh ${k:+-i $k }$t"
+  echo "  sudo tail -50 /var/log/cloud-gaming-bootstrap.log"
+}
+
 # The one ssh probe that answers build_aborted's second argument.
+# A machine of yours has no cloud-init: there the build's own result file (00-
+# header.sh writes it on exit) says the same - "error" when it stopped short.
 _build_state_cmd='s=$(cloud-init status 2>/dev/null | head -1); s=${s#status: };
+if [ -z "$s" ] && [ -f /var/lib/cloud-gaming-bootstrap.rc ]; then
+  [ "$(cat /var/lib/cloud-gaming-bootstrap.rc)" = 0 ] && s=done || s=exited; fi;
 grep -q "bootstrap complete" /var/log/cloud-gaming-bootstrap.log 2>/dev/null && f=yes || f=no;
 printf "%s|%s\n" "${s:-unknown}" "$f"'
 
@@ -634,13 +672,11 @@ stream_build() {
   local target=$1 key=$2 timeout=${3:-2400}
   if _cg_styled; then _stream_build_styled "$target" "$key" "$timeout"; return; fi
   local seen=0 waited=0 new count rebooted=0 failed_seen=0 last_fail="" state
-  local ssh_opts=(-i "$key" -o StrictHostKeyChecking=accept-new
-                  -o ConnectTimeout=8 -o BatchMode=yes)
 
   local err
   err=$(mktemp)
   while (( waited < timeout )); do
-    if new=$(ssh "${ssh_opts[@]}" "$target" \
+    if new=$(mssh "$target" "$key" \
              "tail -n +$((seen+1)) /var/log/cloud-gaming-bootstrap.log 2>/dev/null" 2>"$err"); then
       if [[ -n $new ]]; then
         count=$(wc -l <<<"$new")
@@ -660,20 +696,18 @@ stream_build() {
         done < <(grep -E '^>>> |^E: |^ERROR|[Ee]rror:|[Ff]ailed to |command not found|curl: \([0-9]+\)|No such file' <<<"$new" \
                  | grep -vE 'Setting up|Unpacking|Preparing to unpack|Selecting previously|^Get:|^info:|^ls: |usbmux|/nonexistent|NetworkManager' || true)
       fi
-      if ssh "${ssh_opts[@]}" "$target" 'test -f /var/lib/cloud-gaming-ready' 2>/dev/null; then
+      if mssh "$target" "$key" 'test -f /var/lib/cloud-gaming-ready' 2>/dev/null; then
         log "build complete after $(( waited / 60 ))m"
         rm -f "$err"
         return 0
       fi
-      # Asked only once a FAILED has been seen, so a healthy build pays nothing.
-      if (( failed_seen )); then
-        state=$(ssh "${ssh_opts[@]}" "$target" "$_build_state_cmd" 2>/dev/null) || state=""
+      # Asked at once when a FAILED has been seen, and once a minute otherwise:
+      # set -e ends a build without a FAILED line, and a machine of yours then
+      # says so in its result file - not a 40-minute wait.
+      if (( failed_seen || waited % 60 == 0 )); then
+        state=$(mssh "$target" "$key" "$_build_state_cmd" 2>/dev/null) || state=""
         if build_aborted "$failed_seen" "$state"; then
-          log "the build STOPPED here: $last_fail"
-          log "  user-data runs under 'set -e', so a failed check ends it."
-          log "  nothing after that step ran, and no desktop is coming up."
-          log "  ssh -i $key $target"
-          log "  sudo tail -50 /var/log/cloud-gaming-bootstrap.log"
+          while IFS= read -r l; do log "$l"; done < <(build_stopped_lines "$target" "$key" "$last_fail")
           rm -f "$err"
           return 1
         fi
@@ -698,7 +732,7 @@ stream_build() {
     cg_sleep 10; waited=$(( waited + 10 ))
   done
   log "TIMEOUT after $(( timeout / 60 ))m. Check on the box:"
-  log "  ssh -i $key $target"
+  log "  ssh ${key:+-i $key }$target"
   log "  sudo tail -50 /var/log/cloud-gaming-bootstrap.log"
   return 1
 }
@@ -748,12 +782,10 @@ _stream_build_styled() {
   local seen=0 waited=0 new count rebooted=0 step="starting" out line err
   local failed_seen=0 last_fail="" state
   local have=0 prev_have=0 prev_t=0 rate=0 inst
-  local ssh_opts=(-i "$key" -o StrictHostKeyChecking=accept-new
-                  -o ConnectTimeout=8 -o BatchMode=yes)
   err=$(mktemp)
   while (( waited < timeout )); do
     if (( waited % 10 == 0 )); then
-      if new=$(ssh "${ssh_opts[@]}" "$target" \
+      if new=$(mssh "$target" "$key" \
                "tail -n +$((seen+1)) /var/log/cloud-gaming-bootstrap.log 2>/dev/null" 2>"$err"); then
         if [[ -n $new ]]; then
           count=$(wc -l <<<"$new")
@@ -764,7 +796,11 @@ _stream_build_styled() {
                                failed_seen=1; last_fail=${line#>>> FAILED: } ;;
               ">>> ok: "*)     _cg_line ok "${line#>>> ok: }" ;;
               ">>> "*)         step=${line#>>> }
-                               if [[ $step == "finishing up" ]]; then
+                               # Only the AWS box reboots - reached with cg's key; a
+                               # machine of yours (your own ssh, no key) never does.
+                               if [[ $step == "finishing up" && -z $key ]]; then
+                                 _cg_line step "finishing up"
+                               elif [[ $step == "finishing up" ]]; then
                                  if (( ${CG_RESTORE_BYTES:-0} > 0 )); then
                                    _cg_line step "finishing up ${_CG_GREY}(reboots, then waits for the game restore to finish)${_CG_R}"
                                  else
@@ -780,22 +816,22 @@ _stream_build_styled() {
         fi
         # Exact bytes over the same three directories an archive's size counts,
         # so "of N GB" compares like with like.
-        out=$(ssh "${ssh_opts[@]}" "$target" \
+        out=$(mssh "$target" "$key" \
           'test -f /var/lib/cloud-gaming-ready && echo READY; du -sb --exclude=downloading --exclude=temp /scratch/steam/steamapps/common /scratch/steam/steamapps/compatdata /scratch/steam/steamapps/shadercache 2>/dev/null | awk "{t+=\$1} END{print t+0}"' 2>/dev/null) || out=""
         if [[ $out == *READY* ]]; then
           _cg_line ok "build complete after $(_cg_dur "$waited")"
           rm -f "$err"
           return 0
         fi
-        # Asked only once a FAILED has been seen, so a healthy build pays nothing.
-        if (( failed_seen )); then
-          state=$(ssh "${ssh_opts[@]}" "$target" "$_build_state_cmd" 2>/dev/null) || state=""
+        # Asked at once when a FAILED has been seen, and once a minute otherwise
+        # (see stream_build).
+        if (( failed_seen || waited % 60 == 0 )); then
+          state=$(mssh "$target" "$key" "$_build_state_cmd" 2>/dev/null) || state=""
           if build_aborted "$failed_seen" "$state"; then
-            _cg_line fail "the build STOPPED here: $last_fail"
-            _cg_line cont "  user-data runs under 'set -e', so a failed check ends it."
-            _cg_line cont "  nothing after that step ran, and no desktop is coming up."
-            _cg_line cont "  ssh -i $key $target"
-            _cg_line cont "  sudo tail -50 /var/log/cloud-gaming-bootstrap.log"
+            local first=1
+            while IFS= read -r l; do
+              if (( first )); then _cg_line fail "$l"; first=0; else _cg_line cont "$l"; fi
+            done < <(build_stopped_lines "$target" "$key" "$last_fail")
             rm -f "$err"
             return 1
           fi
@@ -822,7 +858,7 @@ _stream_build_styled() {
     cg_sleep 1; waited=$(( waited + 1 ))
   done
   _cg_line fail "TIMEOUT after $(( timeout / 60 ))m. Check on the box:"
-  _cg_line cont "  ssh -i $key $target"
+  _cg_line cont "  ssh ${key:+-i $key }$target"
   _cg_line cont "  sudo tail -50 /var/log/cloud-gaming-bootstrap.log"
   rm -f "$err"
   return 1
@@ -924,18 +960,16 @@ wait_image_available() {
 wait_for_steam() {
   local target=$1 key=$2 timeout=${3:-1500}
   local waited=0 beat=0 size last="" phase cur
-  local ssh_opts=(-i "$key" -o StrictHostKeyChecking=accept-new
-                  -o ConnectTimeout=8 -o BatchMode=yes)
 
   if _cg_styled; then
     phase=working size=""
     while (( waited < timeout )); do
       if (( waited % 15 == 0 )); then
-        if ssh "${ssh_opts[@]}" "$target" 'test -f ~/.steam-prewarmed' 2>/dev/null; then
+        if mssh "$target" "$key" 'test -f ~/.steam-prewarmed' 2>/dev/null; then
           _cg_line ok "steam ready after $(_cg_dur "$waited")"
           return 0
         fi
-        IFS='|' read -r phase size < <(ssh "${ssh_opts[@]}" "$target" \
+        IFS='|' read -r phase size < <(mssh "$target" "$key" \
           'printf "%s|%s\n" "$(cat ~/.steam-phase 2>/dev/null || echo working)" \
              "$(du -shcL ~/.steam ~/.local/share/Steam 2>/dev/null | tail -1 | cut -f1)"' 2>/dev/null || echo "working|")
       fi
@@ -947,7 +981,7 @@ wait_for_steam() {
   fi
 
   while (( waited < timeout )); do
-    if ssh "${ssh_opts[@]}" "$target" 'test -f ~/.steam-prewarmed' 2>/dev/null; then
+    if mssh "$target" "$key" 'test -f ~/.steam-prewarmed' 2>/dev/null; then
       log "steam ready after $(( waited / 60 ))m"
       return 0
     fi
@@ -957,7 +991,7 @@ wait_for_steam() {
     # '|'-separated, not space: phase names contain spaces, and `read a b` puts
     # the whole remainder in $b - which printed the phase text as if it were the
     # download size. Size follows symlinks and covers both client layouts.
-    IFS='|' read -r phase size < <(ssh "${ssh_opts[@]}" "$target" \
+    IFS='|' read -r phase size < <(mssh "$target" "$key" \
       'printf "%s|%s\n" "$(cat ~/.steam-phase 2>/dev/null || echo working)" \
          "$(du -shcL ~/.steam ~/.local/share/Steam 2>/dev/null | tail -1 | cut -f1)"' 2>/dev/null || echo "working|")
     cur="${phase:-working} ${size:-}"

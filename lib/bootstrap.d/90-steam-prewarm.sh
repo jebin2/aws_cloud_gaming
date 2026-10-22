@@ -5,6 +5,11 @@
 # Pin Steam to the dock. Must go through xfconf-query, not a direct edit of
 # xfce4-panel.xml: xfconfd owns that file while the session runs and silently
 # overwrites direct edits on the next panel restart.
+# The AWS box's: Steam unpacked and updated headless before anyone connects, its
+# library put on /scratch, pinned to the dock. A machine of yours keeps its own
+# Steam setup: Steam updates itself the first time you open it, so the build
+# only marks this step done for the laptop that waits on it.
+if aws_box; then
 cat > /usr/local/bin/pin-steam-to-dock.sh <<'EOF'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -333,4 +338,6 @@ TimeoutStartSec=1200
 WantedBy=graphical.target
 EOF
 systemctl enable steam-prewarm.service
-
+else
+  install -o "$USER_NAME" -g "$USER_NAME" /dev/null "$USER_HOME/.steam-prewarmed"
+fi

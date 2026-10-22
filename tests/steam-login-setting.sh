@@ -43,8 +43,8 @@ contains "  including the other value"    "$app" "fresh: 'Ask me to sign in'"
 
 echo "3. the setting reaches the box"
 contains "provision passes it"         "$prov"  'CG_LOGIN="${GAME_STEAM_LOGIN:-use}"'
-contains "  and substitutes the token" "$prov"  '"CG_APPS", "CG_LOGIN"'
-contains "  refusing to ship it unsubstituted" "$prov" '"__CG_APPS__", "__CG_LOGIN__"'
+contains "  and renders through the one assembly" "$prov" 'render_bootstrap > "$USERDATA"'
+contains "  which refuses to ship a placeholder unsubstituted" "$(cat lib/render.sh)" 'no value for placeholder(s)'
 contains "the module forwards it" "$(cat lib/bootstrap.d/22-library.sh)" "'__CG_APPS__' '__CG_LOGIN__'"
 inst=$(cat host/install-library.sh)
 contains "install-library takes it"   "$inst" 'CG_LOGIN="${4:-${CG_LOGIN:-use}}"'

@@ -89,7 +89,8 @@ else
   ' 2>&1)
   check "restore, shutdown skipped; ssh, sunshine still restarted" "$verdict" "skip skip restart restart"
 fi
-first_apt=$(grep -n 'apt-get install' "$base" | head -1 | cut -d: -f1)
+# pkg is lib/bootstrap.d's installer (00-header.sh); its definition runs nothing.
+first_apt=$(grep -nE 'apt-get install|^\s*pkg ' "$base" | head -1 | cut -d: -f1)
 rule=$(grep -n 'NRCONF' "$base" | head -1 | cut -d: -f1)
 if [[ -n $rule && -n $first_apt && $rule -lt $first_apt ]]; then
   echo "  ok   the rule is written before the first apt install"; pass=$((pass+1))
@@ -97,7 +98,7 @@ else
   echo "  FAIL the rule must come before the first apt-get install (rule ${rule:-none}, apt ${first_apt:-none})"; fail=$((fail+1))
 fi
 BASE_N=$(num "$base"); for f in lib/bootstrap.d/*.sh; do
-  if grep -q 'apt-get install' "$f" && [[ $(num "$f") -lt $BASE_N ]]; then
+  if grep -vE '^\s*(ubuntu\|debian\)|arch\)|fedora\))' "$f" | grep -qE '^(apt-get install|\s*pkg )' && [[ $(num "$f") -lt $BASE_N ]]; then
     echo "  FAIL $(basename "$f") runs apt before the needrestart rule exists"; fail=$((fail+1)); fi
 done
 

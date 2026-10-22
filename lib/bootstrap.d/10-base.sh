@@ -7,11 +7,13 @@
 # install sat waiting ~9 minutes for a download it did not need.
 #
 # First thing in the build, before the first apt call, so no later stage can do it.
+if aws_box; then
 mkdir -p /etc/needrestart/conf.d
 cat > /etc/needrestart/conf.d/50-cg-library.conf <<'NRCONF'
 # cloud-gaming: never restart the library units (see lib/bootstrap.d/10-base.sh).
 $nrconf{override_rc}{qr(^cg-library-)} = 0;
 NRCONF
+fi
 
 progress "installing base packages"
-apt-get install -y curl jq
+pkg curl jq

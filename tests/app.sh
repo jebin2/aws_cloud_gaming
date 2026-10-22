@@ -47,6 +47,8 @@ contains "sandboxed"                     "$main" "sandbox: true"
 contains "no new windows"                "$main" "setWindowOpenHandler"
 contains "no navigation away"            "$main" "will-navigate"
 contains "no File/Edit/View menu"        "$main" "Menu.setApplicationMenu(null)"
+# A VM's emulated GPU, or a hung NVIDIA driver, left a window that never painted.
+contains "drawn in software"             "$main" "app.disableHardwareAcceleration()"
 contains "a content security policy"     "$(cat app/renderer/index.html)" "Content-Security-Policy"
 
 echo "3b. the Stitch design, vendored - nothing is fetched at runtime"
@@ -203,7 +205,7 @@ contains "  refresh waits for a write only" "$js" 'refresh'"'"').disabled = busy
 contains "  writes wait for everything"  "$js" '$(b).disabled = jobs.size > 0'
 # Single quotes: a needle in double quotes runs $(...) as a command, which made
 # this assertion pass against nothing at all.
-contains "  and takes refresh's place while it runs" "$js" "|| !!mine.length"
+contains "  and takes refresh's place while it runs" "$js" "|| mine.some(j => !hostRun(j))"
 contains "stop says what it stops"       "$js" 'Stop ${hereNames[0]}'
 # status + watcher are one refresh to the person looking at the dashboard.
 contains "  counting actions, not commands" "$js" "hereNames.length === 1"
@@ -220,12 +222,12 @@ contains "  and hidden where it means nothing" "$js" "(!NEEDS[view] && view !== 
 contains "cost reads the same one call"  "$js" "v === 'cost' ? [[['cost', '--json'], 'cost']]"
 check    "no button is left mid-page"    "$(grep -c 'cost-run' app/renderer/index.html app/renderer/app.js | grep -vc ':0')" "0"
 
-echo "5a. the first-run pipeline"
-# The dashboard, on a laptop that is not ready. It replaces three attempts at
-# this: a banner naming one problem at a time, a modal popup over a window you
-# could not use yet, and that popup moved into a corner so it would stop
-# blocking. All three avoided the fact that a new laptop had no screen.
-contains "the dashboard carries it"      "$html" 'id="onb"'
+echo "5a. adding a machine: its steps"
+# There is no setup screen: Home opens every time, and setting a machine up is
+# adding it - a dialog of the steps that machine needs. Before that, a whole
+# window of steps stood in front of everything, and was AWS's steps whether
+# you played on AWS or not.
+contains "the add dialog carries them"   "$html" 'id="adddlg"'
 contains "  one row per stage"           "$html" 'id="onb-steps"'
 # Each step keeps its own log, folded under it, parked here between paints.
 contains "  and a home for each step's log" "$html" 'id="onb-logs"'
@@ -233,19 +235,18 @@ contains "  built per step, in the painter"  "$js" "u.id = 'onb-unit-' + key"
 # A sign-in finishes in a browser: the link has to be reachable while the
 # command is still waiting for it - on the step that is waiting.
 contains "  with room for a sign-in link"   "$js" "link.id = 'onb-link-' + key"
-# Setup hands over to the dashboard and leaves nothing behind: the "Runs in
-# Mumbai" line it used to leave above the cards said what the Build tab says.
+# It leaves nothing behind: the "Runs in Mumbai" line the old screen left
+# above the cards said what the Build tab says.
 lacks    "it leaves no line behind"      "$html" 'id="onb-done"'
-contains "  which the painter decides"   "$js" "\$('onb').hidden = !showPipeline"
-# Setup is the whole window: no sidebar or header until it is done, and every
-# open starts on the splash.
-contains "the window opens in setup"     "$html" '<body class="setup'
+# The window opens on Home, whatever is missing: nothing hides it.
+lacks    "the window never opens in setup" "$html" '<body class="setup'
 lacks    "  and no splash in front of it" "$html" 'id="onb-splash"'
-contains "  and the CSS hides the rest"  "$(cat app/renderer/src.css)" 'body.setup > aside'
+lacks    "  nor CSS that hides the rest" "$(cat app/renderer/src.css)" 'body.setup'
 contains "  for less motion, none"       "$(cat app/renderer/src.css)" 'prefers-reduced-motion: reduce' 
-# The stages ARE the prerequisites - the same list the banner reads, so the two
-# cannot disagree about what is left.
-contains "the stages come from prereqs"  "$js" "const setup = prereqs().filter"
+# The stages ARE the prerequisites - the same list the cards read, so the two
+# cannot disagree about what is left - and they are the machine's own.
+contains "the stages come from prereqs"  "$js" "const rungs = prereqs().filter"
+contains "  per kind of machine"         "$js" "function prereqs(kind = kindNow())"
 contains "  one of them active"          "$js" "const firstOpen = rungs.findIndex(r => r.ok !== true)"
 contains "  the rest locked"             "$js" "      : 'locked';"
 # You cannot start in the middle, and a met stage is still ticked where it sits.
@@ -274,15 +275,17 @@ check "  nor the header's command line"  "$(grep -c 'job-line' app/renderer/inde
 # Nothing polls: a window that asked AWS something every so often would bill
 # for it without anyone touching the machine.
 check "nothing repeats on a timer"       "$(grep -c 'setInterval' app/renderer/app.js)" "0"
-# One delay, and it starts no command: the finished pipeline is held on screen
-# for a beat so you see it finish, instead of six ticks flashing for 200ms.
+# One delay, and it starts no command: the finished steps are held on screen
+# for a beat so you see them finish, instead of six ticks flashing for 200ms.
 check "  and one delay, which it is"     "$(grep -c 'setTimeout' app/renderer/app.js)" "1"
-contains "  the handover beat"           "$js" 'onbHandover = setTimeout('
-contains "  after which it is the cards" "$js" "onbPhase = 'dashboard';"
-# The cards are not worth showing to someone who cannot build a box yet, and
-# they sat under the setup flow saying "No box" as though that were the news.
-contains "the dashboard waits its turn"  "$html" 'id="d-main"'
-contains "  hidden until handed over"    "$js" "\$('d-main').hidden = showPipeline"
+contains "  the handover beat"           "$js" 'function afterBeat(then) { return setTimeout(then, ONB_HANDOVER_MS); }'
+contains "  after which it closes on the card" "$js" "note('AWS added', 'text-primary'); closeAdd();"
+# Home is never hidden: with no machine it asks the one question instead.
+lacks    "Home waits for nothing"        "$html" '<div id="d-main" hidden>'
+contains "  with no machine, the question" "$html" 'id="d-welcome"'
+# A machine that needs something says so on its card, not by locking the window.
+contains "an AWS machine that needs something says so" "$js" "'AWS needs you'"
+contains "  with the button that reopens its steps" "$js" "onclick = () => openAdd('aws')"
 # A read in flight and a read that came back broken are not the same sentence.
 contains "a stage being read says so"    "$js" "(waiting ? 'checking' : 'unknown')"
 
@@ -293,17 +296,17 @@ echo "5a2. no engine, and a read that cannot be painted"
 contains "main says whether cg is there"  "$main" 'function engineFacts()'
 contains "  over the bridge"              "$(cat app/main/preload.js)" 'cg:engine'
 contains "  and re-reads the contract"    "$main" 'if (found && !CONTRACT.runs_alone) loadContract();'
-contains "the window asks before reading" "$js" 'if (await engineReady()) await refreshAll();'
-contains "  and says the one true thing"  "$js" "'This app cannot find its scripts'"
-contains "  naming where it looked"       "$js" 'Looked for it at ${engineGone.cg}'
+contains "the window asks before reading" "$js" 'if (!(await engineReady())) return;'
+contains "  and says the one true thing"  "$js" "'Scripts not found'"
+contains "  naming where it looked"       "$js" 'Expected at ${engineGone.cg}'
 # A main process too old to answer, or a test stub, is taken at its word.
 contains "  an unanswered ask carries on" "$js" 'try { e = await window.cg.engine(); } catch { return true; }'
 # Reads do not block each other, so a second set would leave the stuck ones in
 # `jobs` - and a job in flight is what disables Build, Play and Destroy.
-contains "trying again cancels first"     "$js" 'if (!job.write) await window.cg.cancel(id)'
+contains "trying again cancels first"     "$js" 'if (!job.write && !hostRun(job)) await window.cg.cancel(id)'
 # The key's sentence is cg's answer, not a guess at an error string.
 contains "why a key failed comes from cg" "$js" "switch (credsNow && credsNow.reason)"
-contains "  unreachable is not rejected"  "$js" 'Nothing was rejected; AWS just could not be reached'
+contains "  unreachable is not rejected"  "$js" 'Network error. The key was not rejected.'
 contains "  and an old cg still works"    "$js" "title: 'AWS rejected this access key'"
 
 echo "5b. the build screen, as the design draws it"
@@ -313,7 +316,7 @@ contains "an archive table"              "$html" 'id="b-games"'
 lacks    "  by name, not by Steam's id"   "$js" 'appid ${g.appid}'
 contains "  and when each is deleted"    "$js" "deleteOn(g, days, seen, marks)"
 contains "the allocation bar"            "$html" 'id="b-bar"'
-contains "  says what is left, plainly"  "$js" "Too big by"
+contains "  says what is left, plainly"  "$js" "GB over. Deselect a game."
 contains "the machine comes from cg"     "$js" "const spec = s.spec || {}"
 check    "  with no type hardcoded"      "$(grep -c 'g6\.xlarge\|L4\|16 GiB' app/renderer/app.js)" "0"
 lacks    "no build time, no second rate line" "$js" "from the moment it starts"
@@ -375,13 +378,13 @@ contains "  and comes back on the next run" "$js" "\$('b-bar-track').hidden = fa
 contains "  and the step that failed holds it" "$js" "if (state === 'failed') body.append(fail);"
 # A fixed "launch failed" heading sat directly above cg's own "launch failed:
 # InsufficientInstanceCapacity", which read as the same sentence twice.
-contains "  the heading says it stopped"  "$js" "failed: 'The build stopped'"
+contains "  the heading says it stopped"  "$js" "failed: 'Build failed'"
 check    "  with no second heading under it" \
          "$(grep -c 'b-error-title' app/renderer/app.js app/renderer/index.html | awk -F: '{s+=$2} END{print s}')" "0"
 contains "  fed by the lines cg marked"    "$js" "if (event.kind === 'fail') { buildFailing = true;"
 contains "  and the report under them"     "$js" "else if (buildFailing && event.t === 'line')"
 contains "  an error event lands there too" "$js" "if (event.t === 'error') buildFail(event.text)"
-contains "  a nonzero exit is never silent" "$js" 'stopped without saying why'
+contains "  a nonzero exit is never silent" "$js" 'exited without an error message'
 contains "  and the next run clears it"    "$js" "buildFailClear();"
 
 # The machine chooser. Its whole point is that the app knows nothing about any
@@ -410,8 +413,8 @@ contains "choosing one writes the type"   "$js" "'config', 'set', 'GAME_INSTANCE
 contains "  and the purchase model"       "$js" "'config', 'set', 'GAME_SPOT'"
 contains "  and the region, last"         "$js" "if (moving) await runCg(['config', 'set', 'GAME_REGION'"
 contains "  after confirming the rate"    "$js" 'title: `Use ${row.type} in ${placeName(row.region)}?`' 
-contains "  saying what each model means" "$js" "Never taken back mid-game."
-contains "  and warning when capacity says no" "$js" "a spot start will likely be refused."
+contains "  saying what each model means" "$js" "Not reclaimed."
+contains "  and warning when capacity says no" "$js" "A spot launch will likely fail."
 contains "a running box locks every pick" "$js" "const usable = !why && !boxNow"
 # The three settings it owns get no second editor, or the dropdowns are back.
 contains "settings defer to the table"    "$js" "CHOSEN_IN_TABLE"
@@ -447,7 +450,7 @@ contains "  with the animation defined"   "$(cat app/renderer/src.css)" "@keyfra
 check    "  and the card it points at exists"          "$(grep -c 'id="s-machine-card"' app/renderer/index.html)" "1"
 # The summary must sit above the button that spends the money, not below it.
 contains "the summary is above Build"    "$js" 'box.append(body, busy, row);'
-contains "  and says why"                 "$js" "Delete it before changing machines"
+contains "  and says why"                 "$js" "Delete the running machine before changing type"
 contains "  the unpinned zone is priced too" "$js" "usd_hour_spot_max"
 check    "  and still no machine is named here" \
          "$(grep -cE 'g6\.|g6e\.|L40S|L4 ' app/renderer/app.js)" "0"
@@ -465,11 +468,11 @@ contains "  the Steam login is a card of its own" "$html" 'id="lib-login-box"'
 # print 209 GB of box disk and a rupee rate of 88 when cg had told it neither.
 check    "no disk size is guessed"        "$(grep -c '|| 209' app/renderer/app.js)" "0"
 check    "  nor a starting value for one"  "$(grep -c 'selectable_gb: 209' app/renderer/app.js)" "0"
-contains "  it says it does not know"     "$js" "the machine's space is not known yet"
+contains "  it says it does not know"     "$js" "capacity unknown"
 check    "no exchange rate is guessed"    "$(grep -c 'inr_per_usd || 88' app/renderer/app.js)" "0"
 contains "cost projects the month"       "$js" "m.projected_usd"
 contains "  against the budget you set, in rupees" "$js" "Number(setting('GAME_BUDGET_INR', NaN))"
-contains "  which only emails"            "$js" "AWS emails you if you pass it; it stops nothing"
+contains "  which only emails"            "$js" "Email alert only. Nothing is stopped."
 # Rupees only: the Cost page was the last one showing dollars beside them.
 lacks    "  no dollar column"             "$html" "TOTAL ($)"
 check    "  no dollar helper left"        "$(grep -c 'const money = ' app/renderer/app.js)" "0"
@@ -551,7 +554,7 @@ contains "  recording what happened"     "$js" 'note(`${cgName(args)} started`'
 # Guards: one card per layer cg reports, never a layer the app invented.
 contains "guards come from the watcher"  "$js" "for (const g of guards) {"
 # The minutes are cg's: the page wrote "30 min" and "1 h" whatever was set.
-contains "  with cg's minutes"           "$js" "\${g.idle_min ?? '?'} min with no stream"
+contains "  with cg's minutes"           "$js" "\${g.idle_min ?? '?'} min without a stream"
 lacks    "  and no minutes of its own"   "$js" 'g.idle_min || '
 contains "  and the last check, aged"    "$js" 'Last check ${ago(cloud.last_decision_age_s)}'
 # Rupees only: the budget read "$57 a month" from AWS's own figure.
@@ -584,7 +587,7 @@ echo "5h. the logs and settings screens"
 contains "the chooser table is on this screen"    "$html" 'id="s-chooser"'
 contains "  and settings asks cg for its rows"    "$js" "[['config', '--json'], 'config'], [['machines', '--json'], 'machines']"
 lacks    "  no second editor for what it owns"    "$js" "r.key === 'GAME_INSTANCE_TYPE' && machinesNow"
-contains "  those rows point at the table"        "$js" "set in Machine, above"
+contains "  those rows point at the table"        "$js" "set under Machine"
 # The row is flex/justify-between with a shrink-0 right side, so the editor's
 # control and its two buttons took their width out of the only flexible thing
 # in the row - the label, which squeezed and wrapped on every Edit click.
@@ -707,7 +710,7 @@ echo "6. the actions that spend money ask first"
 # window.confirm draws a native alert that belongs to no design.
 check    "no native alert boxes"         "$(grep -cE '(^|[^a-zA-Z.])confirm\(' app/renderer/app.js)" "0"
 contains "  the app asks in its own dialog" "$html" 'id="confirm-title"'
-contains "a build confirms, with its rate" "$js" 'It costs ${rate != null ? `${rate} an hour` : '"'"'by the hour'"'"'} while it runs.'
+contains "a build confirms, with its rate" "$js" 'Billed ${rate != null ? `${rate}/hour` : '"'"'hourly'"'"'} while running.'
 contains "  and passes the chosen games" "$js" "GAME_APPS: apps"
 contains "a delete confirms"             "$js" "Delete the machine?"
 contains "only GAME_APPS may cross"      "$(cat app/main/index.js)" "ENV_ALLOWED = new Set(['GAME_APPS'])"
@@ -718,9 +721,9 @@ contains "settings read the registry"    "$js" "settings:  [[['config', '--json'
 contains "  and write through cg"        "$js" "runCg(['config', 'set', r.key, value]"
 contains "  showing a secret as set"     "$js" "r.is_set ? 'Set' : 'Not set'"
 contains "  replacing, never revealing"  "$js" "r.secret ? '' : (r.value || '')"
-contains "  and confirming a clear"      "$js" "you will not be asked for it again"
+contains "  and confirming a clear"      "$js" "will not be asked for again"
 # "1" means nothing to a person, and a secret is worth seeing once, on purpose.
-contains "a choice is shown in words"    "$js" "'1': 'Spot', '0': 'Standard'"
+contains "a choice is shown in words"    "$js" "'1': 'Spot', '0': 'On-demand'"
 contains "a secret can be revealed"      "$js" "runCg(['config', 'get', r.key]"
 contains "  deliberately, then hidden"   "$js" "click again to hide it"
 

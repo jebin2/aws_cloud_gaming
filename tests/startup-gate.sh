@@ -55,10 +55,12 @@ window.cg = {
       }, 0);
       return Promise.resolve({ ok: true, id });
     }
-    // Games in other places: no case here is about them, so the answer is
-    // "none" unless a case says otherwise - an unanswered read holds the gate.
+    // Games in other places, machines of your own: no case here is about
+    // them, so the answer is "none" unless a case says otherwise - an
+    // unanswered read holds the gate.
     const reply = window.__answers[line]
-      ?? (line === 'library elsewhere --json' ? { error: null, places: [] } : undefined);
+      ?? (line === 'library elsewhere --json' ? { error: null, places: [] }
+        : line === 'host list --json' ? [] : undefined);
     if (reply !== undefined) {
       // Answer on a later turn, the way a real run does - or slowly, for a case
       // that needs the window caught mid-read.
@@ -112,14 +114,20 @@ JS
   // Past the opening popup's delay, so both of its answers can be seen: a
   // laptop whose reads all landed inside the delay must never have shown it.
   await new Promise(r => setTimeout(r, 700));
+  // The steps are the add dialog's now, not a screen of their own: open it on
+  // AWS, as Add or Finish setting up does, unless a case is about Home itself.
+  if (!window.__noAdd) {
+    openAdd('aws');
+    for (let i = 0; i < 30; i++) await new Promise(r => setTimeout(r, 2));
+    await new Promise(r => setTimeout(r, 200));
+  }
   out.push('RAN | ' + window.__ran.join(' ;; '));
   // The pipeline: one row per stage, each carrying its verdict, and the pane
   // beside it carrying cg's own words.
-  out.push('ONB | ' + (document.getElementById('onb').hidden ? 'hidden' : 'shown')
+  out.push('ONB | ' + (document.getElementById('adddlg').open ? 'shown' : 'hidden')
            + ' cards=' + (document.getElementById('d-main').hidden ? 'hidden' : 'shown'));
   out.push('TITLE2 | ' + document.getElementById('onb-title').textContent.trim());
   out.push('COUNT | ' + document.getElementById('onb-count').textContent.trim());
-  out.push('SUB | ' + document.getElementById('onb-sub').textContent.replace(/\s+/g, ' ').trim());
   out.push('STAGES | ' + [...document.querySelectorAll('#onb-steps [data-stage]')]
              .map(r => r.dataset.stage + '=' + r.dataset.state).join(','));
   out.push('STAGETEXT | ' + document.getElementById('onb-steps').innerText
@@ -204,7 +212,7 @@ cfg_ok='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":true,"value
 cfg_noemail='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":false,"value":null,"default":null,"note":"n"},
              {"key":"GAME_REGION","kind":"text","secret":false,"is_set":true,"value":"ap-south-2","default":"ap-south-2","note":"n"}]'
 # A fresh laptop: no region written, so cg is using its default - which is not
-# a choice anybody made.
+# a choice anybody made. No AWS machine yet: these cases add one.
 cfg_noregion='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":true,"value":"a@b.c","default":null,"note":"n"},
               {"key":"GAME_REGION","kind":"text","secret":false,"is_set":false,"value":null,"default":"ap-south-2","note":"n"}]'
 
@@ -232,8 +240,8 @@ window.__after = async () => {
 };"
 OUT=$(probe "{}")
 check    "nothing is asked at all"     "$(row RAN)" "RAN | "
-contains "the pipeline says so"        "$(row TITLE2)" "This app cannot find its scripts"
-contains "  and what cg is"            "$(row SUB)" "runs on a set of scripts"
+contains "the pipeline says so"        "$(row TITLE2)" "Scripts not found"
+contains "  and what cg is"            "$(row STAGETEXT)" "requires its scripts"
 contains "  where it looked"           "$(row STAGETEXT)" "/opt/nope/cg"
 contains "  and how to fix it"         "$(row STAGETEXT)" "Install them with"
 contains "  with something to run"     "$(row STAGETEXT)" "git clone"
@@ -252,19 +260,20 @@ lacks    "status is not asked"         "$(row RAN)" "status --json"
 lacks    "  nor the library"           "$(row RAN)" "library list --json"
 lacks    "and never cost"              "$(row RAN)" "cost"
 contains "the pipeline is up"          "$(row ONB)" "ONB | shown"
-# Six setup steps and the Dashboard: seven.
-contains "  counting the steps"        "$(row COUNT)" "of 7 done"
-contains "it shows the steps, not the splash" "$(row MODE)" "MODE | steps setup=true"
-contains "  the whole window: no sidebar, header or title bar" "$(row MODE)" "sidebar=false header=false viewbar=false"
+# AWS's six steps: tools, the key, the tailnet, the machine key, alerts, where.
+contains "  counting the steps"        "$(row COUNT)" "of 6 done"
+# In the add dialog, over Home: there is no full-window setup screen any more.
+contains "it shows the steps, not the splash" "$(row MODE)" "MODE | steps setup=false"
+contains "  over the window, which stays as it is" "$(row MODE)" "sidebar=true header=true viewbar=true"
 # The tools themselves, not a sentence about them: present in green, missing
 # in red, and the count as the only heading.
 contains "  each tool shown"           "$(row TOOLS)" "python3:yes"
 contains "    the missing ones marked"  "$(row TOOLS)" "aws:no,moonlight:no"
 check    "  and nothing else said"     "$(row TOOLTEXT)" "TOOLTEXT | "
-contains "  the count is the heading"  "$(row COUNT)" "of 7 done"
+contains "  the count is the heading"  "$(row COUNT)" "of 6 done"
 contains "the tools stage is active"   "$(row STAGES)" "tools=active"
 # You cannot start in the middle: there is exactly one button on the screen.
-check    "only one stage offers anything" "$(row BUTTONS)" "BUTTONS | tools=Install them"
+check    "only one stage offers anything" "$(row BUTTONS)" "BUTTONS | tools=Install"
 # What is already true is ticked wherever it sits, and what cannot be judged
 # says so rather than reading as fine.
 contains "  a met stage is still ticked"  "$(row STAGES)" "tailnet=done"
@@ -277,10 +286,9 @@ lacks    "  no chatty notes"              "$(row STAGETEXT)" "asks for your pass
 # warning strip above the pages to say it a second time.
 check    "no strip says it again"      "$(row BANNER)" "BANNER | none"
 check    "and no step has a log yet"   "$(row LOG)" "LOG | "
-# A box, an archive and a bill are not worth showing to someone who cannot
-# build one yet - and they sat under the pipeline saying "No box" as though
-# that were the news.
-contains "the cards wait their turn"   "$(row ONB)" "cards=hidden"
+# The steps are a dialog over Home, not a screen in its place: Home is there,
+# and closing the dialog leaves you on it.
+contains "Home is behind it"           "$(row ONB)" "cards=shown"
 
 echo "1a. no Tailscale installed is not signed in"
 # cg says signed_in null when it cannot tell - Tailscale is not installed - and
@@ -378,7 +386,7 @@ OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_BAD" true), \"creds --json\": $cre
 contains "the step says it failed"     "$(row AFTER)" "state=failed"
 contains "  its log is open by itself" "$(row AFTER)" "open=true"
 contains "  carrying cg's own words"   "$(row AFTER)" "failed retrieving file moonlight-qt"
-contains "  under one plain sentence"  "$(row AFTER)" "The install did not finish"
+contains "  under one plain sentence"  "$(row AFTER)" "Install failed"
 contains "  and the button that helps" "$(row AFTER)" "buttons=Try again"
 ENGINE=""
 
@@ -488,18 +496,42 @@ echo "3. tools and key are there, the tailnet is not"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" false), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_out, \"config --json\": $cfg_ok}")
 contains "three stages are ticked"     "$(row STAGES)" "key=done"
 contains "the tailnet stage is active" "$(row STAGES)" "tailnet=active"
-contains "  saying why it matters"     "$(row STAGETEXT)" "reachable only over your private Tailscale network"
+contains "  saying why it matters"     "$(row STAGETEXT)" "reachable only over your tailnet"
 check    "one button, the sign-in"     "$(row BUTTONS)" "BUTTONS | tailnet=Sign in to Tailscale"
 lacks    "  no chatty notes"           "$(row STAGETEXT)" "opens your browser"
+
+echo "3a. pressed while the last checks are still landing, it waits its turn"
+# Sign-in runs alone, so it was refused outright while any read was in flight -
+# and the step offers its button the moment its own read lands, with the rest
+# still landing. After an install that was every time: "Something else is
+# running", on a fresh laptop, as the first thing it ever did.
+ENGINE="window.__after = async () => {
+  window.__slow = ['watcher --json']; window.__slowMs = 600;
+  window.__answers['watcher --json'] = { guards: [] };
+  runCg(['watcher', '--json'], { json: 'guards' });
+  await new Promise(r => setTimeout(r, 20));
+  document.querySelector('#onb-steps [data-stage=tailnet] button').click();
+  await new Promise(r => setTimeout(r, 50));
+  const live = document.getElementById('onb-live-tailnet');
+  const during = 'ran=' + window.__ran.includes('creds tailscale signin') + ' says=' + (live ? live.textContent : 'none');
+  await new Promise(r => setTimeout(r, 900));
+  return during + ' | after: ran=' + window.__ran.includes('creds tailscale signin')
+       + ' note=' + document.querySelector('#onb-steps [data-stage=tailnet]').innerText.replace(/\\s+/g, ' ');
+};"
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" false), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_out, \"config --json\": $cfg_ok}")
+contains "while a read is out, it waits"     "$(row AFTER)" "ran=false says=Waiting for the last checks to finish"
+contains "  then signs in, once it has landed" "$(row AFTER)" "after: ran=true"
+lacks    "  and is never refused"            "$(row AFTER)" "is still running"
+ENGINE=""
 
 echo "3b. the box has no key to join with"
 # This one used to be a dialog in the MIDDLE of a build: fifteen minutes of
 # log, then "paste auth key". It is a prerequisite, so it is a stage.
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_nokey, \"config --json\": $cfg_ok}")
 contains "the auth key stage is active" "$(row STAGES)" "authkey=active"
-contains "  saying what it is for"      "$(row STAGETEXT)" "Each new machine uses it to join your private network"
+contains "  saying what it is for"      "$(row STAGETEXT)" "New machines use a Tailscale auth key to join your tailnet"
 # No API token here, so there is nothing to mint one with: one button, not two.
-check    "and only pasting is offered"  "$(row BUTTONS)" "BUTTONS | authkey=Paste a key"
+check    "and only pasting is offered"  "$(row BUTTONS)" "BUTTONS | authkey=Add auth key"
 
 echo "3b2. pasting the key saves it, and the stage moves on"
 # The save worked and the screen did not change: cg wrote .env, the dialog
@@ -538,7 +570,7 @@ lacks    "  and asks for nothing"       "$(row BUTTONS)" "authkey"
 echo "3d. nowhere to send a billing alert"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_noemail}")
 contains "the alerts stage is active"  "$(row STAGES)" "email=active"
-contains "  and says what it is for"   "$(row STAGETEXT)" "when spending passes your budget"
+contains "  and says what it is for"   "$(row STAGETEXT)" "Email address for budget alerts"
 
 echo "3d2. the address is asked for here too"
 # Same detour as the key stage: this one sent you to Settings, to find the row
@@ -585,16 +617,16 @@ echo "3e. the laptop could not reach AWS, which is not the key's fault"
 # lie about a call that never arrived, and it sent people to replace a key that
 # was fine. cg says which it was; the stage only reads it.
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_offline, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
-contains "it says the call never arrived" "$(row STAGETEXT)" "AWS could not be reached"
+contains "it says the call never arrived" "$(row STAGETEXT)" "Cannot reach AWS"
 lacks    "  and blames nothing"           "$(row STAGETEXT)" "rejected"
-contains "  saying the key may be fine"   "$(row STAGETEXT)" "It may be fine"
+contains "  saying the key may be fine"   "$(row STAGETEXT)" "The key was not verified"
 contains "  offering another go"          "$(row BUTTONS)" "key=Try again"
 
 echo "3f. there is no key at all, which is not a rejection either"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_nokey, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
-contains "it says what the key is for"  "$(row STAGETEXT)" "start and stop your games machine"
+contains "it says what the key is for"  "$(row STAGETEXT)" "launch and stop machines"
 lacks    "  and accuses no key"         "$(row STAGETEXT)" "rejected"
-contains "  and offers to connect"     "$(row BUTTONS)" "key=Connect Amazon"
+contains "  and offers to connect"     "$(row BUTTONS)" "key=Connect AWS"
 
 echo "3f2. the key is asked for where you are standing"
 # The stage used to send you to Settings and flash the card there, which puts a
@@ -617,7 +649,7 @@ ENGINE=""
 
 echo "3g. a key AWS actually refused still says so"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_rejected, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
-contains "a refusal is said, where it is true" "$(row STAGETEXT)" "AWS rejected the saved access key"
+contains "a refusal is said, where it is true" "$(row STAGETEXT)" "The saved access key was rejected"
 contains "  and offers a new one"      "$(row BUTTONS)" "key=Connect again"
 
 echo "4. the prerequisites pass: the reads that need AWS go at once"
@@ -633,7 +665,7 @@ lacks    "cost is never automatic"  "$(row RAN)" "cost"
 # same as judging it ready.
 # Nothing answered those, so where it runs cannot be judged - which is not the
 # same as judging it missing: still the splash, still checking.
-contains "still checking, on the steps" "$(row MODE)" "MODE | steps setup=true"
+contains "still checking, on the steps" "$(row MODE)" "MODE | steps setup=false"
 contains "  location says it is checking" "$(row STAGES)" "where=checking"
 contains "the pipeline is still up" "$(row ONB)" "ONB | shown"
 
@@ -664,7 +696,7 @@ echo "4c. everything ready: the same steps, all ticked, then the dashboard"
 # meant sitting on it for as long as the slow reads behind Location took.
 ENGINE="window.__after = async () => {
   await new Promise(r => setTimeout(r, 1200));
-  const at = n => document.getElementById(n).hidden ? 'hidden' : 'shown';
+  const at = n => n === 'onb' ? (document.getElementById('adddlg').open ? 'shown' : 'hidden') : document.getElementById(n).hidden ? 'hidden' : 'shown';
   return 'then=' + at('onb') + '/' + at('d-main')
        + ' setup=' + document.body.classList.contains('setup')
        + ' arriving=' + document.body.classList.contains('arriving')
@@ -672,12 +704,10 @@ ENGINE="window.__after = async () => {
 };"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP}")
 contains "the steps are shown"          "$(row MODE)" "MODE | steps"
-check    "  every one ticked"           "$(row STAGES)" "STAGES | tools=done,key=done,tailnet=done,authkey=done,email=done,where=done,open=done"
-contains "  and held for a beat"        "$(row ONB)" "ONB | shown cards=hidden"
-contains "then the dashboard takes over" "$(row AFTER)" "then=hidden/shown"
-contains "  with the sidebar back"      "$(row AFTER)" "setup=false"
-contains "  and it arrives, not appears" "$(row AFTER)" "arriving=true"
-contains "  once: Home again does not replay it" "$(row AFTER)" "back=false"
+check    "  every one ticked"           "$(row STAGES)" "STAGES | tools=done,key=done,tailnet=done,authkey=done,email=done,where=done"
+contains "  and held for a beat"        "$(row ONB)" "ONB | shown cards=shown"
+contains "then it closes on Home"       "$(row AFTER)" "then=hidden/shown"
+contains "  which never left"           "$(row AFTER)" "setup=false"
 lacks    "nothing rescans"              "$(row RAN)" ";; sweep --json"
 check    "nothing threw"                "$(row ERRS)" "ERRS | "
 ENGINE=""
@@ -690,33 +720,17 @@ echo "4c2. it hands over only once the dashboard has something to show"
 # window in which it used to have handed over already.
 ENGINE="window.__slow = ['status --json']; window.__slowMs = 2500;
 window.__after = async () => {
-  const at = n => document.getElementById(n).hidden ? 'hidden' : 'shown';
+  const at = n => n === 'onb' ? (document.getElementById('adddlg').open ? 'shown' : 'hidden') : document.getElementById(n).hidden ? 'hidden' : 'shown';
   await new Promise(r => setTimeout(r, 1000));
   const before = 'onb=' + at('onb') + ' cards=' + at('d-main');
-  const step = document.querySelector('[data-stage=open]');
-  const opening = 'open=' + step.dataset.state + ' '
-    + [...step.querySelectorAll('[data-tab]')]
-        .map(r => r.dataset.tab + ':' + r.dataset.state).join(',')
-    + ' names=' + [...step.querySelectorAll('[data-tab]')].map(r => r.textContent.slice(2)).join(',');
   await new Promise(r => setTimeout(r, 2200));
   return before + ' | after: onb=' + at('onb') + ' cards=' + at('d-main')
-       + ' stop=' + at('cancel') + ' | ' + opening;
+       + ' stop=' + at('cancel');
 };"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP}")
 contains "every step is ticked"             "$(row STAGES)" "where=done"
-contains "  but the box is still being read, so it waits" "$(row AFTER)" "onb=shown cards=hidden |"
-# And the wait is shown as a wait, as the pipeline's last step - not a loose
-# list under the finished ones - with one chip per TAB: what each tab shows has
-# to be read before it can show it. The box is slow here, and three tabs show
-# it; Guards and Settings do not.
-contains "  the last step is loading"       "$(row AFTER)" "open=loading"
-contains "    one chip per tab"             "$(row AFTER)" "dashboard:checking,build:checking,library:checking,guards:done,settings:done"
-# Named as the sidebar names them: these said Build, Library, Guards after the
-# pages were renamed, because they were a second copy of the names.
-contains "    by the pages' own names"      "$(row AFTER)" "names=Home,Machine,Games,Safety,Settings"
-# Cost reads Cost Explorer, which bills: only on Fetch, never here.
-lacks    "    and never Cost"               "$(row AFTER)" "cost:"
-contains "then the dashboard arrives"       "$(row AFTER)" "after: onb=hidden cards=shown"
+contains "  but the box is still being read, so it waits" "$(row AFTER)" "onb=shown cards=shown |"
+contains "then it closes, the card filled"  "$(row AFTER)" "after: onb=hidden cards=shown"
 contains "  with nothing left running"      "$(row AFTER)" "stop=hidden"
 ENGINE=""
 
@@ -749,8 +763,8 @@ echo "4d. a region that cannot rent the machine is not 'ready'"
 OUT=$(probe "{$READY, \"machines --json\": $machines_noquota, \"sweep --cached --json\": $FULL_SWEEP}")
 contains "the pipeline stays up"       "$(row ONB)" "ONB | shown"
 contains "  with where it runs active" "$(row STAGES)" "where=active"
-contains "  naming the place, not a code" "$(row STAGETEXT)" "Hyderabad has no GPU limit for your machine"
-contains "  offering the choice"       "$(row BUTTONS)" "where=Choose a location"
+contains "  naming the place, not a code" "$(row STAGETEXT)" "Hyderabad has no GPU quota for this machine"
+contains "  offering the choice"       "$(row BUTTONS)" "where=Choose region"
 
 echo "4d2. a region nobody chose is not a choice"
 # A fresh laptop names no region, cg falls back to its default, the default
@@ -769,7 +783,7 @@ ENGINE="window.__after = async () => {
   window.__ran = [];
   document.getElementById('whereto-use').click();
   await new Promise(r => setTimeout(r, 60));
-  const at = n => document.getElementById(n).hidden ? 'hidden' : 'shown';
+  const at = n => n === 'onb' ? (document.getElementById('adddlg').open ? 'shown' : 'hidden') : document.getElementById(n).hidden ? 'hidden' : 'shown';
   // The last step just went green: the finished list is held for a beat.
   // Redraw on purpose, 50ms after the change: the tick must still be there,
   // carrying on from 50ms in rather than starting again.
@@ -799,7 +813,7 @@ OUT=$(probe "{$READY, \"config --json\": $cfg_noregion, \"sweep --cached --json\
               \"config set GAME_REGION ap-south-2\": {}}")
 contains "the pipeline stays up"        "$(row ONB)" "ONB | shown"
 contains "  with where it runs active"  "$(row STAGES)" "where=active"
-contains "  asking, not blaming"        "$(row STAGETEXT)" "Choose where your games machine runs"
+contains "  asking, not blaming"        "$(row STAGETEXT)" "Choose a region. Lower latency is better."
 lacks    "  and no region is accused"   "$(row STAGETEXT)" "no GPU quota"
 # The stage is judged on cg machines, which is behind the gate: it must not
 # be what keeps the gate shut, or the list it opens has nothing in it.
@@ -817,11 +831,11 @@ contains "  so the stage is done"       "$(row AFTER)" "where=done"
 contains "  and the box is read for it" "$(row AFTER)" "status=true"
 # A checklist you watched finish is held for a beat - six ticks replaced in
 # 200ms reads as a glitch - and then the dashboard arrives.
-contains "the finished list is held"    "$(row AFTER)" "held=shown/hidden"
-contains "  counting it"                "$(row AFTER)" "count=7 of 7 done"
+contains "the finished list is held"    "$(row AFTER)" "held=shown/shown"
+contains "  counting it"                "$(row AFTER)" "count=6 of 6 done"
 contains "  the tick lands, animated"   "$(row AFTER)" "tick=true"
 contains "  and a redraw resumes it"    "$(row AFTER)" "resumed=true"
-contains "  then the dashboard arrives" "$(row AFTER)" "then=hidden/shown"
+contains "  then it closes on Home"     "$(row AFTER)" "then=hidden/shown"
 ENGINE=""
 
 echo "4d3. choosing the location waits for that location's reads"
@@ -837,7 +851,7 @@ ENGINE="window.__after = async () => {
     {key: 'GAME_REGION', kind: 'text', secret: false, is_set: true, value: 'ap-south-2'}];
   window.__slow = ['status --json']; window.__slowMs = 1500;
   document.getElementById('whereto-use').click();
-  const at = n => document.getElementById(n).hidden ? 'hidden' : 'shown';
+  const at = n => n === 'onb' ? (document.getElementById('adddlg').open ? 'shown' : 'hidden') : document.getElementById(n).hidden ? 'hidden' : 'shown';
   await new Promise(r => setTimeout(r, 1200));
   const mid = at('onb') + '/' + at('d-main');
   await new Promise(r => setTimeout(r, 1500));
@@ -845,8 +859,8 @@ ENGINE="window.__after = async () => {
 };"
 OUT=$(probe "{$READY, \"config --json\": $cfg_noregion, \"sweep --cached --json\": $FIT_SWEEP,
               \"config set GAME_REGION ap-south-2\": {}}")
-contains "past the beat, the box still out: held" "$(row AFTER)" "mid=shown/hidden"
-contains "  then the dashboard, filled"          "$(row AFTER)" "end=hidden/shown"
+contains "past the beat, the box still out: held" "$(row AFTER)" "mid=shown/shown"
+contains "  then it closes, the card filled"     "$(row AFTER)" "end=hidden/shown"
 contains "  with nothing left running"           "$(row AFTER)" "stop=hidden"
 ENGINE=""
 
@@ -857,7 +871,7 @@ echo "4e. the location popup on a laptop that has never measured"
 ENGINE="window.__after = async () => {
   document.querySelector('#onb-steps [data-stage=\"where\"] button').click();
   await new Promise(r => setTimeout(r, 30));
-  const at = n => document.getElementById(n).hidden ? 'hidden' : 'shown';
+  const at = n => n === 'onb' ? (document.getElementById('adddlg').open ? 'shown' : 'hidden') : document.getElementById(n).hidden ? 'hidden' : 'shown';
   return 'busy=' + at('whereto-busy') + ' list=' + at('whereto-list')
        + ' use=' + at('whereto-use') + ' measure=' + at('whereto-measure')
        + ' sweeps=' + window.__ran.filter(c => c === 'sweep --json').length;
@@ -876,7 +890,7 @@ ENGINE="window.__after = async () => {
   await new Promise(r => setTimeout(r, 30));
   document.getElementById('whereto-measure').click();
   await new Promise(r => setTimeout(r, 30));
-  const at = n => document.getElementById(n).hidden ? 'hidden' : 'shown';
+  const at = n => n === 'onb' ? (document.getElementById('adddlg').open ? 'shown' : 'hidden') : document.getElementById(n).hidden ? 'hidden' : 'shown';
   return 'busy=' + at('whereto-busy') + ' spinner=' + !!document.querySelector('#whereto-busy .spinner')
        + ' text=' + document.getElementById('whereto-busy-text').textContent.trim()
        + ' list=' + at('whereto-list') + ' stale=' + document.getElementById('whereto-list').classList.contains('stale')
@@ -894,7 +908,7 @@ ENGINE="window.__broken = ['sweep --json'];
 window.__after = async () => {
   document.querySelector('#onb-steps [data-stage=\"where\"] button').click();
   await new Promise(r => setTimeout(r, 30));
-  const at = n => document.getElementById(n).hidden ? 'hidden' : 'shown';
+  const at = n => n === 'onb' ? (document.getElementById('adddlg').open ? 'shown' : 'hidden') : document.getElementById(n).hidden ? 'hidden' : 'shown';
   return 'busy=' + at('whereto-busy') + ' err=' + at('whereto-err')
        + ' why=' + document.getElementById('whereto-err').textContent.trim()
        + ' measure=' + document.getElementById('whereto-measure').textContent.trim()
@@ -944,18 +958,18 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
 contains "no machine, said plainly"        "$(row AFTER)" "title=No machine running"
 lacks    "  not 'nothing is billed'"        "$(row AFTER)" "billed by the hour"
 contains "  what it would be"              "$(row AFTER)" "machine=g6.xlarge · NVIDIA L4"
-contains "  where, how, and what it would cost" "$(row AFTER)" "where=Hyderabad · Spot when available · ₹16.44 an hour while it runs"
+contains "  where, how, and what it would cost" "$(row AFTER)" "where=Hyderabad · Spot, else on-demand · ₹16.44/hour"
 contains "  the same card as the Machine page" "$(row AFTER)" "same=true"
 contains "  laid out the same, buttons and all" "$(row AFTER)" "twin=true"
 lacks    "  and no build time on Home"     "$(row AFTER)" "ready in about"
 # Recurring cost is the Spending page's card, from the bill: unchecked, it waits.
-contains "recurring waits for the bill"    "$(row AFTER)" "bill=— Exact cost checks the bill."
+contains "recurring waits for the bill"    "$(row AFTER)" "bill=— Exact cost reads the bill."
 # The month is the bill, checked on request. AWS Budgets' figure is after
 # credits - it read Rs 0 while Rs 285 had been used - so it is not shown.
-contains "the month waits for a check"     "$(row AFTER)" "month=— | monthsub=Press Exact cost to see it."
+contains "the month waits for a check"     "$(row AFTER)" "month=— | monthsub=Use Exact cost to load it."
 lacks    "  not Budgets' after-credit figure" "$(row AFTER)" "₹396"
 contains "the exact figure's price, in rupees" "$(row AFTER)" "price=₹0.88"
-contains "no games yet"                    "$(row AFTER)" "games=No games saved yet"
+contains "no games yet"                    "$(row AFTER)" "games=No saved games"
 contains "the budget is protection"        "$(row AFTER)" "Budget alert at ₹5,016 · emails 2 addresses"
 contains "one action: build"               "$(row AFTER)" "buttons=d-build |"
 lacks    "no dollars anywhere on it"       "$(row AFTER)" "$"
@@ -1026,12 +1040,12 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"library list --json\": {\"games\": [], \"total_bytes\": 0, \"bucket\": \"b\", \"login\": {\"present\": false}},
   \"library elsewhere --json\": $HG_ELSE,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
-contains "unchecked, recurring waits"     "$(row AFTER)" "bill=— Exact cost checks the bill."
+contains "unchecked, recurring waits"     "$(row AFTER)" "bill=— Exact cost reads the bill."
 contains "  games elsewhere listed by name" "$(row AFTER)" "games=Diablo IV"
 # Once the bill is checked, the games in Hyderabad are in it, on Home as on Spending.
 contains "checked, games elsewhere count"  "$(row AFTER)" "remembered: bill=₹387 a month"
 contains "  the month from the bill"       "$(row AFTER)" "month=₹285"
-contains "  with its pace"                 "$(row AFTER)" "on pace for ₹553"
+contains "  with its pace"                 "$(row AFTER)" "projected ₹553"
 contains "  and when it was checked"       "$(row AFTER)" "src=Checked today"
 contains "a check from another month is not this one" "$(row AFTER)" "stale: month=—"
 contains "Show details opens Spending"     "$(row AFTER)" "went=cost"
@@ -1040,8 +1054,8 @@ ENGINE="$KEPT_ENGINE"
 
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
-contains "the laptop, by name"             "$(row AFTER)" "This laptop is signed in as laptop"
-contains "  no machine yet, said as what happens" "$(row AFTER)" "Your machine joins when you build it"
+contains "the laptop, by name"             "$(row AFTER)" "This device: signed in as laptop"
+contains "  no machine yet, said as what happens" "$(row AFTER)" "Machine: joins on build"
 contains "  and no path to measure"        "$(row AFTER)" "pings=0"
 contains "  nothing to sign in to"         "$(row AFTER)" "signin=false"
 
@@ -1049,13 +1063,13 @@ ONLINE=$(st '{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle":
   | python3 -c 'import json,sys; d=json.load(sys.stdin); d["tailnet"]={"node":"gamevps","online":True}; print(json.dumps(d))')
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP, \"status --json\": $ONLINE,
   \"ping --json\": {\"node\": \"gamevps\", \"path\": \"direct\", \"median_ms\": 18}}")
-contains "a running machine, online"       "$(row AFTER)" "Your machine is connected"
+contains "a running machine, online"       "$(row AFTER)" "Machine: connected"
 contains "  the path, measured once"       "$(row AFTER)" "Direct connection · 18 ms"
 contains "  only once"                     "$(row AFTER)" "pings=1"
 
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP, \"status --json\": $ONLINE,
   \"ping --json\": {\"node\": \"gamevps\", \"path\": \"DERP\", \"median_ms\": 74}}")
-contains "a relayed path says it is slower" "$(row AFTER)" "Relayed · 74 ms · slower for streaming"
+contains "a relayed path says it is slower" "$(row AFTER)" "Relayed · 74 ms · higher latency"
 
 ENGINE="$DASH"
 # An older cg sends no price table: every figure is unknown, never ₹0.
@@ -1063,7 +1077,7 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": {\"box\": null, \"region\": \"ap-south-2\", \"instance_type\": \"g6.xlarge\",
      \"archive\": {\"bytes\": 1073741824, \"usd_month\": 0.03}, \"res\": {\"volumes_gb\": 0},
      \"budget\": {\"limit\": 57, \"spent\": 4.5}, \"config\": {}, \"local\": {}, \"account\": {}}}")
-contains "no price table: nothing is invented" "$(row AFTER)" "bill=— Exact cost checks the bill."
+contains "no price table: nothing is invented" "$(row AFTER)" "bill=— Exact cost reads the bill."
 lacks    "  never zero"                    "$(row AFTER)" "₹0.00"
 ENGINE=""
 
@@ -1112,20 +1126,20 @@ ENGINE="$BUILD"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "before a build: the plan"          "$(row AFTER)" "plan=true"
-contains "  saying what Build starts billing" "$(row AFTER)" "chip=Hyderabad · Spot when available · ₹16.44 an hour while it runs"
-contains "the confirm names the rate"        "$(row AFTER)" "It costs ₹16.44 an hour while it runs."
+contains "  saying what Build starts billing" "$(row AFTER)" "chip=Hyderabad · Spot, else on-demand · ₹16.44/hour"
+contains "the confirm names the rate"        "$(row AFTER)" "Billed ₹16.44/hour while running."
 # Mid-build: setup, budget, machine and Tailscale done; the box's own steps
 # (base packages, the driver) are one step, installing.
 contains "four steps done, the fifth running" "$(row AFTER)" "mid=0=done,1=done,2=done,3=done,4=running,5=locked,6=locked,7=locked"
 contains "  in plain words"                   "$(row AFTER)" "Checked your setup"
-contains "    the rental, with when billing began" "$(row AFTER)" "Machine rented · billing from"
+contains "    the rental, with when billing began" "$(row AFTER)" "Machine launched · billing from"
 contains "    the box's steps as one"         "$(row AFTER)" "Installing the software"
 contains "    with the line it is on"         "$(row AFTER)" "nvidia-driver-580 unpacked"
-contains "  the heading is the build"         "$(row AFTER)" "title=Building your machine"
+contains "  the heading is the build"         "$(row AFTER)" "title=Building"
 contains "  with the rate in it"              "$(row AFTER)" "₹16.44 an hour"
 contains "  and the plan is put away"         "$(row AFTER)" "plan=false"
 contains "a failure stops at its step"        "$(row AFTER)" "failed=0=done,1=done,2=done,3=done,4=failed,5=skipped"
-contains "  the heading says so"              "$(row AFTER)" "head=The build stopped"
+contains "  the heading says so"              "$(row AFTER)" "head=Build failed"
 contains "  the reason sits in that step"     "$(row AFTER)" "panelIn=4"
 contains "  with try again, or close"         "$(row AFTER)" "acts=Try again,Close"
 ENGINE=""
@@ -1156,7 +1170,7 @@ B2="window.__after = async () => {
 ENGINE="$B2"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
-contains "a failed rental: nothing was billed" "$(row AFTER)" "failed=The build stopped / Nothing was billed"
+contains "a failed rental: nothing was billed" "$(row AFTER)" "failed=Build failed / Nothing was billed"
 contains "a finished build: ready to play"     "$(row AFTER)" "done=Ready to play / built in"
 contains "  with play, and delete"            "$(row AFTER)" "▶ Play,Delete machine"
 contains "  and all eight steps ticked"        "$(row AFTER)" "steps=done,done,done,done,done,done,done,done"
@@ -1217,8 +1231,8 @@ B4="window.__after = async () => {
 ENGINE="$B4"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
-contains "a build shows the run"              "$(row AFTER)" "during=run:Building your machine acts=Cancel"
-contains "  and still does after leaving"     "$(row AFTER)" "back=run:Building your machine |"
+contains "a build shows the run"              "$(row AFTER)" "during=run:Building acts=Cancel"
+contains "  and still does after leaving"     "$(row AFTER)" "back=run:Building |"
 contains "a finished build is the machine"    "$(row AFTER)" "done=run:Ready to play acts=▶ Play,Delete machine folded=true"
 contains "  and stays it after leaving"       "$(row AFTER)" "done2=run:Ready to play |"
 contains "cancel interrupts cg"               "$(row AFTER)" "cancelled=true"
@@ -1291,9 +1305,9 @@ ENGINE="$B6"
 BOX='{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle": "spot", "launched": "2026-01-01T00:00:00Z"}'
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st "$BOX" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
-contains "play starts with the machine"     "$(row AFTER)" "starting=run:Starting the game session running,locked,locked,locked"
+contains "play starts with the machine"     "$(row AFTER)" "starting=run:Starting session running,locked,locked,locked"
 contains "  then is playing"                "$(row AFTER)" "playing=run:Playing done,done,done,running"
-contains "  saying how to stop"             "$(row AFTER)" "Close Moonlight to stop"
+contains "  saying how to stop"             "$(row AFTER)" "Close Moonlight to end the session"
 contains "  and what it costs"              "$(row AFTER)" "so far"
 contains "kept: back to the machine"        "$(row AFTER)" "kept=run:Ready to play"
 contains "deleted: the delete is shown"     "$(row AFTER)" "deleting=run:Deleting the machine"
@@ -1365,7 +1379,7 @@ contains "stopping it opens the popup"     "$(row AFTER)" "popup=open=true title
 contains "  which leaves it ready to play" "$(row AFTER)" "after=run:Ready to play closed=true"
 contains "  and calls nothing a failure"   "$(row AFTER)" "fail=false"
 # One round of reads, under the popup: not the page's, then all of them again.
-contains "  read once, all under the popup" "$(row AFTER)" "statusReads=1 stillReading=0 rows=10"
+contains "  read once, all under the popup" "$(row AFTER)" "statusReads=1 stillReading=0 rows=11"
 ENGINE=""
 
 echo "7i. after a session, the machine is still the build: its steps and its log"
@@ -1400,7 +1414,7 @@ ENGINE="$B9"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "after a session: ready to play"  "$(row AFTER)" "title=Ready to play"
-contains "  with how it was built"         "$(row AFTER)" "built=How it was built"
+contains "  with how it was built"         "$(row AFTER)" "built=Build details"
 contains "  and the build's own log"       "$(row AFTER)" "buildlog=true sessionlog=false"
 contains "  shown"                         "$(row AFTER)" "logbox=true"
 ENGINE=""
@@ -1531,16 +1545,16 @@ contains "the machine's place first"         "$(row AFTER)" "rows=Red Dead 2 / M
 contains "  then the other place's, with Move" "$(row AFTER)" "Diablo IV / Hyderabad / 162.8 GB / ₹386 / $D14 / KeepMoveDelete"
 contains "  its Reset counts from the Reset" "$(row AFTER)" "/ $D14 /"
 contains "  one total"                       "$(row AFTER)" "foot=Total282.8 GB₹671 a month"
-contains "  and how long, as set"            "$(row AFTER)" "keepfor=14 note=Saved games are deleted 14 days after you last play."
+contains "  and how long, as set"            "$(row AFTER)" "keepfor=14 note=Deleted 14 days after last played."
 lacks    "  an empty place is not a row"     "$(row AFTER)" "cg-library-empty"
 c=$(row AFTER); lacks "  nor any bucket name on the page" "${c%% | move=*}" "cg-library"
 contains "Move asks first, with the price"   "$(row AFTER)" "title=Move Diablo IV to Mumbai? body=162.8 GB is copied from Hyderabad to Mumbai"
-contains "  about the one-time cost"         "$(row AFTER)" "Costs about ₹1,329 once"
+contains "  about the one-time cost"         "$(row AFTER)" "One-time transfer: about ₹1,329"
 contains "  runs cg's move from that place"  "$(row AFTER)" "ran=library move 2344520 --from cg-library-old"
 contains "  in the popup, answered for cg"   "$(row AFTER)" "popup=Moving Diablo IV to Mumbai answered=MOVE"
 contains "  and stays on Library"            "$(row AFTER)" "after=view=library popup=false"
-contains "Reset needs no confirm"            "$(row AFTER)" "reset=ran=library reset 2344520 --from cg-library-old popup=Keeping Diablo IV from today"
-contains "Keep for applies at once"          "$(row AFTER)" "keep=ran=library keep-for 30 popup=Keeping saved games for 30 days"
+contains "Reset needs no confirm"            "$(row AFTER)" "reset=ran=library reset 2344520 --from cg-library-old popup=Resetting timer for Diablo IV"
+contains "Keep for applies at once"          "$(row AFTER)" "keep=ran=library keep-for 30 popup=Retention set to 30 days"
 # The popup said "Keeping saved games for 14 days" twice - title and step.
 contains "  under the title, a placeholder until cg speaks" "$(row AFTER)" "steps=before:● Working…"
 contains "  then cg's own steps, each ticked as the next begins" "$(row AFTER)" "during:✓ Saving the setting, ● Updating auto-stop"

@@ -28,7 +28,9 @@ while [[ ${1:-} == -* ]]; do
     #
     # It is cg that takes the locks, so it is cg that knows. The rule is about
     # COLLISION, not about change: `cg quota request` opens a support case and
-    # still collides with nothing.
+    # still collides with nothing. Nor do `cg host setup` and `cg host open`:
+    # they touch a machine of yours and nothing in AWS, and a stream from one
+    # lasts hours - run alone, every read in the app would wait it out.
     --contract) cat <<'JSON'
 {
   "events": 1,
@@ -40,15 +42,14 @@ while [[ ${1:-} == -* ]]; do
     ["creds", "set"],
     ["creds", "tailscale", "signin"],
     ["creds", "tailscale", "authkey"],
-    ["deps", "install"],
-    ["host", "setup"], ["host", "open"]
+    ["deps", "install"]
   ],
   "asks": [
     "aws-access-key-id", "aws-secret-access-key",
     "tailscale-api-token", "tailscale-auth-key",
     "alert-email", "session-end", "fix-go-ahead", "steam-login",
     "clean-orphans", "delete-volume", "destroy-all", "forget-game", "forget-login",
-    "move-game", "host-sudo"
+    "move-game", "host-sudo", "host-ssh-password"
   ]
 }
 JSON
@@ -1915,6 +1916,40 @@ print(json.dumps({
 }, indent=2))'
 }
 
+# cg aws forget [--anyway] - this laptop stops playing on AWS. The region it was
+# set up in leaves .env, which is what "an AWS machine" means here: the app then
+# shows none and asks AWS nothing. Only when nothing cg made there still bills:
+# no machine, and no saved games in any region. Nothing in AWS is deleted, and
+# the access key stays in ~/.aws/credentials - other tools on this laptop may
+# use it. Exit 3 when AWS could not be asked, so whether anything bills is not
+# known; --anyway forgets it all the same.
+cmd_aws_forget() {
+  local anyway=0 st n other
+  [[ ${1:-} == --anyway ]] && anyway=1
+  grep -q '^GAME_REGION=.' "$(cg_env_file)" 2>/dev/null || { log "AWS is not set up on this laptop - nothing to forget"; return 0; }
+  if (( ! anyway )); then
+    say "checking nothing is left billing on AWS"
+    st=$(box_state)
+    case $st in
+      none|terminated) ;;
+      unknown|"") ( die "AWS could not be asked whether a machine is still there" ) || exit 3 ;;
+      *) die "a machine is still on AWS ($st) - delete it first: cg destroy" ;;
+    esac
+    n=$(library_index 2>/dev/null | python3 -I -c 'import json,sys; print(len(json.load(sys.stdin).get("apps") or []))' 2>/dev/null) \
+      || { ( die "AWS could not be asked about your saved games" ) || exit 3; }
+    (( n == 0 )) || die "$n game$( (( n == 1 )) || echo s) still saved in AWS - delete them first, or keep using AWS: cg library list"
+    other=$(library_elsewhere_json | python3 -I -c 'import json,sys
+d = json.load(sys.stdin)
+if d.get("error"): sys.exit(1)
+print(sum(len(p.get("games") or []) for p in d.get("places") or []))' 2>/dev/null) \
+      || { ( die "AWS could not be asked about games saved in other regions" ) || exit 3; }
+    (( other == 0 )) || die "$other game$( (( other == 1 )) || echo s) still saved in another AWS region - see cg library elsewhere"
+  fi
+  cg_env_unset GAME_REGION || die "could not write .env"
+  log_as ok "this laptop no longer plays on AWS"
+  log "nothing in AWS was deleted; your access key stays in ~/.aws/credentials"
+}
+
 cmd_watcher() {
   if (( WATCH )); then box 'journalctl -t idle-watchdog -f'; return; fi
   if (( JSON )); then watcher_json; return; fi
@@ -1974,11 +2009,15 @@ build (changes things)
   cg init                    build everything; reuses an existing box   [costs money]
   cg open                    start, stream, stop on exit                [costs money]
   cg pair                    redo the Moonlight handshake (no rebuild needed)
-  cg host add <name> --ssh <user@address>
-                             a machine of your own (Linux), reached over ssh
+  cg host add [name] --ssh <user@address>
+                             a machine of your own (Linux), reached over ssh;
+                             its password once, if it has no key of cg's yet
   cg host setup <name>       add Tailscale + Sunshine to it, pair Moonlight
   cg host status|open <name> what it is ready for / stream from it
+                             (also: cg status --on <name>, cg open --on <name>)
   cg host list|remove <name>
+  cg aws forget              stop playing on AWS from this laptop; deletes nothing,
+                             refused while a machine or saved games are there
   cg stop                    mirror the games to S3, then stop - ends hourly billing
   cg status                  instance, disks, guards, tailnet, ping
   cg library                 what is on the box vs in S3, and what it costs
@@ -2069,7 +2108,10 @@ case "$CMD" in
   # Reports go through cg_report: on a terminal it boxes and colours them, and
   # anywhere else it is `cat`, so a redirected report is byte-for-byte as before.
   # --json is the app's view: one object from lib/setup, no box round-trips.
-  status)    if (( JSON )); then cg_exec lib/setup status --json; fi
+  # --on <name>: a machine of yours instead of the AWS box (lib/host.sh). The
+  # AWS box is the default, as it always has been.
+  status)    if [[ ${1:-} == --on ]]; then cmd_host_status "${2:-}" $( (( JSON )) && echo --json); exit $?; fi
+             if (( JSON )); then cg_exec lib/setup status --json; fi
              { lib/setup status; [[ -n $INSTANCE_ID ]] && lib/game status || true
                # `tailscale ip` succeeds for a node that is registered but OFFLINE, so it
                # does not mean the box answers - and the heading used to print with
@@ -2086,13 +2128,18 @@ case "$CMD" in
              lib/setup cost "$@" | cg_report ;;
   clean)     cg_exec lib/setup clean ;;
   destroy)   cmd_destroy "$@" ;;
-  open|up)   ensure_moonlight_syskeys; cg_exec lib/game up ;;
+  open|up)   ensure_moonlight_syskeys
+             if [[ ${1:-} == --on ]]; then cmd_host_open "${2:-}"; else cg_exec lib/game up; fi ;;
   stop|down) cmd_stop "$@" ;;
   snapshot)  cmd_snapshot "$@" ;;
   # Only the bare report is piped: `games --volume --delete` asks a question.
   games)     if (( $# )); then cmd_games "$@"; else cmd_games | cg_report "🎮" "Games"; fi ;;
   pair)      cmd_pair ;;
   host)      cmd_host "$@" ;;
+  aws)       case ${1:-} in
+               forget) shift; cmd_aws_forget "$@" ;;
+               *) die "usage: cg aws forget [--anyway]" ;;
+             esac ;;
   library|lib) cmd_library "$@" ;;
   watchdog)  cmd_watchdog "$@" ;;
   # No leading `shift`: with no subcommand there is nothing to shift, and under

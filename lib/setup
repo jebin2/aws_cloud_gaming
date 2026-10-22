@@ -1538,109 +1538,28 @@ print("%d\t%s" % (sum(int(a.get("bytes", 0)) for a in apps), label))' 2>/dev/nul
   export CG_RESTORE_BYTES="${CG_RESTORE_BYTES:-0}" CG_RESTORE_LABEL="${CG_RESTORE_LABEL:-games}"
 fi
 
-say "building the box - live progress below ($(cg_build_takes))"
-stream_build "ubuntu@$TS_NODE" "$KEY" \
-  || { cg_notify "build failed" "The box is still running and billing. Look at: cg log build" high warning
-       die "the build did not finish. The instance is still running and still
-       billing - stop it with $C_STOP once you have looked at the log."; }
-
-# The build already installed this (15-watchdog.sh), so the box has been
-# guarded since minute one. This pass refreshes it from the local host/ - which
-# matters on a REUSED instance built from older code, and costs nothing here.
-say "refreshing the on-host watchdog"
-log "copying host/ ..."
-scp -q -i "$KEY" -o StrictHostKeyChecking=accept-new -r host "ubuntu@$TS_NODE:"
-# The notification URL goes beside the scripts, as the build put it there; removing
-# it here is what turns notifications off on a box that already had them.
-if [[ -n $CG_NTFY_URL ]]; then
-  printf '%s\n' "$CG_NTFY_URL" | $SSH 'cat > host/notify.url'
-else
-  $SSH 'rm -f host/notify.url'
-fi
-log "installing units ..."
-$SSH 'cd host && sudo ./install-watchdog.sh' 2>&1 | cg_relay '    '
-
-IP=$(tailscale ip -4 "$TS_NODE")
-
-# Sunshine's first-run account can be created over its API, which removes the
-# "open a browser and invent a password" step. The PIN exchange cannot:
-# POST /api/pin needs a 32-hex pairing_id whose origin Sunshine does not
-# document and exposes no endpoint for, so that half stays manual.
-# Pair Moonlight without a browser. The one undocumented piece is GET /api/pin,
-# which lists pending pairing requests and their ids - found by reading the web
-# UI's own JS bundle, since the API reference documents only the POST. Without
-# it there is no way to learn the pairing_id that POST /api/pin demands.
-
-# Neutral heading: this block may create an account or find one already
-  # there, and announcing "creating" before knowing which is how a rerun
-  # came to look like it was regenerating credentials every time.
-  say "Sunshine account"
-# Wait for Sunshine to answer before deciding anything. A connection failure
-# used to fall through to "already configured", which on a fresh box meant no
-# account was ever created and pairing then failed with stale credentials.
-# Poll /welcome itself, not /. Sunshine answers on / before /welcome is ready,
-# so checking / raced ahead and a not-yet-200 /welcome was misread as
-# "already configured" - which then skipped account creation and pairing.
-# Three outcomes, and each must END the loop as soon as it is certain:
-#   200          first run, no account yet      -> create one
-#   2xx/3xx/4xx  Sunshine is up and configured  -> nothing to do
-#   000          not listening yet              -> keep waiting
-#
-# This only broke on 200, so a configured box ran the loop to exhaustion: 40
-# iterations of sleep 3 + sleep 5 is over five minutes of waiting on every
-# rerun, for an answer it already had on the first request. Measured 6s now.
-#
-# A non-200 is confirmed a few times rather than trusted at once, because
-# Sunshine serves / and redirects for a moment before /welcome settles - which
-# is what an earlier single check got wrong in the other direction.
-SUN_UP=0; WELCOME=0; configured=0
-for _ in $(seq 1 40); do
-  code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "https://$IP:47990/welcome" 2>/dev/null || echo 000)
-  case $code in
-    200) SUN_UP=1; WELCOME=1; break ;;
-    000) configured=0 ;;
-    *)   SUN_UP=1; configured=$(( configured + 1 ))
-         (( configured >= 3 )) && break ;;
-  esac
-  sleep 3
-done
-
-# The login: saved here first, checked against the box, set again on the box
-# when they disagree - lib/sunshine-login.sh, shared with your own machines.
-# shellcheck source=lib/sunshine-login.sh
-source lib/sunshine-login.sh
-if (( ! SUN_UP )); then
-  log "Sunshine is not answering on $IP:47990 - skipping account and pairing"
-  log "check on the box: systemctl --user status app-dev.lizardbyte.app.Sunshine.service"
-else
-  sun_login_ensure "$IP" "$WELCOME" cg_env_set $SSH || true
-fi
-
-say "moonlight pairing"
-PAIRED=0
-if command -v moonlight >/dev/null && timeout 45 moonlight list "$IP" 2>/dev/null | grep -q .; then
-  log "already paired"
-  PAIRED=1
-elif command -v moonlight >/dev/null && [[ -n ${SUNSHINE_USER:-} && -n ${SUNSHINE_PASS:-} ]]; then
-  # Once more before giving up. A pairing that does not stick is now REPORTED
-  # as a failure instead of printed as "paired", so a retry is worth the seconds.
-  if pair_moonlight "$IP" "$SUNSHINE_USER" "$SUNSHINE_PASS" \
-     || { log "pairing did not stick - trying once more"; pair_moonlight "$IP" "$SUNSHINE_USER" "$SUNSHINE_PASS"; }; then
-    log "paired"
-    PAIRED=1
+# The rest is every build's: lib/build.sh, shared with your own machines. What
+# is the AWS box's alone comes in as hooks - the on-host watchdog, and the game
+# library on /scratch.
+build_after_stream() {
+  # The build already installed this (15-watchdog.sh), so the box has been
+  # guarded since minute one. This pass refreshes it from the local host/ - which
+  # matters on a REUSED instance built from older code, and costs nothing here.
+  say "refreshing the on-host watchdog"
+  log "copying host/ ..."
+  scp -q -i "$KEY" -o StrictHostKeyChecking=accept-new -r host "ubuntu@$TS_NODE:"
+  # The notification URL goes beside the scripts, as the build put it there; removing
+  # it here is what turns notifications off on a box that already had them.
+  if [[ -n $CG_NTFY_URL ]]; then
+    printf '%s\n' "$CG_NTFY_URL" | $SSH 'cat > host/notify.url'
   else
-    log "automatic pairing failed - pair by hand, see below"
-    PAIRED=0
+    $SSH 'rm -f host/notify.url'
   fi
-else
-  log "skipped (moonlight or credentials missing) - pair by hand, see below"
-  PAIRED=0
-fi
-say "waiting for Steam to finish installing"
-STEAM_OK=0
-STEAM_MSG="still installing - check ~/steam-prewarm.log on the box."
-if wait_for_steam "ubuntu@$TS_NODE" "$KEY" 1500; then
-  STEAM_OK=1
+  log "installing units ..."
+  $SSH 'cd host && sudo ./install-watchdog.sh' 2>&1 | cg_relay '    '
+}
+
+build_steam_report() {
   # Report what actually happened rather than assuming the three sub-steps
   # (client, library registration, dock pin) all succeeded.
   $SSH 'echo "    client:  $(du -shcL ~/.steam ~/.local/share/Steam 2>/dev/null | tail -1 | cut -f1)"
@@ -1654,7 +1573,15 @@ if wait_for_steam "ubuntu@$TS_NODE" "$KEY" 1500; then
   else
     STEAM_MSG="installed and pinned, but the game library is NOT registered - games would fill the ${GAME_DISK_GB:-$(source lib/config.sh && config_field GAME_DISK_GB 3)} GB root disk. Add $GAMES_LIB in Steam > Settings > Storage."
   fi
-fi
+}
+
+# shellcheck source=lib/build.sh
+source lib/build.sh
+BUILD_SSH="ubuntu@$TS_NODE" BUILD_KEY="$KEY" BUILD_IP=$(tailscale ip -4 "$TS_NODE")
+BUILD_SAVE=cg_env_set BUILD_NAME="the box"
+build_finish || { cg_notify "build failed" "The box is still running and billing. Look at: cg log build" high warning
+       die "the build did not finish. The instance is still running and still
+       billing - stop it with $C_STOP once you have looked at the log."; }
 
 # This laptop's half of the build is done for this machine: it waited for the
 # box and paired with it. cg status reads it (box.built), so an app closed in

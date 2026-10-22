@@ -1,5 +1,8 @@
 # --- Autologin ---------------------------------------------------------------
 # Sunshine captures an existing X session, so one must come up unattended.
+# Signed in at boot: the AWS box, or a machine of yours that had no desktop until
+# this build gave it one. A machine with its own login screen keeps it.
+if aws_box || [ -n "${DESKTOP_ADDED:-}" ]; then
 progress "configuring autologin"
 groupadd -f autologin
 usermod -aG autologin,input,video "$USER_NAME"
@@ -20,8 +23,8 @@ verify "lightdm autologin configured" grep -q autologin-user /etc/lightdm/lightd
 # and `xset q` still reports "timeout: 600, DPMS is Enabled" once the session is
 # up. So the config has to be set where the power manager reads it. Written as
 # XML directly because xfconfd is not running at build time.
-install -d -m 755 "/home/$USER_NAME/.config/xfce4/xfconf/xfce-perchannel-xml"
-cat > "/home/$USER_NAME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml" <<EOF
+install -d -m 755 "$USER_HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
+cat > "$USER_HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-power-manager" version="1.0">
   <property name="xfce4-power-manager" type="empty">
@@ -35,8 +38,8 @@ EOF
 
 # light-locker blanks and locks the screen too, and a locked screen on a box
 # with no keyboard is unrecoverable over a stream.
-install -d -m 755 "/home/$USER_NAME/.config/autostart"
-cat > "/home/$USER_NAME/.config/autostart/light-locker.desktop" <<EOF
+install -d -m 755 "$USER_HOME/.config/autostart"
+cat > "$USER_HOME/.config/autostart/light-locker.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=light-locker
@@ -47,14 +50,15 @@ EOF
 # manager is configured above, and this covers an X server started some other
 # way. Cheap, and this failure is expensive: once a headless display blanks,
 # the framebuffer never comes back - only restarting the session recovers it.
-install -d -m 755 "/home/$USER_NAME/.config/autostart"
-cat > "/home/$USER_NAME/.config/autostart/no-blank.desktop" <<EOF
+install -d -m 755 "$USER_HOME/.config/autostart"
+cat > "$USER_HOME/.config/autostart/no-blank.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Disable screen blanking
 Exec=/bin/sh -c "xset s off; xset s noblank; xset -dpms"
 X-GNOME-Autostart-enabled=true
 EOF
-chown -R "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.config/autostart"
+chown -R "$USER_NAME:$USER_NAME" "$USER_HOME/.config/autostart"
 
-verify "screen blanking disabled in xorg.conf" grep -q 'BlankTime' /etc/X11/xorg.conf
+if aws_box; then verify "screen blanking disabled in xorg.conf" grep -q 'BlankTime' /etc/X11/xorg.conf; fi
+fi

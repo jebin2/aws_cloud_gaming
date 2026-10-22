@@ -43,7 +43,7 @@ chmod +x "$T/bin/dpkg-query"
 # the shipped code rather than a copy of it.
 ver() { env PATH="$T/bin:$PATH" PKGS="${1:-}" bash -c '
   set -uo pipefail
-  '"$(sed -n '/^NVIDIA_MIN=/p;/^nvidia_driver_version()/,/^}/p;/^nvidia_driver_ok()/,/^}/p' "$MOD")"'
+  '"$(sed -nE '/^\s*NVIDIA_MIN=/p;/^\s*nvidia_driver_version\(\)/,/^\s*}/p;/^\s*nvidia_driver_ok\(\)/,/^\s*}/p' "$MOD")"'
   v=$(nvidia_driver_version) || v=
   nvidia_driver_ok && echo "ok=yes v=$v" || echo "ok=no v=$v"' 2>&1
 }
@@ -89,7 +89,7 @@ contains "the version found is reported" "$src" 'progress "installed nvidia driv
 lacks "  and 'none' is not behind a || that cannot fire" "$src" 'nvidia_driver_version || echo none'
 contains "  it uses the captured value"  "$src" 'NV_FOUND:-none}'
 ln_p=$(grep -n 'progress "installed nvidia driver:' "$MOD" | cut -d: -f1)
-ln_v=$(grep -n '^verify "nvidia driver' "$MOD" | cut -d: -f1)
+ln_v=$(grep -nE '^\s*verify "nvidia driver [0-9$]' "$MOD" | head -1 | cut -d: -f1)
 check "  and before the verify" "$([[ ${ln_p:-0} -lt ${ln_v:-0} ]] && echo yes)" "yes"
 
 echo "6. the install still reaches for the newest, which is why the floor is a floor"

@@ -193,7 +193,7 @@ contains "  and it is the one used"   "$(row 'PRESENT ROWS')" "/ In use / Remove
 contains "  said once, below"         "$(row 'PRESENT NOTE')" "A new machine signs in as alice."
 # Stated and dismissed in the same breath: 22 KB is not a saving, and offering a
 # delete button next to a cost invites reading it as one.
-contains "deleting is not sold as a saving" "$(row 'PRESENT NOTE')" "does not save money"
+contains "deleting is not sold as a saving" "$(row 'PRESENT NOTE')" "does not reduce cost"
 contains "  Forget is offered, in red" "$(row 'PRESENT BTN')" "btn btn-danger"
 
 echo "2. several accounts in one tarball"
@@ -203,15 +203,15 @@ contains "  and the whole-tarball caveat is said" "$(row 'TWO NOTE')" "come back
 contains "  with how to keep one"     "$(row 'TWO NOTE')" "sign in as it on the machine"
 
 echo "3. nothing archived"
-contains "it says none"               "$(row 'ABSENT ROWS')" "No Steam login saved"
-contains "  and what that means"      "$(row 'ABSENT ROWS')" "asks you to sign in"
+contains "it says none"               "$(row 'ABSENT ROWS')" "No saved Steam login"
+contains "  and what that means"      "$(row 'ABSENT ROWS')" "You sign in once on the next machine"
 check    "  Forget is not offered"    "$(row 'ABSENT BTN')"  "ABSENT BTN | "
 
 echo "4. UNKNOWN is the one that must not read as 'none'"
 # The whole reason this file is rendered rather than grepped.
-contains "it admits it could not look" "$(row 'UNKNOWN ROWS')" "The saved login could not be read"
-lacks    "  and never claims none"     "$(row 'UNKNOWN ROWS')" "No Steam login saved"
-lacks    "  nor invites a sign-in"     "$(row 'UNKNOWN NOTE')" "asks you to sign in"
+contains "it admits it could not look" "$(row 'UNKNOWN ROWS')" "Could not read the saved login"
+lacks    "  and never claims none"     "$(row 'UNKNOWN ROWS')" "No saved Steam login"
+lacks    "  nor invites a sign-in"     "$(row 'UNKNOWN NOTE')" "You sign in once on the next machine"
 # No delete button for a state nobody can vouch for.
 check    "  Forget is not offered"     "$(row 'UNKNOWN BTN')" "UNKNOWN BTN | "
 
@@ -237,10 +237,10 @@ contains "the question is a question"  "$(row 'CHOICE PROMPT')" "What should hap
 lacks    "  not the terminal prompt"   "$(row 'CHOICE PROMPT')" "[d] destroy"
 check    "the radios are shown"        "$(row 'CHOICE BOX')"   "CHOICE BOX | shown"
 check    "  and the text field is not" "$(row 'CHOICE INPUT')" "CHOICE INPUT | hidden"
-contains "the first option says what it does" "$(row 'CHOICE ROWS')" "Delete the machine"
+contains "the first option says what it does" "$(row 'CHOICE ROWS')" "Delete it"
 contains "  and the second"            "$(row 'CHOICE ROWS')" "Keep it running"
-contains "  with the consequence spelled out" "$(row 'CHOICE ROWS')" "keeps costing"
-contains "the default is preselected"  "$(row 'CHOICE ROWS')" "CHECKED Delete the machine"
+contains "  with the consequence spelled out" "$(row 'CHOICE ROWS')" "billed hourly"
+contains "the default is preselected"  "$(row 'CHOICE ROWS')" "CHECKED Delete it"
 # Dismissing must answer the default, never an empty string: cg reads the reply
 # and an empty one would fall through to its own default anyway, but a build
 # that answers "" to a choice prompt is a thing nobody can debug.

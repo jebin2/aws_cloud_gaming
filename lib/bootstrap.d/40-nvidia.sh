@@ -1,48 +1,69 @@
 # --- NVIDIA driver -----------------------------------------------------------
-progress "installing nvidia driver (the slowest step, ~10 min)"
-apt-get install -y ubuntu-drivers-common
-# The desktop driver, not --gpgpu: we need the X11 display components, which
-# the headless compute build omits.
-# Sunshine's bundled ffmpeg needs NVENC API 13.1, which arrived in driver 610.
-# `ubuntu-drivers install` picks the distro's "recommended" driver, which was
-# 595 - and Sunshine then silently falls back to libx264, which 4 vCPUs cannot
-# sustain, giving a black screen rather than an error. So the requirement is a
-# version FLOOR: install the newest open driver the archive offers, then check
-# the floor rather than a package name.
-NVIDIA_MIN=610
-NEWEST=$(apt-cache search --names-only '^nvidia-driver-[0-9]+-open$' 2>/dev/null \
-  | grep -oE 'nvidia-driver-[0-9]+-open' | sort -uV | tail -1)
-if [[ -n $NEWEST ]]; then
-  progress "installing $NEWEST"
-  apt-get install -y "$NEWEST" || ubuntu-drivers install || ubuntu-drivers autoinstall
-else
-  ubuntu-drivers install || ubuntu-drivers autoinstall
+# An NVIDIA card with no driver gets one: always on the AWS box; on a machine of
+# yours only when it has the card and not the driver, which is then loaded at
+# the next boot - this never reboots your machine.
+NVIDIA_ADDED=""
+if aws_box || { lspci 2>/dev/null | grep -E " (VGA compatible|3D) controller: " | grep -qi nvidia \
+                && ! nvidia-smi >/dev/null 2>&1; }; then
+  case $FAMILY in
+    ubuntu|debian)
+      progress "installing nvidia driver (the slowest step, ~10 min)"
+      apt-get install -y ubuntu-drivers-common
+      # The desktop driver, not --gpgpu: we need the X11 display components, which
+      # the headless compute build omits.
+      # Sunshine's bundled ffmpeg needs NVENC API 13.1, which arrived in driver 610.
+      # `ubuntu-drivers install` picks the distro's "recommended" driver, which was
+      # 595 - and Sunshine then silently falls back to libx264, which 4 vCPUs cannot
+      # sustain, giving a black screen rather than an error. So the requirement is a
+      # version FLOOR: install the newest open driver the archive offers, then check
+      # the floor rather than a package name.
+      NVIDIA_MIN=610
+      NEWEST=$(apt-cache search --names-only '^nvidia-driver-[0-9]+-open$' 2>/dev/null \
+        | grep -oE 'nvidia-driver-[0-9]+-open' | sort -uV | tail -1 || true)
+      if [[ -n $NEWEST ]]; then
+        progress "installing $NEWEST"
+        apt-get install -y "$NEWEST" || ubuntu-drivers install || ubuntu-drivers autoinstall
+      else
+        ubuntu-drivers install || ubuntu-drivers autoinstall
+      fi
+
+      # The highest nvidia-driver-NNN actually installed, whatever its name. Asking
+      # dpkg for one hardcoded name - it was nvidia-driver-610-open - meant the check
+      # failed the day Ubuntu's archive moved on to 615: the install had done exactly
+      # what it was told, picked the newest, and the verify then demanded a package
+      # that was deliberately not installed. Under `set -e` a failed verify aborts
+      # user-data, so the build died before xorg, steam and sunshine, and a perfectly
+      # good driver reported as a broken GPU.
+      nvidia_driver_version() {
+        dpkg-query -W -f '${Package} ${db:Status-Status}\n' 'nvidia-driver-*' 2>/dev/null \
+          | awk '$2 == "installed" { print $1 }' \
+          | sed -nE 's/^nvidia-driver-([0-9]+).*/\1/p' \
+          | sort -n | tail -1
+      }
+      nvidia_driver_ok() {
+        local v
+        v=$(nvidia_driver_version) || v=
+        [[ -n $v ]] && (( v >= NVIDIA_MIN ))
+      }
+      # In a variable, not inline: the pipeline exits 0 with NO output when nothing
+      # matches, so `|| echo none` would never fire and the line would read blank.
+      NV_FOUND=$(nvidia_driver_version) || NV_FOUND=
+      progress "installed nvidia driver: ${NV_FOUND:-none} (need $NVIDIA_MIN+)"
+      verify "nvidia driver $NVIDIA_MIN or newer installed" nvidia_driver_ok
+      ;;
+    arch)
+      progress "installing nvidia driver"
+      pkg nvidia-open-dkms nvidia-utils
+      verify "nvidia driver installed" pacman -Q nvidia-utils ;;
+    *) echo ">>> FAILED: this NVIDIA card has no driver, and cg installs one only on Ubuntu, Debian or Arch"
+       exit 1 ;;
+  esac
+  NVIDIA_ADDED=1
 fi
 
-# The highest nvidia-driver-NNN actually installed, whatever its name. Asking
-# dpkg for one hardcoded name - it was nvidia-driver-610-open - meant the check
-# failed the day Ubuntu's archive moved on to 615: the install had done exactly
-# what it was told, picked the newest, and the verify then demanded a package
-# that was deliberately not installed. Under `set -e` a failed verify aborts
-# user-data, so the build died before xorg, steam and sunshine, and a perfectly
-# good driver reported as a broken GPU.
-nvidia_driver_version() {
-  dpkg-query -W -f '${Package} ${db:Status-Status}\n' 'nvidia-driver-*' 2>/dev/null \
-    | awk '$2 == "installed" { print $1 }' \
-    | sed -nE 's/^nvidia-driver-([0-9]+).*/\1/p' \
-    | sort -n | tail -1
-}
-nvidia_driver_ok() {
-  local v
-  v=$(nvidia_driver_version) || v=
-  [[ -n $v ]] && (( v >= NVIDIA_MIN ))
-}
-# In a variable, not inline: the pipeline exits 0 with NO output when nothing
-# matches, so `|| echo none` would never fire and the line would read blank.
-NV_FOUND=$(nvidia_driver_version) || NV_FOUND=
-progress "installed nvidia driver: ${NV_FOUND:-none} (need $NVIDIA_MIN+)"
-verify "nvidia driver $NVIDIA_MIN or newer installed" nvidia_driver_ok
-
+# NvFBC capture on the AWS box's headless X - never on a machine of yours, where
+# turning kernel modesetting off would break a Wayland desktop.
+if aws_box; then
 # Ubuntu's driver package ships nvidia-graphics-drivers-kms.conf containing
 # `options nvidia_drm modeset=1`. NvFBC cannot create a capture session while
 # DRM KMS owns the display - every stream then connects, sends no video at all,
@@ -61,4 +82,4 @@ sed -i 's/^options nvidia_drm modeset=1/options nvidia_drm modeset=0/' \
 update-initramfs -u >/dev/null 2>&1 || true
 
 verify "nvidia DRM KMS disabled" bash -c '! grep -rqs "nvidia_drm.*modeset=1" /etc/modprobe.d/'
-
+fi

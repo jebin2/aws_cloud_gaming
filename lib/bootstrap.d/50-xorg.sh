@@ -9,6 +9,8 @@
 # active output, which hid this until capture moved to X11.) The driver also
 # clamps Virtual to its own mode pool - asking for 3840x2160 silently produced a
 # 2560x1600 screen against a 1920x1080 mode, which is exactly that mismatch.
+# A virtual screen for the AWS box's GPU, which has no monitor. A machine of yours has its own display set up.
+if aws_box; then
 progress "configuring headless X"
 BDF=$(lspci -d 10de: -mm | awk 'NR==1{print $1}')
 [[ $BDF == *:*:* ]] && BDF=${BDF#*:}   # drop the domain prefix if lspci emits one
@@ -61,3 +63,4 @@ EndSection
 EOF
 
 verify "xorg.conf written with a BusID" grep -q BusID /etc/X11/xorg.conf
+fi

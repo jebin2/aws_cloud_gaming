@@ -80,8 +80,10 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push(label + ' PAGE | ' + document.querySelector('section[data-view=cost]').innerText.replace(/\s+/g, ' '));
   };
   try {
+    // A laptop that plays on AWS: a region chosen is what makes it one.
     paintConfig([{ key: 'GAME_BUDGET_INR', kind: 'number', secret: false, is_set: false, value: null,
-                   default: '5000', effective: '5000', note: 'n', label: 'budget', group: 'The guards' }]);
+                   default: '5000', effective: '5000', note: 'n', label: 'budget', group: 'The guards' },
+                 { key: 'GAME_REGION', kind: 'region', secret: false, is_set: true, value: 'ap-south-2', default: 'ap-south-2', effective: 'ap-south-2', note: 'n', label: 'region', group: 'The box' }]);
     paintCost(COST({}));
     read('REAL');
     paintCost(COST({ resources: { instance: null, volumes_gb: 50, snapshots_gb: 0, images: 0, budget_usd: null },
@@ -211,12 +213,12 @@ row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
 echo "1. the month, in rupees at cg's one rate"
 contains "the total in rupees"           "$(row 'REAL c-month')" "₹167"
-contains "  hours played and the pace"   "$(row 'REAL c-month-sub')" "so far · 2.4 h of machine time · on pace for ₹553 by 31 Oct"
-contains "the budget is yours, as set"   "$(row 'REAL c-cap-note')" "Budget ₹5,000 a month. AWS emails you if you pass it; it stops nothing."
+contains "  hours played and the pace"   "$(row 'REAL c-month-sub')" "so far · 2.4 h runtime · projected ₹553 by 31 Oct"
+contains "the budget is yours, as set"   "$(row 'REAL c-cap-note')" "Budget ₹5,000/month. Alert by email only; nothing is stopped."
 lacks    "  not AWS's dollars turned back" "$(row 'REAL c-cap-note')" "5,412"
-contains "  and the bar's verdict"       "$(row 'REAL CHIP')" "under the budget"
+contains "  and the bar's verdict"       "$(row 'REAL CHIP')" "under budget"
 contains "credits in rupees"             "$(row 'REAL c-credits')" "₹12,854 left"
-contains "  and how long they last"      "$(row 'REAL c-credits-note')" "about 23 months at this pace"
+contains "  and how long they last"      "$(row 'REAL c-credits-note')" "about 23 months at this rate"
 contains "the rate is said once"         "$(row 'REAL c-days-note')" "₹94.95 to the dollar"
 # How old the bill on screen is, on the Refresh that renews it: red and
 # blinking once it is more than a day old.
@@ -227,7 +229,7 @@ echo "5b. a bill gone out of date by something since"
 contains "a fresh check is not marked"   "$(row FRESH)" "stale=false title="
 contains "an action since marks it"       "$(row CHANGED)" "stale=true"
 contains "  and the hover says what, and when" "$(row CHANGED)" "Since then: you built a machine (today"
-contains "  and that the bill runs a day behind" "$(row CHANGED)" "about a day behind"
+contains "  and that the bill runs a day behind" "$(row CHANGED)" "lags about a day"
 check    "  on Home too"                  "$(row 'HOME CHANGED')" "HOME CHANGED | true"
 # A heartbeat, at full strength, and hoverable - the old dimming class it once
 # shared a name with turned the pointer off, hiding the reason.
@@ -250,22 +252,22 @@ echo "3. storage the bill charges that cg cannot see is not guessed at"
 check    "no lost-storage warning"       "$(row 'REAL UNKNOWN')" "REAL UNKNOWN | hidden"
 lacks    "  nor counted in the total"    "$(row 'REAL c-standby')" "₹370"
 lacks    "no saved games, no Saved games row" "$(row 'REAL c-bills')" "Saved games"
-contains "  and nothing stored says so"  "$(row 'REAL c-bills')" "Nothing is stored, so nothing is charged."
+contains "  and nothing stored says so"  "$(row 'REAL c-bills')" "Nothing stored."
 # A disk left behind is a row only when there is one; "none" only raised
 # the question of what it was.
 lacks    "  and no empty disk row"         "$(row 'REAL c-bills')" "disk"
 contains "a bucket that explains it raises nothing" "$(row 'KNOWN UNKNOWN')" "hidden"
 contains "  and standby is what cg knows" "$(row 'KNOWN c-standby')" "₹813 a month"
 contains "  saved games with their size" "$(row 'KNOWN c-bills')" "Saved games →₹380 a month"
-contains "  a disk left behind is named" "$(row 'KNOWN c-bills')" "Disk left by a deleted machine50 GB · ₹433 a month"
-contains "no budget in AWS is said, in red" "$(row 'KNOWN c-cap-note')" "No budget alert is set up in AWS"
+contains "  a disk left behind is named" "$(row 'KNOWN c-bills')" "Orphaned disk50 GB · ₹433 a month"
+contains "no budget in AWS is said, in red" "$(row 'KNOWN c-cap-note')" "No budget alert set in AWS"
 
 echo "3b. storage explained by games in another place"
 # One Saved games row for every location, with the other place said under it.
 contains "they are counted in one row"   "$(row 'AWAY c-bills')" "Saved games →₹386 a month"
 # A list, each row pointing at its page - where the games are is on Games.
 lacks    "  with no note under it"        "$(row 'AWAY c-bills')" "which your machine does not use"
-contains "recurring is what charges whether or not you play" "$(row 'REAL c-standby-sub')" "Charged every month, whether or not you play."
+contains "recurring is what charges whether or not you play" "$(row 'REAL c-standby-sub')" "Billed monthly, whether or not you play."
 lacks    "  not a row of their own"      "$(row 'AWAY c-bills')" "Saved in ap-south-2"
 contains "  and counted in standby"      "$(row 'AWAY c-standby')" "₹386 a month"
 contains "  so nothing is a mystery"     "$(row 'AWAY UNKNOWN')" "hidden"
@@ -273,17 +275,17 @@ check    "  and AWS was not asked again" "$(row 'AWAY RAN')" "AWAY RAN | 0"
 check    "Saved games opens the Games page" "$(row WENT)" "WENT | library"
 
 echo "3c. what playing adds, and a machine that exists"
-contains "playing adds the machine, by the hour" "$(row PLAY)" "Playing adds ₹16 an hour for the machine."
+contains "playing adds the machine, by the hour" "$(row PLAY)" "Playing adds ₹16/hour."
 # 0.10 x 100 + 0.5 + 100 x 0.0912 / 720 x 100 = 10 + 0.5 + 1.27 = 11.77; 0.15 -> 16.77
 check    "a machine not built yet: the spread across zones" "$(row PLANNED)" "PLANNED | ₹11.77–₹16.77"
 check    "  one that runs: its own zone, address and disk"  "$(row 'IN ZONE')" "IN ZONE | ₹16.77"
 check    "  the disk counts by its size"  "$(row 'BIG DISK')" "BIG DISK | ₹18.03"
-contains "closed mid-build: the card says it is building" "$(row HALF)" "HALF | Building your machine"
+contains "closed mid-build: the card says it is building" "$(row HALF)" "HALF | Building"
 contains "  and offers no Play"            "$(row HALF)" "play=false"
 contains "  the build is picked up again"  "$(row HALF)" "ran=1"
 contains "  without leaving the page"      "$(row HALF)" "stayed=true"
 check    "  once, not on every status"     "$(row 'HALF AGAIN')" "HALF AGAIN | ran=1"
-contains "status after a Refresh reaches Spending's card too" "$(row 'SAME PLAY')" "Playing adds ₹16 an hour for the machine. == Playing adds ₹16 an hour for the machine."
+contains "status after a Refresh reaches Spending's card too" "$(row 'SAME PLAY')" "Playing adds ₹16/hour. == Playing adds ₹16/hour."
 contains "a stopped machine is its own row"  "$(row STOPPED)" "Machine (stopped) →₹433 a month"
 lacks    "  not a disk left behind"           "$(row STOPPED)" "Disk left by a deleted machine"
 
@@ -291,8 +293,8 @@ echo "4. free streaming"
 contains "used of free"                  "$(row 'REAL c-egress')" "0.4 of 100 GB used this month"
 # What was used is measured; the hours are the most the quality setting could
 # use, so they are a floor - "at least".
-contains "used, from the bill"           "$(row 'REAL c-egress-src')" "From your bill."
-contains "  the worst case, as a floor"  "$(row 'REAL c-egress-note')" "Even at your full quality (20 Mbps, 60 fps, Moonlight's own resolution: about 9 GB an hour), at least 11 more hours are free. After that, ₹10 a GB."
+contains "used, from the bill"           "$(row 'REAL c-egress-src')" "From the AWS bill."
+contains "  the worst case, as a floor"  "$(row 'REAL c-egress-note')" "At 20 Mbps, 60 fps, native resolution (~9 GB/hour): at least 11 free hours left, then ₹10/GB."
 
 echo "5. none of the old words"
 for w in '$' 'box' 'S3' 'egress' 'Cost Explorer' 'elastic' 'lambda' 'standby' 'COMPUTE' 'API'; do

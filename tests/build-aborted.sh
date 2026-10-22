@@ -34,6 +34,16 @@ ab() { bash -c '
 echo "1. the real abort: a fatal verify failed and user-data is gone"
 check "error, never finished"      "$(ab 1 'error|no')"   "aborted"
 
+echo "1b. a machine of yours: its build ended, and not well"
+# set -e stops a build without printing FAILED, and there is no reboot to wait
+# for: the result file saying so is the end, FAILED or not. It waited 40
+# minutes for a build that had stopped two minutes in.
+check "exited, no FAILED seen"      "$(ab 0 'exited|no')"  "aborted"
+check "  exited, FAILED seen"       "$(ab 1 'exited|no')"  "aborted"
+check "  but done is done"          "$(ab 0 'done|yes')"   "waiting"
+contains "the result file is read where there is no cloud-init" "$(cat lib/common.sh)" 's=done || s=exited'
+contains "  and asked once a minute, not only after a FAILED" "$(cat lib/common.sh)" 'failed_seen || waited % 60 == 0'
+
 echo "2. a healthy build is never condemned"
 check "still running"              "$(ab 1 'running|no')" "waiting"
 check "  no FAILED seen at all"    "$(ab 0 'error|no')"   "waiting"
@@ -64,12 +74,14 @@ echo "5. both watchers use it - styled and plain"
 check "the check appears twice"  "$(grep -c 'if build_aborted "\$failed_seen" "\$state"' lib/common.sh)" "2"
 check "  FAILED is recorded twice" "$(grep -c 'failed_seen=1; last_fail=' lib/common.sh)" "2"
 check "  and the probe is shared, defined once" "$(grep -c '^_build_state_cmd=' lib/common.sh)" "1"
-# Only after a FAILED: a healthy build must not pay for an extra ssh every poll.
-check "  guarded by failed_seen"   "$(grep -c 'if (( failed_seen )); then' lib/common.sh)" "2"
+# At once after a FAILED, and once a minute otherwise: a healthy build pays one
+# ssh a minute, not one every poll, and a silent stop is still caught.
+check "  guarded: after a FAILED, or once a minute" "$(grep -c 'if (( failed_seen || waited % 60 == 0 )); then' lib/common.sh)" "2"
 
 echo "6. it says what happened, not just that something did"
-contains "the failing step is named" "$src" 'the build STOPPED here: $last_fail'
-contains "  and why that is final"   "$src" "so a failed check ends it"
+contains "the failing step is named" "$src" 'the build STOPPED here: $f'
+contains "  or, with none, the end of the log" "$src" "the end of its log"
+contains "  and that nothing after it ran" "$src" "nothing after that step ran"
 contains "  and where to look"       "$src" "sudo tail -50 /var/log/cloud-gaming-bootstrap.log"
 
 echo "7. this file's own needles are safe"

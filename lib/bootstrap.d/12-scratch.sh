@@ -13,6 +13,8 @@
 # so that the S3 restore can start immediately and run while everything else
 # installs. That overlap is what turns a 10-minute download into roughly no
 # extra wait at all.
+# The AWS box's instance store. A machine of yours keeps games where Steam does.
+if aws_box; then
 progress "setting up local NVMe at /scratch"
 cat > /usr/local/bin/mount-scratch.sh <<'EOF'
 #!/usr/bin/env bash
@@ -64,8 +66,8 @@ export __GL_SHADER_DISK_CACHE_PATH="$HOME/.cache/nvidia-shader-cache"
 export __GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1
 export DXVK_STATE_CACHE_PATH="$HOME/.cache/dxvk-cache"
 EOF
-mkdir -p "/home/$USER_NAME/.cache/nvidia-shader-cache" "/home/$USER_NAME/.cache/dxvk-cache"
-chown -R "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.cache"
+mkdir -p "$USER_HOME/.cache/nvidia-shader-cache" "$USER_HOME/.cache/dxvk-cache"
+chown -R "$USER_NAME:$USER_NAME" "$USER_HOME/.cache"
 
 # Start it now rather than waiting for the next boot, and check the *mount*, not
 # just that the script exists - "installed the thing that does X" has been a
@@ -74,3 +76,4 @@ systemctl start scratch-disk.service || true
 verify "scratch mount script installed" test -x /usr/local/bin/mount-scratch.sh
 verify "/scratch mounted on local NVMe" mountpoint -q /scratch
 verify "steam library dir on /scratch" test -d /scratch/steam/steamapps
+fi

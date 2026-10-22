@@ -2,6 +2,8 @@
 # A desktop with no browser gives "failed to execute default browser" the first
 # time anything opens a link. Mozilla's .deb rather than Ubuntu's snap: snaps
 # are awkward under an autologin session started by lightdm.
+# The AWS box's browser. A machine of yours has its own.
+if aws_box; then
 progress "installing firefox"
 install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg \
@@ -29,8 +31,9 @@ for d in /etc/firefox/policies /usr/lib/firefox/distribution; do
 EOF
 done
 # XFCE's exo-open reads its own helper config; setting only xdg is not enough.
-install -d -o "$USER_NAME" -g "$USER_NAME" "/home/$USER_NAME/.config/xfce4"
-printf 'WebBrowser=firefox\n' > "/home/$USER_NAME/.config/xfce4/helpers.rc"
-chown "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.config/xfce4/helpers.rc"
+install -d -o "$USER_NAME" -g "$USER_NAME" "$USER_HOME/.config/xfce4"
+printf 'WebBrowser=firefox\n' > "$USER_HOME/.config/xfce4/helpers.rc"
+chown "$USER_NAME:$USER_NAME" "$USER_HOME/.config/xfce4/helpers.rc"
 
 verify "firefox installed" test -x /usr/bin/firefox
+fi

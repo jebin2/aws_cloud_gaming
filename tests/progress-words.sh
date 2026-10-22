@@ -35,7 +35,7 @@ const js = fs.readFileSync("app/renderer/app.js", "utf8");
 const src = js.slice(js.indexOf("const BUILD_PARTS = ["), js.indexOf("];", js.indexOf("const BUILD_PARTS = [")) + 1);
 const BUILD_PARTS = eval(src.replace("const BUILD_PARTS =", "(") + ")");
 const lines = fs.readFileSync(0, "utf8").split("\n").filter(Boolean);
-const skip = [/^finishing up/, /^installing \$NEWEST/];
+const skip = [/^finishing up/, /^installing \$NEWEST/, /^enabled the multilib repository/, /^the NVIDIA driver loads at the next boot/];
 console.log(lines.filter(l => !skip.some(r => r.test(l)) && !BUILD_PARTS.some(([, re]) => re.test(l))).join("; "));
 ' < <(grep -hoE '^\s*progress "[^"]+"' lib/bootstrap.d/*.sh | sed -E 's/^\s*progress "//; s/"$//')) \
   || missing="(the check itself failed to run)"

@@ -240,32 +240,32 @@ OUT=$(probe "$(q_json null)" \
 echo "2. opening it asks for nothing"
 contains "it reads the quota"          "$(row 'PICK RAN')"  "--region ap-south-1 quota --json"
 lacks    "  and files nothing"         "$(row 'PICK RAN')"  "quota request"
-contains "it waits for a choice"       "$(row 'PICK WHY')"  "Pick one to see what it would ask for"
+contains "it waits for a choice"       "$(row 'PICK WHY')"  "Select a quota."
 contains "  with the button dead"      "$(row 'PICK BTN')"  "go=false/true"
 
 echo "3. choosing one says what the case would contain"
-contains "it says what you have"       "$(row 'CHOSEN STATE')" "Your limit: 0 vCPU. One g6.xlarge needs 4"
-contains "  and what would be created" "$(row 'CHOSEN PRE')"   "This sends AWS a request for"
-contains "  the quota, by name"        "$(row 'CHOSEN BODY')"  "Spot GPU machines"
-contains "  the value, as one box"     "$(row 'CHOSEN BODY')"  "New value: 4 vCPU (one machine)"
-contains "  and that a refusal is step one" "$(row 'CHOSEN BODY')" "usually refuses within minutes"
+contains "it says what you have"       "$(row 'CHOSEN STATE')" "Quota: 0 vCPU. One g6.xlarge needs 4"
+contains "  and what would be created" "$(row 'CHOSEN PRE')"   "Request:"
+contains "  the quota, by name"        "$(row 'CHOSEN BODY')"  "Spot GPU instances"
+contains "  the value, as one box"     "$(row 'CHOSEN BODY')"  "New value: 4 vCPU (one instance)"
+contains "  and that a refusal is step one" "$(row 'CHOSEN BODY')" "First requests are usually denied"
 contains "the button is live now"      "$(row 'CHOSEN BTN')"   "go=false/false"
 
 echo "4. creating"
-contains "it says it is working"       "$(row 'CREATING STATE')" "Sending the request"
+contains "it says it is working"       "$(row 'CREATING STATE')" "Submitting"
 check    "  and runs the request"      "$(row 'MADE RAN')"       "MADE RAN | --region ap-south-1 quota request spot ;; --region ap-south-1 quota --json ;; --region ap-south-1 quota appeal spot"
 
 echo "5. and then the case exists"
 contains "the status is AWS's own"     "$(row 'MADE STATE')"  "Being reviewed"
 contains "  with the date asked"       "$(row 'MADE STATE')"  "asked 2026-10-12"
-contains "  explained"                 "$(row 'MADE WHY')"    "usually refuses the first request"
+contains "  explained"                 "$(row 'MADE WHY')"    "First requests are usually denied"
 # "I replied with the appeal and it still says case open" - it will. Replying
 # is a correspondence on the case; the request only moves when AWS decides.
-contains "  and that replying does not move it" "$(row 'MADE WHY')" "a person reviews it"
+contains "  and that replying does not move it" "$(row 'MADE WHY')" "manual review"
 contains "when AWS last touched it"    "$(row 'MADE STATE')"  "AWS last moved it 2026-10-13"
 # The label says WHEN to use it, because the refusal lands minutes after you
 # have closed the window.
-contains "the appeal is labelled"      "$(row 'MADE PRE')"    "If AWS refuses, reply to them with this"
+contains "the appeal is labelled"      "$(row 'MADE PRE')"    "If denied, reply with:"
 contains "  and is the appeal"         "$(row 'MADE BODY')"   "Requesting an appeal"
 contains "the case is linked"          "$(row 'MADE URL')"    "displayId=100000000000001"
 check    "  and the link opens it"     "$(row OPENED)"        "OPENED | https://console.aws.amazon.com/support/home#/case/?displayId=100000000000001"
@@ -278,7 +278,7 @@ check    "the old appeal is gone at once" "$(row 'REOPEN NOW')" "REOPEN NOW | pr
 # Locked while it reads: a dropdown you can change mid-read answers the
 # previous question.
 contains "  and the controls are locked" "$(row 'REOPEN BUSY')" "kind=true refresh=true"
-contains "then it asks for a choice"     "$(row 'REOPEN SETTLED')" "Pick one to see what it would ask for"
+contains "then it asks for a choice"     "$(row 'REOPEN SETTLED')" "Select a quota."
 contains "  with the controls back"      "$(row 'REOPEN SETTLED')" "kindDisabled=false"
 
 echo "7. Refresh clears, locks, then reflects"

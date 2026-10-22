@@ -134,7 +134,7 @@ row() { grep -m1 "^$1 " <<<"$GEO" || true; }
 field() { sed -n "s/.*| $2=\([^|]*\).*/\1/p" <<<"$(row "$1")" | tr -d ' '; }
 
 for W in 1000 1280; do
-  GEO=$(geo "$W")
+  GEO=$(geo "$W"); [[ -n ${CG_GEO_DUMP:-} ]] && printf "%s\n" "$GEO"
   echo "at ${W}px wide"
   [[ $GEO == *"NO PROBE OUTPUT"* ]] && { echo "  FAIL the page did not render"; fail=$((fail+1)); continue; }
 

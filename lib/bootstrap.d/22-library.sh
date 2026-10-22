@@ -29,6 +29,8 @@
 # Nothing here needs to precede tailscale. Tailscale installs in seconds, so
 # moving this after it costs no measurable overlap with the driver install and
 # guarantees the box is reachable whatever happens here.
+# The S3 game library is the AWS box's: a machine of yours keeps its games.
+if aws_box; then
 progress "installing the S3 game library mirror"
 ( cd /opt/cloud-gaming-host && bash ./install-library.sh '__S3_BUCKET__' steam '__CG_APPS__' '__CG_LOGIN__' '__CG_RESERVE_GB__' ) \
   || echo ">>> FAILED: library mirror install - games will not persist a stop"
@@ -56,4 +58,4 @@ verify "library mirror installed" test -x /usr/local/bin/cg-library || true
 verify "library restore started" bash -c 'systemctl show -p ActiveState --value cg-library-restore.service | grep -qE "^(active|activating)$"' || true
 verify "mirror on shutdown armed" systemctl is-enabled cg-library-shutdown.service || true
 verify "no background push timer exists" bash -c '! systemctl list-unit-files cg-library-push.timer 2>/dev/null | grep -q enabled' || true
-
+fi

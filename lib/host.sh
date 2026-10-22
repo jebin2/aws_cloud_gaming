@@ -2,7 +2,9 @@
 # Your own machines: a PC or a server you already have, reached over ssh and
 # streamed from over Tailscale - not only an AWS box. See docs/own-machine-plan.md.
 #
-# The prerequisite is a machine with its OS installed and ssh working with a key.
+# The prerequisite is a machine with its OS installed and an ssh server. The
+# first connection may use its password, once: cg puts a key of its own on it
+# (host_key) and uses that from then on - the password is never saved.
 # cg adds only what streaming needs - Tailscale, Sunshine, a Sunshine login, the
 # Moonlight pairing - and touches nothing else: not the desktop, not autologin,
 # not the display, not the games. It is your machine, not a throwaway one.
@@ -60,26 +62,72 @@ with open(f + ".new", "w") as o: json.dump(d, o, indent=1, sort_keys=True)
 os.chmod(f + ".new", 0o600); os.replace(f + ".new", f)' "$f" "$1")
 }
 
-# host_ssh_raw [--in] <target> <command> - your own ssh: your keys, your
-# ~/.ssh/config. A key, never a password: BatchMode turns a password prompt into
-# a clear failure. stdin only with --in, for data piped on purpose: otherwise
+# cg's own key for machines of yours: one per laptop, made the first time a
+# machine is added, put on each machine by host_key_install. Its own, so that
+# removing a machine takes off exactly the line cg added and nothing of yours.
+host_key() { printf '%s/cg/ssh/id_ed25519' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
+# A key only counts when its public half reads as one: a .pub that is missing or
+# empty is made again from the private key, and a pair that cannot be read is
+# replaced - an empty line is not a key, and sending one lets nothing in.
+host_key_ensure() {
+  local k; k=$(host_key)
+  host_key_ok && return 0
+  if [[ -s $k ]] && ssh-keygen -y -f "$k" > "$k.pub.new" 2>/dev/null; then
+    mv -f "$k.pub.new" "$k.pub"; host_key_ok && return 0
+  fi
+  rm -f "$k" "$k.pub" "$k.pub.new"
+  mkdir -p "${k%/*}" && chmod 700 "${k%/*}" \
+    && ssh-keygen -q -t ed25519 -N '' -C "cg@$(cat /etc/hostname 2>/dev/null || echo laptop)" -f "$k" >/dev/null 2>&1 \
+    && host_key_ok
+}
+host_key_ok() { local k; k=$(host_key); [[ -s $k ]] && grep -q '^ssh-ed25519 [A-Za-z0-9+/=]' "$k.pub" 2>/dev/null; }
+
+# host_key_install <target> <password> - cg's key onto the machine, logging in
+# once with its password. The password reaches ssh through SSH_ASKPASS from this
+# process's environment - never a file, never a command line - and is gone
+# when this returns. On the machine: appended to ~/.ssh/authorized_keys unless
+# it is there already, under sh whatever the login shell is, and read back -
+# exit 3 when the line is not there after all.
+host_key_install() {
+  local t=$1 pw=$2 ask pub rc
+  host_key_ok || return 1
+  pub=$(head -n 1 "$(host_key).pub") || return 1
+  ask=$(mktemp) || return 1
+  printf '#!/bin/sh\nprintf "%%s\\n" "$CG_SSH_PASSWORD"\n' > "$ask"; chmod 700 "$ask"
+  CG_SSH_PASSWORD=$pw SSH_ASKPASS=$ask SSH_ASKPASS_REQUIRE=force DISPLAY=${DISPLAY:-:0} \
+    ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o PubkeyAuthentication=no \
+        -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1 \
+        "$t" "sh -c 'umask 077; mkdir -p \"\$HOME/.ssh\"; f=\"\$HOME/.ssh/authorized_keys\"; touch \"\$f\"; [ -n \"\$1\" ] || exit 3; grep -qxF \"\$1\" \"\$f\" || printf \"%s\\n\" \"\$1\" >> \"\$f\"; grep -qxF \"\$1\" \"\$f\" || exit 3' _ '$pub'" \
+        </dev/null >/dev/null 2>&1
+  rc=$?; rm -f "$ask"; return $rc
+}
+
+# host_key_remove <target> - cg's line off the machine, and nothing else.
+host_key_remove() {
+  local pub; pub=$(cat "$(host_key).pub" 2>/dev/null) || return 0
+  host_ssh_raw "$1" "sh -c 'f=\"\$HOME/.ssh/authorized_keys\"; [ -f \"\$f\" ] || exit 0; grep -vxF \"\$1\" \"\$f\" > \"\$f.cg\"; cat \"\$f.cg\" > \"\$f\"; rm -f \"\$f.cg\"' _ '$pub'"
+}
+
+# host_ssh_raw [--in] <target> <command> - ssh as you run it - your keys, your
+# ~/.ssh/config - plus cg's own key. A key, never a password: BatchMode turns a
+# password prompt into a clear failure. stdin only with --in, for data piped on purpose: otherwise
 # ssh reads cg's own stdin, which is where the app's answers arrive, and would
 # swallow the next one.
 host_ssh_raw() {
   local in=0; [[ $1 == --in ]] && { in=1; shift; }
   local t=$1; shift
   local o=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
+  [[ -f $(host_key) ]] && o+=(-i "$(host_key)")
   if (( in )); then ssh "${o[@]}" "$t" "$@"; else ssh "${o[@]}" "$t" "$@" < /dev/null; fi
 }
-# host_ssh <target> <command> - the command run by sh on the machine, whatever
-# your login shell there is. ssh hands a command to the login shell, and fish -
-# CachyOS's default - cannot read sh. Quoted as 'it'\''s': the one form sh,
-# bash, zsh and fish all read the same way. stdin is passed through.
+# host_ssh [--in] <target> <command> - a machine of yours, through cg's one way
+# of reaching any machine (mssh, lib/common.sh) with your own ssh setup: under
+# sh whatever your login shell is, stdin only with --in.
 host_ssh() {
   local in=(); [[ $1 == --in ]] && { in=(--in); shift; }
-  local t=$1; shift
-  local q="'\''" c="$*"
-  host_ssh_raw "${in[@]}" "$t" "sh -c '${c//\'/$q}'"
+  local t=$1 k=""; shift
+  [[ -f $(host_key) ]] && k=$(host_key)
+  mssh "${in[@]}" "$t" "$k" "$@"
 }
 
 # What the machine is, asked of it: KEY=value lines. One ssh, read-only.
@@ -100,7 +148,7 @@ uv=""
   && uv=$(awk -F, -v c="$UBUNTU_CODENAME" "\$3 == c {v = \$1} END {print v}" /usr/share/distro-info/ubuntu.csv | sed "s/ LTS//")
 echo "ubuntu_version=$uv"
 echo "debian_codename=${DEBIAN_CODENAME:-${VERSION_CODENAME:-}}"
-echo "arch=$(uname -m)"; echo "user=$(id -un)"
+echo "arch=$(uname -m)"; echo "user=$(id -un)"; echo "hostname=$(hostname 2>/dev/null)"
 # By device class, not anywhere on the line: "3d" also matched the PCI address
 # 3d:00.0 of an NVMe drive.
 echo "gpu=$(lspci 2>/dev/null | grep -E " (VGA compatible|3D|Display) controller: " | sed -E "s/^[0-9a-f:.]+ [^:]+: //" | paste -sd";" -)"
@@ -168,19 +216,46 @@ host_name_ok() {
   fi
 }
 
-cmd_host_add() { # cmd_host_add <name> --ssh <target>
-  local name="" target="" why facts
+# A name from the machine's own hostname: what Tailscale would call it.
+host_name_from() { # host_name_from <hostname>
+  local n=${1,,}; n=${n%%.*}; n=$(sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//' <<<"$n")
+  printf '%s' "${n:0:40}"
+}
+
+cmd_host_add() { # cmd_host_add [name] --ssh <target>
+  local name="" target="" why facts pw rc
   while (( $# )); do
     case $1 in --ssh) target=${2:-}; shift 2 ;; -*) shift ;; *) name=$1; shift ;; esac
   done
-  [[ -n $name && -n $target ]] || die "usage: cg host add <name> --ssh <user@address>"
-  why=$(host_name_ok "$name") || die "$why"
+  [[ -n $target ]] || die "usage: cg host add [name] --ssh <user@address>"
+  if [[ -n $name ]]; then
+    why=$(host_name_ok "$name") || die "$why"
+    [[ -z $(host_get "$name" ssh) ]] || die "there is already a machine called '$name'"
+  fi
+  host_key_ensure || die "could not make cg's ssh key ($(host_key))"
   say "reaching $target over ssh"
-  host_ssh_raw "$target" exit 2>/dev/null \
-    || die "ssh $target did not connect without a password. cg uses your own ssh setup:
-       make 'ssh $target' work with a key first (ssh-copy-id $target)."
+  if ! host_ssh_raw "$target" exit 2>/dev/null; then
+    # Not in with a key: its password, once, to put cg's key on it.
+    cg_can_ask || die "ssh $target did not connect with a key, and there is no one to ask for its password -
+       run this in a terminal, or make 'ssh $target' work with a key first (ssh-copy-id $target)"
+    log "the first time: its password lets cg's own key in, and is not kept"
+    pw=$(cg_ask_secret host-ssh-password "  password for $target: ")
+    [[ -n $pw ]] || die "no password given - nothing was changed on $target"
+    host_key_install "$target" "$pw"; rc=$?
+    (( rc == 3 )) && die "logged in to $target, but cg's key did not stay in its ~/.ssh/authorized_keys - is that file or folder not yours to write?"
+    (( rc == 0 )) || die "$target did not let cg in with that password. Check the address, user and password -
+       or, if it takes keys only, make 'ssh $target' work first (ssh-copy-id $target)"
+    host_ssh_raw "$target" exit 2>/dev/null \
+      || die "cg's key is on $target, but it still does not let cg in with it - is PubkeyAuthentication off in its sshd_config?"
+    log "cg's key is on $target: no password from now on"
+  fi
   facts=$(host_facts "$target")
   [[ -n $facts ]] || die "connected, but $target did not say what it is"
+  if [[ -z $name ]]; then
+    name=$(host_name_from "$(_fact "$facts" hostname)")
+    why=$(host_name_ok "$name") || die "its own name, '$name', will not do ($why) - give it one"
+    [[ -z $(host_get "$name" ssh) ]] || die "there is already a machine called '$name' - give this one another name"
+  fi
   host_set "$name" ssh "$target"
   host_set "$name" os "$(_fact "$facts" os)"
   if [[ $(_fact "$facts" os) == Windows ]]; then
@@ -196,129 +271,6 @@ cmd_host_add() { # cmd_host_add <name> --ssh <target>
   log "added '$name'. Next: cg host setup $name"
 }
 
-# The part that needs root, as one script: the AWS build's steps, each done the
-# way this machine needs it and only when it is missing. Tailscale, Sunshine,
-# virtual input, the firewall letting the tailnet in - and, as the AWS build
-# does, Steam, a desktop when there is none, an NVIDIA driver when the card
-# has none. Never the AWS-only steps: no idle shutdown (a home machine must not
-# switch itself off), no S3 library, no /scratch, no reboot.
-_host_root_script() { # <family> <codename> <version> <user> <needs: steam desktop nvidia>
-  cat <<EOF
-set -euo pipefail
-FAMILY='$1' CODENAME='$2' VERSION='$3' USER_NAME='$4' NEEDS='${5:-}'
-EOF
-  cat <<'EOF'
-# Package managers talk a lot; their output goes to a log on the machine and is
-# shown only when a step fails. Never a question on a terminal there is not.
-export DEBIAN_FRONTEND=noninteractive
-LOG=/var/log/cg-host-setup.log
-quiet() { "$@" >> "$LOG" 2>&1 || { echo ">>> FAILED: $* - the end of $LOG:"; tail -25 "$LOG"; exit 1; }; }
-if ! command -v tailscale >/dev/null; then
-  echo ">>> installing Tailscale"
-  quiet sh -c "curl -fsSL https://tailscale.com/install.sh | sh"
-fi
-systemctl enable --now tailscaled >/dev/null 2>&1 || true
-if ! command -v sunshine >/dev/null; then
-  echo ">>> installing Sunshine"
-  # The file for this distribution and version, picked from the latest release
-  # by its name - no version written down here.
-  case $FAMILY in
-    ubuntu) want="+ubuntu${VERSION}_amd64.deb" ;;
-    debian) want="+debian${CODENAME}_amd64.deb" ;;
-    arch)   want="-x86_64.pkg.tar.zst" ;;
-    fedora) want=".fc${VERSION}.x86_64.rpm" ;;
-  esac
-  url=$(curl -fsSL https://api.github.com/repos/LizardByte/Sunshine/releases/latest \
-        | python3 -c 'import json,sys
-w = sys.argv[1]
-print(next((a["browser_download_url"] for a in json.load(sys.stdin)["assets"] if a["name"].endswith(w)), ""))' "$want")
-  [ -n "$url" ] || { echo ">>> FAILED: Sunshine publishes no package for this system ($want)"; exit 1; }
-  tmp=$(mktemp -d); f="$tmp/${url##*/}"
-  quiet curl -fsSL -o "$f" "$url"
-  case $FAMILY in
-    ubuntu|debian) quiet apt-get update -qq; quiet apt-get install -y "$f" ;;
-    arch)          quiet pacman -U --noconfirm --needed "$f" ;;
-    fedora)        quiet dnf install -y "$f" ;;
-  esac
-  echo ">>> ok: Sunshine $(sunshine --version 2>/dev/null | head -1 | grep -oE "[0-9][0-9.]+" | head -1) installed"
-  rm -rf "$tmp"
-fi
-needs() { case " $NEEDS " in *" $1 "*) return 0 ;; esac; return 1; }
-# Steam, as the AWS build installs it on Ubuntu (lib/bootstrap.d/70-steam-pkg.sh):
-# 32-bit packages and Valve's own .deb. Arch has it in multilib, Fedora only
-# outside its own repositories, so there it comes from Flathub.
-if needs steam; then
-  echo ">>> installing Steam"
-  case $FAMILY in
-    ubuntu|debian)
-      dpkg --add-architecture i386
-      quiet apt-get update -qq
-      echo steam steam/question select "I AGREE" | debconf-set-selections
-      echo steam steam/license note '' | debconf-set-selections
-      quiet apt-get install -y libgl1-mesa-dri:i386 mesa-vulkan-drivers:i386 || true
-      quiet curl -fsSL --retry 3 -o /tmp/steam_latest.deb https://repo.steampowered.com/steam/archive/stable/steam_latest.deb
-      quiet apt-get install -y /tmp/steam_latest.deb
-      rm -f /tmp/steam_latest.deb ;;
-    arch)
-      if ! grep -q '^\[multilib\]' /etc/pacman.conf; then
-        printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /etc/pacman.conf
-        echo ">>> enabled the multilib repository in /etc/pacman.conf (Steam needs it)"
-      fi
-      quiet pacman -Sy --noconfirm --needed steam ;;
-    fedora)
-      quiet dnf install -y flatpak
-      quiet flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-      quiet flatpak install -y --noninteractive flathub com.valvesoftware.Steam ;;
-  esac
-  echo ">>> ok: Steam installed"
-fi
-# A desktop for Sunshine to stream, only when the machine has none - the AWS
-# build's (30-desktop, 60-autologin): XFCE, signed in at boot.
-if needs desktop; then
-  case $FAMILY in
-    ubuntu|debian)
-      echo ">>> installing a desktop (XFCE) and signing $USER_NAME in at boot"
-      quiet apt-get install -y xfce4 lightdm xserver-xorg x11-xserver-utils
-      mkdir -p /etc/lightdm/lightdm.conf.d
-      printf '[Seat:*]\nautologin-user=%s\nautologin-user-timeout=0\nuser-session=xfce\n' "$USER_NAME" \
-        > /etc/lightdm/lightdm.conf.d/50-autologin.conf
-      groupadd -f autologin; usermod -aG autologin "$USER_NAME"
-      systemctl set-default graphical.target; systemctl enable lightdm >/dev/null 2>&1 || true
-      echo ">>> ok: desktop installed - it starts at the next boot" ;;
-    *) echo ">>> no desktop on this machine, and cg installs one only on Ubuntu or Debian - install one, then run setup again" ;;
-  esac
-fi
-# An NVIDIA card with no driver: the newest open driver, as the AWS build does
-# (40-nvidia). Loaded at the next boot - this does not reboot your machine.
-if needs nvidia; then
-  case $FAMILY in
-    ubuntu|debian)
-      echo ">>> installing the NVIDIA driver"
-      pkg=$(apt-cache search --names-only '^nvidia-driver-[0-9]+-open$' 2>/dev/null | grep -oE 'nvidia-driver-[0-9]+-open' | sort -uV | tail -1)
-      [ -n "$pkg" ] || { echo ">>> FAILED: no NVIDIA driver package found"; exit 1; }
-      quiet apt-get install -y "$pkg"
-      echo ">>> ok: $pkg installed - reboot the machine to load it" ;;
-    arch) quiet pacman -S --noconfirm --needed nvidia-open-dkms nvidia-utils
-          echo ">>> ok: NVIDIA driver installed - reboot the machine to load it" ;;
-    *) echo ">>> this NVIDIA card has no driver, and cg installs one only on Ubuntu, Debian or Arch" ;;
-  esac
-fi
-# Sunshine plays your keyboard and controller through a virtual input device.
-modprobe uinput 2>/dev/null || true
-grep -qx uinput /etc/modules-load.d/uinput.conf 2>/dev/null || echo uinput > /etc/modules-load.d/uinput.conf
-# Its user service runs when you are signed in; lingering keeps it up between.
-loginctl enable-linger "$USER_NAME" 2>/dev/null || true
-# A firewall that is on would drop the stream arriving from the tailnet.
-if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
-  ufw allow in on tailscale0 >/dev/null
-fi
-if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
-  firewall-cmd --permanent --zone=trusted --add-interface=tailscale0 >/dev/null && firewall-cmd --reload >/dev/null
-fi
-echo ">>> ok: root steps done"
-EOF
-}
-
 # host_sudo_ask <target> - the sudo password, asked once for a whole setup (it
 # runs root steps more than once, and asking each time asked twice). Handed to
 # sudo on the machine's stdin; never saved, never on a command line.
@@ -327,139 +279,89 @@ host_sudo_ask() {
   cg_ask_secret host-sudo "  sudo password for $1: "
 }
 
-# host_run_root <target> <script> [sudo password] - the script, as root: with
-# no password, sudo must need none.
-host_run_root() {
-  local t=$1 script=$2 pw=${3:-} f
-  f=$(printf '%s' "$script" | host_ssh --in "$t" 'f=$(mktemp); cat > "$f"; chmod 600 "$f"; echo "$f"') \
-    || die "could not copy the setup script to $t"
-  if [[ -z $pw ]]; then
-    host_ssh "$t" "sudo -n bash '$f'; r=\$?; rm -f '$f'; exit \$r"
-  else
-    printf '%s\n' "$pw" | host_ssh --in "$t" "sudo -S -p '' bash '$f'; r=\$?; rm -f '$f'; exit \$r"
-  fi
-}
-
 # The Tailscale address this laptop reaches it at - only if it is on THIS tailnet.
 host_ts_ip() { # host_ts_ip <ip-the-machine-reports>
   [[ -n $1 ]] && tailscale status 2>/dev/null | awk -v ip="$1" '$1 == ip {print $1; exit}'
 }
 
-cmd_host_setup() { # cmd_host_setup <name>
-  local name=${1:-} t facts fam ip=""
+# cmd_host_setup <name> - the build every machine gets, run on yours. The same
+# modules the AWS box boots with (lib/bootstrap.d, assembled by lib/render.sh),
+# here as a machine of yours: each step adds only what is missing, and the AWS
+# box's own are left out (00-header.sh, aws_box). Then the same second half as
+# the AWS box (lib/build.sh): its log followed, the Sunshine login, Moonlight
+# paired, Steam. Safe to run again.
+cmd_host_setup() {
+  local name=${1:-} t facts fam pw="" key="" f how
   [[ -n $name ]] || die "usage: cg host setup <name>"
   t=$(host_get "$name" ssh); [[ -n $t ]] || die "no machine called '$name' - add it: cg host add $name --ssh <user@address>"
   say "asking $name what it is"
   facts=$(host_facts "$t"); [[ -n $facts ]] || die "$t did not answer over ssh"
   [[ $(_fact "$facts" os) == Windows ]] && die "setting a Windows machine up is not built yet - see docs/own-machine-plan.md"
   fam=$(host_family "$facts")
-  [[ $fam != unsupported ]] || die "cg sets up Ubuntu, Debian, Arch and Fedora; $(_fact "$facts" pretty) is not one. Install Sunshine and Tailscale yourself, then: cg host pair $name"
+  [[ $fam != unsupported ]] || die "cg sets up Ubuntu, Debian, Arch and Fedora; $(_fact "$facts" pretty) is not one."
   [[ $(_fact "$facts" arch) == x86_64 ]] || die "x86_64 only - Steam and Proton need it ($(_fact "$facts" arch) here)"
   [[ $fam != ubuntu || -n $(_fact "$facts" ubuntu_version) ]] \
     || die "$(_fact "$facts" pretty) is Ubuntu-based, but which Ubuntu release it is could not be read"
+  log "$(_fact "$facts" pretty), signed in as $(_fact "$facts" user)"
 
-  # What the AWS build would add that this machine lacks - each read from the
-  # machine, nothing assumed.
-  local needs=()
-  [[ -n $(_fact "$facts" steam) ]] || needs+=(steam)
-  [[ -n $(_fact "$facts" dm) || -n $(_fact "$facts" session) ]] || needs+=(desktop)
-  [[ $(_fact "$facts" nvidia_card) -gt 0 && -z $(_fact "$facts" nvidia) ]] 2>/dev/null && needs+=(nvidia)
-  local install=0
-  [[ -z $(_fact "$facts" tailscale) || -z $(_fact "$facts" sunshine) || ${#needs[@]} -gt 0 ]] && install=1
-
-  # Root is needed to install, or to join the tailnet; then the password, once,
-  # in a step of its own.
-  local pw=""
-  local root=$install
-  [[ -z $(_fact "$facts" ts_ip) ]] && root=1
-  if (( root )) && [[ $(_fact "$facts" sudo) != nopass ]]; then
+  # The build runs as root: the sudo password, once, and checked before
+  # anything runs, so a typo is said here and not halfway through.
+  if [[ $(_fact "$facts" sudo) != nopass ]]; then
     say "root on $name - asked once, never saved"
     pw=$(host_sudo_ask "$t")
     [[ -n $pw ]] || die "no sudo password given - nothing was changed on $name"
-    # Checked before anything runs, so a typo is said here and not as a failed
-    # install halfway through.
     printf '%s\n' "$pw" | host_ssh --in "$t" "sudo -S -p '' -v" >/dev/null 2>&1 \
       || die "sudo did not accept that password on $name - nothing was changed"
   fi
+  # The auth key only when it has to join; already on the tailnet, it stays as
+  # it is. It is the AWS boxes' reusable, non-ephemeral key: an ephemeral one
+  # would drop this machine whenever it slept.
+  [[ -n $(_fact "$facts" ts_ip) ]] || key="${TAILSCALE_AUTH_KEY:-${GAME_TS_AUTHKEY:-}}"
+  [[ -n $(_fact "$facts" ts_ip) || -n $key ]] || die "no Tailscale auth key in the settings - cg check --fix asks for one"
 
-  if (( install )); then
-    say "installing what is missing on $name"
-    host_run_root "$t" \
-      "$(_host_root_script "$fam" "$(_fact "$facts" debian_codename)" \
-         "$(_fact "$facts" "$([[ $fam == fedora ]] && echo version_id || echo ubuntu_version)")" "$(_fact "$facts" user)" "${needs[*]}")" "$pw" \
-      | cg_relay '    ' || die "setting up $name failed - the lines above say where"
+  say "starting the build on $name"
+  # shellcheck source=lib/render.sh
+  source lib/render.sh
+  # Copied as a file readable by root alone - it may carry the auth key - and
+  # deleted by the build as it starts (00-header.sh).
+  f=$(TS_AUTHKEY="$key" TS_HOST="$name" HOST_TGZ_URL="" S3_BUCKET="" CG_APPS="" CG_LOGIN="" \
+      CG_RESERVE_GB="" CG_TARGET=host CG_USER="$(_fact "$facts" user)" CG_FAMILY="$fam" render_bootstrap \
+      | host_ssh --in "$t" 'f=$(mktemp); cat > "$f"; chmod 600 "$f"; echo "$f"') \
+    || die "could not copy the build to $name"
+  # Detached, so it outlives this ssh as user-data outlives nobody watching. The
+  # last run's marker, result and log go first, so the laptop never follows -
+  # or calls stopped - an old one.
+  local run='rm -f /var/lib/cloud-gaming-ready /var/lib/cloud-gaming-bootstrap.rc /var/log/cloud-gaming-bootstrap.log; setsid nohup bash "$1" >/dev/null 2>&1 </dev/null &'
+  if [[ -n $pw ]]; then
+    printf '%s\n' "$pw" | host_ssh --in "$t" "sudo -S -p '' sh -c '$run' _ '$f'" \
+      || die "the build could not be started on $name"
+  else
+    host_ssh "$t" "sudo -n sh -c '$run' _ '$f'" || die "the build could not be started on $name"
+  fi
+
+  # The second half, as every build: lib/build.sh. Reached as host_ssh reaches
+  # it - your ssh, with cg's key; its tailnet address is read once it has joined.
+  # shellcheck source=lib/build.sh
+  source lib/build.sh
+  build_after_stream() {
     facts=$(host_facts "$t")
-  else
-    log "Tailscale, Sunshine and Steam are already installed"
-  fi
-
-  say "joining the tailnet"
-  ip=$(host_ts_ip "$(_fact "$facts" ts_ip)")
-  if [[ -z $(_fact "$facts" ts_ip) ]]; then
-    local key="${TAILSCALE_AUTH_KEY:-${GAME_TS_AUTHKEY:-}}"
-    [[ -n $key ]] || die "no Tailscale auth key in the settings - cg check --fix asks for one"
-    # The key goes in a file on the machine, never on its command line, and is
-    # deleted straight after. It is the same reusable, non-ephemeral key the AWS
-    # boxes use: an ephemeral one would drop this machine whenever it slept.
-    host_run_root "$t" "set -e
-umask 077; k=\$(mktemp); printf '%s' '$key' > \"\$k\"
-tailscale up --auth-key=file:\"\$k\" --hostname='$name'; r=\$?; rm -f \"\$k\"; exit \$r" "$pw" \
-      | cg_relay '    ' || die "tailscale up failed on $name"
-    facts=$(host_facts "$t"); ip=$(host_ts_ip "$(_fact "$facts" ts_ip)")
-  fi
-  [[ -n $ip ]] || die "$name is on Tailscale, but not on the tailnet this laptop is on - sign it in to the same one"
-  log "on the tailnet at $ip"
-  host_set "$name" ts_ip "$ip"
-  # Key expiry off, as for the AWS boxes - a home machine must not drop out
-  # after 180 days. Needs the API token; without it, it is said, not skipped.
-  local node; node=$(tailscale status 2>/dev/null | awk -v ip="$ip" '$1 == ip {print $2; exit}')
-  lib/tailnet-expiry.sh "$node" 2>&1 | cg_relay '    ' || true
-
-  say "starting Sunshine"
-  host_ssh "$t" 'export XDG_RUNTIME_DIR=/run/user/$(id -u)
-    u=$(systemctl --user list-unit-files "*unshine*" --no-legend 2>/dev/null | awk "NR==1{print \$1}")
-    [ -n "$u" ] && systemctl --user enable --now "$u" >/dev/null 2>&1; true' || true
-  local up=0 code
-  for _ in $(seq 1 20); do
-    code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "https://$ip:47990/welcome" 2>/dev/null || echo 000)
-    [[ $code != 000 ]] && { up=1; break; }
-    sleep 3
-  done
-  (( up )) || die "Sunshine is not answering at https://$ip:47990 - is a desktop signed in on $name?"
-
-  # Somewhere for the sound to go: a machine with no audio output streams
-  # silence. The AWS build's answer (92-audio): a virtual sink, kept by a user
-  # service. A machine with speakers already has one and is left alone.
-  if [[ $(_fact "$facts" sinks) == 0 ]]; then
-    say "adding a virtual audio output"
-    host_ssh "$t" 'export XDG_RUNTIME_DIR=/run/user/$(id -u); d=$HOME/.config/systemd/user; mkdir -p "$d"
-      printf "[Unit]\nDescription=Virtual audio output for Sunshine\nAfter=pipewire-pulse.service pulseaudio.service\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/bin/pactl load-module module-null-sink sink_name=sunshine sink_properties=device.description=Sunshine\nExecStart=/usr/bin/pactl set-default-sink sunshine\n[Install]\nWantedBy=default.target\n" > "$d/cg-audio-sink.service"
-      systemctl --user daemon-reload && systemctl --user enable --now cg-audio-sink.service' >/dev/null 2>&1 \
-      && log "added - sound streams through it" || log "could not add one - the stream will be silent"
-  fi
-
-  say "the Sunshine login"
-  # shellcheck source=lib/sunshine-login.sh
-  source lib/sunshine-login.sh
-  SUNSHINE_USER=$(host_get "$name" sunshine_user); SUNSHINE_PASS=$(host_get "$name" sunshine_pass)
+    BUILD_IP=$(host_ts_ip "$(_fact "$facts" ts_ip)")
+    [[ -n $BUILD_IP ]] || die "$name is on Tailscale, but not on the tailnet this laptop is on - sign it in to the same one"
+    log "on the tailnet at $BUILD_IP"
+    host_set "$name" ts_ip "$BUILD_IP"
+    # Key expiry off, as for the AWS boxes - a home machine must not drop out
+    # after 180 days. Needs the API token; without it, it is said, not skipped.
+    lib/tailnet-expiry.sh "$(tailscale status 2>/dev/null | awk -v ip="$BUILD_IP" '$1 == ip {print $2; exit}')" 2>&1 \
+      | cg_relay '    ' || true
+  }
   _host_save_login() { case $1 in SUNSHINE_USER) host_set "$name" sunshine_user "$2" ;; SUNSHINE_PASS) host_set "$name" sunshine_pass "$2" ;; esac; }
-  sun_login_ensure "$ip" "$([[ $code == 200 ]] && echo 1 || echo 0)" _host_save_login host_ssh "$t" \
-    || die "the Sunshine login could not be set on $name"
-
-  say "pairing Moonlight"
-  if ! command -v moonlight >/dev/null; then
-    log "Moonlight is not installed on this laptop - cg check --fix installs it"
-  elif timeout 45 moonlight list "$ip" 2>/dev/null | grep -q .; then
-    log "already paired"
-  else
-    # shellcheck source=lib/pair.sh
-    source lib/pair.sh
-    pair_moonlight "$ip" "$SUNSHINE_USER" "$SUNSHINE_PASS" && log "paired" || die "pairing failed - try again: cg host setup $name"
-  fi
+  SUNSHINE_USER=$(host_get "$name" sunshine_user); SUNSHINE_PASS=$(host_get "$name" sunshine_pass)
+  BUILD_SSH="$t" BUILD_KEY="" BUILD_IP="" BUILD_SAVE=_host_save_login BUILD_NAME="$name"
+  [[ -f $(host_key) ]] && BUILD_KEY=$(host_key)
+  build_finish || die "the build on $name did not finish - its log is /var/log/cloud-gaming-bootstrap.log there"
 
   # What cg does not change, said rather than fixed.
   [[ -n $(_fact "$facts" session) ]] || log "note: no desktop is signed in on $name right now - Sunshine streams a signed-in desktop"
-  [[ -n $(_fact "$facts" steam) ]] || log "note: Steam could not be installed on $name"
   [[ -n $(_fact "$facts" nvidia) || -n $(_fact "$facts" render) ]] \
     || log "note: no GPU video encoder found on $name - the stream would fall back to the CPU"
   host_set "$name" ready yes
@@ -476,6 +378,10 @@ cmd_host_status() {
   [[ -n $ip ]] && tailscale ping -c 1 --timeout 3s "$ip" >/dev/null 2>&1 && ts_on=yes
   if [[ -n $ip ]] && [[ $(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "https://$ip:47990/welcome" 2>/dev/null) != 000 ]]; then
     sun_up=yes
+    # Its tailnet address answered, which nothing but the tailnet reaches: on
+    # it, whatever one ping said - a single tailscale ping can go unanswered on
+    # a path that streams fine, and the card said "not connected" beside Play.
+    ts_on=yes
     # shellcheck source=lib/sunshine-login.sh
     source lib/sunshine-login.sh
     sun_login_ok "$ip" "$(host_get "$name" sunshine_user)" "$(host_get "$name" sunshine_pass)" && login=yes
@@ -484,14 +390,18 @@ cmd_host_status() {
   if cg_json || [[ ${2:-} == --json ]]; then
     N="$name" T="$t" IP="$ip" SSH_OK=$ssh_ok TS_ON=$ts_on SUN=$sun_up LOGIN=$login PAIRED=$paired \
     OS="$(host_get "$name" os)" FAM="$(host_get "$name" family)" READY="$(host_get "$name" ready)" \
-    SESSION="$(_fact "$facts" session)" STEAM="$(_fact "$facts" steam)" GPU="$(_fact "$facts" nvidia)" \
+    SESSION="$(_fact "$facts" session)" STEAM="$(_fact "$facts" steam)" PRETTY="$(_fact "$facts" pretty)" \
+    GPU="$(_fact "$facts" nvidia)" GPUS="$(_fact "$facts" gpu)" \
     python3 -c 'import json, os
 g = os.environ.get; yes = lambda k: g(k) == "yes"
-print(json.dumps({"name": g("N"), "ssh": g("T"), "os": g("OS") or None, "family": g("FAM") or None,
+print(json.dumps({"name": g("N"), "ssh": g("T"), "os": g("OS") or None, "os_name": g("PRETTY") or None,
+  "family": g("FAM") or None,
   "tailnet_ip": g("IP") or None, "reachable": yes("SSH_OK"), "online": yes("TS_ON"),
   "sunshine": yes("SUN"), "login_ok": yes("LOGIN"), "paired": yes("PAIRED"),
   "set_up": g("READY") == "yes", "desktop": g("SESSION") or None,
-  "steam": bool(g("STEAM")) if yes("SSH_OK") else None, "gpu": g("GPU") or None}, indent=2))'
+  "steam": bool(g("STEAM")) if yes("SSH_OK") else None,
+  # The NVIDIA name when there is one; otherwise what lspci calls the card.
+  "gpu": g("GPU") or (g("GPUS") or "").split(";")[0] or None}, indent=2))'
     return 0
   fi
   local ok="✓" no="✗"
@@ -519,11 +429,8 @@ cmd_host_open() {
   [[ $(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "https://$ip:47990/welcome" 2>/dev/null) != 000 ]] \
     || die "Sunshine is not answering on $name ($ip) - is it on, and a desktop signed in?"
   session_claim
-  local mlf=(); moonlight_flags mlf
-  local t0=$SECONDS
-  moonlight stream ${mlf[@]+"${mlf[@]}"} "$ip" "${GAME_APP:-Desktop}" || true
+  stream_play "$ip" "${GAME_APP:-Desktop}"
   session_end 2>/dev/null || true
-  log "session ended after $(( (SECONDS - t0) / 60 ))m"
 }
 
 cmd_host() {
@@ -548,7 +455,12 @@ cmd_host() {
       fi ;;
     remove)
       [[ -n ${1:-} && -n $(host_get "$1" ssh) ]] || die "usage: cg host remove <name>"
-      host_forget "$1"; log "forgot '$1' - nothing was changed on the machine itself" ;;
-    *) die "usage: cg host [list|add <name> --ssh <user@address>|setup <name>|status <name>|open <name>|remove <name>]" ;;
+      if host_key_remove "$(host_get "$1" ssh)" 2>/dev/null; then
+        log "took cg's key off it"
+      else
+        log_as warn "could not reach it to take cg's key off - that one line stays in its ~/.ssh/authorized_keys"
+      fi
+      host_forget "$1"; log "forgot '$1' - nothing else on the machine was changed" ;;
+    *) die "usage: cg host [list|add [name] --ssh <user@address>|setup <name>|status <name>|open <name>|remove <name>]" ;;
   esac
 }

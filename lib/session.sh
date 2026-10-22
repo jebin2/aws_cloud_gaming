@@ -95,3 +95,21 @@ moonlight_flags() {
   [[ -n ${GAME_VIDEO_CODEC:-} ]]  && _mf+=(--video-codec "$GAME_VIDEO_CODEC") || true
   [[ ${GAME_PERF_OVERLAY:-0} == 1 ]] && _mf+=(--performance-overlay) || true
 }
+
+# stream_play <ip> <app> - the stream itself, from whatever machine: Moonlight
+# with the stream settings, timed. Shared by the AWS box (lib/game) and your own
+# (lib/host.sh); the lock, and anything to do with the machine before and after,
+# stay with them.
+#
+# Stream settings come from .env as launch flags rather than by rewriting
+# Moonlight's config: the flags win for this session and leave whatever you set
+# in the GUI untouched. A variable left unset passes no flag at all, so
+# Moonlight's own saved setting remains the default.
+stream_play() {
+  local ip=$1 app=${2:-Desktop} t0=$SECONDS mlf=()
+  moonlight_flags mlf
+  (( ${#mlf[@]} )) && cg_echo "    stream: ${mlf[*]}" || true
+  moonlight stream ${mlf[@]+"${mlf[@]}"} "$ip" "$app" || true
+  if _cg_styled; then _cg_line ok "session ended after $(_cg_dur $(( SECONDS - t0 )))"
+  else printf 'session ended after %dm\n' $(( (SECONDS - t0) / 60 )); fi
+}

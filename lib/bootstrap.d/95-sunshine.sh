@@ -1,15 +1,43 @@
-progress "installing sunshine"
-SUNSHINE_DEB=/tmp/sunshine.deb
-# The asset filename embeds the release version, so there is no stable
-# latest/download/ URL to hard-code - resolve it from the release API.
-SUNSHINE_URL=$(curl -fsSL https://api.github.com/repos/LizardByte/Sunshine/releases/latest \
-  | jq -r '.assets[] | select(.name | test("ubuntu24\\.04_amd64\\.deb$")) | .browser_download_url' \
-  | head -1)
-[[ -n $SUNSHINE_URL ]] || { echo "could not resolve a Sunshine .deb for ubuntu 24.04"; exit 1; }
-curl -fsSL -o "$SUNSHINE_DEB" "$SUNSHINE_URL"
-apt-get install -y "$SUNSHINE_DEB"
-rm -f "$SUNSHINE_DEB"
+# The package for this system, picked from the latest release by its name -
+# Ubuntu's by its release number (Linux Mint 22.2 is Ubuntu 24.04, read from
+# the machine), Debian's by codename, Arch's and Fedora's by their own - so no
+# version is written down here.
+sunshine_package() {
+  . /etc/os-release
+  local uv=""
+  case $FAMILY in
+    ubuntu)
+      [ -r /etc/upstream-release/lsb-release ] && uv=$(sed -n 's/^DISTRIB_RELEASE=//p' /etc/upstream-release/lsb-release)
+      [ -z "$uv" ] && [ "${ID:-}" = ubuntu ] && uv=${VERSION_ID:-}
+      [ -z "$uv" ] && [ -n "${UBUNTU_CODENAME:-}" ] && [ -r /usr/share/distro-info/ubuntu.csv ] \
+        && uv=$(awk -F, -v c="$UBUNTU_CODENAME" '$3 == c {v = $1} END {print v}' /usr/share/distro-info/ubuntu.csv | sed 's/ LTS//')
+      echo "+ubuntu${uv}_amd64.deb" ;;
+    debian) echo "+debian${DEBIAN_CODENAME:-${VERSION_CODENAME:-}}_amd64.deb" ;;
+    arch)   echo "-x86_64.pkg.tar.zst" ;;
+    fedora) echo ".fc${VERSION_ID:-}.x86_64.rpm" ;;
+  esac
+}
+# Always on the AWS box; on a machine of yours only when it has no Sunshine.
+if aws_box || ! command -v sunshine >/dev/null; then
+  progress "installing sunshine"
+  WANT=$(sunshine_package)
+  SUNSHINE_URL=$(curl -fsSL https://api.github.com/repos/LizardByte/Sunshine/releases/latest \
+    | jq -r --arg w "$WANT" '.assets[] | select(.name | endswith($w)) | .browser_download_url' \
+    | head -1)
+  [[ -n $SUNSHINE_URL ]] || { echo ">>> FAILED: Sunshine publishes no package for this system ($WANT)"; exit 1; }
+  SUNSHINE_PKG="/tmp/${SUNSHINE_URL##*/}"
+  curl -fsSL -o "$SUNSHINE_PKG" "$SUNSHINE_URL"
+  case $FAMILY in
+    ubuntu|debian) apt-get install -y "$SUNSHINE_PKG" ;;
+    arch)          pacman -U --noconfirm --needed "$SUNSHINE_PKG" ;;
+    fedora)        dnf install -y "$SUNSHINE_PKG" ;;
+  esac
+  rm -f "$SUNSHINE_PKG"
+fi
 
+# The AWS box's display: its resolution script and the settings its headless X
+# needs. A machine of yours keeps its own.
+if aws_box; then
 # Match the desktop to whatever screen the client is streaming from. This is
 # what lets one desktop serve a phone, a tablet and a laptop.
 cat > /usr/local/bin/set-resolution.sh <<'EOF'
@@ -67,7 +95,7 @@ done
 EOF
 chmod 755 /usr/local/bin/set-resolution.sh
 
-install -d -o "$USER_NAME" -g "$USER_NAME" "/home/$USER_NAME/.config/sunshine"
+install -d -o "$USER_NAME" -g "$USER_NAME" "$USER_HOME/.config/sunshine"
 # Sunshine's CSRF protection only trusts localhost by default, so the web UI
 # rejects every request made over the tailnet. Both the MagicDNS name and the
 # raw IP need listing - which host you type in the browser is what gets checked.
@@ -84,7 +112,7 @@ ORIGINS="https://${TS_SELF},https://${TS_SELF}:47990"
 [[ -n $TS_FQDN ]] && ORIGINS="$ORIGINS,https://${TS_FQDN},https://${TS_FQDN}:47990"
 [[ -n $TS_IP   ]] && ORIGINS="$ORIGINS,https://${TS_IP},https://${TS_IP}:47990"
 ORIGINS="$ORIGINS,https://localhost:47990"
-cat > "/home/$USER_NAME/.config/sunshine/sunshine.conf" <<EOF
+cat > "$USER_HOME/.config/sunshine/sunshine.conf" <<EOF
 # A STABLE name, not the EC2 hostname.
 #
 # Sunshine advertises its hostname by default, and every rebuild gets a new
@@ -126,7 +154,25 @@ global_prep_cmd = []
 capture = x11
 csrf_allowed_origins = $ORIGINS
 EOF
-chown -R "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.config/sunshine"
+chown -R "$USER_NAME:$USER_NAME" "$USER_HOME/.config/sunshine"
+else
+  # A machine of yours: its Sunshine settings are its own. A name and the
+  # tailnet's packet size only when it has no settings yet; then its virtual
+  # input, and a firewall that would drop the stream arriving on the tailnet.
+  if [ ! -s "$USER_HOME/.config/sunshine/sunshine.conf" ]; then
+    install -d -o "$USER_NAME" -g "$USER_NAME" "$USER_HOME/.config/sunshine"
+    printf 'sunshine_name = %s\npacket_size = 1024\n' "$TS_HOST" > "$USER_HOME/.config/sunshine/sunshine.conf"
+    chown "$USER_NAME:$USER_NAME" "$USER_HOME/.config/sunshine/sunshine.conf"
+  fi
+  modprobe uinput 2>/dev/null || true
+  grep -qx uinput /etc/modules-load.d/uinput.conf 2>/dev/null || echo uinput > /etc/modules-load.d/uinput.conf
+  if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+    ufw allow in on tailscale0 >/dev/null
+  fi
+  if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
+    firewall-cmd --permanent --zone=trusted --add-interface=tailscale0 >/dev/null && firewall-cmd --reload >/dev/null
+  fi
+fi
 
 loginctl enable-linger "$USER_NAME"
 # Enable by symlink rather than `systemctl --user`: there is no user session
@@ -135,11 +181,12 @@ loginctl enable-linger "$USER_NAME"
 # and the package may rename it again - so match on the path rather than assume.
 UNIT=$(ls /usr/lib/systemd/user/*[Ss]unshine*.service /lib/systemd/user/*[Ss]unshine*.service 2>/dev/null | head -1)
 [[ -n $UNIT ]] || { echo "no Sunshine systemd user unit found"; exit 1; }
-WANTS="/home/$USER_NAME/.config/systemd/user/default.target.wants"
+WANTS="$USER_HOME/.config/systemd/user/default.target.wants"
 install -d -o "$USER_NAME" -g "$USER_NAME" "$WANTS"
 ln -sf "$UNIT" "$WANTS/$(basename "$UNIT")"
 chown -h "$USER_NAME:$USER_NAME" "$WANTS/$(basename "$UNIT")"
 
+if aws_box; then
 # Sunshine probes every encoder once at startup and gives up permanently if it
 # finds no display: "Fatal: Unable to find display or encoder during startup".
 # Its user service starts alongside the graphical session, so on a cold boot it
@@ -148,7 +195,7 @@ chown -h "$USER_NAME:$USER_NAME" "$WANTS/$(basename "$UNIT")"
 # unit tries to cover this with ExecStartPre=/bin/sleep 5, which is a guess, not
 # a check. Wait for X to actually answer, and let systemd retry if it still
 # loses.
-DROPIN="/home/$USER_NAME/.config/systemd/user/$(basename "$UNIT").d"
+DROPIN="$USER_HOME/.config/systemd/user/$(basename "$UNIT").d"
 install -d -o "$USER_NAME" -g "$USER_NAME" "$DROPIN"
 cat > "$DROPIN/wait-for-x.conf" <<EOF
 [Service]
@@ -157,7 +204,14 @@ ExecStartPre=/bin/sh -c 'for i in \$(seq 1 60); do xset q >/dev/null 2>&1 && exi
 Restart=on-failure
 RestartSec=10
 EOF
-chown -R "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.config/systemd"
+fi
+chown -R "$USER_NAME:$USER_NAME" "$USER_HOME/.config/systemd"
 
 verify "sunshine binary installed" test -x /usr/bin/sunshine
-verify "sunshine waits for X before starting" test -f "$DROPIN/wait-for-x.conf"
+if aws_box; then verify "sunshine waits for X before starting" test -f "$DROPIN/wait-for-x.conf"; fi
+# A machine of yours does not reboot into it: started now, as you, so the laptop
+# can make the login and pair straight after.
+if ! aws_box; then
+  sudo -u "$USER_NAME" XDG_RUNTIME_DIR="/run/user/$USER_UID" systemctl --user daemon-reload 2>/dev/null || true
+  sudo -u "$USER_NAME" XDG_RUNTIME_DIR="/run/user/$USER_UID" systemctl --user restart "$(basename "$UNIT")" 2>/dev/null || true
+fi

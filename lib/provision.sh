@@ -108,9 +108,6 @@ else
     # step can be read and changed on its own. They are concatenated here
     # because user-data has to be one self-contained script - the box has no
     # copy of this repo.
-    shopt -s nullglob
-    parts=(lib/bootstrap.d/*.sh)
-    (( ${#parts[@]} )) || { echo "no bootstrap modules found in lib/bootstrap.d/"; exit 1; }
     # Comments are ~47% of the module source and the single most valuable thing
     # in this repo - every one of them records a failure that cost a build. The
     # BOX does not need them, so strip whole-line comments here and keep them in
@@ -204,23 +201,17 @@ else
     #
     # Nothing here needs regex or escaping: these are literal replacements, so
     # use a tool that does literal replacement.
-    cat "${parts[@]}" \
-      | grep -vE '^[[:space:]]*#([^!]|$)' \
-      | TS_AUTHKEY="$TS_AUTHKEY" TS_HOST="$TS_HOST" HOST_TGZ_URL="$HOST_TGZ_URL" \
-        S3_BUCKET="$S3_BUCKET" CG_APPS="${GAME_APPS:-all}" \
-        CG_LOGIN="${GAME_STEAM_LOGIN:-use}" \
-        CG_RESERVE_GB="${GAME_DISK_RESERVE_GB:-$(source lib/config.sh && config_field GAME_DISK_RESERVE_GB 3)}" \
-        python3 -c 'import os,sys
-s = sys.stdin.read()
-for k in ("TS_AUTHKEY", "TS_HOST", "HOST_TGZ_URL", "S3_BUCKET", "CG_APPS", "CG_LOGIN", "CG_RESERVE_GB"):
-    s = s.replace("__%s__" % k, os.environ.get(k, ""))
-missing = [w for w in ("__TS_AUTHKEY__", "__TS_HOST__", "__HOST_TGZ_URL__",
-                       "__S3_BUCKET__", "__CG_APPS__", "__CG_LOGIN__", "__CG_RESERVE_GB__") if w in s]
-if missing:
-    sys.exit("placeholders left unsubstituted: %s" % ", ".join(missing))
-sys.stdout.write(s)' > "$USERDATA" \
+    # Assembled by lib/render.sh - the same build a machine of yours gets - as
+    # the AWS box: user ubuntu on Ubuntu, with its own steps switched on.
+    # shellcheck source=lib/render.sh
+    source lib/render.sh
+    TS_AUTHKEY="$TS_AUTHKEY" TS_HOST="$TS_HOST" HOST_TGZ_URL="$HOST_TGZ_URL" \
+    S3_BUCKET="$S3_BUCKET" CG_APPS="${GAME_APPS:-all}" CG_LOGIN="${GAME_STEAM_LOGIN:-use}" \
+    CG_RESERVE_GB="${GAME_DISK_RESERVE_GB:-$(source lib/config.sh && config_field GAME_DISK_RESERVE_GB 3)}" \
+    CG_TARGET=aws CG_USER=ubuntu CG_FAMILY=ubuntu \
+      render_bootstrap > "$USERDATA" \
       || { echo "could not render user-data"; exit 1; }
-    echo "    assembled ${#parts[@]} modules"
+    echo "    assembled $(ls lib/bootstrap.d/*.sh | wc -l) modules"
     # EC2 caps user-data at 16 KB, which bootstrap.sh outgrew. cloud-init
     # detects the gzip magic bytes and decompresses on its own, so shipping it
     # compressed costs nothing and roughly quadruples the room available.

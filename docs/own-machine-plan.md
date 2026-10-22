@@ -1,9 +1,29 @@
 # Plan: play on your own machine, not only AWS
 
-Status (2026-10-18): **step 1 built** - the Linux CLI, `cg host add | setup |
-status | open | list | remove` (lib/host.sh, tests/host.sh). Not yet run against a
-real machine: tested against a fake one. Windows (step 2) and the app (step 3)
-are not built. Costs nothing on AWS.
+Status (2026-10-21): **Linux built, on one shared path with AWS** - set up and
+streamed from on a real Linux Mint 22.2 machine, and **in the app**, where
+machines are the whole design: Home is a card per machine and "+ Add a
+machine" - AWS, or a server of yours. There is no setup screen; adding a
+machine walks the steps it needs (this laptop's once, then the machine's), and
+a machine that needs something says so on its own card. A server's first
+connection may use its password, once: cg puts a key of its own on it
+(`cg host add`) and takes it off again on remove. Removing AWS is
+`cg aws forget`, refused while a machine or saved games are there; it deletes
+nothing in AWS and leaves the access key alone. Windows (step 2) is not built.
+Costs nothing on AWS.
+
+## One path for every machine
+
+There is one flow; only where the machine comes from differs.
+
+| | shared | the AWS box only | a machine of yours only |
+|---|---|---|---|
+| reaching it | `mssh` (lib/common.sh): sh on the far side, stdin only when piped on purpose | cg's own key | your ssh setup |
+| the build | `lib/bootstrap.d`, assembled by `lib/render.sh` | user-data at first boot | copied over ssh, run detached with sudo |
+| what it adds | every module adds only what is missing | `/scratch`, S3 library, idle shutdown, headless X, Firefox, reboot (`aws_box`) | - |
+| to "ready" | `lib/build.sh build_finish`: log followed, Sunshine login, pairing, Steam | hooks: on-host watchdog, the /scratch library | its tailnet address read once it joins |
+| playing | `stream_play` (lib/session.sh) | start the instance, offer to delete it | Sunshine checked first |
+| commands | `cg status --on <name>`, `cg open --on <name>` | the default | `cg host add|setup|list|remove` |
 
 ## The idea
 

@@ -247,7 +247,7 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('NOSWEEP LEGEND | ' + document.getElementById('s-chooser-legend').innerText
                           .replace(/\s+/g, ' ').trim());
   out.push('NOSWEEP BTN | ' + [...document.querySelectorAll('#s-chooser-legend button')]
-             .filter(b => b.textContent.trim() === 'Check all locations').length);
+             .filter(b => b.textContent.trim() === 'Check all regions').length);
   // Nothing this quota can launch, anywhere: the table is empty, and asking AWS
   // for more is the way on - it used to be offered only beside a greyed price.
   const keepMachines = machinesNow;
@@ -323,7 +323,7 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('BPICK | ' + card('what'));
   // A number column's heading sits over its numbers.
   out.push('HEADALIGN | ' + [...document.querySelectorAll('#s-chooser th')]
-    .filter(th => /Game disk|Chance/.test(th.textContent)).map(th => getComputedStyle(th).textAlign).join(','));
+    .filter(th => /Game disk|Spot availability/.test(th.textContent)).map(th => getComputedStyle(th).textAlign).join(','));
   out.push('BWHERE | ' + card('where'));
   out.push('BNOTE | ' + card('warn'));
   // The why-mark in a greyed cell, even on a greyed row, is not greyed itself.
@@ -333,7 +333,7 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('MARKS | ' + marks.length + ' live=' + marks.filter(live).length);
   // The checked price and the card's price are one number, from one function.
   const picked = document.querySelector('#s-chooser input:checked');
-  out.push('SAMEPRICE | ' + (picked ? card('where').includes(picked.closest('label').querySelector('.amount').textContent + ' an hour') : 'none'));
+  out.push('SAMEPRICE | ' + (picked ? card('where').includes(picked.closest('label').querySelector('.amount').textContent + '/hour') : 'none'));
   out.push('BTABLE | ' + (document.getElementById('b-chooser') ? 'PRESENT' : 'absent'));
   out.push('BSETUP | ' + (document.querySelector('#b-machine-card [data-f=change]') ? 'present' : 'ABSENT'));
   for (const id of ['s-chooser']) {
@@ -416,17 +416,17 @@ contains "paintGuards drew a net"           "$OUT" "PAINTED | guards | 1"
 contains "paintLibrary sized the disk"      "$OUT" "PAINTED | library | "
 
 echo "1b. a disk size cg did not give is not guessed"
-contains "the meter is labelled plainly"   "$OUT" "NOCAP | fit | Space on the machine"
+contains "the meter is labelled plainly"   "$OUT" "NOCAP | fit | Disk space"
 contains "  and counts what is picked, with no fraction of an unknown" \
-         "$OUT" "NOCAP | pct | 50.0 GB · the machine's space is not known yet"
+         "$OUT" "NOCAP | pct | 50.0 GB · capacity unknown"
 # The box checks the real limit at boot. Refusing the build here on a number
 # nobody has would be guessing in the other direction.
 contains "  and Build is still allowed"    "$OUT" "NOCAP | build | on"
 check    "number headings are right-aligned, over their numbers" "$(grep '^HEADALIGN' <<<"$OUT")" "HEADALIGN | right,right"
 contains "the machine card says how much room it has" "$(grep '^BPICK' <<<"$OUT")" " GB"
-contains "the meter names the machine"     "$OUT" "SMALL | fit | Space on a g4dn.xlarge"
+contains "the meter names the machine"     "$OUT" "SMALL | fit | Disk space (g4dn.xlarge)"
 contains "a game bigger than its disk is not offered" "$OUT" "SMALL | big | off"
-contains "  and says why"                  "$OUT" "Too big for a g4dn.xlarge (96 GB for games). Pick a machine with a bigger disk."
+contains "  and says why"                  "$OUT" "Exceeds g4dn.xlarge capacity (96 GB). Choose a larger disk."
 contains "  a game that fits still is"     "$OUT" "SMALL | small | on"
 contains "  and clicking its row does nothing" "$OUT" "SMALL | clicked | false"
 
@@ -451,12 +451,12 @@ echo "4. what is configured is what is checked - all three at once"
 # .env here is ap-south-1 + g4dn.xlarge + GAME_SPOT=0, so exactly one radio is
 # checked and it is the on-demand price of that machine in that region.
 check "exactly one radio is checked" "$(grep -c 'CHECKED' <<<"$OUT" || true)" "1"
-contains "and it is Mumbai g4dn on demand" "$OUT" "g4dn.xlarge | NVIDIA T4, 16 GB | 125 GB | 9/10 | OFF ₹18 [Over your GPU limit] | CHECKED ₹51"
+contains "and it is Mumbai g4dn on demand" "$OUT" "g4dn.xlarge | NVIDIA T4, 16 GB | 125 GB | 9/10 | OFF ₹18 [Over GPU quota] | CHECKED ₹51"
 
 echo "5. a cell you cannot pick says why"
 # The three refusals are different and lead to different actions.
-contains "no spot quota in the region" "$OUT" "OFF ₹18 [Over your GPU limit]"
-contains "the region is not enabled"   "$OUT" "OFF ₹89 [Not switched on]"
+contains "no spot quota in the region" "$OUT" "OFF ₹18 [Over GPU quota]"
+contains "the region is not enabled"   "$OUT" "OFF ₹89 [Region not enabled]"
 contains "no spot market at all"       "$OUT" "OFF none [No spot price]"
 # Hyderabad has both quotas, so both of its prices are selectable - this is the
 # control case proving the disabling is about quota, not about the region.
@@ -466,19 +466,19 @@ echo "5b. Build states the choice without offering a second control"
 # The one line that matters, from the same rows the table uses, so the two
 # cannot disagree.
 contains "the machine, once"             "$OUT" "BPICK | g4dn.xlarge"
-contains "  then where and how it is bought" "$OUT" "· Standard"
+contains "  then where and how it is bought" "$OUT" "· On-demand"
 contains "  with the GPU"                "$(grep -m1 '^BPICK ' <<<"$OUT")" "NVIDIA T4, 16 GB"
 contains "every why-mark is live, not greyed" "$OUT" "MARKS | 4 live=4"
 contains "the table and the card agree on the price" "$OUT" "SAMEPRICE | true"
-contains "  and the hourly rate, in rupees" "$(grep -m1 '^BWHERE ' <<<"$OUT")" "₹51 an hour while it runs"
+contains "  and the hourly rate, in rupees" "$(grep -m1 '^BWHERE ' <<<"$OUT")" "₹51/hour"
 
 echo "6. capacity is shown next to price, which is the whole point"
 contains "the good score is there" "$OUT" "9/10"
 contains "and the bad one"         "$OUT" "1/10"
-contains "the column says what the score means" "$OUT" "Chance of a spare one"
-contains "spot and standard, told apart"  "$OUT" "Spot is much cheaper, but AWS can take the machine back mid-game."
+contains "the column says what the score means" "$OUT" "Spot availability"
+contains "spot and standard, told apart"  "$OUT" "Spot is cheaper but can be reclaimed mid-session. On-demand is not."
 contains "the age of the scan is shown"   "$OUT" "Checked 5m ago"
-contains "and what was left out"          "$OUT" "2 more locations are too far to stream (over 80 ms) and are not listed."
+contains "and what was left out"          "$OUT" "2 regions hidden (over 80 ms)"
 
 echo "7. the three settings it owns have no second editor"
 # Not even a pointer: Settings does not list region, machine or purchase model.
@@ -526,7 +526,7 @@ check    "one row before a scan"          "$(row 'NOSWEEP ROWS')" "NOSWEEP ROWS 
 # this one has never run it. The table was showing .env's region alone and
 # calling it the whole picture.
 contains "  it says it is one region"     "$(row 'NOSWEEP LEGEND')" "Showing ap-south-1 only"
-contains "  and what compares them all"   "$(row 'NOSWEEP LEGEND')" "Check all locations"
+contains "  and what compares them all"   "$(row 'NOSWEEP LEGEND')" "Check all regions"
 # The button is IN that line, not named by it: the real one is at the top of a
 # long screen, which is where "how do I see the others" went unanswered.
 contains "  as a button in the line"      "$(row 'NOSWEEP BTN')" "NOSWEEP BTN | 1"
@@ -536,23 +536,23 @@ contains "  no button pressed"             "$(row SCANNING)" "buttons=0/"
 contains "  and Esc does not close it"     "$(row SCANNING)" "esc=blocked"
 contains "  and nothing looks pickable"    "$(row SCANNING)" "cursor=wait"
 # A popup over it says what it is waiting for, with a backdrop over the rest.
-contains "a popup says what is happening" "$(row SCANNING)" "popup=true:Checking every location"
+contains "a popup says what is happening" "$(row SCANNING)" "popup=true:Checking all regions"
 check    "  and Esc does not close it"     "$(row POPESC)" "POPESC | true"
 contains "  gone once the scan is in"     "$(row SCANNED)" "popup=false"
 lacks    "after it, they look pickable again" "$(row SCANNED)" "cursor=wait"
 contains "after it, Esc closes it again"   "$(row SCANNED)" "esc=closes"
 lacks    "  and the buttons are back"      "$(row SCANNED)" "buttons=0/"
-contains "an empty table says why"        "$(row 'EMPTY ROWS')" "No machine here fits your GPU limit"
-contains "  and offers to ask AWS for more" "$(row 'EMPTY BTN')" "Ask AWS for a higher GPU limit"
-contains "  with the price of asking"     "$(row 'NOSWEEP LEGEND')" "about 90 seconds and is free"
+contains "an empty table says why"        "$(row 'EMPTY ROWS')" "No machine type fits your GPU quota here"
+contains "  and offers to ask AWS for more" "$(row 'EMPTY BTN')" "Request quota increase"
+contains "  with the price of asking"     "$(row 'NOSWEEP LEGEND')" "takes ~90 s. No charge."
 lacks    "  not said after a scan"        "$(row 'LEGEND')" "only. Scan all regions"
-contains "  and the legend says why"      "$(row 'NOSWEEP LEGEND')" "2 more GPU machines are offered here"
-contains "  naming the limit"             "$(row 'NOSWEEP LEGEND')" "over your GPU limit"
-contains "  with both ways round it"      "$(row 'NOSWEEP LEGEND')" "Ask AWS for more, or pick another location"
+contains "  and the legend says why"      "$(row 'NOSWEEP LEGEND')" "2 more GPU types here exceed your quota"
+contains "  naming the limit"             "$(row 'NOSWEEP LEGEND')" "exceed your quota"
+contains "  with both ways round it"      "$(row 'NOSWEEP LEGEND')" "exceed your quota."
 lacks    "  and not after one"            "$(row 'LEGEND')" "more GPU machines are offered here"
-contains "  and names the quota case"      "$OUT" "Over your GPU limit: your GPU limit here"
-contains "  the opt-in case"               "$OUT" "Not switched on: this location is not switched on"
-contains "  and the missing market"        "$OUT" "No spot price: AWS sells no spot machine"
+contains "  and names the quota case"      "$OUT" "Over GPU quota: GPU quota here"
+contains "  the opt-in case"               "$OUT" "Region not enabled: this region is not enabled"
+contains "  and the missing market"        "$OUT" "No spot price: no spot market for this type"
 # Only the reasons actually on screen: this fixture has no priceless row.
 lacks    "  but not a reason nothing shows" "$OUT" "no price - The Pricing API"
 # A row with nothing pickable recedes instead of looking broken. The fixture has
