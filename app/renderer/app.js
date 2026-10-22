@@ -2579,7 +2579,8 @@ function openAwsKey(log) {
   $('awskey-err').textContent = '';
   $('awskey-go').disabled = false;
   $('awskey-go').textContent = 'Connect';
-  $('awskey').showModal();
+  keepOpen($('awskey'));
+  if (!$('awskey').open) $('awskey').showModal();
   $('awskey-id').focus();
 }
 function awsKeyFail(text) {
@@ -2602,9 +2603,11 @@ $('awskey-go').onclick = async e => {
   const { rc, err } = await runCg(['creds', 'set'], { wantRc: true, collect: awsKeyLog });
   awsKeyPending = null;
   if (rc === 0) {
-    // cg has written it and every screen re-reads, because this counts as a
-    // write - so the card behind this dialog is already right.
-    $('awskey').close();
+    // Saved. The dialog stays until the key has been read back, so what it
+    // closes onto already shows it - not, for a moment, Connect AWS again.
+    $('awskey-go').textContent = 'Connected. Checking\u2026';
+    await readFresh(['creds', '--json'], 'creds');
+    closeDialog($('awskey'));
     return;
   }
   // cg's own words, minus the line that only tells you where to find a key -
@@ -4634,6 +4637,12 @@ const serverForm = (() => {
     i.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); connectServer(); } });
   return wrap;
 })();
+// readFresh(args, json) - that read, answered after now: the one already under
+// way when there is one (a write re-reads by itself), else a new one.
+async function readFresh(args, json) {
+  if (readOut(json)) { while (readOut(json)) await new Promise(r => jobEnded.push(r)); return; }
+  await runCg(args, { json, group: 'refresh' });
+}
 let connecting = false;
 // Until a machine's status has answered once, or failed - asking for it if no
 // read of it is under way.

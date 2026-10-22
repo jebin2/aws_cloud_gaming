@@ -153,6 +153,17 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('OK RAN | ' + window.__ran.join(' ;; ') + ' lastId=' + window.__lastId);
     window.__emit(window.__lastId, { t: 'exit', rc: 0 });
     await sleep(); await sleep();
+    // Saved: it stays, checking, until the key has been read back.
+    const credsReads = [...jobs].filter(([, j]) => j.json === 'creds').map(([id]) => id);
+    out.push('OK CHECKING | ' + dlg.open + ' ' + document.getElementById('awskey-go').textContent.trim()
+             + ' reading=' + (credsReads.length > 0));
+    // The key read back - whichever read of it is under way.
+    for (const id of credsReads) {
+      window.__emit(id, { t: 'raw', stream: 'stdout',
+        text: JSON.stringify({ cli: true, key_id: 'AKIDEXAMPLE', valid: true, account: '123456789012' }) });
+      window.__emit(id, { t: 'exit', rc: 0 });
+    }
+    await new Promise(r => setTimeout(r, 400));     // its closing motion
     out.push('OK OPEN | ' + dlg.open);
 
     // --- the Tailscale card, which fails in two independent ways --------
@@ -408,6 +419,7 @@ contains "  and that nothing was saved" "$(row 'FAIL ERR')"    "nothing was save
 # The line telling you where to find a key is noise when you are holding one.
 lacks    "  without the how-to line"   "$(row 'FAIL ERR')"     "paste an access key"
 contains "  and the button comes back" "$(row 'FAIL BTN')"     "Connect disabled=false"
+check    "saved, it stays to check the key back" "$(row 'OK CHECKING')" "OK CHECKING | true Connected. Checking… reading=true"
 check    "a key that works closes it"  "$(row 'OK OPEN')"      "OK OPEN | false"
 
 echo "4c. Tailscale is its own card, and fails in two ways"
