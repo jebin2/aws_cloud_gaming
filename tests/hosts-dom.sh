@@ -238,6 +238,28 @@ cat > "$T/r/probe.js" <<'PROBE'
     await wait(1200);
     out.push('SETUP CLOSED | ' + $$('adddlg').open);
 
+    // Setting it up again, from its card: the same dialog, already connected.
+    const pw = async v => {
+      await until(() => $$('pwdlg').open);
+      $$('pwdlg-input').value = v;
+      $$('pwdlg-input').dispatchEvent(new Event('input'));
+      $$('pwdlg-yes').click();
+      await until(() => !$$('pwdlg').open);
+    };
+    goHost('homebox');
+    await until(() => document.querySelector('#b-hosts [data-host="homebox"] [data-f="setup"]'));
+    const runsBefore = window.__ran.filter(a => a === 'host setup homebox').length;
+    document.querySelector('#b-hosts [data-host="homebox"] [data-f="setup"]').click();
+    await until(() => $$('pwdlg').open);
+    out.push('RERUN | ' + $$('adddlg').open + ' ' + txt($$('onb-title')) + ' / ' + stages()
+             + ' ran=' + (window.__ran.filter(a => a === 'host setup homebox').length - runsBefore)
+             + ' log=' + !$$('onb-log-setup').hidden + ' popup=' + txt($$('pwdlg-title')));
+    await pw('hunter2');
+    await pw('tskey-auth-PASTED');
+    window.__finish();
+    await until(() => !$$('adddlg').open);
+    out.push('RERUN CLOSED | ' + $$('adddlg').open);
+
     goView('dashboard');
     $$('d-add-aws').click();
     await wait(400);
@@ -320,6 +342,8 @@ cat > "$T/r/probe.js" <<'PROBE'
     const setupsBefore = window.__ran.filter(a => a.startsWith('host setup')).length;
     openAdd('host');
     await wait(100);
+    out.push('FRESH | ' + ['add-addr', 'add-user', 'add-pw', 'add-name'].map(i => $$(i).value).join('|')
+             + ' log=' + $$('add-log').hidden + ' units=' + document.querySelectorAll('[id^="onb-unit-"]').length);
     $$('add-addr').value = '10.0.0.5';
     $$('add-user').value = 'me';
     $$('add-pw').value = 'letmein';
@@ -410,6 +434,8 @@ check    "  handed to cg"                       "$(row 'KEY ANSWER')" "KEY ANSWE
 check    "its progress shows in the step"        "$(row 'SETUP LIVE')" "SETUP LIVE | >>> installing sunshine open=true"
 check    "done: the step ticks"                  "$(row 'SETUP DONE')" "SETUP DONE | done open=true"
 check    "  and then the dialog closes"          "$(row 'SETUP CLOSED')" "SETUP CLOSED | false"
+check    "setting up again from the card is the same dialog, already connected" "$(row 'RERUN')" "RERUN | true Set up homebox / tools:done tailnet:done server:done setup:running ran=1 log=true popup=Sudo password"
+check    "  closing by itself once done"         "$(row 'RERUN CLOSED')" "RERUN CLOSED | false"
 check    "Home has its card, and no AWS one"     "$(row 'HOME WELCOME')" "HOME WELCOME | hidden machines=shown aws=hidden"
 contains "  setting up"                          "$(row 'HOME CARD')" "Setting up"
 contains "  with its own Stop"                   "$(row 'HOME CARD')" "Stop"
@@ -447,6 +473,7 @@ check    "  which closes by itself onto Home, machine gone" "$(row 'REMOVE CLOSE
 contains "unreachable: closes all the same"      "$(row 'REMOVE DOWN')" "REMOVE DOWN | false toast="
 contains "  and says so in a toast that stays"  "$(row 'REMOVE DOWN')" "homebox was removed, but its SSH key could not be revoked: the machine was unreachable."
 check    "  until it is dismissed"              "$(row 'TOAST GONE')" "TOAST GONE | 0"
+check    "a new add starts fresh: nothing left from the last" "$(row 'FRESH')" "FRESH | ||| log=true units=0"
 contains "added again, already set up: done as it is" "$(row 'READD')" "server:done setup:done setups=0"
 check    "  and the dialog closes by itself"     "$(row 'READD CLOSED')" "READD CLOSED | false"
 check    "which reopens its steps"               "$(row 'FINISH')" "FINISH | true Finish setting up AWS"

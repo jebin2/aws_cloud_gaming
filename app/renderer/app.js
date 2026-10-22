@@ -4465,18 +4465,17 @@ function hostLog(name) {
   return log;
 }
 
-// Setting one up: the same build an AWS machine gets, run on yours (cg host
-// setup). It asks for the sudo password itself, once - the ask dialog - and
-// saves nothing of it.
-async function setUpHost(name) {
-  const log = hostLog(name);
-  log.textContent = '';
-  log.dataset.fresh = 'yes';
-  delete log.dataset.failed;
-  const { rc } = await runCg(['host', 'setup', name], { collect: log.id, wantRc: true, onStart: paintHostCards });
-  if (rc !== 0) log.dataset.failed = 'yes';
-  note(rc === 0 ? `${name} set up` : `Setup of ${name} failed`, rc === 0 ? 'text-primary' : 'text-error');
-  await refreshHosts(name);
+// Setting one up again, from its card: the add dialog's own flow, with the
+// machine already connected - its steps ticked, and setup starting by itself,
+// its log open, its questions in the popup, closing once it is done.
+function setUpHost(name) {
+  openAdd('host');
+  addedHost = name;
+  $('onb-title').textContent = `Set up ${name}`;
+  paintOnboard();
+  // Only once what comes before it is met: a tool gone since is its step.
+  const before = prereqs().filter(r => !r.sameAs && r.key !== 'setup');
+  if (before.every(r => r.ok === true)) onbSetupHost();
 }
 
 // Streaming from it. Nothing to start and nothing billed by the hour: it is
@@ -4564,6 +4563,15 @@ function openAdd(kind) {
   adding = kind;
   addedHost = null;
   setupDone = false;
+  // Each time it opens, it starts fresh: nothing typed for the last machine,
+  // and no log from the last attempt - except a step still running.
+  if (!connecting) {
+    for (const id of ['add-addr', 'add-user', 'add-pw', 'add-name']) serverForm.querySelector('#' + id).value = '';
+    const log = serverForm.querySelector('#add-log');
+    log.textContent = ''; log.hidden = true; log.classList.remove('text-error');
+  }
+  for (const u of [...document.querySelectorAll('[id^="onb-unit-"]')])
+    if (u.id !== 'onb-unit-' + onbRunning) u.remove();
   onbNote = ''; onbTone = '';
   $('onb-title').textContent = kind === 'aws'
     ? (awsAdded() ? 'Finish setting up AWS' : 'Add AWS') : 'Add a server';
