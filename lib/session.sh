@@ -116,38 +116,56 @@ moonlight_flags() {
   [[ ${GAME_PERF_OVERLAY:-0} == 1 ]] && _mf+=(--performance-overlay) || true
 }
 
-# hypr_place <moonlight-pid> <WxH|""> <log> - on Hyprland, float each window
-# Moonlight opens, at the size asked, centred. Hyprland tiles every new window
-# and a tiled window fills the space it is given, so "in a window" opened
-# looking full screen at a size nobody set. Each window is taken as it appears
-# - Moonlight opens a small one while it connects, then the stream's - for as
-# long as Moonlight runs, up to a few minutes. A window Moonlight made full
-# screen itself is left alone and said so: that is Moonlight's choice, not
-# Hyprland's. What it found goes in Moonlight's log and the run's output.
+# hypr_windows <pid> - Moonlight's mapped windows, one a line:
+# "<address> <floating 0|1> <fullscreen state> <WxH>". The state is a bool on
+# older Hyprland and 0 none / 1 maximized / 2 full screen on newer.
+hypr_windows() {
+  hyprctl clients -j 2>/dev/null | python3 -c '
+import json, sys
+for c in json.load(sys.stdin):
+    if c.get("pid") == int(sys.argv[1]) and c.get("mapped", True) and not c.get("hidden", False):
+        w, h = c.get("size", [0, 0])
+        print(c["address"], int(bool(c.get("floating"))), int(c.get("fullscreen") or 0), "%dx%d" % (w, h))' "$1" 2>/dev/null
+}
+
+# hypr_place <moonlight-pid> <WxH|""> <log> - on Hyprland, put each window
+# Moonlight opens in a window: out of full screen, floating, at the size asked,
+# centred. Two things make it fill the screen though asked for a window:
+# Hyprland tiles every new window to fill its space, and Moonlight opens its
+# stream maximized when its own launcher window is - which on Hyprland a tiled
+# window can be. Each window is taken as it appears (Moonlight opens a small
+# one while it connects, then the stream's) for as long as Moonlight runs, up
+# to a few minutes, and looked at again a second later: if Moonlight put it
+# back, that is said. What it found goes in Moonlight's log and the run.
 hypr_place() {
-  local pid=$1 size=$2 log=$3 i seen=" " win addr floating full wh
+  local pid=$1 size=$2 log=$3 i seen=" " win addr floating full wh was after
   for ((i = 0; i < 360; i++)); do
     kill -0 "$pid" 2>/dev/null || return 0
     while read -r addr floating full wh; do
       [[ -n $addr && $seen != *" $addr "* ]] || continue
       seen+="$addr "
-      if [[ $full != 0 ]]; then
-        win="Moonlight made its window full screen itself ($wh) - Hyprland did not"
+      case $full in
+        2) was="full screen" ;;
+        1) was=maximized ;;
+        *) if ((floating)); then was=floating; else was=tiled; fi ;;
+      esac
+      {
+        hyprctl dispatch focuswindow "address:$addr"
+        ((full == 0)) || hyprctl dispatch fullscreenstate 0 0
+        ((floating)) || hyprctl dispatch setfloating "address:$addr"
+        [[ -z $size ]] || hyprctl dispatch resizewindowpixel "exact ${size%x*} ${size#*x},address:$addr"
+        hyprctl dispatch centerwindow 1
+      } >/dev/null 2>&1 || true
+      sleep 1
+      after=$(hypr_windows "$pid" | awk -v a="$addr" '$1 == a { print $3, $4 }')
+      if [[ -n $after && ${after%% *} != 0 ]]; then
+        win="Moonlight opened the window $was at $wh, and put it back full screen (state ${after%% *}) after it was set to a window"
       else
-        [[ $floating == 1 ]] || hyprctl dispatch setfloating "address:$addr" >/dev/null 2>&1 || true
-        [[ -z $size ]] || hyprctl dispatch resizewindowpixel "exact ${size%x*} ${size#*x},address:$addr" >/dev/null 2>&1 || true
-        { hyprctl dispatch focuswindow "address:$addr" && hyprctl dispatch centerwindow 1; } >/dev/null 2>&1 || true
-        win="Hyprland had the window $([[ $floating == 1 ]] && echo floating || echo tiled) at $wh - floated${size:+ at $size}, centred"
+        win="Moonlight opened the window $was at $wh - set to a window${after:+ at ${after#* }}, centred"
       fi
       printf '# cg: %s\n' "$win" >> "$log"
       cg_echo "    window: $win"
-    done < <(hyprctl clients -j 2>/dev/null | python3 -c '
-import json, sys
-for c in json.load(sys.stdin):
-    if c.get("pid") == int(sys.argv[1]) and c.get("mapped", True) and not c.get("hidden", False):
-        full = int(c.get("fullscreen") or 0)   # a bool on older Hyprland, a state on newer
-        w, h = c.get("size", [0, 0])
-        print(c["address"], int(bool(c.get("floating"))), full, "%dx%d" % (w, h))' "$pid" 2>/dev/null)
+    done < <(hypr_windows "$pid")
     sleep 0.5
   done
 }
