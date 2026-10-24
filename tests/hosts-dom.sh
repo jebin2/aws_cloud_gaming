@@ -375,7 +375,11 @@ cat > "$T/r/probe.js" <<'PROBE'
     S.listDelay = 0;
     out.push('REMOVE DONE | ' + $$('rundlg').open + ' ' + txt($$('rundlg-status')) + ' busy=' + !$$('rundlg-busy').hidden
              + ' view=' + view + ' card=' + !!document.querySelector('#d-hosts [data-host="homebox"]'));
+    // It waits to be read, with Done - as disconnecting AWS does.
     await wait(1200);
+    out.push('REMOVE WAITS | ' + $$('rundlg').open + ' buttons=' + vis('rundlg'));
+    $$('rundlg-done').click();
+    await wait(300);
     out.push('REMOVE CLOSED | ' + $$('rundlg').open + ' view=' + view + ' hosts=' + (hostsNow || []).length);
     // The machine was off: removed all the same, and that is left to be read.
     S.hosts = [{ name: 'homebox', ssh: 'me@10.0.0.5', os: 'Linux', family: 'ubuntu', user: 'me' }];
@@ -386,11 +390,10 @@ cat > "$T/r/probe.js" <<'PROBE'
     removeBtn().click();
     await wait(50);
     $$('rundlg-go').click();
-    await until(() => !$$('rundlg').open && $$('toasts').children.length);
-    out.push('REMOVE DOWN | ' + $$('rundlg').open + ' toast=' + txt($$('toasts')));
-    const tx = $$('toasts').querySelector('button');
-    if (tx) tx.click();
-    out.push('TOAST GONE | ' + $$('toasts').children.length);
+    await until(() => !$$('rundlg-done').hidden);
+    out.push('REMOVE DOWN | ' + $$('rundlg').open + ' said=' + txt($$('rundlg-status')) + ' toasts=' + $$('toasts').children.length);
+    $$('rundlg-done').click();
+    await wait(300);
 
     // Added again, already set up: nothing is run on it, and the dialog closes.
     STATUS.set_up = true;
@@ -578,10 +581,11 @@ check    "  asking shows no loading"             "$(row 'REMOVE ASK BUSY')" "REM
 check    "  and Esc does not close it"           "$(row 'REMOVE ESC')" "REMOVE ESC | stopped=true"
 check    "removed, it keeps loading while the list is read again" "$(row 'REMOVE UPDATING')" "REMOVE UPDATING | true Updating… busy=true view=build buttons="
 check    "  then says Removed, with Home already without it" "$(row 'REMOVE DONE')" "REMOVE DONE | true ✓Removed. busy=false view=dashboard card=false"
-check    "  which closes by itself onto Home, machine gone" "$(row 'REMOVE CLOSED')" "REMOVE CLOSED | false view=dashboard hosts=0"
-contains "unreachable: closes all the same"      "$(row 'REMOVE DOWN')" "REMOVE DOWN | false toast="
-contains "  and says so in a toast that stays"  "$(row 'REMOVE DOWN')" "homebox was removed, but its SSH key could not be revoked: the machine was unreachable."
-check    "  until it is dismissed"              "$(row 'TOAST GONE')" "TOAST GONE | 0"
+check    "  and waits, with Done, as Disconnect does" "$(row 'REMOVE WAITS')" "REMOVE WAITS | true buttons=Done"
+check    "  which closes it onto Home, machine gone" "$(row 'REMOVE CLOSED')" "REMOVE CLOSED | false view=dashboard hosts=0"
+contains "unreachable: removed all the same"     "$(row 'REMOVE DOWN')" "REMOVE DOWN | true said=✓Removed."
+contains "  and says so in the dialog, above Done" "$(row 'REMOVE DOWN')" "Its SSH key could not be revoked: homebox was unreachable."
+contains "  not in a toast left behind"         "$(row 'REMOVE DOWN')" "toasts=0"
 check    "a new add starts fresh: nothing left from the last" "$(row 'FRESH')" "FRESH | ||| log=true units=0"
 contains "added again, already set up: done as it is" "$(row 'READD')" "server:done setup:done setups=0"
 check    "  and the dialog closes by itself"     "$(row 'READD CLOSED')" "READD CLOSED | false"

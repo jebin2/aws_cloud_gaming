@@ -4878,19 +4878,23 @@ async function playOn(name) {
 // be reached to revoke the key: that outlasts the dialog, as a toast.
 async function removeHost(name) {
   const unreachable = out => /could not reach it/.test(out);
-  let said = '';
-  const ok = await runInDialog({
+  return runInDialog({
     title: `Remove ${name}`,
     confirm: { body: 'Revokes the app\'s SSH key on the machine and removes it from the app.\n'
                    + 'Sunshine, Steam and games on it are not changed.', yes: 'Remove', danger: true },
     args: ['host', 'remove', name],
     starting: 'Revoking SSH key…',
-    done: 'Removed.',
-    close: () => true,
+    // What was not done is said here, above Done, where it is read - not in a
+    // note left behind once the dialog has gone.
+    done: out => unreachable(out)
+      ? `Removed. Its SSH key could not be revoked: ${name} was unreachable. `
+        + 'Remove the line from its ~/.ssh/authorized_keys when it is back.'
+      : 'Removed.',
+    // Stays to be read, with Done, as disconnecting AWS does.
+    close: () => false,
     stoppable: false,
     // Before it says Removed: the list read again, and Home shown without it.
-    after: async out => {
-      said = out;
+    after: async () => {
       hostStatus.delete(name);
       hostLogs.delete(name);
       await refreshHosts();
@@ -4898,10 +4902,6 @@ async function removeHost(name) {
     },
     fail: () => 'Not removed. See details above.',
   });
-  if (ok && unreachable(said))
-    toast(`${name} was removed, but its SSH key could not be revoked: the machine was unreachable. `
-        + 'Remove the line from its ~/.ssh/authorized_keys when it is back.', 'warn');
-  return ok;
 }
 
 // After anything changes a machine: the list, and that machine's status.
