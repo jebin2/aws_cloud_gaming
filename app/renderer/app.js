@@ -377,6 +377,7 @@ function ask(id, event) {
       row.className = 'row font-code-md text-code-md cursor-pointer';
       const r = document.createElement('input');
       r.type = 'radio'; r.name = 'ask-choice'; r.value = c;
+      r.className = 'accent-primary w-4 h-4 cursor-pointer';     // the app's green, not the browser's blue
       r.checked = c === (event.default || choices[0]);
       const txt = document.createElement('span');
       txt.textContent = ASK_CHOICE_LABEL[`${event.id}:${c}`] || c;
@@ -413,20 +414,18 @@ const ASK = {
   awsSecret:  'aws-secret-access-key',
   tsToken:    'tailscale-api-token',
   tsAuthKey:  'tailscale-auth-key',
-  sessionEnd: 'session-end',
   hostSudo:   'host-sudo',
   hostSshPw:  'host-ssh-password',
   awsDisconnect: 'aws-disconnect',
 };
 const ASK_QUESTION = {
-  [ASK.sessionEnd]: 'Session ended. What should happen to the machine?',
   [ASK.hostSudo]: 'Sudo password for this machine. Used once for setup. Not stored.',
   [ASK.hostSshPw]: 'SSH password. Used once to install a key. Not stored.',
 };
-const ASK_CHOICE_LABEL = {
-  [`${ASK.sessionEnd}:d`]: 'Delete it (recommended; games are saved first)',
-  [`${ASK.sessionEnd}:n`]: 'Keep it running (billed hourly)',
-};
+// A choice cg offers, in plain words, by "<ask>:<answer>". None at present:
+// the one there was - keep or delete the machine when a session ended - is
+// no longer asked; closing Moonlight just ends the session.
+const ASK_CHOICE_LABEL = {};
 // Any id the window pre-answers but cg no longer asks under is a modal waiting
 // to appear in the middle of a build - which is exactly what this replaced.
 async function checkAsks() {
@@ -628,7 +627,7 @@ function renderMachineCard(card) {
   } else if (running) {
     title = sessionNow ? 'Playing' : 'Ready to play';
     sub = `Up ${uptime(box.launched)} · ${rs(price != null ? price * upHours : null)} so far`;
-    note = sessionNow ? 'Closing Moonlight prompts to keep or delete the machine.'
+    note = sessionNow ? 'Closing Moonlight ends the session. The machine keeps running until auto-stop or Delete.'
                       : idleAfter ? `Auto-stops after ${idleAfter} idle.`
                                   : 'Auto-stops when idle.';
   } else if (box) {
@@ -3767,7 +3766,7 @@ const OPEN_STEPS = [
     end: /waiting for tailscale ok|tailscale is up|^\s*pong|\bvia\b/i },
   { doing: 'Starting the game stream', done: 'Game stream ready', end: /waiting for sunshine ok|sunshine is up|^disk:/i },
   { doing: 'Playing', done: 'Played', end: /session ended/i, stream: true,
-    note: 'Close Moonlight to end the session, then choose to keep or delete the machine.' },
+    note: 'Close Moonlight to end the session. The machine keeps running until auto-stop or Delete.' },
 ];
 // What the machine installs, in the order it does it, each matched to the
 // progress line the box prints when it starts that piece (lib/bootstrap.d).
@@ -3839,9 +3838,6 @@ function openLine(text) {
 function runStep(text) {
   if (!run) return;
   const now = Date.now();
-  // The stream has ended and "delete" was the answer: cg open hands over to
-  // cg destroy in the same process, so the run becomes the delete.
-  if (run.kind === 'open' && run.streamEnded) runBegin('destroy');
   if (run.kind === 'open') { runLine(text); return; }
   // A machine that was there before this build: not its to delete on failure.
   if (run.kind === 'init' && /reusing the existing|starting the existing/i.test(text)) run.reused = true;

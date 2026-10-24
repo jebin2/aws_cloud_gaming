@@ -128,16 +128,15 @@ cat > "$T/r/probe.js" <<'PROBE'
   // browser choosing to fire it is the browser's business.
   const closeNow = () => { const d = dlg(); const h = d.onclose; d.close(); if (h) h(); };
   try {
-    ask(7, { t: 'ask', id: 'session-end',
-             prompt: '  [d] destroy (recommended)  [n] leave it running: ',
-             default: 'd', choices: 'd,n' });
+    // A question the app has no words of its own for: cg's prompt, its choices.
+    ask(7, { t: 'ask', id: 'fix-go-ahead', prompt: '  Fix it now? ', default: 'y', choices: 'y,n' });
     askRead('CHOICE');
     // Dismissing without touching anything must answer the DEFAULT, not empty.
     closeNow();
     out.push('CHOICE ANSWER | ' + answered);
 
     // Picking the other one must answer that.
-    ask(8, { t: 'ask', id: 'session-end', prompt: 'p', default: 'd', choices: 'd,n' });
+    ask(8, { t: 'ask', id: 'fix-go-ahead', prompt: 'p', default: 'y', choices: 'y,n' });
     [...document.querySelectorAll('#ask-choices input')].find(r => r.value === 'n').checked = true;
     closeNow();
     out.push('PICK2 ANSWER | ' + answered);
@@ -232,19 +231,14 @@ contains "  after the one that signs in" "$(row 'ELSE ROWS')" "/ In use / Remove
 check    "  its Forget is not red"     "$(row 'ELSE BTN')" "ELSE BTN | btn btn-danger,btn"
 
 echo "6. a numbered prompt is a choice, not a text box"
-# Asked in the app's words, not cg's terminal prompt.
-contains "the question is a question"  "$(row 'CHOICE PROMPT')" "What should happen to the machine?"
-lacks    "  not the terminal prompt"   "$(row 'CHOICE PROMPT')" "[d] destroy"
+contains "the question is cg's, trimmed" "$(row 'CHOICE PROMPT')" "CHOICE PROMPT | Fix it now?"
 check    "the radios are shown"        "$(row 'CHOICE BOX')"   "CHOICE BOX | shown"
 check    "  and the text field is not" "$(row 'CHOICE INPUT')" "CHOICE INPUT | hidden"
-contains "the first option says what it does" "$(row 'CHOICE ROWS')" "Delete it"
-contains "  and the second"            "$(row 'CHOICE ROWS')" "Keep it running"
-contains "  with the consequence spelled out" "$(row 'CHOICE ROWS')" "billed hourly"
-contains "the default is preselected"  "$(row 'CHOICE ROWS')" "CHECKED Delete it"
+contains "the default is preselected"  "$(row 'CHOICE ROWS')" "CHECKED y"
 # Dismissing must answer the default, never an empty string: cg reads the reply
 # and an empty one would fall through to its own default anyway, but a build
 # that answers "" to a choice prompt is a thing nobody can debug.
-check "closing answers the default"    "$(row 'CHOICE ANSWER')" "CHOICE ANSWER | 7=d"
+check "closing answers the default"    "$(row 'CHOICE ANSWER')" "CHOICE ANSWER | 7=y"
 check "picking the other answers it"   "$(row 'PICK2 ANSWER')"  "PICK2 ANSWER | 8=n"
 
 echo "7. a prompt with no choices is still a text field"

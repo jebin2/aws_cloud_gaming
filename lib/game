@@ -166,11 +166,16 @@ up() {
 
   echo "disk:"; disks
 
-  # The stream itself is every machine's (lib/session.sh); what is the AWS
-  # box's - starting it above, offering to delete it below - stays here.
+  # The stream itself is every machine's (lib/session.sh); starting the AWS
+  # box, above, is this file's.
   stream_play "$ip" "$APP"
 
-  end_session
+  # Closing Moonlight ends the session and nothing else. Asking keep-or-delete
+  # every time was one more popup between closing a game and being done, and
+  # "delete" set off a whole second flow behind it. The machine is kept for the
+  # next session; auto-stop ends it once it sits idle, and it can be deleted
+  # now from the app or with cg destroy.
+  cg_echo "session ended - the machine is still running and billing until auto-stop ends it when idle, or delete it now: cg destroy"
 }
 
 # Sunshine never answered. The useful question is not "is it slow" but "was it
@@ -222,8 +227,7 @@ open_no_sunshine() { # open_no_sunshine <ip>
   return 0
 }
 
-# How a session ends, for both `cg stop` and the prompt above - one function so
-# the two cannot drift apart.
+# How `cg stop` ends a session.
 #
 # On spot there is no stop worth offering. A one-time request cannot be stopped
 # at all (AWS only allows it for persistent requests), and a persistent one that

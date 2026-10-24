@@ -83,6 +83,9 @@ check "and these are all of them" \
          | sed -E 's/cg_ask_typed ([a-z-]+) "type ([A-Z-]+)/\1=\2/' | sort | tr '\n' ' ')" \
       "clean-orphans=CLEAN delete-volume=DELETE destroy-all=DESTROY-ALL forget-game=FORGET forget-login=FORGET move-game=MOVE "
 check "the session-end prompt asks"  "$(grep -c 'cg_ask session-end' lib/game)" "1"
+# ...under `cg stop` only: closing Moonlight in `cg open` just ends the session.
+check "  but not when a session ends" "$(grep -c '^  end_session$' lib/game)" "0"
+check "  which says what is left running" "$(grep -c 'session ended - the machine is still running and billing' lib/game)" "1"
 
 echo "7. the settings prompts, driven"
 mkdir -p "$T/repo"; cp -r lib lambda "$T/repo/"

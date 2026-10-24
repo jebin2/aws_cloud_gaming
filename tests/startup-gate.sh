@@ -1405,7 +1405,7 @@ contains "  how long it has been up"  "$(row AFTER)" "meta=Up "
 contains "  play, or delete it"       "$(row AFTER)" "acts=b-open,b-destroy"
 ENGINE=""
 
-echo "7f. play is a session, as steps, ending in keep or delete"
+echo "7f. play is a session, as steps; closing Moonlight just ends it"
 # cg open announces no steps, so the card used to say "Starting the stream" over
 # an empty list for the whole session.
 B6="window.__after = async () => {
@@ -1434,16 +1434,7 @@ B6="window.__after = async () => {
   window.__emit(id, { t: 'exit', rc: 0 });
   await wait();
   const kept = card() + 'panel:' + document.querySelector('#b-machine-card [data-f=title]').textContent;
-  id = await play();
-  for (const t of ['instance already running', 'waiting for sunshine ok', 'session ended after 1m'])
-    window.__emit(id, { t: 'line', text: t });
-  window.__emit(id, { t: 'step', text: 'destroying the box' });
-  await wait();
-  const deleting = card();
-  window.__emit(id, { t: 'exit', rc: 0 });
-  await wait();
-  return 'starting=' + starting + ' | playing=' + playing + ' | kept=' + kept
-    + ' | deleting=' + deleting + ' | after=' + card();
+  return 'starting=' + starting + ' | playing=' + playing + ' | kept=' + kept + ' | asked=' + document.getElementById('ask').open;
 };"
 ENGINE="$B6"
 BOX='{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle": "spot", "launched": "2026-01-01T00:00:00Z"}'
@@ -1451,11 +1442,11 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st "$BOX" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "play starts with the machine"     "$(row AFTER)" "starting=run:Starting session running,locked,locked,locked"
 contains "  then is playing"                "$(row AFTER)" "playing=run:Playing done,done,done,running"
-contains "  saying how to stop"             "$(row AFTER)" "Close Moonlight to end the session"
+contains "  saying how to stop, and what stays" "$(row AFTER)" "Close Moonlight to end the session. The machine keeps running until auto-stop or Delete."
 contains "  and what it costs"              "$(row AFTER)" "so far"
 # Kept: the panel is the machine again, and there is no run under it.
-contains "kept: back to the machine"        "$(row AFTER)" "kept=panel:Ready to play"
-contains "deleted: the delete is shown"     "$(row AFTER)" "deleting=run:Deleting the machine"
+contains "ended: back to the machine"       "$(row AFTER)" "kept=panel:Ready to play"
+contains "  with nothing asked"             "$(row AFTER)" "asked=false"
 ENGINE=""
 
 echo "7g. Refresh is a popup over the whole window, gone once the page is redrawn"
