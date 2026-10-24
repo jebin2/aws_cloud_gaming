@@ -2049,7 +2049,8 @@ async function runInDialog(opts) {
       word.oninput = () => { go.disabled = word.value.trim() !== asking.word; };
       word.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); if (!go.disabled) go.click(); } };
       word.focus();
-    } else go.focus();
+    // Enter on a destructive ask is Cancel: the safe answer is the default.
+    } else (asking.danger && !$('rundlg-cancel').hidden ? $('rundlg-cancel') : go).focus();
     const yes = await new Promise(resolve => {
       runDlgConfirm = resolve;
       go.onclick = e => { e.preventDefault(); if (!go.disabled) resolve(true); };
@@ -5072,7 +5073,7 @@ const serverForm = (() => {
   const wrap = el('div', 'flex flex-col gap-space-sm mt-space-sm');
   const field = (label, id, placeholder, note) => {
     const l = el('label', 'block font-body-sm text-body-sm text-on-surface-variant', label);
-    const i = el('input', 'mt-space-xs w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface');
+    const i = el('input', 'mt-space-xs field');
     i.id = id; i.placeholder = placeholder; i.autocomplete = 'off'; i.spellcheck = false;
     l.append(i);
     if (note) l.append(el('span', 'block font-code-sm text-code-sm text-outline mt-0.5', note));

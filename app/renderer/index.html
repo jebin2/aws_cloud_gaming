@@ -587,7 +587,7 @@
          and handed to cg, so there is one question and not two. -->
     <label class="block mt-space-md" id="confirm-word-row" hidden>
       <span class="font-code-sm text-code-sm text-outline" id="confirm-word-label"></span>
-      <input class="mt-space-xs w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface" id="confirm-word" autocomplete="off" spellcheck="false">
+      <input class="mt-space-xs field" id="confirm-word" autocomplete="off" spellcheck="false">
     </label>
     <menu class="dlg-actions">
       <button value="no" class="btn" id="confirm-no">Cancel</button>
@@ -602,7 +602,7 @@
     <p class="dlg-title" id="pwdlg-title">Password</p>
     <p class="dlg-sub" id="pwdlg-sub"></p>
     <input id="pwdlg-input" type="password" autocomplete="off" spellcheck="false"
-           class="mt-space-md w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
+           class="mt-space-md field">
     <menu class="dlg-actions">
       <button value="no" class="btn" id="pwdlg-no">Cancel</button>
       <button value="yes" class="btn btn-primary" id="pwdlg-yes" disabled>Continue</button>
@@ -614,7 +614,7 @@
   <form method="dialog">
     <p class="dlg-title mb-space-md" id="ask-prompt"></p>
     <input id="ask-input" autocomplete="off" spellcheck="false"
-           class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
+           class="field">
     <!-- cg says in the ask event which answers it will accept. When it does,
          the answer is a CHOICE and typing it into a free-text box is both
          harder and easier to get wrong - a build asking "choice [1]:" with a
@@ -637,10 +637,10 @@
   </p>
   <label class="font-code-sm text-code-sm text-outline" for="awskey-id">Access key ID</label>
   <input id="awskey-id" autocomplete="off" spellcheck="false" placeholder="AKIA…"
-         class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface mb-space-sm">
+         class="field mb-space-sm">
   <label class="font-code-sm text-code-sm text-outline" for="awskey-secret">Secret access key</label>
   <input id="awskey-secret" type="password" autocomplete="off" spellcheck="false"
-         class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
+         class="field">
   <pre class="font-code-sm text-code-sm text-error whitespace-pre-wrap mt-space-sm max-h-[30vh] overflow-auto" id="awskey-err" hidden></pre>
   <menu class="dlg-actions">
     <button class="btn" id="awskey-cancel">Cancel</button>
@@ -678,7 +678,7 @@ The ids are the old first-run screen's, whose steps these are. -->
   <label class="block mb-space-md" id="rundlg-word-row" hidden>
     <span class="font-code-sm text-code-sm text-outline" id="rundlg-word-label"></span>
     <input id="rundlg-word" autocomplete="off" spellcheck="false"
-           class="mt-space-xs w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
+           class="mt-space-xs field">
   </label>
   <button class="btn btn-primary mb-space-md" id="rundlg-link" hidden>
     <span class="material-symbols-outlined text-[16px]" data-icon="public">&#xe80b;</span>Open the sign-in page
@@ -709,13 +709,13 @@ The ids are the old first-run screen's, whose steps these are. -->
          a region gives you zero of everything in it. -->
     <label class="font-code-sm text-code-sm text-outline" for="quota-where">Location</label>
     <select id="quota-where"
-            class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-md text-code-md text-on-surface"></select>
+            class="field w-auto py-space-xs cursor-pointer"></select>
   </div>
 
   <div class="flex items-center gap-space-sm mt-space-sm">
     <label class="font-code-sm text-code-sm text-outline" for="quota-kind">Limit</label>
     <select id="quota-kind"
-            class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-md text-code-md text-on-surface">
+            class="field w-auto py-space-xs cursor-pointer">
       <option value="">Pick one…</option>
       <option value="ondemand">On-demand</option>
       <option value="spot">Spot</option>
@@ -817,7 +817,7 @@ The ids are the old first-run screen's, whose steps these are. -->
   <div class="flex items-center gap-space-sm">
     <label class="font-code-sm text-code-sm text-outline" for="optin-pick">Location</label>
     <select id="optin-pick"
-            class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-md text-code-md text-on-surface">
+            class="field w-auto py-space-xs cursor-pointer">
       <option value="">Pick one…</option>
     </select>
   </div>
@@ -841,7 +841,7 @@ The ids are the old first-run screen's, whose steps these are. -->
   <p class="dlg-sub mb-space-md" id="onefield-note"></p>
   <label class="font-code-sm text-code-sm text-outline" for="onefield-input" id="onefield-label">Value</label>
   <input id="onefield-input" type="password" autocomplete="off" spellcheck="false"
-         class="w-full bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-code-md text-code-md text-on-surface">
+         class="field">
   <pre class="font-code-sm text-code-sm text-error whitespace-pre-wrap mt-space-sm max-h-[30vh] overflow-auto" id="onefield-err" hidden></pre>
   <menu class="dlg-actions">
     <button class="btn" id="onefield-cancel">Cancel</button>

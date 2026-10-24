@@ -367,6 +367,8 @@ cat > "$T/r/probe.js" <<'PROBE'
     await wait(50);
     out.push('REMOVE ASK | ' + $$('rundlg').open + ' ' + txt($$('rundlg-title')) + ' / ' + txt($$('rundlg-status')) + ' / ' + vis('rundlg'));
     out.push('REMOVE ASK BUSY | ' + !$$('rundlg-busy').hidden);
+    // Destructive: Enter is Cancel - the safe answer is the one with focus.
+    out.push('REMOVE FOCUS | ' + document.activeElement.id);
     const escR = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     $$('rundlg').dispatchEvent(escR);
     out.push('REMOVE ESC | stopped=' + escR.defaultPrevented);
@@ -593,6 +595,7 @@ check    "remove asks in its own dialog"         "$(row 'REMOVE ASK')" "REMOVE A
 check    "  Cancel runs nothing"                 "$(row 'REMOVE CANCEL')" "REMOVE CANCEL | false ran=0"
 check    "  while it runs, nothing to press - no Cancel" "$(row 'REMOVE RUNNING')" "REMOVE RUNNING | Revoking SSH key… / buttons= busy=true"
 check    "  asking shows no loading"             "$(row 'REMOVE ASK BUSY')" "REMOVE ASK BUSY | false"
+check    "  and opens on Cancel, not Remove"      "$(row 'REMOVE FOCUS')" "REMOVE FOCUS | rundlg-cancel"
 check    "  and Esc does not close it"           "$(row 'REMOVE ESC')" "REMOVE ESC | stopped=true"
 check    "removed, it keeps loading while the list is read again" "$(row 'REMOVE UPDATING')" "REMOVE UPDATING | true Updating… busy=true view=build buttons="
 check    "  then says Removed, with Home already without it" "$(row 'REMOVE DONE')" "REMOVE DONE | true ✓Removed. busy=false view=dashboard card=false"

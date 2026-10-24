@@ -15,10 +15,17 @@ select option { background: theme(colors.surface-container-high); color: theme(c
    else stays inline utility classes, exactly as the export had them. */
 @layer components {
   /* Every popup, one look: the same frame, title, subtitle and button row. */
-  .dlg { @apply rounded-xl bg-surface-container-low text-on-surface border border-surface-variant p-space-xl; }
+  /* Lifted off the page it covers: a shade lighter than its cards, and a shadow. */
+  .dlg { @apply rounded-xl bg-surface-container text-on-surface border border-surface-variant/70 p-space-xl
+                shadow-[0_24px_64px_rgb(0_0_0/0.55)] outline-none; }
   .dlg-title { @apply font-headline-md text-headline-md; }
-  .dlg-sub { @apply font-body-sm text-body-sm text-on-surface-variant mt-space-xs; }
-  .dlg-actions { @apply flex justify-end gap-space-sm mt-space-lg p-0; }
+  .dlg-sub { @apply font-body-sm text-body-sm text-on-surface-variant mt-space-sm leading-relaxed; }
+  .dlg-actions { @apply flex justify-end gap-space-sm mt-space-xl p-0; }
+  /* Every text field in a dialog: one look, and a soft ring in the theme's
+     green when it has focus - the browser's own was a hard white border. */
+  .field { @apply w-full bg-surface border border-surface-variant rounded px-space-md py-space-sm
+                  font-body-md text-body-md text-on-surface placeholder:text-outline
+                  outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/25; }
   /* A section tab in the top bar: a pill, the open one filled in light. */
   .nav-item {
     @apply flex items-center px-space-md py-space-sm rounded-full transition-colors whitespace-nowrap
