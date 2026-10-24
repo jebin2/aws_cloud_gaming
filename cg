@@ -1612,7 +1612,9 @@ cmd_games() {
     printf "RATE\t%s\n" "$(( (r2 - r1) / 3 ))"
   ' 2>/dev/null) || die "could not read the box"
 
-  local idx; idx=$(library_index 2>/dev/null || echo '"'"'{"apps":[]}'"'"')
+  # No index: none of the games are saved - said as the JSON it would be. The
+  # quoting here once came out as '{apps:[]}', which no reader could parse.
+  local idx; idx=$(library_index 2>/dev/null || echo '{"apps":[]}')
   RAW="$raw" IDX="$idx" python3 -c '
 import json, os, sys
 GB = 1073741824.0
