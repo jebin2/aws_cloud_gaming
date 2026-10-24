@@ -145,6 +145,9 @@ echo "codename=${VERSION_CODENAME:-}"; echo "pretty=${PRETTY_NAME:-}"
 echo "ubuntu_version=$(ubuntu_release)"
 echo "debian_codename=${DEBIAN_CODENAME:-${VERSION_CODENAME:-}}"
 echo "arch=$(uname -m)"; echo "user=$(id -un)"; echo "hostname=$(hostname 2>/dev/null)"
+# The machine itself, whatever address or name reaches it: kept on this laptop
+# only as a hash, so the same machine is never added twice.
+echo "machine_id=$(cat /etc/machine-id 2>/dev/null || cat /var/lib/dbus/machine-id 2>/dev/null)"
 # By device class, not anywhere on the line: "3d" also matched the PCI address
 # 3d:00.0 of an NVMe drive.
 echo "gpu=$(lspci 2>/dev/null | grep -E " (VGA compatible|3D|Display) controller: " | sed -E "s/^[0-9a-f:.]+ [^:]+: //" | paste -sd";" -)"
@@ -216,6 +219,25 @@ host_name_ok() {
   fi
 }
 
+# host_machine_key <facts> - who the machine is, as a short hash of its own
+# machine id: an IP, a tailnet name and a hostname can all reach one machine,
+# and the raw id is not this laptop's to keep. Empty when it has none.
+host_machine_key() {
+  local m; m=$(_fact "$1" machine_id)
+  [[ -n $m ]] && printf '%s' "$m" | sha256sum | cut -c1-16
+}
+
+# host_added_as <key> <target> - the name a machine is already added under:
+# the same machine, by its key, or the same ssh address. Empty when it is new.
+host_added_as() {
+  local n
+  for n in $(host_names); do
+    if [[ -n $1 && $(host_get "$n" machine) == "$1" ]] || [[ $(host_get "$n" ssh) == "$2" ]]; then
+      printf '%s' "$n"; return 0
+    fi
+  done
+}
+
 # A name from the machine's own hostname: what Tailscale would call it.
 host_name_from() { # host_name_from <hostname>
   local n=${1,,}; n=${n%%.*}; n=$(sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//' <<<"$n")
@@ -223,7 +245,7 @@ host_name_from() { # host_name_from <hostname>
 }
 
 cmd_host_add() { # cmd_host_add [name] --ssh <target>
-  local name="" target="" why facts pw rc
+  local name="" target="" why facts pw rc key
   while (( $# )); do
     # --ssh with nothing after it: `shift 2` with one argument shifts none, and
     # the loop spun forever at full CPU instead of saying how to use it.
@@ -232,6 +254,9 @@ cmd_host_add() { # cmd_host_add [name] --ssh <target>
                -*) shift ;; *) name=$1; shift ;; esac
   done
   [[ -n $target ]] || die "usage: cg host add [name] --ssh <user@address>"
+  # The same address: known before anything is asked, a password least of all.
+  why=$(host_added_as "" "$target")
+  [[ -z $why ]] || die "$target is already added, as '$why'"
   if [[ -n $name ]]; then
     why=$(host_name_ok "$name") || die "$why"
     [[ -z $(host_get "$name" ssh) ]] || die "there is already a machine called '$name'"
@@ -255,12 +280,17 @@ cmd_host_add() { # cmd_host_add [name] --ssh <target>
   fi
   facts=$(host_facts "$target")
   [[ -n $facts ]] || die "connected, but $target did not say what it is"
+  # The same machine by another address - its IP once, its tailnet name now -
+  # added twice was two cards, two setups and two of cg's keys on one machine.
+  key=$(host_machine_key "$facts")
+  why=$(host_added_as "$key" "$target")
+  [[ -z $why ]] || die "$target is a machine already added, as '$why' - the same machine, by another address"
   if [[ -z $name ]]; then
     name=$(host_name_from "$(_fact "$facts" hostname)")
     why=$(host_name_ok "$name") || die "its own name, '$name', will not do ($why) - give it one"
     [[ -z $(host_get "$name" ssh) ]] || die "there is already a machine called '$name' - give this one another name"
   fi
-  host_set "$name" ssh "$target" os "$(_fact "$facts" os)"
+  host_set "$name" ssh "$target" os "$(_fact "$facts" os)" machine "$key"
   if [[ $(_fact "$facts" os) == Windows ]]; then
     log "Windows - added. Setting a Windows machine up is not built yet (docs/own-machine-plan.md)."
     return 0
@@ -293,11 +323,15 @@ host_ts_ip() { # host_ts_ip <ip-the-machine-reports>
 # the AWS box (lib/build.sh): its log followed, the Sunshine login, Moonlight
 # paired, Steam. Safe to run again.
 cmd_host_setup() {
-  local name=${1:-} t facts fam pw="" key="" f how
+  local name=${1:-} t facts fam pw="" key="" f how mk
   [[ -n $name ]] || die "usage: cg host setup <name>"
   t=$(host_get "$name" ssh); [[ -n $t ]] || die "no machine called '$name' - add it: cg host add $name --ssh <user@address>"
   say "asking $name what it is"
   facts=$(host_facts "$t"); [[ -n $facts ]] || die "$t did not answer over ssh"
+  # A machine added before cg knew who machines are: learned now, so adding
+  # it again by another address is caught.
+  mk=$(host_machine_key "$facts")
+  [[ -n $mk && -z $(host_get "$name" machine) ]] && host_set "$name" machine "$mk"
   [[ $(_fact "$facts" os) == Windows ]] && die "setting a Windows machine up is not built yet - see docs/own-machine-plan.md"
   fam=$(host_family "$facts")
   [[ $fam != unsupported ]] || die "cg sets up Ubuntu, Debian, Arch and Fedora; $(_fact "$facts" pretty) is not one."

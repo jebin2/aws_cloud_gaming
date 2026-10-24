@@ -160,8 +160,22 @@ lacks    "the password is on no command line" "$(cat "$T/ssh.log")" "letmein"
 contains "it is named after its own hostname" "$out" "added 'living-room'"
 check    "  and saved"                        "$(field living-room ssh)" "me@server"
 check    "every later ssh uses cg's key"      "$(grep -v PubkeyAuthentication=no "$T/ssh.log" | grep -vc -- "-i $XDG_CONFIG_HOME/cg/ssh/id_ed25519")" "0"
+rm -f "$T/ssh.log"
 out=$(printf 'letmein\n' | EXTRA="KEYLESS=1 CG_JSON=1" cgh add --ssh me@server)
-contains "the same machine twice is refused"  "$out" "already a machine called 'living-room'"
+contains "the same address twice is refused"  "$out" "me@server is already added, as 'living-room'"
+check    "  before a password is asked"       "$(cat "$T/ssh.log" 2>/dev/null | grep -c PubkeyAuthentication=no)" "0"
+# The same machine by another address and another name: its IP once, its
+# tailnet name now. It was added twice - two cards, two of cg's keys on it.
+facts <<<"$LINUX
+hostname=Living-Room.local
+machine_id=0123456789abcdef0123456789abcdef"
+EXTRA="CG_JSON=1" cgh add den --ssh me@den >/dev/null
+check    "who a machine is, kept as a hash"   "$(field den machine)" "$(printf 0123456789abcdef0123456789abcdef | sha256sum | cut -c1-16)"
+lacks    "  never the raw id"                 "$(cat "$XDG_CONFIG_HOME/cg/hosts.json")" "0123456789abcdef0123456789abcdef"
+out=$(EXTRA="CG_JSON=1" cgh add study --ssh me@100.64.0.9)
+contains "the same machine by another address is refused" "$out" "a machine already added, as 'den'"
+check    "  and not added"                    "$(field study ssh)" ""
+cgh remove den >/dev/null
 out=$(cgh remove living-room)
 contains "removing it takes cg's key off"     "$out" "took cg's key off it"
 contains "  that one line, nothing else"      "$(cat "$T/ssh.log")" "grep -vxF"
