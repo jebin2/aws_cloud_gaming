@@ -1153,6 +1153,10 @@ BUILD="window.__after = async () => {
     .map(r => r.dataset.step + '=' + r.dataset.state).join(',');
   const mid = 'mid=' + st() + ' | title=' + document.getElementById('b-strip-title').textContent
     + ' | meta=' + document.getElementById('b-strip-meta').textContent
+    + ' | now=' + document.getElementById('b-run-now').textContent
+    + ' | count=' + document.getElementById('b-run-step').textContent
+    + ' | tiles=' + (document.getElementById('b-run-tiles').hidden ? 'hidden'
+      : document.getElementById('b-run-tiles').innerText.replace(/\\s+/g, ' '))
     + ' | text=' + document.getElementById('b-steps').innerText.replace(/\\s+/g, ' ')
     + ' | plan=' + !document.getElementById('b-plan').hidden;
   window.__emit(id, { t: 'line', kind: 'fail', text: 'the driver did not install' });
@@ -1160,7 +1164,8 @@ BUILD="window.__after = async () => {
   await new Promise(r => setTimeout(r, 30));
   const failed = 'failed=' + st() + ' | head=' + document.getElementById('b-strip-title').textContent
     + ' | acts=' + [...document.querySelectorAll('#b-run-acts button')].map(b => b.textContent.trim()).join(',')
-    + ' | panelIn=' + (document.getElementById('b-fail').closest('[data-step]') || {}).dataset?.step;
+    + ' | panelIn=' + (document.getElementById('b-fail').closest('[data-step]') || {}).dataset?.step
+    + ' | headed=' + !document.getElementById('b-run-head').hidden + ',' + !document.getElementById('b-run-tiles').hidden;
   return 'plan=' + plan + ' | chip=' + chip + ' | ask=' + ask + ' || ' + mid + ' || ' + failed;
 };"
 ENGINE="$BUILD"
@@ -1178,11 +1183,16 @@ contains "    the box's steps as one"         "$(row AFTER)" "Installing the sof
 contains "    with the line it is on"         "$(row AFTER)" "nvidia-driver-580 unpacked"
 contains "  the heading is the build"         "$(row AFTER)" "title=Building"
 contains "  with the rate in it"              "$(row AFTER)" "₹16.44 an hour"
+contains "  the step it is on, large"         "$(row AFTER)" "now=Installing the software |"
+contains "  and how far through"              "$(row AFTER)" "count=Step 5 of 8. You can leave this screen; the build carries on."
+contains "  time against the usual build"     "$(row AFTER)" "tiles=Elapsed under a minute Usually about 20 min"
+contains "  the bill since the rental"        "$(row AFTER)" "Cost so far ₹0.00 Billing since"
 contains "  and the plan is put away"         "$(row AFTER)" "plan=false"
 contains "a failure stops at its step"        "$(row AFTER)" "failed=0=done,1=done,2=done,3=done,4=failed,5=skipped"
 contains "  the heading says so"              "$(row AFTER)" "head=Build failed"
 contains "  the reason sits in that step"     "$(row AFTER)" "panelIn=4"
 contains "  with try again, or close"         "$(row AFTER)" "acts=Try again,Close"
+contains "  and no step heading or tiles"     "$(row AFTER)" "headed=false,false"
 ENGINE=""
 
 echo "7b. a rental that fails bills nothing; a build that finishes is ready to play"

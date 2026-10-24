@@ -179,15 +179,35 @@
     <div class="p-space-lg rounded-lg bg-surface-container-low fit-view" id="b-strip" hidden>
       <div class="flex items-baseline justify-between gap-space-md">
         <p class="font-headline-lg text-headline-lg" id="b-strip-title">Building</p>
+        <p class="font-label-caps text-label-caps uppercase text-primary min-w-0" id="b-run-kicker" hidden></p>
         <span class="font-mono text-body-sm text-on-surface-variant shrink-0" id="b-strip-meta"></span>
       </div>
       <p class="font-body-sm text-body-sm text-outline mt-space-xs" id="b-run-sum"></p>
+      <!-- While a build or a session starts: the step it is on, large, how far
+           through the list that is, and the two things worth watching - the
+           time against the last build, and the bill since the machine was rented. -->
+      <div id="b-run-head" hidden>
+        <p class="font-headline-xl text-headline-xl mt-space-sm" id="b-run-now"></p>
+        <p class="font-body-lg text-body-lg text-on-surface-variant mt-space-sm" id="b-run-step"></p>
+      </div>
       <!-- Time against the usual length of a build - never a share of steps,
            which cg does not announce in advance. -->
       <div class="h-2 rounded-full bg-surface-container overflow-hidden mt-space-md" id="b-bar-track">
         <div class="h-full bg-primary rounded-full" id="b-prog" style="width:0%"></div>
       </div>
       <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm truncate" id="b-prog-step" hidden></p>
+      <div class="grid grid-cols-2 gap-space-sm mt-space-md" id="b-run-tiles" hidden>
+        <div class="p-space-md rounded bg-surface-container flex flex-col gap-0.5">
+          <span class="font-body-sm text-body-sm text-outline">Elapsed</span>
+          <span class="font-mono text-headline-md" id="b-tile-time"></span>
+          <span class="font-body-sm text-body-sm text-on-surface-variant" id="b-tile-time-sub"></span>
+        </div>
+        <div class="p-space-md rounded bg-surface-container flex flex-col gap-0.5">
+          <span class="font-body-sm text-body-sm text-outline">Cost so far</span>
+          <span class="font-mono text-headline-md" id="b-tile-cost"></span>
+          <span class="font-body-sm text-body-sm text-on-surface-variant" id="b-tile-cost-sub"></span>
+        </div>
+      </div>
 
       <div class="flex flex-col mt-space-lg" id="b-steps"></div>
 

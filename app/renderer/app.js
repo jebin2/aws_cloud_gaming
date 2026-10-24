@@ -3931,6 +3931,20 @@ async function cancelBuild() {
   for (const [id, j] of jobs) if (j.cmd[0] === 'init') window.cg.cancel(id);
 }
 
+// A step's name as the run shows it: restoring games says how much, or is the
+// restart when there are none; the launch says when billing began.
+function runStepName(r, def, state) {
+  let name = state === 'done' ? def.done : def.doing;
+  if (def.games) {
+    name = !r.games ? (state === 'done' ? 'Restarted into the desktop' : 'Restarting into the desktop')
+      : state === 'done' ? name : `${name} · ${r.gamesGb.toFixed(1)} GB`;
+  }
+  if (def.bills && state === 'done' && r.billFrom) {
+    name += ` · billing from ${new Date(r.billFrom).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  return name;
+}
+
 function paintRun() {
   paintBuildMode();
   const r = run || machineCard();
@@ -3963,8 +3977,42 @@ function paintRun() {
         .filter(Boolean).join(' · ')
     : '';
   $('b-run-sum').hidden = !$('b-run-sum').textContent;
-  // Time against the usual length, and only while it runs.
-  const expect = RUN_EXPECT[r.kind];
+  // While a build or a session gets going, the step it is on is the heading,
+  // and what the run is - building, where, on what - sits above it, small.
+  // Not once Playing: that heading is the session, and the step says the rest.
+  const defs = r.kind === 'init' ? BUILD_STEPS : r.kind === 'open' ? OPEN_STEPS : null;
+  const going = defs && r.state === 'running' && !r.cancelling;
+  const at = going ? Math.max(0, r.steps.findIndex(x => x && !x.end)) : -1;
+  const headed = at >= 0 && !defs[at].stream;
+  $('b-run-head').hidden = !headed;
+  $('b-run-kicker').hidden = !headed;
+  title.hidden = headed;
+  if (headed) {
+    $('b-run-kicker').textContent = [title.textContent, $('b-run-sum').textContent].filter(Boolean).join(' · ');
+    $('b-run-sum').hidden = true;
+    $('b-run-now').textContent = runStepName(r, defs[at], 'running');
+    $('b-run-step').textContent = `Step ${at + 1} of ${defs.length}.`
+      + (r.kind === 'init' ? ' You can leave this screen; the build carries on.' : '');
+  }
+  // A build's time and bill as two tiles: the time against the last build cg
+  // measured, the bill from the moment the machine was rented.
+  const lastMin = ((statusNow || {}).build || {}).last_min;
+  const tiles = headed && r.kind === 'init';
+  $('b-run-tiles').hidden = !tiles;
+  $('b-strip-meta').hidden = tiles;
+  if (tiles) {
+    $('b-tile-time').textContent = mins(now - r.start);
+    $('b-tile-time-sub').textContent = lastMin != null ? `Last build took ${lastMin} min`
+      : `Usually about ${RUN_EXPECT.init} min`;
+    $('b-tile-cost').textContent = rs(so != null ? so : 0);
+    $('b-tile-cost-sub').textContent = [
+      r.billFrom ? `Billing since ${new Date(r.billFrom).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+        : 'Starts when the machine launches',
+      r.rate != null ? `${rsh(r.rate)} an hour` : null,
+    ].filter(Boolean).join(' · ');
+  }
+  // Time against the last build, else the usual length, and only while it runs.
+  const expect = r.kind === 'init' && lastMin || RUN_EXPECT[r.kind];
   $('b-bar-track').hidden = !(r.state === 'running' && expect);
   if (expect) $('b-prog').style.width = `${Math.min(95, ((now - r.start) / 60000 / expect) * 100).toFixed(1)}%`;
 
@@ -3977,7 +4025,6 @@ function paintRun() {
   if (r.state === 'running' || machine || r.cancelling) fail.classList.add('hidden');
   else if (buildFailures.length) fail.classList.remove('hidden');
   wrap.textContent = '';
-  const defs = r.kind === 'init' ? BUILD_STEPS : r.kind === 'open' ? OPEN_STEPS : null;
   const rows = defs
     ? defs.map((d, i) => ({ def: d, st: r.steps[i] }))
     : r.steps.map(st => ({ def: null, st }));
@@ -4003,14 +4050,7 @@ function paintRun() {
     body.className = 'min-w-0 flex-1 ' + (state === 'running' || state === 'failed' ? 'pb-space-lg' : 'pb-space-sm');
     const top = document.createElement('div');
     top.className = 'flex items-baseline justify-between gap-space-sm';
-    let name = def ? (state === 'done' ? def.done : def.doing) : st.name;
-    if (def && def.games) {
-      name = !r.games ? (state === 'done' ? 'Restarted into the desktop' : 'Restarting into the desktop')
-        : state === 'done' ? name : `${name} · ${r.gamesGb.toFixed(1)} GB`;
-    }
-    if (def && def.bills && state === 'done' && r.billFrom) {
-      name += ` · billing from ${new Date(r.billFrom).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    }
+    const name = def ? runStepName(r, def, state) : st.name;
     top.append(Object.assign(document.createElement('span'), {
       className: 'leading-6 font-body-md text-body-md ' + (state === 'done' ? 'text-on-surface-variant'
         : state === 'locked' || state === 'skipped' ? 'text-outline'
