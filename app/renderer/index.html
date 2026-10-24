@@ -305,8 +305,9 @@
         <div class="flex flex-col gap-space-md">
           <div class="p-space-lg rounded-xl bg-surface-container-low" id="lib-keepfor-row" hidden>
             <p class="section-label mb-0">Keep saved games</p>
-            <select id="lib-keepfor" aria-label="Keep saved games for"
-                    class="w-full mt-space-sm bg-surface-container-high border border-transparent rounded px-space-md py-space-sm font-body-sm text-body-sm font-medium text-on-surface cursor-pointer hover:bg-surface-container-highest"></select>
+            <!-- A pill per choice, the one in force lit: every choice in sight,
+                 where a dropdown hid four of five behind a system list. -->
+            <div class="seg grid grid-cols-3 w-full rounded-xl bg-surface mt-space-sm" id="lib-keepfor" role="radiogroup" aria-label="Keep saved games for"></div>
             <p class="font-body-sm text-body-sm text-outline mt-space-sm" id="lib-keep"></p>
           </div>
           <!-- Left behind by a save that never finished: billed, and no use. -->

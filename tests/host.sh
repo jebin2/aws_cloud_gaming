@@ -383,7 +383,8 @@ contains "a stream over in seconds says so" "$out" "the stream ended after"
 contains "  with Moonlight's own warning"  "$out" "Your client GPU doesn't support H.264 decoding"
 lacks    "  not its decoder probing"       "$out" "libplacebo"
 contains "  and where the rest is"         "$out" "cg/moonlight.log"
-contains "  in seconds, not 0m"            "$out" "session ended after 0s"
+# Seconds, whatever this machine's load makes them - not minutes rounded to 0m.
+check    "  in seconds, not 0m"            "$(grep -cE 'session ended after [0-9]+s$' <<<"$out")" "1"
 # As cg runs it: a process whose command line is cg's, which is the only kind
 # the session lock believes - the test shell above is not one, and that is how
 # a session that ended by killing itself went unseen.

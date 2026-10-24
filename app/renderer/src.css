@@ -61,7 +61,7 @@ select option { background: theme(colors.surface-container-high); color: theme(c
   .seg { @apply inline-flex flex-wrap items-center gap-1 p-1 rounded-full bg-surface-container-low; }
   .seg-item { @apply inline-flex items-center gap-space-sm px-space-md py-1.5 rounded-full font-body-sm text-body-sm
                      text-on-surface-variant hover:text-on-surface transition-colors; }
-  .seg-item[aria-selected="true"] { @apply bg-surface-container-highest text-on-surface font-medium; }
+  .seg-item[aria-selected="true"], .seg-item[aria-checked="true"] { @apply bg-surface-container-highest text-on-surface font-medium; }
   .seg-dot { @apply w-2 h-2 rounded-full bg-outline/60; }
   .seg-dot.up { @apply bg-primary; }
   .seg-dot.warn { @apply bg-tertiary; }

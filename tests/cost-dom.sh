@@ -134,6 +134,14 @@ cat > "$T/r/probe.js" <<'PROBE'
     paintStatus({ box: { id: 'i-1', state: 'running', type: 'g6.xlarge', lifecycle: 'spot' }, rates: {}, budget: {} });
     paintStatus({ box: { id: 'i-1', state: 'running', type: 'g6.xlarge', lifecycle: 'spot' }, rates: {}, budget: {} });
     out.push('RUNNING | ' + billChanges().map(c => c.what).join(','));
+    // With the app closed while a machine ran and auto-stop ended it: the
+    // watchdog's last-seen mark, later than the check, says so. Earlier, not.
+    paintCost(COST({}));
+    paintLibrary({ games: [], login: { present: false }, last_seen: new Date(Date.now() - 86400000).toISOString() });
+    out.push('SEEN BEFORE | ' + billChanges().length);
+    paintLibrary({ games: [], login: { present: false }, last_seen: new Date(Date.now() + 1000).toISOString() });
+    paintLibrary({ games: [], login: { present: false }, last_seen: new Date(Date.now() + 2000).toISOString() });
+    out.push('SEEN AFTER | ' + billChanges().map(c => c.what).join(',') + ' stale=' + document.getElementById('refresh-age').classList.contains('out-of-date'));
     paintCost(COST({}));
     // Status arriving after a Refresh reaches both copies of the card, not just Home's.
     statusNow = null; paintCostPage();
@@ -237,6 +245,8 @@ contains "  it beats"                    "$(row BEAT)" "anim=cg-heartbeat"
 contains "  can be hovered"              "$(row BEAT)" "pointer=auto"
 contains "a new check clears it"          "$(row RECHECKED)" "stale=false"
 check    "a running machine counts, once" "$(row RUNNING)" "RUNNING | a machine was running"
+check    "a machine from before the check does not" "$(row 'SEEN BEFORE')" "SEEN BEFORE | 0"
+check    "one that ran after it, with the app closed, does - once" "$(row 'SEEN AFTER')" "SEEN AFTER | a machine was running stale=true"
 contains "the last bill comes back at start" "$(row RESTORED)" "RESTORED | ₹167"
 # stale exactly when it is over a day old (on the 1st, a kept bill is younger).
 r=$(row RESTORED); check "  marked with its age" "$(sed -E 's/.*stale=([a-z]+).*/\1/' <<<"$r")" "$(sed -E 's/.*expect=([a-z]+).*/\1/' <<<"$r")"

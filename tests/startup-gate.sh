@@ -1601,7 +1601,7 @@ B11="window.__after = async () => {
   const rowText = () => [...document.querySelectorAll('#lib-rows [data-game]')]
     .map(c => [...c.querySelectorAll('[data-f]')].map(x => x.textContent.trim()).join(' / ')).join(' || ');
   const table = 'rows=' + rowText() + ' foot=' + document.getElementById('lib-foot').textContent.replace(/\\s+/g, ' ')
-    + ' keepfor=' + document.getElementById('lib-keepfor').value + ' note=' + document.getElementById('lib-keep').textContent;
+    + ' keepfor=' + (document.querySelector('#lib-keepfor [aria-checked=true]') || { dataset: {} }).dataset.value + ' note=' + document.getElementById('lib-keep').textContent;
   let asked = null;
   window.askConfirm = async o => { asked = o; return true; };
   const answered = [];
@@ -1623,8 +1623,8 @@ B11="window.__after = async () => {
   const reset = 'ran=' + window.__ran.slice(-1)[0] + ' popup=' + document.getElementById('refdlg-title').textContent;
   window.__emit(id, { t: 'exit', rc: 0 });
   await wait(); await wait();
-  const sel = document.getElementById('lib-keepfor');
-  sel.value = '30'; sel.dispatchEvent(new Event('change'));
+  // A pill per choice: pressing 30 days applies it.
+  document.querySelector('#lib-keepfor [data-value=\"30\"]').click();
   await wait();
   const keep = 'ran=' + window.__ran.slice(-1)[0] + ' popup=' + document.getElementById('refdlg-title').textContent;
   const steps = () => [...document.querySelectorAll('#refdlg-list [data-step]')]

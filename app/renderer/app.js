@@ -496,10 +496,7 @@ function paintStatus(s) {
   statusAt = new Date().toISOString();
   const wasUp = statusNow && statusNow.box && statusNow.box.state === 'running';
   const isUp = s.box && ['running', 'pending'].includes(s.box.state);
-  const checkedAt = lastCost() && lastCost().at;
-  if (checkedAt && isUp && !billChangesSince(checkedAt).some(c => c.what === 'a machine was running')) {
-    noteBillChange('a machine was running');
-  }
+  if (isUp) noteMachineRan();
   // Ended outside the app - auto-stop, or the console - with no delete here.
   const justDeleted = billChanges().some(c => c.what === 'you deleted the machine'
                                          && Date.now() - Date.parse(c.at) < 15 * 60000);
@@ -1015,6 +1012,18 @@ function billChanges() {
 // At or after: the list is cleared when a check is made, so anything in it
 // came after that check - even within the same millisecond.
 const billChangesSince = iso => billChanges().filter(c => Date.parse(c.at) >= Date.parse(iso));
+// A machine ran after the bill was checked: once, however it is found out -
+// seen running here, or, with this app closed the whole time it ran and
+// auto-stop ending it, by the cloud watchdog's last-seen mark (`seen`), which
+// it moves every five minutes while a machine exists. Free: that mark arrives
+// with the saved games' read. The bill is never checked by itself - each check
+// is a paid call, and the bill runs a day behind anyway - the label only beats.
+function noteMachineRan(seen) {
+  const checkedAt = lastCost() && lastCost().at;
+  if (!checkedAt || (seen && Date.parse(seen) <= Date.parse(checkedAt))) return;
+  if (billChangesSince(checkedAt).some(c => c.what === 'a machine was running')) return;
+  noteBillChange('a machine was running');
+}
 function noteBillChange(what) {
   if (!lastCost()) return;              // nothing checked yet: nothing to go out of date
   const list = billChanges();
@@ -1303,6 +1312,7 @@ const elsewherePlaces = () => ((elsewhereNow && elsewhereNow.places) || []).filt
 
 function paintLibrary(d) {
   libNow = d;                 // first: Home lists these names as it redraws
+  if (d.last_seen) noteMachineRan(d.last_seen);
   paintPicker(d);
   paintArchiveCard(d);
   // cg says which it is; the app must never turn "I could not look" into
@@ -1385,18 +1395,22 @@ function paintLibraryPage() {
       + `${GB(games.reduce((a, g) => a + (g.bytes || 0), 0))} · ${r(usd)} a month`;
   }
 
-  // How long: one setting, chosen here and applied at once (cg library keep-for).
-  const sel = $('lib-keepfor');
+  // How long: one setting, chosen here and applied at once (cg library keep-for),
+  // a pill per choice. The one in force does nothing when pressed again.
+  const pills = $('lib-keepfor');
   $('lib-keepfor-row').hidden = days == null;
   if (days != null) {
     const opts = [7, 14, 30, 60, 0];
     if (!opts.includes(days)) opts.splice(-1, 0, days);
-    sel.textContent = '';
+    pills.textContent = '';
     for (const n of opts) {
-      sel.append(Object.assign(document.createElement('option'),
-        { value: String(n), textContent: n ? `${n} days` : 'Forever' }));
+      const b = el('button', 'seg-item justify-center rounded-lg', n ? `${n} days` : 'Forever');
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(n === days));
+      b.dataset.value = String(n);
+      b.onclick = () => { if (n !== days) keepFor(n); };
+      pills.append(b);
     }
-    sel.value = String(days);
   }
   $('lib-keep').textContent = !days ? 'Kept until you delete them.'
     : `Deleted ${days} days after last played. Keep restarts the timer for one game.`;
@@ -6606,11 +6620,10 @@ function watchdogDigest(text) {
 // for the word typed out - CLEAN, FORGET - which the ask dialog renders.
 // Keep for: the one rule for every saved game, saved and applied in one go
 // (cg library keep-for), so the dates in the table are the ones AWS acts on.
-$('lib-keepfor').onchange = async ev => {
-  const n = Number(ev.target.value);
+async function keepFor(n) {
   await libraryRun(['library', 'keep-for', String(n)],
                    n ? `Retention set to ${n} days` : 'Retention set to forever');
-};
+}
 $('lib-clean').onclick = async () => {
   const ok = await askConfirm({
     title: 'Delete leftover files?',
