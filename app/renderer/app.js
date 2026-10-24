@@ -1682,7 +1682,9 @@ function paintGuardStrip() { paintDash(); }
 
 // The three nets in plain words. The minutes are cg's, read from the settings
 // the watchdogs run with; the wording around them is the page's.
-const NET_NAME = { 1: 'When you quit', 2: 'On the machine', 3: 'In AWS' };
+// Which machine is said: with machines of your own beside it, "the machine"
+// read as homeserver. These guard the AWS one; yours are not stopped by cg.
+const NET_NAME = { 1: 'When you quit', 2: 'On the AWS machine', 3: 'In AWS' };
 function netWords(g, d) {
   if (g.layer === 1) return ['Closing Moonlight ends the session.', 'Runs on this device.'];
   if (g.layer === 2) {
@@ -1691,18 +1693,19 @@ function netWords(g, d) {
       ? ` Then ${sd.value === 'terminate' ? 'deleted' : 'stopped'}.` : '';
     // Every number is cg's (cg watcher), none is a fallback written here.
     return [`Shuts down after ${g.idle_min != null ? `${g.idle_min} min` : 'a period'} with no connection.${end}`,
-            'Runs on the machine.'];
+            'Runs on the AWS machine itself, so it works with this device off.'];
   }
   return [`${g.every_min != null ? `Every ${g.every_min} min: ` : ''}ends the machine after ${g.idle_min ?? '?'} min without a stream, or a shutdown stuck for `
           + `${g.stuck_min ?? '?'} min.`,
-          'Runs in AWS, independent of this device and the machine.'];
+          'Runs in AWS, independent of this device and the AWS machine.'];
 }
 function netState(g) {
   if (g.layer === 1) return ['Always on', 'pill-ok'];
   if (g.armed === true) return ['On', 'pill-ok'];
   if (g.armed === false) return ['Off', 'pill-bad'];
   // Layer 2 with no machine to live on is waiting, not failing.
-  return [g.state === 'no box' ? 'Idle' : 'Unreachable', ''];
+  // No AWS machine for it to live on: waiting, not off - "Idle" read as a fault.
+  return [g.state === 'no box' ? 'Waits for a machine' : 'Unreachable', ''];
 }
 
 function paintGuards(d) {
@@ -1749,7 +1752,7 @@ function paintGuards(d) {
     row.dataset.layer = g.layer;
     row.innerHTML = `
       <span class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center font-body-md text-body-md font-semibold ${tone === 'pill-bad' ? 'bg-error/15 text-error' : 'bg-primary/15 text-primary'}"></span>
-      <span class="font-headline-md text-headline-md basis-44 grow-0 shrink-0 whitespace-nowrap"></span>
+      <span class="font-headline-md text-headline-md basis-56 grow-0 shrink-0 whitespace-nowrap"></span>
       <div class="flex-1 min-w-[14rem]">
         <p class="font-body-md text-body-md text-on-surface-variant"></p>
         <p class="font-body-sm text-body-sm text-outline mt-space-xs"></p>
@@ -4533,6 +4536,10 @@ function hostState(h) {
   if (!s.reachable && !s.online) return { title: 'Offline', tone: 'bad', sub: 'Powered off, asleep or disconnected.' };
   if (!s.sunshine) return { title: 'Not streaming', tone: 'bad', sub: 'Sunshine is not responding. Re-run setup to restart it.' };
   if (s.reachable && !s.desktop) return { title: 'No user session', tone: 'warn', sub: 'Sign in on the machine to start a desktop session.' };
+  // Streaming needs only the tailnet and Sunshine, so it is ready - but what
+  // the page says about it was read without SSH, and setup needs it back.
+  if (!s.reachable) return { title: 'Ready to play', tone: 'ok',
+    sub: 'The app cannot reach it over SSH, so these checks may be out of date. Re-run setup to let it back in.' };
   return { title: 'Ready to play', tone: 'ok', sub: '' };
 }
 
@@ -4766,8 +4773,10 @@ function hostDetail(h, failed) {
   if (log) {
     const box = el('details', 'p-space-lg rounded-xl bg-surface-container-low');
     box.open = setting || log.dataset.failed === 'yes';
+    const session = log.dataset.kind === 'session';
     box.append(el('summary', 'font-body-sm text-body-sm text-on-surface-variant cursor-pointer',
-                  setting ? 'Progress' : log.dataset.failed === 'yes' ? 'Error details' : 'Setup log'));
+                  setting ? 'Progress' : log.dataset.failed === 'yes' ? 'Error details'
+                    : session ? 'Last session' : 'Setup log'));
     box.append(log);
     card.append(box);
   }
@@ -4894,6 +4903,9 @@ async function playOn(name) {
   const log = hostLog(name);
   log.textContent = '';
   log.dataset.fresh = 'yes';
+  // The box holds whichever ran last, and is named for it.
+  log.dataset.kind = 'session';
+  delete log.dataset.failed;
   const { rc } = await runCg(['host', 'open', name], { collect: log.id, wantRc: true, onStart: paintHostCards });
   if (rc !== 0 && rc !== 130) { log.dataset.failed = 'yes'; note(`Stream from ${name} failed to start`, 'text-error'); }
   await refreshHosts(name);

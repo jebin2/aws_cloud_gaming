@@ -244,8 +244,31 @@ host_name_from() { # host_name_from <hostname>
   printf '%s' "${n:0:40}"
 }
 
+# host_let_in <target> - cg's key working on the machine, asking its password
+# once when it does not: the first time a machine is added, and again whenever
+# the key has gone from it - taken off by removing a second entry for the same
+# machine, or by hand. Setup used to need the key already there, so a machine
+# that lost it could only be removed and added again.
+host_let_in() {
+  local target=$1 pw rc
+  host_key_ensure || die "could not make cg's ssh key ($(host_key))"
+  host_ssh_raw "$target" exit 2>/dev/null && return 0
+  cg_can_ask || die "ssh $target did not connect with a key, and there is no one to ask for its password -
+       run this in a terminal, or make 'ssh $target' work with a key first (ssh-copy-id $target)"
+  log "cg's key does not let it in: its password, once, puts the key on it, and is not kept"
+  pw=$(cg_ask_secret host-ssh-password "  password for $target: ")
+  [[ -n $pw ]] || die "no password given - nothing was changed on $target"
+  host_key_install "$target" "$pw"; rc=$?
+  (( rc == 3 )) && die "logged in to $target, but cg's key did not stay in its ~/.ssh/authorized_keys - is that file or folder not yours to write?"
+  (( rc == 0 )) || die "$target did not let cg in with that password. Check the address, user and password -
+       or, if it takes keys only, make 'ssh $target' work first (ssh-copy-id $target)"
+  host_ssh_raw "$target" exit 2>/dev/null \
+    || die "cg's key is on $target, but it still does not let cg in with it - is PubkeyAuthentication off in its sshd_config?"
+  log "cg's key is on $target: no password from now on"
+}
+
 cmd_host_add() { # cmd_host_add [name] --ssh <target>
-  local name="" target="" why facts pw rc key
+  local name="" target="" why facts key
   while (( $# )); do
     # --ssh with nothing after it: `shift 2` with one argument shifts none, and
     # the loop spun forever at full CPU instead of saying how to use it.
@@ -261,23 +284,8 @@ cmd_host_add() { # cmd_host_add [name] --ssh <target>
     why=$(host_name_ok "$name") || die "$why"
     [[ -z $(host_get "$name" ssh) ]] || die "there is already a machine called '$name'"
   fi
-  host_key_ensure || die "could not make cg's ssh key ($(host_key))"
   say "reaching $target over ssh"
-  if ! host_ssh_raw "$target" exit 2>/dev/null; then
-    # Not in with a key: its password, once, to put cg's key on it.
-    cg_can_ask || die "ssh $target did not connect with a key, and there is no one to ask for its password -
-       run this in a terminal, or make 'ssh $target' work with a key first (ssh-copy-id $target)"
-    log "the first time: its password lets cg's own key in, and is not kept"
-    pw=$(cg_ask_secret host-ssh-password "  password for $target: ")
-    [[ -n $pw ]] || die "no password given - nothing was changed on $target"
-    host_key_install "$target" "$pw"; rc=$?
-    (( rc == 3 )) && die "logged in to $target, but cg's key did not stay in its ~/.ssh/authorized_keys - is that file or folder not yours to write?"
-    (( rc == 0 )) || die "$target did not let cg in with that password. Check the address, user and password -
-       or, if it takes keys only, make 'ssh $target' work first (ssh-copy-id $target)"
-    host_ssh_raw "$target" exit 2>/dev/null \
-      || die "cg's key is on $target, but it still does not let cg in with it - is PubkeyAuthentication off in its sshd_config?"
-    log "cg's key is on $target: no password from now on"
-  fi
+  host_let_in "$target"
   facts=$(host_facts "$target")
   [[ -n $facts ]] || die "connected, but $target did not say what it is"
   # The same machine by another address - its IP once, its tailnet name now -
@@ -326,6 +334,9 @@ cmd_host_setup() {
   local name=${1:-} t facts fam pw="" key="" f how mk
   [[ -n $name ]] || die "usage: cg host setup <name>"
   t=$(host_get "$name" ssh); [[ -n $t ]] || die "no machine called '$name' - add it: cg host add $name --ssh <user@address>"
+  # In, before anything: a machine whose key was taken off asks once for its
+  # password here, rather than failing every step after.
+  host_let_in "$t"
   say "asking $name what it is"
   facts=$(host_facts "$t"); [[ -n $facts ]] || die "$t did not answer over ssh"
   # A machine added before cg knew who machines are: learned now, so adding

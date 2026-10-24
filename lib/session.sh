@@ -117,11 +117,28 @@ moonlight_flags() {
 # Moonlight's config: the flags win for this session and leave whatever you set
 # in the GUI untouched. A variable left unset passes no flag at all, so
 # Moonlight's own saved setting remains the default.
+#
+# Moonlight's own output goes to a file of its own, not into cg's: it is a
+# debug log - every decoder it tried, every packet format - thousands of lines
+# that buried the one worth reading. A stream that ends within seconds did not
+# end by choice, so then its last warnings are said, and where the rest is.
 stream_play() {
-  local ip=$1 app=${2:-Desktop} t0=$SECONDS mlf=()
+  local ip=$1 app=${2:-Desktop} t0=$SECONDS mlf=() took mlog
+  mlog="${XDG_CACHE_HOME:-$HOME/.cache}/cg/moonlight.log"
+  mkdir -p "${mlog%/*}"
   moonlight_flags mlf
   (( ${#mlf[@]} )) && cg_echo "    stream: ${mlf[*]}" || true
-  moonlight stream ${mlf[@]+"${mlf[@]}"} "$ip" "$app" || true
-  if _cg_styled; then _cg_line ok "session ended after $(_cg_dur $(( SECONDS - t0 )))"
-  else printf 'session ended after %dm\n' $(( (SECONDS - t0) / 60 )); fi
+  moonlight stream ${mlf[@]+"${mlf[@]}"} "$ip" "$app" > "$mlog" 2>&1 || true
+  took=$(( SECONDS - t0 ))
+  if (( took < 20 )); then
+    log_as warn "the stream ended after ${took}s - Moonlight said:"
+    # Its own warnings and errors, not the decoder probing that fills the rest.
+    grep -E 'Qt (Warning|Critical)|SDL (Error|Critical)|[Ff]ailed to start|[Cc]onnection|offline' "$mlog" \
+      | grep -vE 'QML|portal|libplacebo|VDPAU|AMF|v4l2m2m|cuvid|hwdevice|decoder for format' \
+      | tail -4 | sed 's/^/    /' || true
+    log "  all of it: $mlog"
+  fi
+  if _cg_styled; then _cg_line ok "session ended after $(_cg_dur "$took")"
+  elif (( took < 60 )); then printf 'session ended after %ds\n' "$took"
+  else printf 'session ended after %dm\n' $(( took / 60 )); fi
 }

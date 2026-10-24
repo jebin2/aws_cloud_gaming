@@ -105,7 +105,15 @@ esac
 FAKE
 cat > "$T/bin/moonlight" <<'FAKE'
 #!/usr/bin/env bash
-case $1 in list) echo "Desktop" ;; stream) echo "STREAM $*" >> "$T/stream.log" ;; esac
+case $1 in list) echo "Desktop" ;; stream) echo "STREAM $*" >> "$T/stream.log"
+  # Its debug log, as a real one prints it: decoder probing, and one warning
+  # among it that says something.
+  if [[ -n ${MLNOISE:-} ]]; then
+    for i in 1 2 3; do echo "00:00:00 - FFmpeg: [hevc @ 0x5] Decoding VPS $i"; done
+    echo "00:00:00 - SDL Critical (0): libplacebo: Failed creating instance: VK_ERROR_INCOMPATIBLE_DRIVER"
+    echo "00:00:00 - Qt Warning: Your client GPU doesn't support H.264 decoding. This may cause poor streaming performance."
+    echo '00:00:02 - Qt Info: "gamevps" is now offline'
+  fi ;; esac
 FAKE
 chmod +x "$T/bin/"*
 
@@ -207,6 +215,17 @@ facts <<<"$(sed 's/^id=cachyos/id=void/; s/^id_like=arch/id_like=/' <<<"$LINUX")
 cgh add voidbox --ssh me@void >/dev/null; fresh
 contains "an unknown distribution is refused" "$(cgh setup voidbox)" "is not one"
 check    "  and nothing was started there"  "$(cat "$T/root.log" 2>/dev/null | wc -l)" "0"
+# Its key taken off it - by removing a second entry for the same machine, or by
+# hand: setup asks for the password once and carries on. It used to need the
+# key already there, so the machine could only be removed and added again.
+rm -f "$T/keyed"
+out=$(printf 'letmein\n' | EXTRA="KEYLESS=1 CG_JSON=1" cgh setup voidbox)
+contains "a machine that lost cg's key: setup asks its password" "$out" '"id":"host-ssh-password"'
+contains "  puts the key back"              "$out" "no password from now on"
+contains "  and carries on"                 "$out" "is not one"
+rm -f "$T/keyed"
+out=$(printf 'wrong\n' | EXTRA="KEYLESS=1 CG_JSON=1" cgh setup voidbox)
+contains "  a wrong one is said plainly"    "$out" "did not let cg in with that password"
 
 echo "3. the build is the one every machine gets"
 facts <<<"$LINUX"; fresh
@@ -355,6 +374,16 @@ contains "  but every machine"             "$(cgh list --json)" '"name": "mypc"'
 cgh open mypc >/dev/null
 contains "it streams from the machine's tailnet address" "$(cat "$T/stream.log")" "stream"
 contains "  at 100.64.0.9"                 "$(cat "$T/stream.log")" "100.64.0.9 Desktop"
+# Moonlight's debug log is its own file: thousands of decoder lines used to
+# arrive in cg's output and bury the one that said why a stream ended.
+out=$(EXTRA="MLNOISE=1" cgh open mypc)
+lacks    "Moonlight's debug log stays out of cg's" "$out" "FFmpeg"
+contains "  kept in a file of its own"     "$(cat "$XDG_CONFIG_HOME/../.cache/cg/moonlight.log" 2>/dev/null || cat "$HOME/.cache/cg/moonlight.log")" "Decoding VPS 3"
+contains "a stream over in seconds says so" "$out" "the stream ended after"
+contains "  with Moonlight's own warning"  "$out" "Your client GPU doesn't support H.264 decoding"
+lacks    "  not its decoder probing"       "$out" "libplacebo"
+contains "  and where the rest is"         "$out" "cg/moonlight.log"
+contains "  in seconds, not 0m"            "$out" "session ended after 0s"
 # As cg runs it: a process whose command line is cg's, which is the only kind
 # the session lock believes - the test shell above is not one, and that is how
 # a session that ended by killing itself went unseen.
