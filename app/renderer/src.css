@@ -174,6 +174,19 @@ select option { background: theme(colors.surface-container-high); color: theme(c
   .log-row .k.ok { @apply text-primary; }
   .log-row .k.warn, .log-row .k.wait { @apply text-tertiary; }
   .log-row .t { @apply text-on-surface-variant break-all; }
+  /* A controller in hand: what has focus says so, whatever it is - a card's
+     link and a list as much as a button - and what each button does sits at
+     the bottom of the screen. Both go when the mouse or keyboard comes back. */
+  body.pad :focus { @apply outline outline-2 outline-offset-2 outline-primary; }
+  .pad-hints { @apply fixed bottom-space-md left-1/2 -translate-x-1/2 z-50 hidden items-center gap-space-lg
+                      px-space-lg py-space-sm rounded-full bg-surface-container-high border border-surface-variant
+                      font-body-sm text-body-sm text-on-surface-variant shadow-[0_8px_24px_rgb(0_0_0/0.45)]; }
+  body.pad .pad-hints { @apply flex; }
+  body.pad main { @apply pb-24; }     /* the last row is never under the hints */
+  /* Scrolled to, what has focus clears the top bar above and the hints below. */
+  body.pad main * { @apply scroll-mt-24 scroll-mb-24; }
+  .pad-key { @apply inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 mr-space-xs rounded-full
+                    border border-outline text-on-surface font-semibold text-[12px]; }
 }
 
 /* `hidden` must win. A class that sets display - .btn is inline-flex - is an
