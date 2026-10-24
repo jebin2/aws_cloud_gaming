@@ -115,6 +115,20 @@ const jobsHere = () => [...jobs.values()].filter(j => j.view === view);
 const writing = () => [...jobs.values()].some(j => j.write);
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
+// A machine of yours waits while cg runs something alone - an AWS build, a
+// delete, a session: cg refuses its setup or stream at the start, and pressed
+// anyway, the step read as failed with "Waiting for the build to finish."
+// Greyed instead, saying what it waits for, and back the moment that ends.
+// dataset.off is what the card itself decided; this only adds the wait.
+function lockHostButtons() {
+  const alone = [...jobs.values()].find(j => j.write);
+  const why = alone ? `Waits for ${cgName(alone.cmd)} to finish` : '';
+  for (const b of document.querySelectorAll('[data-host] button[data-f=play], [data-host] button[data-f=setup]')) {
+    b.disabled = b.dataset.off === '1' || !!alone;
+    if (alone) b.title = why;
+    else if (b.title.startsWith('Waits for ')) b.title = '';
+  }
+}
 // Setting up or streaming from a machine of yours: minutes to hours, and
 // nothing to do with AWS, so they are not reads to cancel or wait out. They
 // have their own Stop, on the machine's card.
@@ -145,6 +159,7 @@ function updateHeader() {
   // Stop is for what changes something - a build, a delete, a session, an
   // install. A read finishes in seconds and says so where it was asked (the
   // Refresh popup, a Fetch button); a Stop appearing for it was noise.
+  lockHostButtons();
   const stoppable = mine.filter(j => j.write);
   const hereNames = [...new Set(stoppable.map(j => j.group || runName(j.cmd)))];
   $('cancel').hidden = !stoppable.length;
@@ -4583,6 +4598,7 @@ function hostCard(h, full) {
   if (!unknown && s.set_up && linux) {
     const p = btn(playing ? 'Streaming' : 'Play', 'btn btn-primary btn-lg', () => playOn(h.name), 'play');
     p.disabled = playing || setting || !!sessionNow || !s.sunshine;
+    p.dataset.off = p.disabled ? '1' : '';
     p.title = sessionNow ? 'a session is already open' : '';
   }
   // Not set up yet: that is the one thing to do from here. Setting it up again
@@ -4590,6 +4606,7 @@ function hostCard(h, full) {
   if (!unknown && linux && !s.set_up) {
     const b = btn(setting ? 'Setting up…' : 'Set up', 'btn btn-primary btn-lg', () => setUpHost(h.name), 'setup');
     b.disabled = setting || playing;
+    b.dataset.off = b.disabled ? '1' : '';
   }
   if (setting || playing) {
     // Ends it here; a setup stopped part-way carries on from there next time.
@@ -4695,12 +4712,14 @@ function hostDetail(h, failed) {
   } else if (s.set_up && linux) {
     const p = btn(playing ? 'Streaming' : 'Play', 'btn btn-primary btn-lg w-full', () => playOn(h.name), 'play', acts);
     p.disabled = playing || setting || !!sessionNow || !s.sunshine;
+    p.dataset.off = p.disabled ? '1' : '';
     p.title = sessionNow ? 'a session is already open' : '';
   }
   if (!unknown && linux) {
     const b = btn(setting ? 'Setting up…' : s.set_up ? 'Re-run setup' : 'Set up',
                   s.set_up ? 'btn' : 'btn btn-primary btn-lg w-full', () => setUpHost(h.name), 'setup', s.set_up ? more : acts);
     b.disabled = setting || playing;
+    b.dataset.off = b.disabled ? '1' : '';
   }
   if (setting || playing) {
     // Ends it here; a setup stopped part-way carries on from there next time.
@@ -4764,6 +4783,7 @@ function paintHostCards() {
   page.textContent = '';
   const open = list.find(h => h.name === machineTab);
   if (open) page.append(hostCard(open, true));
+  lockHostButtons();
   paintMachineTab();
   paintHome();
   paintDash();

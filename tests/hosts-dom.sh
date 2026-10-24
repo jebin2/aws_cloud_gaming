@@ -351,6 +351,16 @@ cat > "$T/r/probe.js" <<'PROBE'
     const removeBtn = () => button(document.querySelector('#b-hosts [data-host="homebox"]'), 'Remove');
     goHost('homebox');
     await wait(200);
+    // An AWS build running: cg would refuse this machine's setup and stream,
+    // so they are greyed, saying why, and back once it ends.
+    const own = f => document.querySelector('#b-hosts [data-host="homebox"] button[data-f=' + f + ']');
+    const lockState = () => ['play', 'setup'].map(f => f + '=' + (own(f) ? own(f).disabled + ':' + own(f).title : 'none')).join(' ');
+    jobs.set(9999, { cmd: ['init'], write: true, view: 'build', out: [] });
+    updateHeader();
+    out.push('LOCKED | ' + lockState());
+    jobs.delete(9999);
+    updateHeader();
+    out.push('UNLOCKED | ' + lockState());
     removeBtn().click();
     await wait(50);
     out.push('REMOVE ASK | ' + $$('rundlg').open + ' ' + txt($$('rundlg-title')) + ' / ' + txt($$('rundlg-status')) + ' / ' + vis('rundlg'));
@@ -574,6 +584,9 @@ contains "  with the button that reopens it"     "$(row 'ADDED CARD')" "Finish s
 check    "  and it is not offered again"         "$(row 'ADDED ADD')" "ADDED ADD | hidden"
 lacks    "a running machine is never 'needs you'" "$(row 'RUNNING CARD')" "AWS needs you"
 contains "  and offers no Finish over it"        "$(row 'RUNNING CARD')" "fix=hidden"
+# Not set up here, so Set up is its one button; Play is locked by the same rule.
+check    "an AWS build greys this machine's setup" "$(row 'LOCKED')" "LOCKED | play=none setup=true:Waits for the build to finish"
+check    "  and it comes back when that ends"    "$(row 'UNLOCKED')" "UNLOCKED | play=none setup=false:"
 check    "remove asks in its own dialog"         "$(row 'REMOVE ASK')" "REMOVE ASK | true Remove homebox / Revokes the app's SSH key on the machine and removes it from the app. Sunshine, Steam and games on it are not changed. / Cancel, Remove"
 check    "  Cancel runs nothing"                 "$(row 'REMOVE CANCEL')" "REMOVE CANCEL | false ran=0"
 check    "  while it runs, nothing to press - no Cancel" "$(row 'REMOVE RUNNING')" "REMOVE RUNNING | Revoking SSH key… / buttons= busy=true"
