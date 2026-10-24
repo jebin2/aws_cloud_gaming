@@ -282,12 +282,23 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('AWS TOOLS | ' + txt($$('onb-tools')));
     // No key saved, but an access token that can make one: done, said as that.
     const tsWas = tskeyNow;
-    tskeyNow = { ...tsWas, auth_key_stored: false, can_mint: true };
+    tskeyNow = { ...tsWas, present: true, valid: true, auth_key_stored: false, can_mint: true };
     paintOnboard();
     out.push('AWS AUTHKEY MINT | ' + txt(document.querySelector('[data-stage="authkey"]')));
-    tskeyNow = tsWas;
+    tskeyNow = { ...tsWas, present: true, valid: true };
     paintOnboard();
     out.push('AWS AUTHKEY SAVED | ' + txt(document.querySelector('[data-stage="authkey"]')));
+    // A saved key with no token to check it is not ready: the build would stop.
+    tskeyNow = { ...tsWas, present: false, valid: null, auth_key_stored: true, can_mint: false };
+    paintOnboard();
+    const authStep = () => { const r = prereqs('aws').find(x => x.key === 'authkey');
+      return r.ok + ' ' + r.problem.title + ' / ' + r.problem.label; };
+    out.push('AWS AUTHKEY NOTOKEN | ' + authStep());
+    tskeyNow = { ...tsWas, present: true, valid: false, auth_key_stored: true, can_mint: false };
+    paintOnboard();
+    out.push('AWS AUTHKEY REFUSED | ' + authStep());
+    tskeyNow = tsWas;
+    paintOnboard();
     $$('adddlg-close').click();
     await wait(50);
 
@@ -337,7 +348,7 @@ cat > "$T/r/probe.js" <<'PROBE'
 
     // Removing it: one dialog asks, runs and reports.
     const vis = id => [...$$(id).querySelectorAll('button')].filter(b => !b.hidden).map(b => b.textContent.trim()).join(', ');
-    const removeBtn = () => button(document.querySelector('#b-hosts [data-host="homebox"]'), 'Remove machine');
+    const removeBtn = () => button(document.querySelector('#b-hosts [data-host="homebox"]'), 'Remove');
     goHost('homebox');
     await wait(200);
     removeBtn().click();
@@ -534,15 +545,17 @@ check    "Try again does not cancel the setup"   "$(row 'RETRY KEPT')" "RETRY KE
 echo "4. its detail"
 check    "the Machine page, for it"              "$(row 'DETAIL VIEW')" "DETAIL VIEW | build aws=hidden own=shown title=Machine"
 check    "  one machine: nothing to pick, no way back to make" "$(row 'DETAIL PICK')" "DETAIL PICK | hidden back=none"
-contains "every check cg made"                   "$(row 'DETAIL CARD')" "Moonlight paired"
+contains "every check cg made, with what it found" "$(row 'DETAIL CARD')" "Moonlightpaired"
 contains "  where it is"                         "$(row 'DETAIL CARD')" "me@10.0.0.5"
-contains "  and removing it"                     "$(row 'DETAIL BUTTONS')" "Remove machine(off)"
+contains "  and removing it"                     "$(row 'DETAIL BUTTONS')" "Remove(off)"
 check    "not one read asked AWS"                "$(row 'NO AWS')" "NO AWS | "
 
 echo "5. adding AWS"
 contains "an auth key the token will make is not called saved" "$(row 'AWS AUTHKEY MINT')" "Generated from your access token at build time"
 lacks    "  not 'saved'"                         "$(row 'AWS AUTHKEY MINT')" "Auth key saved"
 contains "a key in the settings is"              "$(row 'AWS AUTHKEY SAVED')" "Auth key saved"
+check    "a saved key with no token is not done" "$(row 'AWS AUTHKEY NOTOKEN')" "AWS AUTHKEY NOTOKEN | false No Tailscale access token / Add access token"
+check    "a refused token says so"               "$(row 'AWS AUTHKEY REFUSED')" "AWS AUTHKEY REFUSED | false Tailscale refused the access token / Update access token"
 contains "its own steps"                         "$(row 'AWS DIALOG')" "Add AWS"
 contains "  the account, alerts and where"       "$(row 'AWS STAGES')" "email:"
 contains "  with the AWS CLI now needed"         "$(row 'AWS TOOLS')" "the AWS CLI"

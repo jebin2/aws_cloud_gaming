@@ -77,7 +77,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     for (const r of R) {
       const row = document.querySelector(`section[data-view="${page}"] .row[data-key="${r.key}"]`);
       if (!row) { out.push(page + ' ' + r.key + ' | NOROW'); continue; }
-      const card = row.closest('.rounded-lg');
+      const card = row.closest('.rounded-lg, .rounded-xl');
       const right = row.lastElementChild;
       const val = right.querySelector('span');
       const btns = [...right.querySelectorAll('button')];

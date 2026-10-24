@@ -1332,7 +1332,14 @@ key_report "$REGION" "$TS_HOST" "$HOME/.ssh/${TS_HOST}.pem"
 # The .env settings: asked for when missing, and saved there.
 # shellcheck source=lib/settings.sh
 source lib/settings.sh
+# The token that checks the box's key, before the questions: settings_prompts
+# would otherwise ask for an auth key this build then refuses to use. --fix
+# asks for the token itself, so it gets the chance to.
+(( FIX )) || tskey_need_token
 settings_prompts "$FIX"
+# Every build, before anything is launched: a key that cannot be shown to work
+# is a box that never joins, found out half an hour into the bill.
+tskey_preflight "${GAME_TS_AUTHKEY:-}"
 
 if (( CHECK_ONLY )); then
   if cg_json; then

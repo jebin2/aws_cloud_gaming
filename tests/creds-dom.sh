@@ -214,6 +214,11 @@ cat > "$T/r/probe.js" <<'PROBE'
     await sleep();
     window.__emit(window.__lastId, { t: 'exit', rc: 0 });
     await sleep(); await sleep();
+    // Saved: it stays, saying so, until the token has been read back.
+    out.push('TSOKWAIT | ' + tsdlg.open + ' ' + document.getElementById('onefield-go').textContent);
+    // Every read still out answers - the save starts more than one.
+    for (const id of [...jobs.keys()]) window.__emit(id, { t: 'exit', rc: 0 });
+    await new Promise(r => setTimeout(r, 300));
     out.push('TSOKCLOSE | ' + tsdlg.open);
 
     // --- the Tailscale sign-in, from the window --------------------------
@@ -330,6 +335,27 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('BAD STRIP | ' + !!document.getElementById('banner')
              + ' ' + document.querySelector('main').innerText.includes('AWS rejected this access key'));
   } catch (e) { out.push('THREW | ' + e.message); }
+  // Settings' sections down its side: one per card, the one at the top of
+  // the view marked, and a jump to each - the last ones too, which cannot
+  // scroll to the top. Instant here: headless time does not run a smooth scroll.
+  try {
+    window.matchMedia = () => ({ matches: true });
+    const opt = (key, value) => ({ key, value, is_set: true, kind: 'text', secret: false, note: 'n' });
+    paintConfig([opt('GAME_RES', '1920x1080'), opt('GAME_FPS', '60'), opt('GAME_BITRATE_KBPS', '20000'),
+                 opt('GAME_DISK_GB', '50')]);
+    scrollTo(0, 0);     // earlier cases here leave the page scrolled
+    document.querySelector('.nav-item[data-view=settings]').click();
+    const navOn = () => [...document.querySelectorAll('#s-nav .on')].map(b => b.textContent).join(',');
+    const sn = ['items=' + [...document.querySelectorAll('#s-nav button')].map(b => b.textContent).join(','), 'open=' + navOn()];
+    for (const name of ['Private network', 'Stream']) {
+      [...document.querySelectorAll('#s-nav button')].find(b => b.textContent === name).click();
+      await new Promise(r => setTimeout(r, 50));
+      sn.push(name + '=' + navOn());
+    }
+    [...document.querySelectorAll('#s-nav button')].find(b => b.textContent.startsWith('Alerts')).click();
+    sn.push('alerts=' + view);
+    out.push('SNAV | ' + sn.join(' | '));
+  } catch (e) { out.push('THREW snav ' + e.message); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
   pre.id = 'probe-out'; pre.textContent = out.join('\n');
@@ -454,7 +480,8 @@ check    "  answering cg's question"      "$(row 'TSSUBMIT ANSWERS')" "TSSUBMIT 
 contains "a refusal stays in the form"    "$(row 'TSFAIL')"      "open=true"
 contains "  with Tailscale's reason"      "$(row 'TSFAIL')"      "rejected that token (401)"
 lacks    "  without the how-to line"      "$(row 'TSFAIL')"      "NOT an auth key"
-check    "a good token closes it"         "$(row 'TSOKCLOSE')"   "TSOKCLOSE | false"
+check    "a good token waits to be read back" "$(row 'TSOKWAIT')" "TSOKWAIT | true Saved. Checking…"
+check    "  then closes"                   "$(row 'TSOKCLOSE')"   "TSOKCLOSE | false"
 
 echo "4e. signing in to Tailscale from the window"
 # `sudo tailscale up` is not an answer in a window, and a button that cannot
@@ -505,6 +532,13 @@ contains "Cancel reaches cg"           "$(row 'SIGNIN CANCEL')"  "cancelled="
 contains "  and closes the dialog"     "$(row 'SIGNIN CANCEL')"  "open=false"
 
 echo "5. nothing threw"
+echo "Settings' sections"
+# No AWS here, so its card - and its section - is not shown.
+contains "one per card shown, and Alerts" "$(row 'SNAV')" "items=Stream,Private network,Alerts and auto-stop →"
+contains "  the top one marked on open"  "$(row 'SNAV')" "open=Stream |"
+contains "  a jump to the last marks it" "$(row 'SNAV')" "Private network=Private network"
+contains "  and back to the top"         "$(row 'SNAV')" "Stream=Stream |"
+contains "Alerts open Safety"            "$(row 'SNAV')" "alerts=guards"
 check "no painter threw"               "$(grep -c '^THREW' <<<"$OUT")" "0"
 check "  and the page logged no errors" "$(row 'ERRS')"        "ERRS | "
 

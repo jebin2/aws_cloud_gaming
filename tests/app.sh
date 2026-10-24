@@ -432,7 +432,7 @@ contains "  and so does Home, the same one" "$html" 'id="d-hero"'
 check    "  built by one recipe, buttons too" "$(grep -cE "^mountMachineCard\(\\$\('(d-hero|b-machine)'\), '[db]'\);$" app/renderer/app.js)" "2"
 check    "  and no page keeps its own copy" "$(grep -cE 'id="[db]-(build|open|destroy)"' app/renderer/index.html)" "0"
 # ...as a dialog over the page, not a trip to the top of Settings.
-contains "  which offers the chooser here" "$js" "ch.onclick = () => openMachines();"
+contains "  which offers the chooser here" "$js" "'Change machine').onclick = () => openMachines();"
 check    "every popup has the one look"   "$(grep -c '<dialog ' app/renderer/index.html)" "$(grep -c '<dialog id="[a-z]*" class="dlg ' app/renderer/index.html)"
 check    "  and one title style"          "$(grep -c '<dialog ' app/renderer/index.html)" "$(grep -c 'class="dlg-title' app/renderer/index.html)"
 check    "  and one button row"           "$(grep -c '<menu class=' app/renderer/index.html)" "$(grep -c '<menu class="dlg-actions"' app/renderer/index.html)"
@@ -456,12 +456,12 @@ check    "  and still no machine is named here" \
          "$(grep -cE 'g6\.|g6e\.|L40S|L4 ' app/renderer/app.js)" "0"
 
 echo "5c. the library and cost screens, in the same language"
-# One Games table: every game, its place, what it costs and when it goes.
-contains "the library is one table of games" "$html" 'id="lib-rows"'
-contains "  each with its place"          "$html" '>Location</th>'
-contains "  and when it is deleted"       "$html" '>Auto-delete</th>'
-contains "  what each game costs, in rupees" "$js" 'cell(tr, r(g.usd_month)'
-contains "  and a total row"              "$html" 'id="lib-foot"'
+# One list of games, a card each: its place, what it costs and when it goes.
+contains "the library is one list of games" "$html" 'id="lib-rows"'
+contains "  each with its place"          "$js" "placeName(g.region) : '—', 'place')"
+contains "  and when it is deleted"       "$js" "deleteWords(deleteOn(g, days, seen, marks)), 'del')"
+contains "  what each game costs, in rupees" "$js" '`${r(g.usd_month)} a month`, '"'"'cost'"'"')'
+contains "  and a total"                  "$html" 'id="lib-foot"'
 contains "  kept for: one setting, applied at once" "$js" "['library', 'keep-for', String(n)]"
 contains "  the Steam login is a card of its own" "$html" 'id="lib-login-box"'
 # A fallback that looks like an answer is worse than no answer: the app used to

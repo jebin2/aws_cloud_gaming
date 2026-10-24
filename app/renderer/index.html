@@ -12,32 +12,30 @@
 </head>
 <body class="bg-surface font-body-md text-body-md text-on-surface min-h-screen">
 
-<header class="fixed top-0 left-0 right-0 h-12 z-50 bg-surface-container-lowest flex items-center justify-between px-margin select-none border-b border-surface-variant">
-  <div class="flex items-center gap-space-sm">
-    <span class="material-symbols-outlined text-primary text-[18px]" data-icon="sports_esports">&#xea28;</span>
-    <span class="font-body-md text-body-md font-medium tracking-tight">Cloud Gaming</span>
+<!-- One bar across the top: the name, then every section as a tab - the
+     console look, where the sections are switched along a row rather than
+     picked from a list down the side. -->
+<header class="topbar fixed top-0 left-0 right-0 h-16 z-50 bg-surface/95 backdrop-blur flex items-center gap-space-lg px-margin-desktop select-none border-b border-surface-variant/60">
+  <div class="flex items-center gap-space-sm shrink-0">
+    <span class="material-symbols-outlined text-primary text-[24px]" data-icon="sports_esports">&#xea28;</span>
+    <span class="font-headline-md text-[18px] font-semibold tracking-tight">Cloud Gaming</span>
   </div>
+  <nav class="flex items-center gap-1 mx-auto overflow-x-auto" id="nav" aria-label="Sections">
+    <a class="nav-item on" data-view="dashboard" href="#"><span>Home</span></a>
+    <a class="nav-item" data-view="build" href="#"><span>Machine</span></a>
+    <a class="nav-item" data-view="library" href="#"><span>Games</span></a>
+    <a class="nav-item" data-view="guards" href="#"><span>Safety</span></a>
+    <a class="nav-item" data-view="cost" href="#"><span>Spending</span></a>
+    <a class="nav-item" data-view="logs" href="#"><span>Activity</span></a>
+    <a class="nav-item" data-view="settings" href="#"><span>Settings</span></a>
+  </nav>
 </header>
 
-<aside class="fixed left-0 top-12 bottom-0 w-60 bg-surface-container-low z-40 flex flex-col justify-between border-r border-surface-variant">
-  <div class="flex flex-col">
-    <nav class="flex flex-col gap-0.5 px-space-xs pt-space-md" id="nav">
-      <a class="nav-item on" data-view="dashboard" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="dashboard">&#xe871;</span><span>Home</span></a>
-      <a class="nav-item" data-view="build" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="build_circle">&#xef48;</span><span>Machine</span></a>
-      <a class="nav-item" data-view="library" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="stadia_controller">&#xf135;</span><span>Games</span></a>
-      <a class="nav-item" data-view="guards" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="shield">&#xe9e0;</span><span>Safety</span></a>
-      <a class="nav-item" data-view="cost" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="attach_money">&#xe227;</span><span>Spending</span></a>
-      <a class="nav-item" data-view="logs" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="terminal">&#xeb8e;</span><span>Activity</span></a>
-      <a class="nav-item" data-view="settings" href="#"><span class="material-symbols-outlined text-[18px]" data-icon="settings">&#xe8b8;</span><span>Settings</span></a>
-    </nav>
-  </div>
-</aside>
+<div class="shell">
+<main class="pt-16 min-h-screen bg-surface px-margin-desktop py-space-lg w-full max-w-[1400px] mx-auto">
 
-<div class="shell pl-60">
-<main class="pt-12 min-h-screen bg-surface px-margin-desktop py-space-lg w-full">
-
-  <div id="viewbar" class="sticky top-12 z-30 -mx-margin-desktop px-margin-desktop pt-space-xs
-              bg-surface border-b border-surface-variant/40
+  <div id="viewbar" class="sticky top-16 z-30 -mx-margin-desktop px-margin-desktop pt-space-md
+              bg-surface
               flex items-center justify-between gap-space-md pb-space-md mb-space-lg">
     <div class="flex flex-col gap-space-xs">
       <div class="flex items-center gap-space-sm">
@@ -47,7 +45,7 @@
     <div class="flex items-center gap-space-sm">
       <!-- Which machine the Machine page shows, when there is more than one. -->
       <select id="machine-pick" aria-label="Machine" hidden
-              class="bg-surface border border-surface-variant rounded px-space-sm py-space-xs font-body-sm text-body-sm text-on-surface"></select>
+              class="bg-surface-container-high border border-transparent rounded px-space-md py-space-sm font-body-sm text-body-sm font-medium text-on-surface cursor-pointer hover:bg-surface-container-highest"></select>
       <button id="refresh" class="btn"><span class="material-symbols-outlined text-[16px]" data-icon="refresh">&#xe5d5;</span>Refresh<em id="refresh-cost" class="not-italic text-tertiary" hidden></em><span id="refresh-age" class="font-code-sm text-code-sm text-outline" hidden></span></button>
       <button id="goto" class="btn" hidden><span class="material-symbols-outlined text-[16px]" data-icon="bolt">&#xea0b;</span><span id="goto-label">running</span></button>
       <button id="cancel" class="btn btn-danger" hidden><span class="material-symbols-outlined text-[16px]" data-icon="error">&#xf8b6;</span><span id="cancel-label">Stop</span></button>
@@ -84,11 +82,13 @@
 
       <!-- The machines: the AWS one (mountMachineCard - the same card as the
            Machine page's), each of yours (paintHostCards), and adding another. -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mb-gutter-desktop" id="d-machines" hidden>
-        <div class="p-space-lg rounded-lg bg-surface-container-low" id="d-hero"></div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mb-space-xl" id="d-machines" hidden>
+        <p class="section-label col-span-full -mb-space-sm">Play</p>
+        <div class="tile" id="d-hero"></div>
         <div class="contents" id="d-hosts"></div>
-        <div class="p-space-lg rounded-lg border border-dashed border-surface-variant flex flex-col" id="d-addcard">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Add a machine</span>
+        <div class="tile tile-add" id="d-addcard">
+          <span class="font-headline-md text-headline-md">Add a machine</span>
+          <span class="font-body-sm text-body-sm text-on-surface-variant mt-space-xs">Rent one on AWS, or connect a server of your own.</span>
           <div class="flex flex-wrap gap-space-sm mt-auto pt-space-md">
             <button class="btn" data-add="aws" id="d-add-aws">AWS</button>
             <button class="btn" data-add="host">Your own server</button>
@@ -96,11 +96,12 @@
         </div>
       </div>
 
+      <p class="section-label" id="d-glance-label" hidden>At a glance</p>
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop mb-gutter-desktop" id="d-money">
         <!-- The same two cards as Spending's, from the same last bill check, so
              the pages cannot disagree. -->
-        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Recurring cost</span>
+        <div class="glance">
+          <span class="glance-label">Recurring cost</span>
           <div id="d-recurring-card"></div>
           <div class="flex items-center justify-between gap-space-sm mt-auto pt-space-md">
             <span class="font-code-sm text-code-sm text-outline" id="d-bill-src"></span>
@@ -111,8 +112,8 @@
         <!-- The month, from the bill - a paid call, made only when asked, and
              remembered with when it was made. AWS Budgets' own figure is after
              credits, so it read Rs 0 while Rs 285 had been used; it is not shown. -->
-        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">This month</span>
+        <div class="glance">
+          <span class="glance-label">This month</span>
           <div id="d-month-card"></div>
           <div class="flex items-center justify-between gap-space-sm mt-auto pt-space-md">
             <span class="font-code-sm text-code-sm text-outline" id="d-month-src"></span>
@@ -124,8 +125,8 @@
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter-desktop" id="d-cards">
         <!-- The games: the only copy is in the archive, so how long it is kept
              is the news, not the bucket name. -->
-        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col" id="d-games-card">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Games</span>
+        <div class="glance" id="d-games-card">
+          <span class="glance-label">Games</span>
           <div class="flex flex-col gap-0.5 mt-space-md font-body-md text-body-md" id="d-games"></div>
           <div class="mt-auto pt-space-md">
             <button id="d-library" class="btn">Manage</button>
@@ -135,8 +136,8 @@
         <!-- The private network the machine is reached over: this laptop, the
              machine, and - while it is up - whether the path between them is
              direct or relayed, which is what decides how a stream feels. -->
-        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col" id="d-net-card">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Private network</span>
+        <div class="glance" id="d-net-card">
+          <span class="glance-label">Private network</span>
           <div class="flex flex-col gap-space-sm mt-space-md" id="d-ts"></div>
           <div class="mt-auto pt-space-md">
             <button id="d-ts-signin" class="btn" hidden>Sign in to Tailscale</button>
@@ -144,8 +145,8 @@
         </div>
 
         <!-- What stops a forgotten machine, and what warns about the bill. -->
-        <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col" id="d-protect-card">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Safety</span>
+        <div class="glance" id="d-protect-card">
+          <span class="glance-label">Safety</span>
           <div class="flex flex-col gap-space-sm mt-space-md" id="d-protect"></div>
           <div class="mt-auto pt-space-md">
             <button id="d-guards" class="btn">Details</button>
@@ -163,18 +164,27 @@
          in the heading from the moment the machine is rented. -->
 
     <!-- One machine: the AWS one (b-aws), or one of yours (b-own) - whichever
-         card on Home was opened. -->
-    <div id="b-aws">
+         card on Home was opened. Both laid out alike: the state and what can
+         be done on the left, what is working on the right, the rest under. -->
+    <div id="b-aws" class="flex flex-col gap-gutter-desktop">
+    <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] gap-gutter-desktop" id="b-panels">
+      <!-- Filled by mountMachineCard: the card Home's tile is, as a panel. -->
+      <section class="p-space-xl rounded-xl bg-surface-container-low flex flex-col gap-space-md" id="b-machine"></section>
+      <section class="flex flex-col gap-space-sm">
+        <p class="section-label mb-space-xs">What is working</p>
+        <div class="flex flex-col gap-space-sm" id="b-checks" data-f="checks"></div>
+      </section>
+    </div>
     <!-- Mode B: a run - a build, a delete, a session - as steps. -->
     <div class="p-space-lg rounded-lg bg-surface-container-low fit-view" id="b-strip" hidden>
       <div class="flex items-baseline justify-between gap-space-md">
-        <p class="font-headline-md text-headline-md" id="b-strip-title">Building</p>
-        <span class="font-code-sm text-code-sm text-outline shrink-0" id="b-strip-meta"></span>
+        <p class="font-headline-lg text-headline-lg" id="b-strip-title">Building</p>
+        <span class="font-mono text-body-sm text-on-surface-variant shrink-0" id="b-strip-meta"></span>
       </div>
-      <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-run-sum"></p>
+      <p class="font-body-sm text-body-sm text-outline mt-space-xs" id="b-run-sum"></p>
       <!-- Time against the usual length of a build - never a share of steps,
            which cg does not announce in advance. -->
-      <div class="h-1 rounded-full bg-surface-container overflow-hidden mt-space-md" id="b-bar-track">
+      <div class="h-2 rounded-full bg-surface-container overflow-hidden mt-space-md" id="b-bar-track">
         <div class="h-full bg-primary rounded-full" id="b-prog" style="width:0%"></div>
       </div>
       <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm truncate" id="b-prog-step" hidden></p>
@@ -212,9 +222,7 @@
 
     <!-- Mode A: what will be built - a card each for the machine, the games and
          Steam, and the bill and the button under them. -->
-    <div class="fit-view flex flex-col gap-space-md" id="b-plan">
-      <!-- Filled by mountMachineCard: the same card as Home's. -->
-      <div class="p-space-lg rounded-lg bg-surface-container-low" id="b-machine"></div>
+    <div class="grid gap-space-md lg:grid-cols-2 items-start" id="b-plan">
 
       <div class="p-space-lg rounded-lg bg-surface-container-low">
         <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Games to install</span>
@@ -255,15 +263,10 @@
         <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-login-note"></p>
       </div>
 
-      <!-- Stopping using AWS from this laptop: cg aws forget, which refuses
-           while a machine or saved games are still there. -->
-      <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-wrap items-center justify-between gap-space-md">
-        <div class="min-w-0">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">AWS account</span>
-          <p class="font-code-sm text-code-sm text-outline mt-0.5">Disconnecting deletes everything the app made in AWS, so nothing is left billing. Your account and access key are kept.</p>
-        </div>
-        <button class="btn btn-danger shrink-0" id="b-aws-remove">Disconnect</button>
-      </div>
+      <!-- Disconnecting AWS deletes everything the app made there, so nothing
+           is left billing; the account and its key are kept. mountMachineCard
+           moves it into the panel, beside Delete machine. -->
+      <button class="btn btn-danger" id="b-aws-remove" title="Deletes everything the app made in AWS. Your account and access key are kept.">Disconnect AWS</button>
 
     </div>
     </div>
@@ -280,46 +283,46 @@
 
   <!-- Library -->
   <section data-view="library" hidden>
-    <!-- Two cards: every saved game wherever it is kept, and the Steam login.
-         Each row says where the game is, what it costs and when it is deleted,
-         and every action stays here: its progress is the popup. -->
-    <div class="fit-view flex flex-col gap-space-md">
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <div class="flex items-center justify-between gap-space-md">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Games</span>
-          <label class="flex items-center gap-space-sm font-code-sm text-code-sm text-outline" id="lib-keepfor-row" hidden>
-            Keep for
-            <select id="lib-keepfor" class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-sm text-code-sm text-on-surface"></select>
-          </label>
+    <!-- Every saved game wherever it is kept, a card each: where it is, what it
+         costs, when it is deleted, and what can be done to it. Beside them how
+         long games are kept; under them the Steam login. Every action stays
+         here: its progress is the popup. -->
+    <div class="flex flex-col gap-gutter-desktop">
+      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-gutter-desktop items-start">
+        <div class="flex flex-col gap-space-sm min-w-0">
+          <div class="flex flex-wrap items-baseline justify-between gap-x-space-md mb-space-xs">
+            <p class="section-label mb-0">Saved games</p>
+            <!-- How many, how big, what they cost a month: the total. -->
+            <p class="font-body-sm text-body-sm text-on-surface-variant" id="lib-foot"></p>
+          </div>
+          <p class="font-body-sm text-body-sm text-error" id="lib-error" hidden></p>
+          <div class="flex flex-col gap-space-sm" id="lib-rows">
+            <p class="font-body-sm text-body-sm text-outline">Reading&hellip;</p>
+          </div>
+          <p class="font-body-sm text-body-sm text-outline mt-space-xs">Games are saved when an AWS machine is deleted, and restored when the next one is built.</p>
         </div>
-        <p class="font-code-sm text-code-sm text-error mt-space-sm" id="lib-error" hidden></p>
-        <table class="w-full font-code-sm text-code-sm mt-space-sm">
-          <thead class="text-outline">
-            <tr class="text-left border-b border-surface-variant">
-              <th class="py-space-xs pr-space-md font-normal">Game</th>
-              <th class="py-space-xs px-space-md font-normal">Location</th>
-              <th class="py-space-xs px-space-md font-normal text-right">Size</th>
-              <th class="py-space-xs px-space-md font-normal text-right">Cost, a month</th>
-              <th class="py-space-xs px-space-md font-normal text-right">Auto-delete</th>
-              <th class="py-space-xs pl-space-md font-normal w-0"></th>
-            </tr>
-          </thead>
-          <tbody id="lib-rows"><tr><td class="py-space-sm text-outline" colspan="6">Reading&hellip;</td></tr></tbody>
-          <tfoot id="lib-foot" class="border-t border-surface-variant"></tfoot>
-        </table>
-        <p class="font-code-sm text-code-sm text-outline mt-space-md" id="lib-keep"></p>
-        <!-- Left behind by a save that never finished: billed, and no use. -->
-        <div class="flex items-center justify-between gap-space-md mt-space-md pt-space-md border-t border-surface-variant" id="lib-orphan-box" hidden>
-          <p class="font-code-sm text-code-sm text-tertiary" id="lib-orphans"></p>
-          <button class="btn shrink-0" id="lib-clean">Clean up</button>
+
+        <div class="flex flex-col gap-space-md">
+          <div class="p-space-lg rounded-xl bg-surface-container-low" id="lib-keepfor-row" hidden>
+            <p class="section-label mb-0">Keep saved games</p>
+            <select id="lib-keepfor" aria-label="Keep saved games for"
+                    class="w-full mt-space-sm bg-surface-container-high border border-transparent rounded px-space-md py-space-sm font-body-sm text-body-sm font-medium text-on-surface cursor-pointer hover:bg-surface-container-highest"></select>
+            <p class="font-body-sm text-body-sm text-outline mt-space-sm" id="lib-keep"></p>
+          </div>
+          <!-- Left behind by a save that never finished: billed, and no use. -->
+          <div class="p-space-lg rounded-xl bg-surface-container-low flex flex-col gap-space-sm" id="lib-orphan-box" hidden>
+            <p class="section-label mb-0">Leftover files</p>
+            <p class="font-body-sm text-body-sm text-tertiary" id="lib-orphans"></p>
+            <button class="btn self-start" id="lib-clean">Clean up</button>
+          </div>
         </div>
       </div>
 
       <!-- The saved Steam login, a ~22 KB file per place: the one beside the
            machine is what a new machine signs in as; a copy a region move
            left elsewhere is used by nothing. A row each, like the games. -->
-      <div class="p-space-lg rounded-lg bg-surface-container-low" id="lib-login-box">
-        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Steam login</span>
+      <div class="p-space-lg rounded-xl bg-surface-container-low" id="lib-login-box">
+        <span class="section-label">Steam login</span>
         <table class="w-full font-code-sm text-code-sm mt-space-sm">
           <thead class="text-outline">
             <tr class="text-left border-b border-surface-variant">
@@ -340,28 +343,28 @@
 
   <!-- Guards -->
   <section data-view="guards" hidden>
-    <!-- Three cards: whether anything is running and what will stop it, the
-         three safety nets in the order they act, and the settings behind them.
-         Every name, minute and state here is cg's; the markup only has places. -->
-    <div class="fit-view flex flex-col gap-space-md">
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Auto-stop</span>
-        <p class="font-headline-md text-headline-md mt-space-sm" id="g-head">&mdash;</p>
-        <p class="font-code-sm text-code-sm text-on-surface-variant mt-0.5" id="g-sub"></p>
-        <div class="flex flex-col gap-0.5 mt-space-sm font-code-sm text-code-sm text-error" id="g-warn" hidden></div>
-      </div>
-
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Safeguards</span>
-        <p class="font-code-sm text-code-sm text-outline mt-0.5">Applied in order. Each works if the one before it fails.</p>
-        <div class="flex flex-col mt-space-sm" id="g-nets"></div>
-      </div>
-
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <div class="flex items-center justify-between">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Settings</span>
+    <!-- The three safety nets, a card each in the order they act; beside them,
+         whether anything is running and what last happened, and the alerts and
+         timings behind it all. Every name, minute and state here is cg's; the
+         markup only has places. -->
+    <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-gutter-desktop items-start">
+      <div class="flex flex-col gap-space-sm">
+        <div class="flex flex-wrap items-baseline justify-between gap-x-space-md mb-space-xs">
+          <p class="section-label mb-0">Safeguards</p>
+          <p class="font-body-sm text-body-sm text-outline">Applied in order. Each works if the one before it fails.</p>
         </div>
-        <div class="flex flex-col mt-space-sm" id="g-knobs"></div>
+        <div class="flex flex-col gap-space-sm" id="g-nets"></div>
+        <div class="p-space-lg rounded-xl bg-surface-container-low mt-space-md">
+          <p class="section-label mb-0">Alerts and timings</p>
+          <div class="flex flex-col mt-space-sm" id="g-knobs"></div>
+        </div>
+      </div>
+
+      <div class="p-space-lg rounded-xl bg-surface-container-low lg:sticky lg:top-0">
+        <p class="section-label mb-0">Auto-stop</p>
+        <p class="font-headline-md text-headline-md mt-space-sm" id="g-head">&mdash;</p>
+        <p class="font-body-sm text-body-sm text-on-surface-variant mt-space-xs" id="g-sub"></p>
+        <div class="flex flex-col gap-0.5 mt-space-sm font-body-sm text-body-sm text-error" id="g-warn" hidden></div>
       </div>
     </div>
   </section>
@@ -371,46 +374,36 @@
     <!-- In rupees, in the words the rest of the app uses. Every figure is from
          the one paid call, `cg cost --json`, made only when Refresh is pressed;
          every rate is cg's. -->
-    <div class="fit-view flex flex-col gap-space-md">
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-space-md">
+    <div class="flex flex-col gap-space-md">
+      <!-- The month large, beside the credits it comes out of; where it went
+           beside what bills every month and the free streaming left; and the
+           days under all of it. -->
+      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-space-md">
         <!-- The same card as Home's, drawn by renderMonth. -->
-        <div class="p-space-lg rounded-lg bg-surface-container-low">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">This month</span>
+        <div class="p-space-xl rounded-xl bg-surface-container-low">
+          <span class="section-label">This month</span>
           <div id="c-month-card"></div>
         </div>
 
-        <div class="p-space-lg rounded-lg bg-surface-container-low">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">AWS credits</span>
-          <p class="font-headline-xl text-headline-xl mt-space-sm" id="c-credits">&mdash;</p>
+        <div class="p-space-xl rounded-xl bg-surface-container-low">
+          <span class="section-label">AWS credits</span>
+          <p class="text-headline-xl figure mt-space-sm" id="c-credits">&mdash;</p>
           <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-xs" id="c-credits-note"></p>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-space-md">
-        <!-- The same card as Home's, drawn by renderRecurring. -->
-        <div class="p-space-lg rounded-lg bg-surface-container-low">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Recurring cost</span>
-          <div id="c-recurring-card"></div>
-        </div>
-
-        <div class="p-space-lg rounded-lg bg-surface-container-low">
-          <div class="flex items-center justify-between">
-            <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Free streaming</span>
-            <span class="pill" id="c-egress-pct" hidden>&mdash;</span>
+      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-space-md items-start">
+        <div class="flex flex-col gap-space-md min-w-0">
+        <!-- The month's bill by what it paid for: the day-by-day columns,
+             added up. Drawn by paintCostPage. -->
+        <div class="p-space-xl rounded-xl bg-surface-container-low">
+          <span class="section-label">Where it went</span>
+          <div class="flex flex-col gap-space-sm mt-space-md" id="c-where">
+            <p class="font-body-sm text-body-sm text-outline">Refresh to load this month&rsquo;s bill.</p>
           </div>
-          <p class="font-headline-md text-headline-md mt-space-sm" id="c-egress">&mdash;</p>
-          <p class="font-code-sm text-code-sm text-outline mt-0.5" id="c-egress-src"></p>
-          <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden">
-            <div class="h-full bg-primary" id="c-egress-bar" style="width:0%"></div>
-          </div>
-          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm" id="c-egress-note">
-            Streaming is free up to AWS's monthly allowance; the bill says how much is left.
-          </p>
-          <button class="font-code-sm text-code-sm text-primary hover:underline text-left mt-space-xs" id="c-egress-settings">Stream quality &rarr;</button>
         </div>
-      </div>
-      <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Day by day</span>
+      <div class="p-space-xl rounded-xl bg-surface-container-low">
+        <span class="section-label">Day by day</span>
         <p class="font-code-sm text-code-sm text-outline mt-0.5" id="c-days-note">
           Days with nothing billed are left out. AWS's bill runs about a day behind.
         </p>
@@ -431,6 +424,32 @@
           </table>
         </div>
       </div>
+        </div>
+
+        <div class="flex flex-col gap-space-md">
+        <!-- The same card as Home's, drawn by renderRecurring. -->
+        <div class="p-space-lg rounded-xl bg-surface-container-low">
+          <span class="section-label">Every month, playing or not</span>
+          <div id="c-recurring-card"></div>
+        </div>
+
+        <div class="p-space-lg rounded-xl bg-surface-container-low">
+          <div class="flex items-center justify-between">
+            <span class="section-label mb-0">Free streaming</span>
+            <span class="pill" id="c-egress-pct" hidden>&mdash;</span>
+          </div>
+          <p class="text-headline-md figure mt-space-sm" id="c-egress">&mdash;</p>
+          <p class="font-code-sm text-code-sm text-outline mt-0.5" id="c-egress-src"></p>
+          <div class="h-1.5 rounded-full bg-surface-container mt-space-md overflow-hidden">
+            <div class="h-full bg-primary" id="c-egress-bar" style="width:0%"></div>
+          </div>
+          <p class="font-code-sm text-code-sm text-on-surface-variant mt-space-sm" id="c-egress-note">
+            Streaming is free up to AWS's monthly allowance; the bill says how much is left.
+          </p>
+          <button class="font-code-sm text-code-sm text-primary hover:underline text-left mt-space-xs" id="c-egress-settings">Stream quality &rarr;</button>
+        </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -439,13 +458,18 @@
     <!-- What only this page sets: how the stream looks, the machine's disk, and
          the two accounts. Everything else has one home elsewhere - the machine
          on Build, the guards and alerts on Guards, how long games are kept on
-         Library - and is not repeated here. -->
+         Library - and is not repeated here. A list of its sections down the
+         left, as the console mockup has: each jumps to its card, and Alerts
+         goes to Safety, where they are set. -->
+    <div class="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] gap-gutter-desktop items-start">
+    <nav class="flex lg:flex-col flex-wrap gap-space-xs lg:sticky lg:top-40" id="s-nav" aria-label="Settings sections"></nav>
+    <div class="flex flex-col gap-space-md min-w-0">
     <div class="flex flex-col gap-space-md" id="s-groups"></div>
 
-    <div class="p-space-lg rounded-lg bg-surface-container-low mt-space-md" id="s-creds-card">
+    <div class="p-space-lg rounded-xl bg-surface-container-low" id="s-creds-card" data-title="AWS account">
       <div class="flex items-start justify-between gap-space-md">
         <div class="min-w-0 flex-1">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">AWS account</span>
+          <span class="section-label">AWS account</span>
           <p class="font-code-sm text-code-sm text-outline mt-0.5">
             The key this app uses to start and stop your machine. Kept on this laptop only.
           </p>
@@ -458,10 +482,10 @@
       </div>
     </div>
 
-    <div class="p-space-lg rounded-lg bg-surface-container-low mt-space-md" id="s-tskey-card">
+    <div class="p-space-lg rounded-xl bg-surface-container-low" id="s-tskey-card" data-title="Private network">
       <div class="flex items-start justify-between gap-space-md">
         <div class="min-w-0 flex-1">
-          <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Private network</span>
+          <span class="section-label">Private network</span>
           <p class="font-code-sm text-code-sm text-outline mt-0.5">
             Tailscale connects this laptop to your machine privately.
           </p>
@@ -483,6 +507,8 @@
           <button id="tskey-authkey" class="btn" hidden>Add auth key</button>
         </div>
       </div>
+    </div>
+    </div>
     </div>
 
   </section>

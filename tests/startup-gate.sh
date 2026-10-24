@@ -150,7 +150,7 @@ JS
   const shown = sel => { const el = document.querySelector(sel); return el ? getComputedStyle(el).display !== 'none' : 'gone'; };
   out.push('MODE | ' + (document.getElementById('onb-steps').hidden ? 'none' : 'steps')
            + ' setup=' + document.body.classList.contains('setup')
-           + ' sidebar=' + shown('body > aside') + ' header=' + shown('body > header') + ' viewbar=' + shown('#viewbar'));
+           + ' header=' + shown('body > header') + ' viewbar=' + shown('#viewbar'));
   out.push('AFTER | ' + (window.__after ? await window.__after() : 'none'));
   out.push('BANNER | ' + (document.getElementById('banner') ? 'exists' : 'none'));
   out.push('LEGEND | ' + document.getElementById('s-chooser-legend').innerText
@@ -264,7 +264,7 @@ contains "the pipeline is up"          "$(row ONB)" "ONB | shown"
 contains "  counting the steps"        "$(row COUNT)" "of 6 done"
 # In the add dialog, over Home: there is no full-window setup screen any more.
 contains "it shows the steps, not the splash" "$(row MODE)" "MODE | steps setup=false"
-contains "  over the window, which stays as it is" "$(row MODE)" "sidebar=true header=true viewbar=true"
+contains "  over the window, which stays as it is" "$(row MODE)" "header=true viewbar=true"
 # The tools themselves, not a sentence about them: present in green, missing
 # in red, and the count as the only heading.
 contains "  each tool shown"           "$(row TOOLS)" "python3:yes"
@@ -529,11 +529,16 @@ echo "3b. the box has no key to join with"
 # log, then "paste auth key". It is a prerequisite, so it is a stage.
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_nokey, \"config --json\": $cfg_ok}")
 contains "the auth key stage is active" "$(row STAGES)" "authkey=active"
-contains "  saying what it is for"      "$(row STAGETEXT)" "New machines use a Tailscale auth key to join your tailnet"
-# No API token here, so there is nothing to mint one with: one button, not two.
-check    "and only pasting is offered"  "$(row BUTTONS)" "BUTTONS | authkey=Add auth key"
+contains "  saying what it is for"      "$(row STAGETEXT)" "New machines join your tailnet with an auth key"
+# No access token, so nothing can check a key or make one: the token is asked
+# for, not a key - a pasted key with no token is what the build refuses.
+check    "and the access token is asked for" "$(row BUTTONS)" "BUTTONS | authkey=Add access token"
+tskey_keyonly='{"present":false,"valid":null,"state":"absent","detail":null,"signed_in":true,"node":"laptop","auth_key_stored":true,"can_mint":false}'
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_keyonly, \"config --json\": $cfg_ok}")
+contains "a saved key alone does not tick it" "$(row STAGES)" "authkey=active"
+check    "  the token is still asked for"     "$(row BUTTONS)" "BUTTONS | authkey=Add access token"
 
-echo "3b2. pasting the key saves it, and the stage moves on"
+echo "3b2. saving the token reaches cg, and the stage is read again"
 # The save worked and the screen did not change: cg wrote .env, the dialog
 # closed, and nothing re-read - because `creds tailscale authkey` was missing
 # from `cg --contract`, so main called it a read. A write is what triggers the
@@ -541,18 +546,25 @@ echo "3b2. pasting the key saves it, and the stage moves on"
 ENGINE="window.__after = async () => {
   document.querySelector('#onb-steps [data-stage=\"authkey\"] button').click();
   const open1 = document.getElementById('onefield').open;
-  document.getElementById('onefield-input').value = 'tskey-auth-abc123';
+  const title = document.getElementById('onefield-title').textContent;
+  document.getElementById('onefield-input').value = 'tskey-api-tok1-secret';
   window.__ran = [];
+  window.__slow = ['creds tailscale --json']; window.__slowMs = 400;
   document.getElementById('onefield-go').click();
-  await new Promise(r => setTimeout(r, 40));
-  return 'dialog=' + open1
-       + ' saved=' + window.__ran.includes('creds tailscale authkey')
+  await new Promise(r => setTimeout(r, 150));
+  // Saved, and the read that shows it still out: the dialog waits, saying so,
+  // rather than closing onto the step's old button.
+  const mid = document.getElementById('onefield').open + ':' + document.getElementById('onefield-go').textContent;
+  await new Promise(r => setTimeout(r, 800));
+  return 'dialog=' + open1 + ' title=' + title + ' mid=' + mid
+       + ' saved=' + window.__ran.includes('creds set tailscale')
        + ' closed=' + !document.getElementById('onefield').open
        + ' reread=' + window.__ran.includes('creds tailscale --json')
        + ' type=' + document.getElementById('onefield-input').type;
 };"
-OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_nokey, \"config --json\": $cfg_ok, \"creds tailscale authkey\": {}}")
-contains "the paste dialog opens here" "$(row AFTER)" "dialog=true"
+OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_nokey, \"config --json\": $cfg_ok, \"creds set tailscale\": {}}")
+contains "the token dialog opens here" "$(row AFTER)" "dialog=true title=Tailscale access token"
+contains "  and stays until the token is read back" "$(row AFTER)" "mid=true:Saved. Checking…"
 contains "  and Save reaches cg"       "$(row AFTER)" "saved=true"
 contains "  the dialog closes"         "$(row AFTER)" "closed=true"
 contains "  and the stage is re-read"  "$(row AFTER)" "reread=true"
@@ -587,7 +599,7 @@ ENGINE="window.__after = async () => {
                                         is_set: true, value: 'ap-south-2'}];
   window.__ran = [];
   document.getElementById('onefield-go').click();
-  await new Promise(r => setTimeout(r, 40));
+  await new Promise(r => setTimeout(r, 400));
   return 'dialog=' + open1
        + ' saved=' + window.__ran.includes('config set EMAIL_ALERTS me@example.com')
        + ' closed=' + !document.getElementById('onefield').open
@@ -864,6 +876,35 @@ contains "  then it closes, the card filled"     "$(row AFTER)" "end=hidden/show
 contains "  with nothing left running"           "$(row AFTER)" "stop=hidden"
 ENGINE=""
 
+echo "4d4. choosing a location saves the machine it showed"
+# The popup shows a machine for each location and saved only the location: a
+# g4dn.xlarge chosen for Mumbai went to Hyderabad, which has none, and the
+# build stopped at its first step. The machine already chosen is kept where
+# it is offered; elsewhere the one shown is saved, before the location.
+ENGINE="window.__after = async () => {
+  document.querySelector('#onb-steps [data-stage=\"where\"] button').click();
+  await new Promise(r => setTimeout(r, 20));
+  const shown = document.querySelector('#whereto-table tr[data-region=\"ap-south-2\"]').textContent;
+  window.__ran = [];
+  document.getElementById('whereto-use').click();
+  await new Promise(r => setTimeout(r, 200));
+  const at = c => window.__ran.indexOf(c);
+  return 'shown=' + shown.includes('g6.xlarge')
+       + ' type=' + (at('config set GAME_INSTANCE_TYPE g6.xlarge') >= 0)
+       + ' first=' + (at('config set GAME_INSTANCE_TYPE g6.xlarge') < at('config set GAME_REGION ap-south-2'));
+};"
+cfg_g4dn='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":true,"value":"a@b.c","default":null,"note":"n"},
+  {"key":"GAME_INSTANCE_TYPE","kind":"text","secret":false,"is_set":true,"value":"g4dn.xlarge","default":"g6.xlarge","note":"n"}]'
+OUT=$(probe "{$READY, \"config --json\": $cfg_g4dn, \"sweep --cached --json\": $FIT_SWEEP,
+              \"config set GAME_INSTANCE_TYPE g6.xlarge\": {}, \"config set GAME_REGION ap-south-2\": {}}")
+contains "the location shows the machine it has" "$(row AFTER)" "shown=true"
+contains "  and using it saves that machine"     "$(row AFTER)" "type=true"
+contains "  before the location"                 "$(row AFTER)" "first=true"
+OUT=$(probe "{$READY, \"config --json\": ${cfg_g4dn//g4dn.xlarge/g6.xlarge}, \"sweep --cached --json\": $FIT_SWEEP,
+              \"config set GAME_REGION ap-south-2\": {}}")
+lacks    "a machine it offers is left alone"     "$(row AFTER)" "type=true"
+ENGINE=""
+
 echo "4e. the location popup on a laptop that has never measured"
 # It opened on an empty table with two greyed buttons and only Cancel live -
 # while the measuring it needed was running, twice: the app had started one by
@@ -940,16 +981,16 @@ DASH="window.__after = async () => {
   const shown = id => !document.getElementById(id).hidden;
   return 'title=' + q('#d-machine-card [data-f=title]') + ' | machine=' + q('#d-machine-card [data-f=what]')
        + ' | where=' + q('#d-machine-card [data-f=where]') + ' | same=' + (q('#d-machine-card [data-f=where]') === q('#b-machine-card [data-f=where]'))
-       + ' | twin=' + (() => { const k = id => [...document.getElementById(id).children].map(c => c.outerHTML).join('')
-           .replace(/id=\"[db]-/g, 'id=\"x-').replace(/ disabled=\"\"/g, ''); return k('d-hero') === k('b-machine'); })()
+       // Home's tile as a machine of yours's: its name, and Details, not Delete.
+       + ' | name=' + document.querySelector('#d-machine-card p').textContent.trim()
        + ' | bill=' + t('d-recurring-card')
        + ' | month=' + q('#d-month-card [data-f=total]') + ' | monthsub=' + q('#d-month-card [data-f=sub]')
        + ' | src=' + t('d-month-src')
        + ' | price=' + t('d-cost-price')
        + ' | games=' + t('d-games')
        + ' | protect=' + t('d-protect')
-       + ' | buttons=' + ['d-build', 'd-open', 'd-destroy'].filter(shown).join(',')
-       + ' | destroy=' + t('d-destroy');
+       + ' | buttons=' + ['d-build', 'd-open', 'd-destroy', 'd-details'].filter(shown).join(',')
+       + ' | destroy=' + t('b-destroy');
 };"
 
 ENGINE="$DASH"
@@ -960,7 +1001,7 @@ lacks    "  not 'nothing is billed'"        "$(row AFTER)" "billed by the hour"
 contains "  what it would be"              "$(row AFTER)" "machine=g6.xlarge · NVIDIA L4"
 contains "  where, how, and what it would cost" "$(row AFTER)" "where=Hyderabad · Spot, else on-demand · ₹16.44/hour"
 contains "  the same card as the Machine page" "$(row AFTER)" "same=true"
-contains "  laid out the same, buttons and all" "$(row AFTER)" "twin=true"
+contains "  named, as a machine of yours is" "$(row AFTER)" "name=AWS"
 lacks    "  and no build time on Home"     "$(row AFTER)" "ready in about"
 # Recurring cost is the Spending page's card, from the bill: unchecked, it waits.
 contains "recurring waits for the bill"    "$(row AFTER)" "bill=— Exact cost reads the bill."
@@ -971,7 +1012,7 @@ lacks    "  not Budgets' after-credit figure" "$(row AFTER)" "₹396"
 contains "the exact figure's price, in rupees" "$(row AFTER)" "price=₹0.88"
 contains "no games yet"                    "$(row AFTER)" "games=No saved games"
 contains "the budget is protection"        "$(row AFTER)" "Budget alert at ₹5,016 · emails 2 addresses"
-contains "one action: build"               "$(row AFTER)" "buttons=d-build |"
+contains "one action: build, and details"  "$(row AFTER)" "buttons=d-build,d-details |"
 lacks    "no dollars anywhere on it"       "$(row AFTER)" "$"
 
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
@@ -982,9 +1023,9 @@ contains "a running machine: ready"        "$(row AFTER)" "title=Ready to play"
 # Home shows the bill as last checked, like Spending - not what exists this
 # minute. A build showed on Home and not on Spending; now both wait for a check.
 lacks    "  the bill's view, not a live list" "$(row AFTER)" "Public IP address"
-contains "play and delete, nothing else"   "$(row AFTER)" "buttons=d-open,d-destroy |"
-# (The icon glyph comes first, so this checks the words after it.)
-contains "  it says delete, not destroy"   "$(row AFTER)" " Delete machine"
+contains "play and details, nothing else"  "$(row AFTER)" "buttons=d-open,d-details |"
+# Delete is the Machine page's, as removing a machine of yours is.
+contains "  delete, on the Machine page"   "$(row AFTER)" "destroy=Delete machine"
 lacks    "    anywhere on the page"         "$(row AFTER)" "Destroy"
 
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
@@ -1161,6 +1202,7 @@ B2="window.__after = async () => {
       + [...document.querySelectorAll('#b-run-acts button')].map(b => b.textContent.trim()).join(',');
   };
   const a = await go(['preflight', 'arming the budget', 'provisioning instance'], 1);
+  const del = window.__ran.includes('destroy --no-push');
   // The same failure with a machine there after all - launched, then the
   // build stopped inside the launching step: said, never 'nothing was billed'.
   const boxWas = boxNow;
@@ -1172,16 +1214,74 @@ B2="window.__after = async () => {
   const b = await go(['preflight', 'arming the budget', 'provisioning instance', 'waiting for the box to join the tailnet',
                       'building the box', 'finishing up', 'moonlight pairing', 'waiting for Steam to finish installing'], 0);
   const st = [...document.querySelectorAll('#b-steps [data-step]')].map(r => r.dataset.state).join(',');
-  return 'failed=' + a + ' | left=' + a2 + ' | done=' + b + ' | steps=' + st;
+  return 'failed=' + a + ' | left=' + a2 + ' | done=' + b + ' | steps=' + st + ' | del=' + del;
 };"
 ENGINE="$B2"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "a failed rental: nothing was billed" "$(row AFTER)" "failed=Build failed / Nothing was billed"
+contains "  and nothing is deleted"           "$(row AFTER)" "del=false"
 contains "  unless a machine is there after all: said, with what to do" "$(row AFTER)" "left=A machine is running - delete it to stop billing"
-contains "a finished build: ready to play"     "$(row AFTER)" "done=Ready to play / built in"
-contains "  with play, and delete"            "$(row AFTER)" "▶ Play,Delete machine"
+# The panel above is the machine, with Play and Delete; this is its record.
+contains "a finished build: how it was built"  "$(row AFTER)" "done=How it was built / built in"
+contains "  with no buttons of its own"       "$(row AFTER)" " /  | steps="
 contains "  and all eight steps ticked"        "$(row AFTER)" "steps=done,done,done,done,done,done,done,done"
+
+echo "7b2. a build that fails with its machine rented deletes it, as Cancel does"
+# It used to stop and leave the machine billing - "delete it to stop billing" -
+# until the cloud watchdog ended it, near an hour on. Deleted under the failed
+# build, so why it failed stays on screen.
+ENGINE="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  document.querySelector('.nav-item[data-view=build]').click();
+  const meta = () => document.getElementById('b-strip-meta').textContent;
+  const acts = () => [...document.querySelectorAll('#b-run-acts button')].map(b => b.textContent.trim() + (b.disabled ? '(off)' : '')).join(',');
+  window.askConfirm = async () => true;
+  document.getElementById('b-build').click();
+  await new Promise(r => setTimeout(r, 30));
+  const id = window.__lastId;
+  window.__ran = [];
+  // The delete's own id: the reads a write starts take later ones.
+  const run0 = window.cg.run;
+  window.cg.run = args => run0(args).then(r => { if (args[0] === 'destroy') window.__delId = r.id; return r; });
+  for (const t of ['preflight', 'arming the budget', 'provisioning instance', 'waiting for the box to join the tailnet'])
+    window.__emit(id, { t: 'step', text: t });
+  window.__emit(id, { t: 'line', kind: 'fail', text: 'no new node joined after 30 min.' });
+  window.__emit(id, { t: 'exit', rc: 1 });
+  await new Promise(r => setTimeout(r, 30));
+  const del = window.__delId;
+  const during = 'ran=' + window.__ran.includes('destroy --no-push') + ' meta=' + meta() + ' acts=' + acts()
+    + ' title=' + document.getElementById('b-strip-title').textContent;
+  window.__emit(del, { t: 'step', text: 'terminating instance' });
+  window.__emit(del, { t: 'exit', rc: 0 });
+  await new Promise(r => setTimeout(r, 60));
+  const after = 'meta=' + meta() + ' acts=' + acts() + ' title=' + document.getElementById('b-strip-title').textContent
+    + ' why=' + document.getElementById('b-fail-head').textContent.trim();
+  // A build that picked up a machine already there - resumed, its games maybe
+  // an hour into restoring - fails the same way: that machine is left alone.
+  run = null; paintRun();
+  document.getElementById('b-build').click();
+  await new Promise(r => setTimeout(r, 30));
+  const id2 = window.__lastId;
+  window.__ran = [];
+  for (const t of ['preflight', 'arming the budget', 'reusing the existing box, already on the tailnet as gamevps', 'building the box'])
+    window.__emit(id2, { t: 'step', text: t });
+  window.__emit(id2, { t: 'exit', rc: 1 });
+  await new Promise(r => setTimeout(r, 30));
+  const reused = 'deleted=' + window.__ran.includes('destroy --no-push');
+  return 'during=' + during + ' | after=' + after + ' | reused=' + reused;
+};"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "the machine is deleted"               "$(row AFTER)" "during=ran=true"
+contains "  said while it goes"                 "$(row AFTER)" "Deleting the machine…"
+contains "  and no new build meanwhile"         "$(row AFTER)" "acts=Try again(off),Close"
+contains "  under the failure, not in its place" "$(row AFTER)" "title=Build failed | after"
+contains "then said, once gone"                 "$(row AFTER)" "Machine deleted, so nothing more is billed"
+contains "  with try again back"                "$(row AFTER)" "acts=Try again,Close title=Build failed"
+contains "  and why it failed still there"      "$(row AFTER)" "why=no new node joined after 30 min."
+contains "a machine the build picked up is kept" "$(row AFTER)" "reused=deleted=false"
+ENGINE=""
 ENGINE=""
 
 echo "7d. the Build screen shows the machine, wherever you have been"
@@ -1212,7 +1312,10 @@ B4="window.__after = async () => {
                                             launched: new Date().toISOString() };
   window.__emit(id, { t: 'exit', rc: 0 });
   await wait();
-  const done = card() + ' acts=' + acts() + ' folded=' + !!document.querySelector('#b-steps details:not([open])');
+  const panel = () => document.querySelector('#b-machine-card [data-f=title]').textContent + ' '
+    + ['b-open', 'b-destroy'].filter(b => !document.getElementById(b).hidden).join(',');
+  const done = card() + ' acts=' + acts() + ' folded=' + !!document.querySelector('#b-steps details:not([open])')
+    + ' panel=' + panel();
   nav('dashboard'); nav('build');
   const done2 = card();
   // Cancel: cg is interrupted, then whatever it rented is deleted, and the
@@ -1241,8 +1344,9 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "a build shows the run"              "$(row AFTER)" "during=run:Building acts=Cancel"
 contains "  and still does after leaving"     "$(row AFTER)" "back=run:Building |"
-contains "a finished build is the machine"    "$(row AFTER)" "done=run:Ready to play acts=▶ Play,Delete machine folded=true"
-contains "  and stays it after leaving"       "$(row AFTER)" "done2=run:Ready to play |"
+# The panel is the machine, with Play and Delete; under it, how it was built.
+contains "a finished build is the machine"    "$(row AFTER)" "done=run:How it was built acts= folded=true panel=Ready to play b-open,b-destroy"
+contains "  and stays it after leaving"       "$(row AFTER)" "done2=run:How it was built |"
 contains "cancel interrupts cg"               "$(row AFTER)" "cancelled=true"
 contains "  then deletes what it rented"      "$(row AFTER)" ";destroy --no-push;"
 contains "  shown as the delete"              "$(row AFTER)" "run:Deleting the machine"
@@ -1254,19 +1358,23 @@ B5="window.__after = async () => {
   await new Promise(r => setTimeout(r, 1200));
   document.querySelector('.nav-item[data-view=build]').click();
   await new Promise(r => setTimeout(r, 30));
+  const q = f => (document.querySelector('#b-machine-card [data-f=' + f + ']') || {}).textContent;
   return 'plan=' + !document.getElementById('b-plan').hidden
-    + ' | title=' + document.getElementById('b-strip-title').textContent
-    + ' | meta=' + document.getElementById('b-strip-meta').textContent
-    + ' | acts=' + [...document.querySelectorAll('#b-run-acts button')].map(b => b.textContent.trim()).join(',');
+    + ' | strip=' + !document.getElementById('b-strip').hidden
+    + ' | title=' + q('title') + ' | word=' + q('word')
+    + ' | meta=' + q('sub')
+    + ' | acts=' + ['b-open', 'b-destroy', 'b-change'].filter(b => !document.getElementById(b).hidden).join(',');
 };"
 ENGINE="$B5"
 BOX='{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle": "spot", "launched": "2026-01-01T00:00:00Z"}'
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st "$BOX" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "no plan beside a machine"   "$(row AFTER)" "plan=false"
-contains "  the machine, ready"       "$(row AFTER)" "title=Ready to play"
-contains "  how long it has been up"  "$(row AFTER)" "meta=up "
-contains "  play, or delete it"       "$(row AFTER)" "acts=▶ Play,Delete machine"
+# Opened again with a machine there: the panel says it all; no run to show.
+contains "  nor an empty run"         "$(row AFTER)" "strip=false"
+contains "  the machine, ready"       "$(row AFTER)" "title=Ready to play | word=Online"
+contains "  how long it has been up"  "$(row AFTER)" "meta=Up "
+contains "  play, or delete it"       "$(row AFTER)" "acts=b-open,b-destroy"
 ENGINE=""
 
 echo "7f. play is a session, as steps, ending in keep or delete"
@@ -1280,7 +1388,7 @@ B6="window.__after = async () => {
   const card = () => (document.getElementById('b-plan').hidden ? '' : 'plan')
     + (document.getElementById('b-strip').hidden ? '' : 'run:' + document.getElementById('b-strip-title').textContent);
   const play = async () => {
-    [...document.querySelectorAll('#b-run-acts button')].find(b => b.textContent.includes('Play')).click();
+    document.getElementById('b-open').click();
     await wait();
     return window.__lastId;
   };
@@ -1297,7 +1405,7 @@ B6="window.__after = async () => {
   line('session ended after 5m');
   window.__emit(id, { t: 'exit', rc: 0 });
   await wait();
-  const kept = card();
+  const kept = card() + 'panel:' + document.querySelector('#b-machine-card [data-f=title]').textContent;
   id = await play();
   for (const t of ['instance already running', 'waiting for sunshine ok', 'session ended after 1m'])
     window.__emit(id, { t: 'line', text: t });
@@ -1317,7 +1425,8 @@ contains "play starts with the machine"     "$(row AFTER)" "starting=run:Startin
 contains "  then is playing"                "$(row AFTER)" "playing=run:Playing done,done,done,running"
 contains "  saying how to stop"             "$(row AFTER)" "Close Moonlight to end the session"
 contains "  and what it costs"              "$(row AFTER)" "so far"
-contains "kept: back to the machine"        "$(row AFTER)" "kept=run:Ready to play"
+# Kept: the panel is the machine again, and there is no run under it.
+contains "kept: back to the machine"        "$(row AFTER)" "kept=panel:Ready to play"
 contains "deleted: the delete is shown"     "$(row AFTER)" "deleting=run:Deleting the machine"
 ENGINE=""
 
@@ -1363,7 +1472,7 @@ B8="window.__after = async () => {
   const wait = () => new Promise(r => setTimeout(r, 30));
   const card = () => (document.getElementById('b-plan').hidden ? '' : 'plan')
     + (document.getElementById('b-strip').hidden ? '' : 'run:' + document.getElementById('b-strip-title').textContent);
-  [...document.querySelectorAll('#b-run-acts button')].find(b => b.textContent.includes('Play')).click();
+  document.getElementById('b-open').click();
   await wait();
   const id = window.__lastId;
   for (const l of ['instance already running', 'waiting for sunshine ok', 'disk:']) window.__emit(id, { t: 'line', text: l });
@@ -1373,7 +1482,7 @@ B8="window.__after = async () => {
   window.__emit(id, { t: 'exit', rc: 130 });
   const popup = 'open=' + document.getElementById('refdlg').open + ' title=' + document.getElementById('refdlg-title').textContent;
   await wait(); await wait();
-  return 'playing=' + playing + ' | popup=' + popup + ' | after=' + card() + ' closed=' + !document.getElementById('refdlg').open
+  return 'playing=' + playing + ' | popup=' + popup + ' | after=' + card() + 'panel:' + document.querySelector('#b-machine-card [data-f=title]').textContent + ' closed=' + !document.getElementById('refdlg').open
     + ' fail=' + !document.getElementById('b-fail').classList.contains('hidden')
     + ' | statusReads=' + window.__ran.filter(l => l === 'status --json').length + ' stillReading=' + jobs.size
     + ' rows=' + document.querySelectorAll('#refdlg-list [data-read]').length;
@@ -1384,7 +1493,7 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st "$BOX" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "a session is playing"            "$(row AFTER)" "playing=run:Playing"
 contains "stopping it opens the popup"     "$(row AFTER)" "popup=open=true title=Refreshing Machine"
-contains "  which leaves it ready to play" "$(row AFTER)" "after=run:Ready to play closed=true"
+contains "  which leaves it ready to play" "$(row AFTER)" "after=panel:Ready to play closed=true"
 contains "  and calls nothing a failure"   "$(row AFTER)" "fail=false"
 # One round of reads, under the popup: not the page's, then all of them again.
 contains "  read once, all under the popup" "$(row AFTER)" "statusReads=1 stillReading=0 rows=11"
@@ -1406,7 +1515,7 @@ B9="window.__after = async () => {
                                             launched: new Date().toISOString() };
   window.__emit(id, { t: 'exit', rc: 0 });
   await wait(); await wait();
-  [...document.querySelectorAll('#b-run-acts button')].find(b => b.textContent.includes('Play')).click();
+  document.getElementById('b-open').click();
   await wait();
   id = window.__lastId;
   window.__emit(id, { t: 'line', text: 'session-only line' });
@@ -1421,7 +1530,7 @@ B9="window.__after = async () => {
 ENGINE="$B9"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
-contains "after a session: ready to play"  "$(row AFTER)" "title=Ready to play"
+contains "after a session: how it was built" "$(row AFTER)" "title=How it was built"
 contains "  with how it was built"         "$(row AFTER)" "built=Build details"
 contains "  and the build's own log"       "$(row AFTER)" "buildlog=true sessionlog=false"
 contains "  shown"                         "$(row AFTER)" "logbox=true"
@@ -1488,16 +1597,18 @@ B11="window.__after = async () => {
   const view = () => document.querySelector('.nav-item.on').dataset.view;
   document.querySelector('.nav-item[data-view=library]').click();
   await wait();
-  const rowText = () => [...document.querySelectorAll('#lib-rows tr')].map(tr => [...tr.children].map(td => td.textContent.trim()).join(' / ')).join(' || ');
+  // A card per game; its marked fields, in order, as the table's cells were.
+  const rowText = () => [...document.querySelectorAll('#lib-rows [data-game]')]
+    .map(c => [...c.querySelectorAll('[data-f]')].map(x => x.textContent.trim()).join(' / ')).join(' || ');
   const table = 'rows=' + rowText() + ' foot=' + document.getElementById('lib-foot').textContent.replace(/\\s+/g, ' ')
     + ' keepfor=' + document.getElementById('lib-keepfor').value + ' note=' + document.getElementById('lib-keep').textContent;
   let asked = null;
   window.askConfirm = async o => { asked = o; return true; };
   const answered = [];
   window.cg.answer = (id, v) => { answered.push(v); return Promise.resolve(true); };
-  const btn = (row, label) => [...document.querySelectorAll('#lib-rows tr')][row].querySelector('td:last-child')
+  const btn = (row, label) => [...document.querySelectorAll('#lib-rows [data-game]')][row].querySelector('[data-f=acts]')
     .querySelectorAll('button').values().find(b => b.textContent === label);
-  btn(1, 'Move').click();
+  btn(1, 'Move to Mumbai').click();
   await wait();
   let id = window.__lastId;
   window.__emit(id, { t: 'ask', id: 'move-game', prompt: 'type MOVE to confirm: ' });
@@ -1553,10 +1664,10 @@ TWO_SWEEP='{"cached": true, "age_seconds": 90, "too_far": [], "unreachable": [],
 OUT=$(probe "{$READY, \"sweep --cached --json\": $TWO_SWEEP, \"library list --json\": $LIB2,
   \"library elsewhere --json\": $ELSE,
   \"status --json\": $(st null '{"bytes": 128849018880}' '{"volumes_gb": 0}' '{"limit": 57}')}")
-contains "the machine's place first"         "$(row AFTER)" "rows=Red Dead 2 / Mumbai / 120.0 GB / ₹285 / $D13 / KeepDelete"
-contains "  then the other place's, with Move" "$(row AFTER)" "Diablo IV / Hyderabad / 162.8 GB / ₹386 / $D14 / KeepMoveDelete"
-contains "  its Reset counts from the Reset" "$(row AFTER)" "/ $D14 /"
-contains "  one total"                       "$(row AFTER)" "foot=Total282.8 GB₹671 a month"
+contains "the machine's place first"         "$(row AFTER)" "rows=Red Dead 2 / Mumbai / 120.0 GB / ₹285 a month / Deleted on $D13 unless you play it or keep it / KeepDelete"
+contains "  then the other place's, with Move" "$(row AFTER)" "Diablo IV / Hyderabad / 162.8 GB / ₹386 a month / Deleted on $D14 unless you play it or keep it / Move to MumbaiKeepDelete"
+contains "  its Reset counts from the Reset" "$(row AFTER)" "Deleted on $D14 unless"
+contains "  one total"                       "$(row AFTER)" "foot=2 games · 282.8 GB · ₹671 a month"
 contains "  and how long, as set"            "$(row AFTER)" "keepfor=14 note=Deleted 14 days after last played."
 lacks    "  an empty place is not a row"     "$(row AFTER)" "cg-library-empty"
 c=$(row AFTER); lacks "  nor any bucket name on the page" "${c%% | move=*}" "cg-library"
@@ -1600,7 +1711,7 @@ B3="window.__after = async () => {
   await new Promise(r => setTimeout(r, 30));
   const st = () => [...document.querySelectorAll('#b-steps [data-step]')].map(r => r.dataset.state).join(',');
   const mid = 'parts=' + parts + ' | mid=' + st() + ' failpanel=' + !document.getElementById('b-fail').classList.contains('hidden')
-    + ' pageScrolls=' + (document.scrollingElement.scrollHeight > innerHeight + 1);
+    + ' stripScrolls=' + (document.getElementById('b-strip').scrollHeight > document.getElementById('b-strip').clientHeight + 1);
   window.__emit(id, { t: 'step', text: 'moonlight pairing' });
   window.__emit(id, { t: 'step', text: 'waiting for Steam to finish installing' });
   window.__emit(id, { t: 'exit', rc: 0 });
@@ -1619,8 +1730,9 @@ contains "the parts are listed"            "$(row AFTER)" "parts=Base system:"
 contains "  the driver, done once Steam starts" "$(row AFTER)" "NVIDIA driver:done"
 contains "  Steam, in progress"            "$(row AFTER)" "Steam:running"
 contains "  Firefox and audio still to come" "$(row AFTER)" "Firefox:waiting,Audio:waiting"
-contains "a long build scrolls in its card, not the page" "$(row AFTER)" "pageScrolls=false"
-contains "it finishes ready to play"       "$(row AFTER)" "end=Ready to play done,done,done,done,done,done,done,done"
+# Under the panels now, so the page may scroll too; the card stays bounded.
+contains "a long build scrolls in its card" "$(row AFTER)" "stripScrolls=true"
+contains "it finishes as how it was built" "$(row AFTER)" "end=How it was built done,done,done,done,done,done,done,done"
 ENGINE=""
 
 echo "5. nothing threw"

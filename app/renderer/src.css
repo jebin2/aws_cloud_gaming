@@ -2,37 +2,67 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Words are Geist; a log, a command or code stays monospace - JetBrains Mono -
+   whatever size class it carries (font-code-* is Geist now). */
+pre[class*="font-code"], code, kbd { font-family: 'JetBrains Mono', monospace; }
+
 /* The few repeated shapes from the Stitch screens, written once. Everything
    else stays inline utility classes, exactly as the export had them. */
 @layer components {
   /* Every popup, one look: the same frame, title, subtitle and button row. */
-  .dlg { @apply rounded-lg bg-surface-container-low text-on-surface border border-surface-variant p-space-lg; }
+  .dlg { @apply rounded-xl bg-surface-container-low text-on-surface border border-surface-variant p-space-xl; }
   .dlg-title { @apply font-headline-md text-headline-md; }
-  .dlg-sub { @apply font-code-sm text-code-sm text-on-surface-variant mt-space-xs; }
+  .dlg-sub { @apply font-body-sm text-body-sm text-on-surface-variant mt-space-xs; }
   .dlg-actions { @apply flex justify-end gap-space-sm mt-space-lg p-0; }
+  /* A section tab in the top bar: a pill, the open one filled in light. */
   .nav-item {
-    @apply flex items-center gap-space-sm px-space-md py-space-sm rounded-r transition-colors
+    @apply flex items-center px-space-md py-space-sm rounded-full transition-colors whitespace-nowrap
            text-on-surface-variant hover:bg-surface-container hover:text-on-surface
-           font-body-sm text-body-sm;
+           font-body-md text-body-md font-medium;
   }
   .nav-item.on {
-    @apply bg-surface-container-high text-primary font-medium border-l-2 border-primary;
+    @apply bg-on-surface text-surface font-semibold hover:bg-on-surface hover:text-surface;
   }
+  /* A button: a filled panel, rounded, words in Geist; the primary one in the
+     accent, a destructive one in soft red. */
   .btn {
-    @apply inline-flex items-center gap-space-xs px-space-md py-space-xs rounded
-           bg-surface-container-high border border-surface-variant text-on-surface
-           font-code-sm text-code-sm transition-colors hover:border-primary
-           disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-surface-variant;
+    @apply inline-flex items-center justify-center gap-space-sm px-space-md py-space-sm rounded
+           bg-surface-container-high border border-transparent text-on-surface
+           font-body-sm text-body-sm font-medium transition-colors hover:bg-surface-container-highest
+           focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary
+           disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-container-high;
   }
-  .btn-primary { @apply bg-primary text-on-primary border-primary font-medium hover:border-primary; }
-  .btn-danger  { @apply text-error border-error/50 bg-transparent; }
+  .btn-primary { @apply bg-primary text-on-primary font-semibold hover:bg-primary-fixed disabled:hover:bg-primary; }
+  .btn-danger  { @apply bg-error-container text-on-error-container hover:bg-error-container hover:brightness-125; }
+  /* A status word: a soft tinted capsule, no outline. */
   .pill {
     @apply inline-flex items-center gap-space-xs px-space-sm py-0.5 rounded-full
-           border border-surface-variant text-outline font-code-sm text-code-sm;
+           bg-surface-container-high text-on-surface-variant font-body-sm text-[13px] font-medium;
   }
-  .pill-ok   { @apply text-primary border-primary/40; }
-  .pill-warn { @apply text-tertiary border-tertiary/40; }
-  .pill-bad  { @apply text-error border-error/40; }
+  /* Sized with a plain size, not a type token: those carry a weight too, and
+     text-body-md undid the button's semibold. */
+  .btn-lg { @apply px-space-lg py-3 text-[17px] leading-6 min-h-[48px]; }
+  /* Home, console style: each machine a big tile to play from, the rest a
+     quiet strip under them. */
+  .tile {
+    @apply p-space-xl rounded-xl bg-surface-container-low flex flex-col min-h-[230px]
+           transition-colors hover:bg-surface-container;
+  }
+  .tile-add { @apply bg-transparent border-2 border-surface-variant hover:bg-surface-container-lowest min-h-0; }
+  .glance { @apply p-space-lg rounded-lg bg-surface-container-lowest border border-surface-variant/60 flex flex-col; }
+  .glance-label, .section-label { @apply font-label-caps text-label-caps uppercase text-outline; }
+  .section-label { @apply mb-space-md; }
+  /* A page's own sections, listed down its side: Settings'. */
+  .side-item { @apply text-left px-space-md py-space-sm rounded-lg font-body-md text-body-md text-on-surface-variant
+                      hover:bg-surface-container-high hover:text-on-surface transition-colors; }
+  .side-item.on { @apply bg-surface-container-high text-on-surface font-medium; }
+  /* Scrolled to from that list: clear of the header and the page's title bar. */
+  section[data-view=settings] [data-title] { @apply scroll-mt-40; }
+  /* A sum of money or data, read at a glance: monospaced so the digits line up. */
+  .figure { @apply font-mono font-medium tracking-tight tabular-nums; }
+  .pill-ok   { @apply bg-primary/15 text-primary; }
+  .pill-warn { @apply bg-tertiary/15 text-tertiary; }
+  .pill-bad  { @apply bg-error/15 text-error; }
   .row { @apply flex items-center justify-between gap-space-sm py-space-xs; }
   /* While a setting is being edited the controls need more width than the value
      they replace, and the label is the only thing that can give - it squeezed
@@ -140,21 +170,21 @@
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
 }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #31353c; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #454a52; }
+::-webkit-scrollbar-thumb { background: theme(colors.surface-variant); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: theme(colors.surface-bright); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 @keyframes flash-attn {
-  /* #4edea3 is theme.colors.primary. Written literally because keyframes sit
-     outside @layer, where Tailwind's token lookup does not reach. */
-  0%, 100% { box-shadow: 0 0 0 0 rgba(78, 222, 163, 0); }
-  35%      { box-shadow: 0 0 0 3px rgba(78, 222, 163, 0.75); }
+  /* The accent, from the tokens: theme() is resolved anywhere in this file,
+     outside @layer too - a literal here stayed the old green once the palette
+     changed. */
+  0%, 100% { box-shadow: 0 0 0 0 theme(colors.primary / 0%); }
+  35%      { box-shadow: 0 0 0 3px theme(colors.primary / 75%); }
 }
 
-/* The checked radio's dot. An inset ring in theme.colors.primary (#4edea3),
-   written literally because this sits outside @layer where tokens resolve. */
-.chooser input[type="radio"]:checked { box-shadow: inset 0 0 0 2px #4edea3; }
-.chooser input[type="radio"]:focus-visible { outline: 1px solid #4edea3; outline-offset: 1px; }
+/* The checked radio's dot: an inset ring in the accent. */
+.chooser input[type="radio"]:checked { box-shadow: inset 0 0 0 2px theme(colors.primary); }
+.chooser input[type="radio"]:focus-visible { outline: 1px solid theme(colors.primary); outline-offset: 1px; }
 
 /* A step that has just been met: the tick lands, the line runs down to the next
    step, and the next step opens. Each fires once, on the paint where the step
@@ -173,13 +203,13 @@
 /* Working, with no percentage to show: cg does not report one, and a made-up
    number would be a lie. A sweep says "alive" without claiming how far. */
 @keyframes cg-sweep { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
-.onb-progress { height: 2px; overflow: hidden; border-radius: 1px; background: #31353c; }
-.onb-progress > i { display: block; width: 40%; height: 100%; background: #4edea3;
+.onb-progress { height: 2px; overflow: hidden; border-radius: 1px; background: theme(colors.surface-variant); }
+.onb-progress > i { display: block; width: 40%; height: 100%; background: theme(colors.primary);
                     animation: cg-sweep 1.4s ease-in-out infinite; }
 
 @keyframes cg-dot { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } }
 .onb-dots { display: flex; gap: 6px; }
-.onb-dots > span { width: 6px; height: 6px; border-radius: 50%; background: #4edea3;
+.onb-dots > span { width: 6px; height: 6px; border-radius: 50%; background: theme(colors.primary);
                    animation: cg-dot 1.2s infinite both; }
 .onb-dots > span:nth-child(2) { animation-delay: .2s; }
 .onb-dots > span:nth-child(3) { animation-delay: .4s; }
@@ -187,7 +217,7 @@
 /* A card still waiting on its first answer: the shapes of what will be there,
    pulsing, and nothing to press. */
 @keyframes cg-skel { 0%, 100% { opacity: .45; } 50% { opacity: .9; } }
-.skel { display: block; border-radius: 4px; background: #31353c; animation: cg-skel 1.4s ease-in-out infinite; }
+.skel { display: block; border-radius: 4px; background: theme(colors.surface-variant); animation: cg-skel 1.4s ease-in-out infinite; }
 .card-in { animation: cg-open 280ms ease-out both; }
 
 body.arriving #d-main > :nth-child(4) { animation-delay: 540ms; }
@@ -209,21 +239,21 @@ body.arriving #d-main > :nth-child(n+5) { animation-delay: 620ms; }
    read as a current one. */
 /* Not .stale - that one dims numbers being replaced, and turns the pointer
    off, which would have hidden the hover that says why. */
-.out-of-date { color: #ffb4ab; display: inline-block; transform-origin: center;
+.out-of-date { color: theme(colors.error); display: inline-block; transform-origin: center;
                animation: cg-heartbeat 1.2s ease-in-out infinite; }
 /* Lub-dub, then rest: two beats, the second softer, with a red glow. */
 @keyframes cg-heartbeat {
   0%, 40%, 100% { transform: scale(1);    text-shadow: none; }
-  10%           { transform: scale(1.12); text-shadow: 0 0 8px rgba(255, 180, 171, .8); }
+  10%           { transform: scale(1.12); text-shadow: 0 0 8px theme(colors.error / 80%); }
   20%           { transform: scale(1);    text-shadow: none; }
-  30%           { transform: scale(1.07); text-shadow: 0 0 5px rgba(255, 180, 171, .6); }
+  30%           { transform: scale(1.07); text-shadow: 0 0 5px theme(colors.error / 60%); }
 }
 /* With reduced motion, no movement: the beat becomes a fade, so it still
    reads as "look at this". */
 @keyframes cg-stale-fade { 50% { opacity: .4; } }
 @media (prefers-reduced-motion: reduce) { .out-of-date { animation: cg-stale-fade 1.4s ease-in-out infinite; } }
 .spinner { width: 16px; height: 16px; flex-shrink: 0; border-radius: 50%;
-           border: 2px solid #31353c; border-top-color: #4edea3;
+           border: 2px solid theme(colors.surface-variant); border-top-color: theme(colors.primary);
            animation: cg-spin 0.8s linear infinite; }
 /* Refresh covers the whole window, sidebar and all, until the page is redrawn. */
 dialog.dlg::backdrop { background: rgb(0 0 0 / 0.6); backdrop-filter: blur(2px); }
@@ -250,6 +280,7 @@ dialog.dlg[open]::backdrop { animation: dim-in 180ms ease-out both; }
 
 /* A card that is the whole screen: as wide as the page, no taller than the
    window, and scrolling inside itself - so the page never scrolls, and the
-   heading and the Stop button above it stay where they are. 156px is the top
-   bar, the screen's title row and the main area's padding. */
-.fit-view { max-height: calc(100vh - 156px); overflow-y: auto; }
+   heading and the Stop button above it stay where they are. 184px is the top
+   bar, the screen's title row and its margin, and the main area's padding -
+   measured, not guessed: tests/startup-gate.sh fails when the page scrolls. */
+.fit-view { max-height: calc(100vh - 184px); overflow-y: auto; }

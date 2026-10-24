@@ -335,7 +335,7 @@ cat > "$T/r/probe.js" <<'PROBE'
   const picked = document.querySelector('#s-chooser input:checked');
   out.push('SAMEPRICE | ' + (picked ? card('where').includes(picked.closest('label').querySelector('.amount').textContent + '/hour') : 'none'));
   out.push('BTABLE | ' + (document.getElementById('b-chooser') ? 'PRESENT' : 'absent'));
-  out.push('BSETUP | ' + (document.querySelector('#b-machine-card [data-f=change]') ? 'present' : 'ABSENT'));
+  out.push('BSETUP | ' + (document.getElementById('b-change') ? 'present' : 'ABSENT'));
   for (const id of ['s-chooser']) {
     const tb = document.getElementById(id);
     out.push('TABLE ' + id + (tb ? '' : ' MISSING'));
@@ -507,10 +507,10 @@ done
 # #3c4a42. A browser default would be appearance=auto and an OS blue.
 contains "the control is redrawn, not the OS one" "$OUT" "STYLE | unchecked | appearance=none"
 contains "  sized by the theme"                   "$OUT" "w=12px"
-contains "  unchecked uses outline"               "$OUT" "unchecked | appearance=none | w=12px | border=rgb(134, 148, 138)"
-contains "  checked uses primary"                 "$OUT" "checked | appearance=none | w=12px | border=rgb(78, 222, 163)"
-contains "  with a primary dot inside"            "$OUT" "rgb(78, 222, 163) 0px 0px 0px 2px inset"
-contains "  disabled recedes to outline-variant"  "$OUT" "disabled | appearance=none | w=12px | border=rgb(60, 74, 66)"
+contains "  unchecked uses outline"               "$OUT" "unchecked | appearance=none | w=12px | border=rgb(139, 148, 167)"
+contains "  checked uses primary"                 "$OUT" "checked | appearance=none | w=12px | border=rgb(61, 220, 151)"
+contains "  with a primary dot inside"            "$OUT" "rgb(61, 220, 151) 0px 0px 0px 2px inset"
+contains "  disabled recedes to outline-variant"  "$OUT" "disabled | appearance=none | w=12px | border=rgb(42, 49, 66)"
 lacks    "nothing is left at the browser default" "$OUT" "appearance=auto"
 
 echo "9. a greyed-out price explains itself once, not in every cell"

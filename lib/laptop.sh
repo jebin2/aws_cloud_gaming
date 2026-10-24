@@ -707,24 +707,33 @@ tskey_auth_id() {
 # key away: a flat network would otherwise delete a perfectly good key and then
 # fail to mint its replacement.
 tskey_auth_check() {
+  local r
+  r=$(tskey_auth_probe "$@")
+  printf '%s\n' "${r%% *}"
+}
+
+# tskey_auth_probe <key> -> the same answer, and for unknown, why:
+#   unknown no-token | unknown no-key | unknown refused | unknown unreachable <code>
+tskey_auth_probe() {
   local key=${1:-} token=${TAILSCALE_API_KEY:-} id out code body
-  [[ -n $key && -n $token ]] || { echo unknown; return; }
+  [[ -n $token ]] || { echo "unknown no-token"; return; }
+  [[ -n $key ]] || { echo "unknown no-key"; return; }
   id=$(tskey_auth_id "$key")
-  [[ -n $id ]] || { echo unknown; return; }
+  [[ -n $id ]] || { echo "unknown no-key"; return; }
   out=$(curl -sS --max-time 20 -w $'\n%{http_code}' \
         -H "Authorization: Bearer $token" "$TS_API/tailnet/-/keys/$id" 2>/dev/null) \
-    || { echo unknown; return; }
+    || { echo "unknown unreachable 000"; return; }
   code=$(tail -n1 <<<"$out"); body=$(sed '$d' <<<"$out")
   case $code in
     404)     echo gone; return ;;
-    401|403) echo unknown; return ;;    # the TOKEN is the problem, not the key
+    401|403) echo "unknown refused"; return ;;    # the TOKEN is the problem, not the key
     2*)      ;;
-    *)       echo unknown; return ;;
+    *)       echo "unknown unreachable $code"; return ;;
   esac
   printf '%s' "$body" | python3 -I -c '
 import datetime, json, sys
 try:    d = json.load(sys.stdin)
-except Exception: print("unknown"); sys.exit()
+except Exception: print("unknown unreadable"); sys.exit()
 if d.get("invalid") or d.get("revoked"): print("expired"); sys.exit()
 exp = d.get("expires") or ""
 if not exp: print("ok"); sys.exit()
@@ -784,8 +793,53 @@ tskey_auth_ensure() {
   printf '%s' "$fresh"
 }
 
+# tskey_preflight <key> - stop a build whose key cannot be shown to work.
+#
+# A key that does not work is found out at boot: the box is launched, billing,
+# and never joins - and the wait for it is half an hour. Only the API can say
+# whether a key works, so a build that cannot ask it does not start. It used to
+# start anyway, and a key revoked along with its token cost a build.
+tskey_preflight() {
+  local r
+  r=$(tskey_auth_probe "${1:-}")
+  case $r in
+    ok) log_as ok "the Tailscale auth key works"; return 0 ;;
+    expired|gone)
+      die "the Tailscale auth key for the box has expired or been revoked, and could not be replaced.
+       Nothing was launched. Save a new one: Settings > Private network in the app,
+       or cg creds tailscale authkey." ;;
+    "unknown no-token") tskey_need_token ;;
+    "unknown refused")
+      die "cannot check the Tailscale auth key: Tailscale refused the API token.
+       Nothing was launched. The token has probably been revoked or has expired -
+       make a new one at https://login.tailscale.com/admin/settings/keys and save
+       it in Settings > Private network (or cg creds tailscale)." ;;
+    "unknown no-key")
+      die "no Tailscale auth key for the box. Nothing was launched." ;;
+    "unknown unreadable")
+      die "cannot check the Tailscale auth key: api.tailscale.com answered with something that is not Tailscale's.
+       Nothing was launched. A proxy or a sign-in page on this network may be in the way." ;;
+    *)
+      die "cannot check the Tailscale auth key: api.tailscale.com did not answer (${r##* }).
+       Nothing was launched. Try again when it can be reached." ;;
+  esac
+}
+
+# tskey_need_token - stop, before anything is asked or launched, when there is
+# no API token to check the box's key with. Asked first, so a build never asks
+# for an auth key it is then going to refuse.
+tskey_need_token() {
+  [[ -n ${TAILSCALE_API_KEY:-} ]] && return 0
+  die "cannot check the Tailscale auth key: no Tailscale API token is saved.
+       Nothing was launched. Without the check, a key that no longer works is found
+       out only after the machine is billing. Add an access token in
+       Settings > Private network, or with cg creds tailscale - with one, cg also
+       makes and replaces the box's auth key itself."
+}
+
 # tskey_auth_set - paste a pre-auth key for the box, for a tailnet whose ACLs
-# will not issue one to the API token (tags), or when there is no token at all.
+# will not issue one to the API token (tags). An AWS build also needs the token,
+# to check the key: with none, tskey_need_token stops it.
 # Checked the same way a stored one is before it is kept.
 tskey_auth_set() {
   local key state
@@ -869,7 +923,7 @@ tskey_show() {
   esac
   case ${state:-absent} in
     ok)          log_as ok   "api token        works" ;;
-    absent)      log_as warn "api token        not set  (optional: prunes old nodes, turns off key expiry)" ;;
+    absent)      log_as warn "api token        not set  (an AWS build needs it, to check the box's auth key)" ;;
     rejected)    log_as fail "api token        rejected (${detail:-}) <- https://login.tailscale.com/admin/settings/keys"; return 1 ;;
     unreachable) log_as warn "api token        set, but api.tailscale.com did not answer (${detail:-})" ;;
   esac

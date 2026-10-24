@@ -52,6 +52,8 @@ case "$method $url" in
     printf '%s\n200' "${POST_BODY:-{\"key\":\"tskey-auth-kNEW111CNTRL-freshsecret\",\"id\":\"kNEW111CNTRL\"}}"; exit 0 ;;
   *GET*/keys/*)
     [[ ${KEYGET:-} == 404 ]] && { printf '{"message":"key not found"}\n404'; exit 0; }
+    [[ ${KEYGET:-} == 401 ]] && { printf '{"message":"API token invalid"}\n401'; exit 0; }
+    [[ ${KEYGET:-} == down ]] && exit 7
     printf '%s\n200' "${KEYGET:?}"; exit 0 ;;
   *GET*/tailnet/-/devices) printf '200'; exit 0 ;;
 esac
@@ -171,6 +173,45 @@ contains "the build tries this first"  "$s" "tskey_auth_ensure"
 contains "  before asking for a key"   "$s" "paste auth key"
 contains "a stored key is checked too" "$s" "answerable here, before anything starts"
 contains "cg reports it"               "$(cat lib/laptop.sh)" "box auth key"
+
+echo "13. every build checks the key first, and stops when it cannot"
+# A key revoked with its token went unchecked - no token, no check - and the
+# box it was given never joined, half an hour into the bill.
+KEYGET="{\"id\":\"kOLD1\",\"expires\":\"$(at_days 60)\"}"
+out=$(run 'tskey_preflight tskey-auth-kOLD1-sec; echo "rc=$?"')
+contains "a working key passes"        "$out" "the Tailscale auth key works"
+contains "  and the build goes on"     "$out" "rc=0"
+out=$(TAILSCALE_API_KEY= run 'tskey_preflight tskey-auth-kOLD1-sec; echo "rc=$?"')
+contains "no token: it stops"          "$out" "no Tailscale API token is saved"
+contains "  before anything launched"  "$out" "Nothing was launched"
+lacks    "  and goes no further"       "$out" "rc=0"
+KEYGET=401
+out=$(run 'tskey_preflight tskey-auth-kOLD1-sec; echo "rc=$?"')
+contains "a refused token: it says so" "$out" "Tailscale refused the API token"
+lacks    "  and stops"                 "$out" "rc=0"
+KEYGET=down
+out=$(run 'tskey_preflight tskey-auth-kOLD1-sec; echo "rc=$?"')
+contains "Tailscale unreachable"       "$out" "api.tailscale.com did not answer"
+lacks    "  stops too"                 "$out" "rc=0"
+KEYGET=404
+out=$(run 'tskey_preflight tskey-auth-kOLD1-sec; echo "rc=$?"')
+contains "a dead key stops it"         "$out" "expired or been revoked"
+lacks    "  as well"                   "$out" "rc=0"
+contains "the build runs it"           "$(cat lib/setup)" 'tskey_preflight "${GAME_TS_AUTHKEY:-}"'
+# Asked first: a build with no token used to ask for an auth key, save it, and
+# then refuse to build with it.
+s=$(cat lib/setup)
+pre=${s%%settings_prompts \"\$FIX\"*}
+contains "no token: stopped before the questions" "$pre" "tskey_need_token"
+out=$(TAILSCALE_API_KEY= run 'tskey_need_token; echo "rc=$?"')
+contains "  saying where to add one"   "$out" "Settings > Private network"
+lacks    "  and goes no further"       "$out" "rc=0"
+out=$(run 'tskey_need_token; echo "rc=$?"')
+contains "with a token it passes"      "$out" "rc=0"
+KEYGET='<html>sign in to this wifi</html>'
+out=$(run 'tskey_preflight tskey-auth-kOLD1-sec; echo "rc=$?"')
+contains "an answer that is not Tailscale's, said" "$out" "answered with something that is not Tailscale's"
+lacks    "  and stops"                 "$out" "rc=0"
 
 echo ""
 echo "authkey: $pass passed, $fail failed"
