@@ -100,12 +100,56 @@ session_end_first() {
 moonlight_flags() {
   local -n _mf=$1
   _mf=()
-  [[ -n ${GAME_RES:-} ]]          && _mf+=(--resolution "$GAME_RES") || true
+  # The display mode has a default of cg's - full screen - rather than none:
+  # unset, it is what it always was. lib/game has no settings registry of its
+  # own loaded, so it is read here.
+  declare -F config_field >/dev/null || source "${BASH_SOURCE[0]%/*}/config.sh"
+  local mode=${GAME_DISPLAY_MODE:-$(config_field GAME_DISPLAY_MODE 3)} size=${GAME_RES:-}
+  # In a window, Moonlight sizes the window to the stream: the window's size is
+  # the stream's resolution there.
+  [[ $mode == windowed && -n ${GAME_WINDOW_SIZE:-} ]] && size=$GAME_WINDOW_SIZE
+  [[ -n $size ]]                  && _mf+=(--resolution "$size") || true
   [[ -n ${GAME_FPS:-} ]]          && _mf+=(--fps "$GAME_FPS") || true
   [[ -n ${GAME_BITRATE_KBPS:-} ]] && _mf+=(--bitrate "$GAME_BITRATE_KBPS") || true
-  [[ -n ${GAME_DISPLAY_MODE:-} ]] && _mf+=(--display-mode "$GAME_DISPLAY_MODE") || true
+  [[ -n $mode ]]                  && _mf+=(--display-mode "$mode") || true
   [[ -n ${GAME_VIDEO_CODEC:-} ]]  && _mf+=(--video-codec "$GAME_VIDEO_CODEC") || true
   [[ ${GAME_PERF_OVERLAY:-0} == 1 ]] && _mf+=(--performance-overlay) || true
+}
+
+# hypr_place <moonlight-pid> <WxH|""> <log> - on Hyprland, float each window
+# Moonlight opens, at the size asked, centred. Hyprland tiles every new window
+# and a tiled window fills the space it is given, so "in a window" opened
+# looking full screen at a size nobody set. Each window is taken as it appears
+# - Moonlight opens a small one while it connects, then the stream's - for as
+# long as Moonlight runs, up to a few minutes. A window Moonlight made full
+# screen itself is left alone and said so: that is Moonlight's choice, not
+# Hyprland's. What it found goes in Moonlight's log and the run's output.
+hypr_place() {
+  local pid=$1 size=$2 log=$3 i seen=" " win addr floating full wh
+  for ((i = 0; i < 360; i++)); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    while read -r addr floating full wh; do
+      [[ -n $addr && $seen != *" $addr "* ]] || continue
+      seen+="$addr "
+      if [[ $full != 0 ]]; then
+        win="Moonlight made its window full screen itself ($wh) - Hyprland did not"
+      else
+        [[ $floating == 1 ]] || hyprctl dispatch setfloating "address:$addr" >/dev/null 2>&1 || true
+        [[ -z $size ]] || hyprctl dispatch resizewindowpixel "exact ${size%x*} ${size#*x},address:$addr" >/dev/null 2>&1 || true
+        { hyprctl dispatch focuswindow "address:$addr" && hyprctl dispatch centerwindow 1; } >/dev/null 2>&1 || true
+        win="Hyprland had the window $([[ $floating == 1 ]] && echo floating || echo tiled) at $wh - floated${size:+ at $size}, centred"
+      fi
+      printf '# cg: %s\n' "$win" >> "$log"
+      cg_echo "    window: $win"
+    done < <(hyprctl clients -j 2>/dev/null | python3 -c '
+import json, sys
+for c in json.load(sys.stdin):
+    if c.get("pid") == int(sys.argv[1]) and c.get("mapped", True) and not c.get("hidden", False):
+        full = int(c.get("fullscreen") or 0)   # a bool on older Hyprland, a state on newer
+        w, h = c.get("size", [0, 0])
+        print(c["address"], int(bool(c.get("floating"))), full, "%dx%d" % (w, h))' "$pid" 2>/dev/null)
+    sleep 0.5
+  done
 }
 
 # stream_play <ip> <app> - the stream itself, from whatever machine: Moonlight
@@ -128,7 +172,18 @@ stream_play() {
   mkdir -p "${mlog%/*}"
   moonlight_flags mlf
   (( ${#mlf[@]} )) && cg_echo "    stream: ${mlf[*]}" || true
-  moonlight stream ${mlf[@]+"${mlf[@]}"} "$ip" "$app" > "$mlog" 2>&1 || true
+  # What was asked of Moonlight, at the top of its log: it never says itself.
+  printf '# cg: moonlight stream %s %s %s\n' "${mlf[*]}" "$ip" "$app" > "$mlog"
+  # In the background and waited on, so the window can be placed while it
+  # runs. Still cg's child: Stop and session_end reach it as before.
+  moonlight stream ${mlf[@]+"${mlf[@]}"} "$ip" "$app" >> "$mlog" 2>&1 &
+  local mpid=$!
+  if [[ " ${mlf[*]} " == *" --display-mode windowed "* && -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] \
+     && command -v hyprctl >/dev/null; then
+    local wsize=${GAME_WINDOW_SIZE:-${GAME_RES:-}}
+    hypr_place "$mpid" "$wsize" "$mlog" &
+  fi
+  wait "$mpid" || true
   took=$(( SECONDS - t0 ))
   if (( took < 20 )); then
     log_as warn "the stream ended after ${took}s - Moonlight said:"

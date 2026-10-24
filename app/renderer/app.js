@@ -2852,6 +2852,7 @@ function setCreds() { openAwsKey(); }
 const CHOICE_LABEL = {
   GAME_SPOT: { '1': 'Spot', '0': 'On-demand', auto: 'Spot, else on-demand' },
   GAME_STEAM_LOGIN: { use: 'Use the saved login', fresh: 'Ask me to sign in' },
+  GAME_DISPLAY_MODE: { fullscreen: 'Full screen', windowed: 'In a window' },
 };
 const choiceLabel = (key, v) => (CHOICE_LABEL[key] || {})[v] || v;
 
@@ -2967,17 +2968,21 @@ addEventListener('scroll', () => {
 // this page used to read.
 const SETTINGS_CARDS = [
   ['Stream', 'Applied per session. Moonlight settings are not changed.',
-   ['GAME_RES', 'GAME_FPS', 'GAME_BITRATE_KBPS']],
+   ['GAME_DISPLAY_MODE', 'GAME_WINDOW_SIZE', 'GAME_RES', 'GAME_FPS', 'GAME_BITRATE_KBPS']],
   ['Machine disk', '', ['GAME_DISK_GB']],
 ];
 // The names a person uses; cg's own labels are for the terminal.
 const PLAIN = { GAME_RES: 'Resolution', GAME_FPS: 'Frame rate', GAME_BITRATE_KBPS: 'Quality',
+                GAME_DISPLAY_MODE: 'Display', GAME_WINDOW_SIZE: 'Window size',
                 GAME_DISK_GB: 'System disk',
                 GAME_BUDGET_INR: 'Monthly budget', EMAIL_ALERTS: 'Alert email',
                 GAME_WATCHDOG_IDLE_MIN: 'Stop after idle', GAME_WATCHDOG_STUCK_MIN: 'Force stop after',
                 GAME_NTFY_URL: 'Phone alerts' };
 const PLAIN_NOTE = {
   GAME_RES: 'e.g. 1920x1080. Empty uses Moonlight default.',
+  GAME_DISPLAY_MODE: 'Moonlight full screen, or in a window.',
+  // Moonlight has no window size of its own: it sizes the window to the stream.
+  GAME_WINDOW_SIZE: 'In a window only, e.g. 1280x720. The stream runs at this size. Empty uses the resolution.',
   GAME_DISK_GB: 'Applies at next build. Cannot be reduced later.',
   GAME_BUDGET_INR: 'Email alert only. Nothing is stopped.',
   EMAIL_ALERTS: 'Comma-separated.',
@@ -2989,6 +2994,10 @@ const PLAIN_NOTE = {
 function plainValue(r) {
   const v = r.value != null ? r.value : r.default;
   if (r.key === 'GAME_RES') return v || 'Default';
+  if (r.key === 'GAME_WINDOW_SIZE') {
+    const windowed = setting('GAME_DISPLAY_MODE', 'fullscreen') === 'windowed';
+    return windowed ? v || 'Same as resolution' : `${v || 'Same as resolution'} · not used full screen`;
+  }
   if (r.key === 'GAME_FPS') return v ? `${v} fps` : '—';
   if (r.key === 'GAME_DISK_GB') return v ? `${v} GB` : '—';
   if (r.key === 'GAME_BITRATE_KBPS') {
