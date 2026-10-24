@@ -381,6 +381,9 @@ lacks    "Moonlight's debug log stays out of cg's" "$out" "FFmpeg"
 contains "  kept in a file of its own"     "$(cat "$XDG_CONFIG_HOME/../.cache/cg/moonlight.log" 2>/dev/null || cat "$HOME/.cache/cg/moonlight.log")" "Decoding VPS 3"
 contains "a stream over in seconds says so" "$out" "the stream ended after"
 contains "  with Moonlight's own warning"  "$out" "Your client GPU doesn't support H.264 decoding"
+# Two steps, which the app shows as it shows the AWS machine's session.
+contains "the session announces the machine check" "$out" "checking mypc is ready to stream"
+contains "  then the stream"               "$out" "streaming from mypc"
 lacks    "  not its decoder probing"       "$out" "libplacebo"
 contains "  and where the rest is"         "$out" "cg/moonlight.log"
 # Seconds, whatever this machine's load makes them - not minutes rounded to 0m.

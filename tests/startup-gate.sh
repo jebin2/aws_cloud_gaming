@@ -1449,6 +1449,70 @@ contains "ended: back to the machine"       "$(row AFTER)" "kept=panel:Ready to 
 contains "  with nothing asked"             "$(row AFTER)" "asked=false"
 ENGINE=""
 
+echo "7f2. play on a machine of yours: the same session card, on its page"
+# It used to run as a log folded under the machine's card, while the AWS
+# machine's session had steps - two ways of showing one thing.
+B6H="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  const wait = () => new Promise(r => setTimeout(r, 30));
+  hostsNow = [{ name: 'homebox', ssh: 'me@10.0.0.5', os: 'Linux', family: 'ubuntu' }];
+  hostStatus.set('homebox', { name: 'homebox', set_up: true, sunshine: true, reachable: true, online: true,
+                              login_ok: true, paired: true, gpu: 'NVIDIA GeForce RTX 3060' });
+  // cg knows it too, for the reads after the session.
+  window.__answers['host list --json'] = hostsNow;
+  window.__answers['host status homebox --json'] = hostStatus.get('homebox');
+  paintHostCards();
+  const strip = document.getElementById('b-strip');
+  const where = () => (strip.closest('#b-own') ? 'own' : strip.closest('#b-aws') ? 'aws' : 'none') + ':' + (strip.hidden ? 'hidden' : 'shown');
+  const st = () => [...document.querySelectorAll('#b-steps [data-step]')].map(r => r.dataset.state).join(',');
+  const txt = id => document.getElementById(id).textContent.trim();
+  playOn('homebox');
+  await wait();
+  const id = window.__lastId;
+  const ran = window.__ran.slice(-1)[0];
+  window.__emit(id, { t: 'step', text: 'checking homebox is ready to stream' });
+  await wait();
+  const starting = 'view=' + view + ' tab=' + machineTab + ' card=' + where() + ' steps=' + st()
+    + ' kicker=' + txt('b-run-kicker') + ' now=' + txt('b-run-now') + ' count=' + txt('b-run-step');
+  window.__emit(id, { t: 'step', text: 'streaming from homebox' });
+  window.__emit(id, { t: 'line', text: '    stream: --display-mode fullscreen' });
+  await wait();
+  const playing = 'title=' + txt('b-strip-title') + ' steps=' + st()
+    + ' text=' + document.getElementById('b-steps').innerText.replace(/\\s+/g, ' ') + ' meta=' + txt('b-strip-meta');
+  // The AWS machine's page never shows it.
+  machineTab = 'aws'; paintMachineTab();
+  const aws = where();
+  machineTab = 'homebox'; paintMachineTab();
+  window.__emit(id, { t: 'line', text: 'session ended after 1m' });
+  window.__emit(id, { t: 'exit', rc: 0 });
+  // The panel keeps what it showed while it is read again - never 'loading'.
+  await new Promise(r => setTimeout(r, 0));
+  const kept = 'kept=' + hostStatus.has('homebox') + ' title=' + ((document.querySelector('#b-hosts [data-f=title]') || {}).textContent || 'none');
+  await wait();
+  // Ended: the page read again with the popup up, as an AWS session ends.
+  const dlg = document.getElementById('refdlg');
+  const popup = 'open=' + dlg.open + ' title=' + txt('refdlg-title') + ' reads='
+    + [...document.querySelectorAll('#refdlg-list [data-read]')].map(r => r.dataset.read).join(',');
+  await new Promise(r => setTimeout(r, 400));
+  return 'ran=' + ran + ' | starting=' + starting + ' | playing=' + playing + ' | aws=' + aws
+    + ' | ' + kept + ' | popup=' + popup + ' | after=' + where() + ' closed=' + !dlg.open + ' tab=' + machineTab;
+};"
+ENGINE="$B6H"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP}")
+contains "play runs cg host open"            "$(row AFTER)" "ran=host open homebox"
+contains "  on that machine's page"          "$(row AFTER)" "view=build tab=homebox card=own:shown"
+contains "  as steps, the first running"     "$(row AFTER)" "steps=running,locked"
+contains "  named for the machine, with no bill" "$(row AFTER)" "kicker=Starting session · homebox · NVIDIA GeForce RTX 3060 · Your machine"
+contains "  the step as its heading"         "$(row AFTER)" "now=Checking the machine count=Step 1 of 2."
+contains "then playing"                      "$(row AFTER)" "title=Playing steps=done,running"
+contains "  saying how to end it"            "$(row AFTER)" "Close Moonlight to end the session."
+lacks    "  and never a price"               "$(row AFTER)" "₹"
+contains "not on the AWS machine's page"     "$(row AFTER)" "aws=aws:hidden"
+contains "closed: the popup reads it again, as for AWS" "$(row AFTER)" "title=Refreshing Machine reads=hosts,host:homebox"
+contains "  then back to the machine"        "$(row AFTER)" "after=own:hidden closed=true tab=homebox"
+contains "  which never turns to loading"    "$(row AFTER)" "kept=true"
+ENGINE=""
+
 echo "7g. Refresh is a popup over the whole window, gone once the page is redrawn"
 B7="window.__after = async () => {
   await new Promise(r => setTimeout(r, 1200));

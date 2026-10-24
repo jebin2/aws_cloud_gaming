@@ -3768,6 +3768,14 @@ const OPEN_STEPS = [
   { doing: 'Playing', done: 'Played', end: /session ended/i, stream: true,
     note: 'Close Moonlight to end the session. The machine keeps running until auto-stop or Delete.' },
 ];
+// A session on a machine of yours: nothing to start and nothing billed, so two
+// steps - cg host open announces each - where the AWS machine has four.
+const HOST_OPEN_STEPS = [
+  { doing: 'Checking the machine', done: 'Machine ready', end: /^streaming from/i },
+  { doing: 'Playing', done: 'Played', end: /session ended/i, stream: true,
+    note: 'Close Moonlight to end the session.' },
+];
+const openSteps = r => (r && r.host ? HOST_OPEN_STEPS : OPEN_STEPS);
 // What the machine installs, in the order it does it, each matched to the
 // progress line the box prints when it starts that piece (lib/bootstrap.d).
 // Shown as chips inside "Installing the software", ticked as the box moves on:
@@ -3812,25 +3820,30 @@ function runBegin(kind, opts = {}) {
           rate: kind === 'init' ? buildRate() : null };
   if (kind === 'init') run.steps = BUILD_STEPS.map(() => null);
   if (kind === 'open') {
-    run.steps = OPEN_STEPS.map(() => null);
+    // A machine of yours: its name, and no bill - it is not rented.
+    if (opts.host) run.host = opts.host;
+    run.steps = openSteps(run).map(() => null);
     run.steps[0] = runRow('');
     run.idx = 0;
-    // The machine has been billing since it launched, not since Play.
-    const box = liveBox();
-    run.billFrom = box && box.launched ? new Date(box.launched).getTime() : null;
-    run.rate = buildRate();
+    if (!run.host) {
+      // The machine has been billing since it launched, not since Play.
+      const box = liveBox();
+      run.billFrom = box && box.launched ? new Date(box.launched).getTime() : null;
+      run.rate = buildRate();
+    }
   }
 }
 // A session's line: move past every step it says is over.
 function openLine(text) {
-  const last = OPEN_STEPS.reduce((k, d, i) => (d.end.test(text) ? i : k), -1);
+  const steps = openSteps(run);
+  const last = steps.reduce((k, d, i) => (d.end.test(text) ? i : k), -1);
   if (last < run.idx) return;
   const now = Date.now();
   for (let i = 0; i <= last; i++) {
     if (!run.steps[i]) run.steps[i] = { ...runRow(''), start: now };
     if (!run.steps[i].end) run.steps[i].end = now;
   }
-  if (last === OPEN_STEPS.length - 1) { run.streamEnded = true; return; }
+  if (last === steps.length - 1) { run.streamEnded = true; return; }
   run.steps[last + 1] = runRow('');
   run.idx = last + 1;
 }
@@ -3970,14 +3983,25 @@ function machineTitle() {
   return `Machine ${box.state}`;
 }
 
+// The run the Machine page shows: the AWS machine's on its tab, a machine of
+// yours' on its own - never one on the other's page.
+function shownRun() {
+  if (machineTab !== 'aws') return run && run.host === machineTab ? run : null;
+  return (run && !run.host ? run : null) || machineCard();
+}
 function paintBuildMode() {
   settleRun();
-  const card = !!(run || liveBox());
-  $('b-plan').hidden = card;
+  const awsRun = run && !run.host ? run : null;
+  $('b-plan').hidden = !!(awsRun || liveBox());
   // The panel above says what the machine is and holds its buttons; this card
   // is the run under it - a build, a session, a delete - or how the machine
-  // was built. A machine with no run behind it here has nothing to add.
-  $('b-strip').hidden = !run;
+  // was built. A machine with no run behind it here has nothing to add. It
+  // sits under the machine it is about: the AWS one, or the card of yours.
+  const strip = $('b-strip');
+  const own = machineTab !== 'aws';
+  if (own && strip.parentElement !== $('b-own')) $('b-own').append(strip);
+  if (!own && strip.parentElement !== $('b-aws')) $('b-aws').insertBefore(strip, $('b-plan'));
+  strip.hidden = !(own ? run && run.host === machineTab : awsRun);
 }
 
 // Cancel a build: stop cg, then delete whatever it rented. The delete runs
@@ -4012,14 +4036,14 @@ function runStepName(r, def, state) {
 
 function paintRun() {
   paintBuildMode();
-  const r = run || machineCard();
+  const r = shownRun();
   if (!r) return;
   const head = RUN_HEAD[r.kind] || { running: 'Running', done: 'Done', failed: 'Stopped' };
   const machine = r.state === 'done' && (r.kind === 'init' || r.kind === 'machine');
   const now = r.state === 'running' ? Date.now() : (r.steps.reduce((t, x) => Math.max(t, x && x.end || 0), 0) || Date.now());
   const title = $('b-strip-title');
   title.textContent = r.cancelling ? 'Cancelling' : machine ? (r.kind === 'init' ? 'How it was built' : machineTitle())
-    : r.kind === 'open' && r.state === 'running' && OPEN_STEPS[r.idx] && OPEN_STEPS[r.idx].stream
+    : r.kind === 'open' && r.state === 'running' && openSteps(r)[r.idx] && openSteps(r)[r.idx].stream
       ? (r.streamEnded ? 'Session ended' : 'Playing') : head[r.state];
   title.className = 'font-headline-lg text-headline-lg ' + (r.state === 'failed' ? 'text-error' : '');
   // The bill, in the heading, from the moment the machine is rented - unless a
@@ -4037,7 +4061,9 @@ function paintRun() {
     billing ? `${rsh(r.rate)} an hour` : null,
   ].filter(Boolean).join(' · ');
   const s = statusNow || {};
-  $('b-run-sum').textContent = r.kind === 'init' || r.kind === 'machine' || r.kind === 'open'
+  const hs = r.host ? hostStatus.get(r.host) || {} : null;
+  $('b-run-sum').textContent = r.host ? [r.host, hs.gpu, 'Your machine'].filter(Boolean).join(' · ')
+    : r.kind === 'init' || r.kind === 'machine' || r.kind === 'open'
     ? [r.kind !== 'init' && liveBox() ? liveBox().type : s.instance_type, s.region ? placeName(s.region) : null,
        (r.kind !== 'init' && liveBox() ? liveBox().lifecycle !== 'spot' : (s.config || {}).spot === '0') ? 'On-demand' : 'Spot',
        r.kind !== 'init' ? null
@@ -4048,7 +4074,7 @@ function paintRun() {
   // While a build or a session gets going, the step it is on is the heading,
   // and what the run is - building, where, on what - sits above it, small.
   // Not once Playing: that heading is the session, and the step says the rest.
-  const defs = r.kind === 'init' ? BUILD_STEPS : r.kind === 'open' ? OPEN_STEPS : null;
+  const defs = r.kind === 'init' ? BUILD_STEPS : r.kind === 'open' ? openSteps(r) : null;
   const going = defs && r.state === 'running' && !r.cancelling;
   const at = going ? Math.max(0, r.steps.findIndex(x => x && !x.end)) : -1;
   const headed = at >= 0 && !defs[at].stream;
@@ -4420,7 +4446,10 @@ window.cg.onEvent(({ id, event }) => {
   logLine(event);
   // The Build card's run: a build, a delete, a session. A change to the saved
   // games is reported by its own popup, on its own page.
-  if (job.write && job.cmd[0] !== 'library' && !job.aside) {
+  // A session on a machine of yours is not a write - it runs beside reads -
+  // but it is a session, and reads as one.
+  const ownSession = job.cmd[0] === 'host' && job.cmd[1] === 'open';
+  if ((job.write && job.cmd[0] !== 'library' && !job.aside) || ownSession) {
     if (event.t === 'step') buildStep(event.text);
     if (event.t === 'step_end') buildStepEnd(event);
     if (event.t === 'line' || (event.t === 'raw' && event.stream === 'stdout')) buildLine(event);
@@ -4433,7 +4462,7 @@ window.cg.onEvent(({ id, event }) => {
       // A nonzero exit with nothing marked is still a failure, and saying so
       // beats a bare status label the eye slides over.
       if (event.rc !== 0 && !buildFailures.length && !(run && run.cancelling)
-          && !(job.cmd[0] === 'open' && event.rc === 130))
+          && !((job.cmd[0] === 'open' || ownSession) && event.rc === 130))
         buildFail(`${CgName(job.cmd)} exited without an error message. See the log above.`);
     }
   }
@@ -4963,6 +4992,8 @@ function paintMachineTab() {
     pick.append(b);
   }
   if (view === 'build') $('view-title').textContent = 'Machine';
+  // The run card follows the machine picked: under the AWS one, or yours.
+  paintRun();
 }
 // The Machine page for the AWS machine - whichever machine it showed last.
 function goAws() {
@@ -5036,16 +5067,15 @@ function setUpHost(name) {
 
 // Streaming from it. Nothing to start and nothing billed by the hour: it is
 // already there.
+// Play on a machine of yours: the session as steps, on its page, and when it
+// ends the page read again with the popup up - as the AWS machine's session
+// is, step for step. What is read is what a session can change here: the
+// machine, not AWS. What it showed stays until the new answer replaces it:
+// forgotten first, the whole panel turned to "loading" and was drawn again,
+// which read as being sent to another page.
 async function playOn(name) {
-  const log = hostLog(name);
-  log.textContent = '';
-  log.dataset.fresh = 'yes';
-  // The box holds whichever ran last, and is named for it.
-  log.dataset.kind = 'session';
-  delete log.dataset.failed;
-  const { rc } = await runCg(['host', 'open', name], { collect: log.id, wantRc: true, onStart: paintHostCards });
-  if (rc !== 0 && rc !== 130) { log.dataset.failed = 'yes'; note(`Stream from ${name} failed to start`, 'text-error'); }
-  await refreshHosts(name);
+  await startRun(['host', 'open', name], { host: name });
+  await refreshShown([HOSTS_READ, hostRead(name)]);
 }
 
 // Removing a machine of yours: asked, run and reported in one dialog that
@@ -6886,7 +6916,9 @@ function startRun(args, opts = {}) {
   runKind = args[0];
   // A build picked up again by itself does not take you off the page you are
   // on; the machine card says it is building, and Watch the build opens it.
-  if (!opts.stay) goAws();
+  // A session on a machine of yours runs on that machine's page.
+  if (opts.host) goHost(opts.host);
+  else if (!opts.stay) goAws();
   $('b-log').dataset.fresh = 'yes';
   $('b-log').textContent = '';
   $('b-log-title').textContent = `${CgName(args)} · log`;
@@ -6896,9 +6928,10 @@ function startRun(args, opts = {}) {
   $('b-prog').style.width = '0%';
   $('b-prog-step').textContent = 'Starting…';
   buildFailClear();
-  runBegin(args[0], opts);
+  runBegin(opts.host ? 'open' : args[0], opts);
   paintRun();
-  return runCg(args, opts.env ? { env: opts.env } : {});
+  // A machine of yours: its card turns to Streaming, with its Stop, once it runs.
+  return runCg(args, { ...(opts.env ? { env: opts.env } : {}), ...(opts.host ? { onStart: paintHostCards } : {}) });
 }
 
 // A machine that runs but has not finished building. Closing the app in the

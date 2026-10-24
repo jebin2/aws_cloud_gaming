@@ -484,9 +484,13 @@ cmd_host_open() {
     read -r pid _ <<<"$held"
     die "a stream from this laptop is already running (pid $pid)"
   fi
+  # Two steps, which the app shows as the AWS machine's session is shown: the
+  # machine answering, then the stream.
+  say "checking $name is ready to stream"
   [[ $(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "https://$ip:47990/welcome" 2>/dev/null) != 000 ]] \
     || die "Sunshine is not answering on $name ($ip) - is it on, and a desktop signed in?"
   session_claim
+  say "streaming from $name"
   stream_play "$ip" "${GAME_APP:-Desktop}"
   session_release
 }
