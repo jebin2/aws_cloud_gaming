@@ -95,6 +95,15 @@ cat > "$T/r/probe.js" <<'PROBE'
                      '    AWS said: Something nobody has seen.',
                      '    error code: SomeBrandNewError']) buildFail(l);
     read('UNKNOWN');
+
+    // The spot allowance full because another machine is still there: never
+    // "no charges" - that machine is billing.
+    buildFailClear();
+    for (const l of ['a spot machine in ap-south-1 is still there and holds your spot allowance: i-0abc (running)',
+                     '    nothing was launched by this build - but the machine above is still billing',
+                     '    AWS said: Max spot instance count exceeded',
+                     '    error code: MaxSpotInstanceCountExceeded']) buildFail(l);
+    read('HELD');
   } catch (e) { out.push('THREW | ' + e.message); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -156,6 +165,9 @@ echo "4. a code nothing is known about"
 contains "the headline still shows"      "$(row 'UNKNOWN HEAD')" "could not be launched"
 contains "  with AWS's words"            "$(row 'UNKNOWN WHY')"  "Something nobody has seen"
 check    "  and no invented buttons"     "$(row 'UNKNOWN ACTS')" "UNKNOWN ACTS | "
+contains "spot allowance held: names the machine" "$(row 'HELD HEAD')" "holds your spot allowance: i-0abc (running)"
+contains "  and says it is billing"      "$(row 'HELD WHY')"  "Nothing was launched by this build, but that machine is still billing."
+lacks    "  never 'no charges'"          "$(row 'HELD WHY')"  "No charges"
 
 echo "5. clearing it clears all of it"
 contains "the panel hides again"         "$(row CLEARED)" "hidden"

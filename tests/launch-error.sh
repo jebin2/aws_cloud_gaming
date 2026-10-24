@@ -19,10 +19,21 @@ lacks()    { if [[ $2 != *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 check()    { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: got '$2' want '$3'"; fail=$((fail+1)); fi; }
 
+# What AWS says holds the spot allowance: HOLDERS lines, or AWS_DOWN to fail.
+mkdir -p "$T/bin"
+cat > "$T/bin/aws" <<'FAKE'
+#!/usr/bin/env bash
+[[ -n ${AWS_DOWN:-} ]] && exit 255
+[[ $* == *describe-instances* ]] && printf '%b' "${HOLDERS:-}"
+exit 0
+FAKE
+chmod +x "$T/bin/aws"
+
 # The real classifier, not a copy.
 report() { # report <stderr text>   - SPOT= picks the purchase model
   printf '%s\n' "$1" > "$T/err"
-  ( TYPE=g6.xlarge REGION=ap-south-2 INSTANCE_PROFILE=gamevps-box \
+  ( PATH="$T/bin:$PATH" HOLDERS="${HOLDERS:-}" AWS_DOWN="${AWS_DOWN:-}" \
+    TYPE=g6.xlarge REGION=ap-south-2 INSTANCE_PROFILE=gamevps-box \
     KEY_NAME=gamevps KEY_FILE=/home/u/.ssh/gamevps.pem SPOT="${SPOT:-1}" \
     bash -c 'source lib/launch-error.sh; launch_error_report "$1"' _ "$T/err" 2>&1 )
 }
@@ -89,6 +100,26 @@ out=$(report "$(printf "$AWSERR" MaxSpotInstanceCountExceeded 'Max spot instance
 contains "spot count: tells you to wait"  "$out" "wait ~2 minutes"
 contains "spot count: names the quota"    "$out" "L-3819A6DF"
 lacks    "spot count: not a capacity story" "$out" "No spare g6.xlarge spot capacity"
+
+# What fills the allowance is asked, not guessed: "wait two minutes" was wrong
+# when a machine was still there, billing.
+MAXSPOT="$(printf "$AWSERR" MaxSpotInstanceCountExceeded 'Max spot instance count exceeded.')"
+out=$(HOLDERS='i-0abc\trunning\tg4dn.xlarge\t2026-10-25T10:00:00+00:00\n' report "$MAXSPOT")
+check    "a machine still there: named in the headline" \
+         "$(head -1 <<<"$out")" "!! a spot machine in ap-south-2 is still there and holds your spot allowance: i-0abc (running)"
+contains "  never 'nothing is billing'"   "$out" "nothing was launched by this build - but the machine above is still billing"
+contains "  listed, with when it started"  "$out" "i-0abc  running  g4dn.xlarge  launched 2026-10-25T10:00:00+00:00"
+contains "  and how to delete it"          "$out" "cg destroy"
+lacks    "  not told to wait"              "$out" "wait ~2 minutes"
+out=$(HOLDERS='i-0old\tshutting-down\tg4dn.xlarge\t2026-10-25T08:00:00+00:00\n' report "$MAXSPOT")
+check    "one shutting down: on its way out" \
+         "$(head -1 <<<"$out")" "!! your previous spot machine is still shutting down - try again in a minute or two"
+contains "  and nothing is billing"        "$out" "nothing was launched, and nothing is billing"
+out=$(report "$MAXSPOT")
+check    "none at all: AWS has not caught up" \
+         "$(head -1 <<<"$out")" "!! your previous spot allocation has not been released yet"
+out=$(AWS_DOWN=1 report "$MAXSPOT")
+contains "AWS not answering: the plain advice" "$out" "wait ~2 minutes"
 
 out=$(report "$(printf "$AWSERR" VcpuLimitExceeded 'You have requested more vCPU capacity than your current limit.')")
 contains "vcpu limit: names on-demand quota" "$out" "on-demand vCPU quota in ap-south-2"

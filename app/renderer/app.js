@@ -4325,8 +4325,11 @@ function failSummary(text) {
   const head = (lines.find(l => l.trim() && !l.startsWith(' ')) || '').trim();
   const code = (/error code:\s*([A-Za-z0-9.]+)/.exec(text) || [])[1] || '';
   const said = (/AWS said:\s*(.+)/.exec(text) || [])[1] || '';
-  const safe = /nothing was launched/.test(text);
-  return { head, code, said, safe };
+  // cg's two sentences, apart: a refused launch charges nothing, unless what
+  // refused it is another machine, still billing.
+  const safe = /nothing was launched, and nothing is billing/.test(text);
+  const other = /nothing was launched by this build - but the machine above is still billing/.test(text);
+  return { head, code, said, safe, other };
 }
 
 function buildFailActions(code) {
@@ -4369,9 +4372,10 @@ function buildFail(text) {
   // The headline above the fold, the detail behind a disclosure, and the two or
   // three things worth doing as buttons - because "cg config set GAME_SPOT 0"
   // is a command to type at someone who is looking at a window.
-  const { head, code, said, safe } = failSummary(whole);
+  const { head, code, said, safe, other } = failSummary(whole);
   $('b-fail-head').textContent = head || 'the build stopped';
   $('b-fail-why').textContent = [safe ? 'Nothing was launched. No charges.' : '',
+                                 other ? 'Nothing was launched by this build, but that machine is still billing.' : '',
                                  said ? `AWS said: ${said}` : '',
                                  code ? `(${code})` : ''].filter(Boolean).join('  ');
   buildFailActions(code);

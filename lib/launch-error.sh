@@ -26,6 +26,22 @@ launch_error_message() { # launch_error_message <errfile>
     | grep -v '^[[:space:]]*$' | tail -2
 }
 
+# spot_holders - the spot machines in REGION that hold the spot allowance now,
+# one "<id> <state> <type> <launched>" a line: any that exists counts, a
+# stopped one and one still shutting down included. Read-only and free.
+# Nothing when there are none; "?" when AWS could not be asked.
+spot_holders() {
+  local out t=()
+  # Bounded where it can be: macOS has no timeout(1).
+  command -v timeout >/dev/null && t=(timeout 20)
+  out=$(${t[@]+"${t[@]}"} aws ec2 describe-instances --region "${REGION:-}" \
+          --filters Name=instance-lifecycle,Values=spot \
+                    Name=instance-state-name,Values=pending,running,stopping,stopped,shutting-down \
+          --query 'Reservations[].Instances[].[InstanceId,State.Name,InstanceType,LaunchTime]' \
+          --output text 2>/dev/null) || { echo "?"; return 0; }
+  grep -v '^[[:space:]]*$' <<<"$out" || true
+}
+
 # launch_error_report <errfile> - reads TYPE, REGION, INSTANCE_PROFILE,
 # KEY_NAME and KEY_FILE from the environment, as provision.sh has them set.
 launch_error_report() {
@@ -37,6 +53,15 @@ launch_error_report() {
   # words rather than repeating AWS's error code at someone who did not ask for
   # one. The code still appears - underneath, where it belongs when you are
   # searching for it.
+  # The spot allowance is full: what fills it is asked, not guessed. "Your old
+  # allocation, wait two minutes" was the guess - true just after a delete,
+  # and wrong when a machine is still there, billing.
+  local holders="" live=""
+  if [[ $code == MaxSpotInstanceCountExceeded ]]; then
+    holders=$(spot_holders)
+    [[ $holders == "?" ]] || live=$(awk '$2 != "shutting-down"' <<<"$holders")
+  fi
+
   local headline
   case "$code" in
     InsufficientInstanceCapacity|SpotMaxPriceTooLow)
@@ -46,7 +71,13 @@ launch_error_report() {
         headline="AWS has no spare ${TYPE:-instance} in ${REGION:-this region} right now"
       fi ;;
     MaxSpotInstanceCountExceeded)
-      headline="your previous spot allocation has not been released yet" ;;
+      if [[ -n $live ]]; then
+        headline="a spot machine in ${REGION:-this region} is still there and holds your spot allowance: $(awk 'NR == 1 { print $1 " (" $2 ")" }' <<<"$live")"
+      elif [[ -n $holders && $holders != "?" ]]; then
+        headline="your previous spot machine is still shutting down - try again in a minute or two"
+      else
+        headline="your previous spot allocation has not been released yet"
+      fi ;;
     VcpuLimitExceeded|InstanceLimitExceeded)
       headline="your AWS quota is too small for ${TYPE:-this machine} in ${REGION:-this region}" ;;
     InvalidKeyPair.NotFound)
@@ -59,20 +90,41 @@ launch_error_report() {
       headline="the instance could not be launched" ;;
   esac
   echo "!! $headline"
-  # Nothing exists to clean up or pay for: run-instances refusing is the one
-  # failure where that is certain, and it is the first thing worth knowing.
-  echo "    nothing was launched, and nothing is billing"
+  # Nothing this build launched exists to clean up or pay for: run-instances
+  # refusing is the one failure where that is certain, and it is the first
+  # thing worth knowing - unless another machine is what refused it.
+  if [[ -n $live ]]; then
+    echo "    nothing was launched by this build - but the machine above is still billing"
+  else
+    echo "    nothing was launched, and nothing is billing"
+  fi
   [[ -n $msg ]] && sed 's/^/    AWS said: /' <<<"$msg"
   [[ -n $code ]] && echo "    error code: $code"
   echo ""
   case "$code" in
     MaxSpotInstanceCountExceeded)
-      echo "  Your own spot allocation is still held. AWS releases the vCPU quota a"
-      echo "  minute or two AFTER an instance terminates, so an immediate rebuild"
-      echo "  hits it. Nothing is wrong - wait ~2 minutes and run it again."
-      echo "  If it persists, the quota (L-3819A6DF) is smaller than ${TYPE:-the instance} needs:"
-      echo "    GAME_SPOT=0 cg init"
-      echo "  What holds it: aws ec2 describe-spot-instance-requests --region ${REGION:-}"
+      if [[ -n $holders && $holders != "?" ]]; then
+        echo "  Spot machines in ${REGION:-the region} right now:"
+        awk '{ print "    " $1 "  " $2 "  " $3 "  launched " $4 }' <<<"$holders"
+        echo ""
+      fi
+      if [[ -n $live ]]; then
+        echo "  Each one counts against the spot allowance while it exists, stopped or not,"
+        echo "  and a running one is billing. If it is the machine cg built, delete it -"
+        echo "  Delete on the app's Machine page, or: cg destroy - then build again."
+        echo "  Anything else is in the EC2 console."
+        echo "  If the allowance is simply too small for two: GAME_SPOT=0 cg init (L-3819A6DF)"
+      elif [[ -n $holders && $holders != "?" ]]; then
+        echo "  It is on its way out; AWS frees its share of the allowance once it is gone."
+        echo "  Nothing is wrong - try again in a minute or two."
+      else
+        echo "  Your own spot allocation is still held. AWS releases the vCPU quota a"
+        echo "  minute or two AFTER an instance terminates, so an immediate rebuild"
+        echo "  hits it. Nothing is wrong - wait ~2 minutes and run it again."
+        echo "  If it persists, the quota (L-3819A6DF) is smaller than ${TYPE:-the instance} needs:"
+        echo "    GAME_SPOT=0 cg init"
+        echo "  What holds it: aws ec2 describe-spot-instance-requests --region ${REGION:-}"
+      fi
       ;;
     InsufficientInstanceCapacity|SpotMaxPriceTooLow)
       # Which purchase model was asked for decides what there is to say. Telling
