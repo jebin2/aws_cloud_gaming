@@ -128,7 +128,8 @@ cat > "$T/r/probe.js" <<'PROBE'
     await sleep();
     out.push('SUBMIT RAN | ' + window.__ran.join(' ;; '));
     out.push('SUBMIT BTN | ' + document.getElementById('awskey-go').textContent.trim()
-             + ' disabled=' + document.getElementById('awskey-go').disabled);
+             + ' disabled=' + document.getElementById('awskey-go').disabled
+             + ' cancel=' + (document.getElementById('awskey-cancel').disabled ? 'off' : 'on'));
     // cg asks its two questions; the form answers them.
     window.__emit(window.__lastId, { t: 'ask', id: 'aws-access-key-id', prompt: 'id: ', default: '' });
     window.__emit(window.__lastId, { t: 'ask', id: 'aws-secret-access-key', prompt: 'secret: ', default: '', secret: 1 });
@@ -142,7 +143,8 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('FAIL OPEN | ' + dlg.open);
     out.push('FAIL ERR | ' + document.getElementById('awskey-err').textContent.replace(/\s+/g, ' ').trim());
     out.push('FAIL BTN | ' + document.getElementById('awskey-go').textContent.trim()
-             + ' disabled=' + document.getElementById('awskey-go').disabled);
+             + ' disabled=' + document.getElementById('awskey-go').disabled
+             + ' cancel=' + (document.getElementById('awskey-cancel').disabled ? 'off' : 'on'));
 
     // And one it takes: the dialog closes.
     document.getElementById('awskey-id').value = 'AKIAGOODGOODGOOD1234';
@@ -435,6 +437,8 @@ check    "  staying open"              "$(row 'EMPTY OPEN')"   "EMPTY OPEN | tru
 check    "submitting runs cg creds set" "$(row 'SUBMIT RAN')"  "SUBMIT RAN | creds set"
 contains "  the button shows it is working" "$(row 'SUBMIT BTN')" "Checking with AWS"
 contains "  and cannot be pressed twice"    "$(row 'SUBMIT BTN')" "disabled=true"
+# Closing would not stop cg: the key saved behind a Cancel, or asked for again.
+contains "  nor cancelled while cg saves it" "$(row 'SUBMIT BTN')" "cancel=off"
 # cg still asks its two questions; the form answers them, so no second modal
 # appears on top of the one being looked at.
 check    "the form answers cg's questions" "$(row 'SUBMIT ANSWERS')" "SUBMIT ANSWERS | AKIABADBADBADBAD9999 ;; bad-secret"
@@ -445,6 +449,7 @@ contains "  and that nothing was saved" "$(row 'FAIL ERR')"    "nothing was save
 # The line telling you where to find a key is noise when you are holding one.
 lacks    "  without the how-to line"   "$(row 'FAIL ERR')"     "paste an access key"
 contains "  and the button comes back" "$(row 'FAIL BTN')"     "Connect disabled=false"
+contains "  and so does Cancel"        "$(row 'FAIL BTN')"     "cancel=on"
 check    "saved, it stays to check the key back" "$(row 'OK CHECKING')" "OK CHECKING | true Connected. Checking… reading=true"
 check    "a key that works closes it"  "$(row 'OK OPEN')"      "OK OPEN | false"
 

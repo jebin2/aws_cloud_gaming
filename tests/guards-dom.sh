@@ -156,6 +156,21 @@ cat > "$T/r/probe.js" <<'PROBE'
     paintGuards(W('running', { armed: true, state: 'armed' }, { armed: true, state: 'armed' },
                   { shutdown_action: { value: 'terminate', expected: 'terminate', ok: true } }));
     read('GOOD');
+    // Fresh AWS, nothing built: every build sets both up before it launches.
+    paintGuards(W('none', { armed: null, state: 'no box' }, { armed: false, state: 'not installed' },
+                  { budget: { usd: null, alerts: 0 } }));
+    read('FRESH');
+    // The machine page's "What is working", the same two, both ways.
+    const checks = () => [...document.querySelectorAll('#b-checks [data-check]')]
+      .filter(r => /Auto-stop in AWS|Budget alert/.test(r.dataset.check))
+      .map(r => r.dataset.check + '=' + r.dataset.ok + ':' + r.lastChild.textContent).join(', ');
+    statusNow = { box: null, budget: {} };
+    paintAwsChecks();
+    out.push('CHECKS FRESH | ' + checks());
+    statusNow = { box: { state: 'running' }, budget: {}, tailnet: {} };
+    watcher = W('running', { armed: true, state: 'armed' }, { armed: false, state: 'disabled' }, { budget: { usd: null } });
+    paintAwsChecks();
+    out.push('CHECKS BOXED | ' + checks());
   } catch (e) { out.push('THREW | ' + e.message); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -241,6 +256,11 @@ contains "the AWS check is off"          "$(row 'BAD WARN')" "AWS auto-stop is d
 contains "the machine's check is off"    "$(row 'BAD WARN')" "The machine's own check is off"
 contains "the wrong shutdown"            "$(row 'BAD WARN')" "Shutdown behavior is "stop"; expected "delete"."
 contains "no spending alert"             "$(row 'BAD WARN')" "No budget alert set in AWS"
+check    "nothing built yet: no red banner" "$(row 'FRESH WARN')" "FRESH WARN | hidden"
+contains "  AWS auto-stop turns on when you build" "$(row 'FRESH NET3')" "Turns on when you build"
+lacks    "  never Off"                    "$(row 'FRESH NET3')" "Off"
+check    "the machine page: not yet, not a cross" "$(row 'CHECKS FRESH')" "CHECKS FRESH | Auto-stop in AWS=later:turns on when you build, Budget alert=later:set when you build"
+check    "  with a machine, missing is a fault"  "$(row 'CHECKS BOXED')" "CHECKS BOXED | Auto-stop in AWS=no:off, Budget alert=no:not set"
 contains "net 2 off"                     "$(row 'BAD NET2')" "Off"
 contains "net 3 off"                     "$(row 'BAD NET3')" "Off"
 

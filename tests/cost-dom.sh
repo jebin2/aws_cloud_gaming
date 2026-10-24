@@ -91,6 +91,11 @@ cat > "$T/r/probe.js" <<'PROBE'
                      storage: { billed_usd_month: 4.02, known_usd_month: 4.0, unknown_usd_month: 0.02 },
                      standby: { usd_month: 8.56, archive_usd_month: 4.0, volumes_usd_month: 4.56, snapshots_usd_month: 0 } }));
     read('KNOWN');
+    // The same with a machine there: then a missing budget is a fault, said in red.
+    statusNow = { box: { type: 'g6.xlarge', state: 'running' } };
+    paintCost(COST({ resources: { instance: null, volumes_gb: 0, snapshots_gb: 0, images: 0, budget_usd: null } }));
+    out.push('BOXED c-cap-note | ' + text('c-cap-note') + ' red=' + find('c-cap-note').classList.contains('text-error'));
+    statusNow = null;
     // The games cg found in another place explain the storage: the page names
     // them instead of calling it a mystery, and does not ask AWS again.
     paintCost(COST({}));
@@ -270,7 +275,9 @@ contains "a bucket that explains it raises nothing" "$(row 'KNOWN UNKNOWN')" "hi
 contains "  and standby is what cg knows" "$(row 'KNOWN c-standby')" "₹813 a month"
 contains "  saved games with their size" "$(row 'KNOWN c-bills')" "Saved games →₹380 a month"
 contains "  a disk left behind is named" "$(row 'KNOWN c-bills')" "Orphaned disk50 GB · ₹433 a month"
-contains "no budget in AWS is said, in red" "$(row 'KNOWN c-cap-note')" "No budget alert set in AWS"
+# Every build sets the budget before it launches: with no machine, not yet.
+contains "no budget and no machine: set when you build" "$(row 'KNOWN c-cap-note')" "The budget alert is set when you build."
+contains "no budget with a machine is said, in red" "$(row 'BOXED c-cap-note')" "No budget alert set in AWS. red=true"
 
 echo "3b. storage explained by games in another place"
 # One Saved games row for every location, with the other place said under it.

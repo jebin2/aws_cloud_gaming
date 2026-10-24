@@ -113,6 +113,11 @@ const jobsHere = () => [...jobs.values()].filter(j => j.view === view);
 // one that returned nothing. cg publishes the rule (cg --contract), the main
 // process applies it, and the answer comes back with the job as job.write.
 const writing = () => [...jobs.values()].some(j => j.write);
+// Why a read was refused: the run cg is doing alone, by name.
+const busyWhy = () => {
+  const alone = [...jobs.values()].find(j => j.write);
+  return alone ? `waits for ${cgName(alone.cmd)} to finish.` : 'another task is running.';
+};
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
 // A machine of yours waits while cg runs something alone - an AWS build, a
@@ -133,6 +138,9 @@ function lockHostButtons() {
 // nothing to do with AWS, so they are not reads to cancel or wait out. They
 // have their own Stop, on the machine's card.
 const hostRun = j => j.cmd[0] === 'host' && (j.cmd[1] === 'setup' || j.cmd[1] === 'open');
+// What the header's Stop leaves alone: a machine of yours (its card has Stop)
+// and a build (its card has Cancel).
+const headerSpares = j => hostRun(j) || j.cmd[0] === 'init';
 // Woken each time a job ends - see readsSettled.
 const jobEnded = [];
 // Until the reads in flight have landed. A step's own command runs alone (cg
@@ -160,7 +168,10 @@ function updateHeader() {
   // install. A read finishes in seconds and says so where it was asked (the
   // Refresh popup, a Fetch button); a Stop appearing for it was noise.
   lockHostButtons();
-  const stoppable = mine.filter(j => j.write);
+  // A build is not stopped here: its card has Cancel, which also deletes the
+  // machine. A second button beside it that stopped cg and left the machine
+  // billing was the same click with a worse ending.
+  const stoppable = mine.filter(j => j.write && !headerSpares(j));
   const hereNames = [...new Set(stoppable.map(j => j.group || runName(j.cmd)))];
   $('cancel').hidden = !stoppable.length;
   if (stoppable.length) $('cancel-label').textContent =
@@ -840,16 +851,19 @@ function paintDash() {
   prot.textContent = '';
   const guards = (watcher && watcher.guards) || [];
   const g2 = guards.find(g => g.layer === 2), g3 = guards.find(g => g.layer === 3);
+  const hasBox = !!(statusNow && statusNow.box && statusNow.box.state !== 'terminated');
   const lines = [
     // Installed with every build: with no machine there is nothing for it to
     // watch, which is not the same as it being off.
     [g2 ? (g2.armed === false ? false : true) : null,
      idleAfter ? `Auto-stop after ${idleAfter} idle` : 'Auto-stop when idle'],
-    [g3 ? g3.armed : null,
-     g3 && g3.armed ? 'AWS auto-stop: on' : 'AWS auto-stop: off'],
-    [b.limit != null ? true : (statusNow ? false : null),
+    // These two are set up by every build before it launches: with no
+    // machine yet, missing is "not yet", never a fault.
+    [g3 ? (g3.armed || (hasBox ? false : null)) : null,
+     g3 && g3.armed ? 'AWS auto-stop: on' : hasBox ? 'AWS auto-stop: off' : 'AWS auto-stop: turns on when you build'],
+    [b.limit != null ? true : (statusNow && hasBox ? false : null),
      b.limit != null ? `Budget alert at ${rs(limit)} · ${b.alerts ? `emails ${b.alerts} address${b.alerts === 1 ? '' : 'es'}` : 'no email set'}`
-                     : 'No budget alert is set'],
+                     : hasBox ? 'No budget alert is set' : 'Budget alert: set when you build'],
   ];
   for (const [ok, text] of lines) {
     const row = document.createElement('div');
@@ -1122,8 +1136,11 @@ function renderMonth(box, { hint } = {}) {
     box.append(wrap);
     sub.append(' ', chip);
   }
-  const note = el('p', 'font-code-sm text-code-sm mt-space-sm ' + (inAws ? 'text-outline' : 'text-error'),
-    !inAws ? 'No budget alert set in AWS.'
+  // Every build sets the budget before it launches: with no machine yet,
+  // none in AWS is "not yet", not a fault.
+  const hasBox = !!(statusNow && statusNow.box && statusNow.box.state !== 'terminated');
+  const note = el('p', 'font-code-sm text-code-sm mt-space-sm ' + (inAws || !hasBox ? 'text-outline' : 'text-error'),
+    !inAws ? (hasBox ? 'No budget alert set in AWS.' : 'The budget alert is set when you build.')
       : isFinite(budget) ? `Budget ${rs(budget)}/month. Alert by email only; nothing is stopped.` : '');
   note.dataset.f = 'note';
   box.append(note);
@@ -1506,6 +1523,36 @@ const typedAnswer = askId => (typedPending && typedPending.askId === askId ? typ
 // is happening; when cg is done the same popup reads everything again and
 // closes (afterWrite), and you are still on Library. Only a refusal keeps it
 // open, with cg's reason.
+// What a failed change left behind, from cg's own words. Most of them fail
+// before they touch anything - reset, delete, clean up and the Steam login
+// each stop at the first thing that goes wrong - so "nothing was changed" is
+// true of them, unless AWS refused part of a delete, which cg says. A move that
+// stops part-way has copied some of the game already, and Keep saved games
+// saves the setting before it updates auto-stop.
+function libraryLeft(err) {
+  // A delete AWS only half did - the rest is still there, billing.
+  if (/^moved .* but part of it is still/m.test(err)) {
+    return 'The game was moved, but part of it is still in its old region and billed there - delete it there to finish.';
+  }
+  if (/^moved .* but the list of saved games/m.test(err)) {
+    return 'The game was moved; it may still be listed in its old region until that list is updated.';
+  }
+  if (/only part of .* was deleted/.test(err)) {
+    return 'Part of the game was deleted; the rest still bills. Delete again finishes it.';
+  }
+  if (/but the list of saved games there could not be updated/.test(err)) {
+    return 'The game was deleted, but may still be listed. Delete again tidies it.';
+  }
+  if (/could not delete \d+ of them/.test(err)) {
+    return 'Some leftover files were deleted; the rest still bill. Clean up again finishes it.';
+  }
+  if (/the copy stopped|does not match|copied, but/.test(err)) {
+    return 'The game is still where it was, untouched. Part of it may already be copied to '
+         + 'your machine\'s region and billed there - Move again finishes the copy.';
+  }
+  if (/saved, but/.test(err)) return 'The setting was saved, but auto-stop still counts the old days.';
+  return 'Nothing was changed.';
+}
 async function libraryRun(args, doing, askId, word) {
   typedPending = askId ? { askId, word } : null;
   const dlg = $('refdlg');
@@ -1543,7 +1590,7 @@ async function libraryRun(args, doing, askId, word) {
   const why = (err || '').trim().split('\n').filter(Boolean).slice(-2).join(' ')
     || `cg ${args.join(' ')} stopped (exit ${rc})`;
   $('refdlg-title').textContent = `${doing} - not done`;
-  $('refdlg-sub').textContent = 'Nothing was changed.';
+  $('refdlg-sub').textContent = libraryLeft(err || '');
   list.textContent = '';
   const bad = document.createElement('div');
   bad.className = 'flex items-start gap-space-sm font-body-md text-body-md';
@@ -1713,9 +1760,11 @@ function netWords(g, d) {
           + `${g.stuck_min ?? '?'} min.`,
           'Runs in AWS, independent of this device and the AWS machine.'];
 }
-function netState(g) {
+function netState(g, gone) {
   if (g.layer === 1) return ['Always on', 'pill-ok'];
   if (g.armed === true) return ['On', 'pill-ok'];
+  // Every build installs it before launching: with no machine, not yet.
+  if (g.layer === 3 && g.armed === false && gone) return ['Turns on when you build', ''];
   if (g.armed === false) return ['Off', 'pill-bad'];
   // Layer 2 with no machine to live on is waiting, not failing.
   // No AWS machine for it to live on: waiting, not off - "Idle" read as a fault.
@@ -1740,12 +1789,14 @@ function paintGuards(d) {
     : cloud.armed ? 'Runs every 5 minutes. No activity in the last hour.' : '';
 
   // What is wrong, in red, on top - not three cards down.
+  // AWS auto-stop and the budget are set up by every build before it
+  // launches; with no machine, their absence is not something wrong.
   const warn = [];
-  if (cloud.armed === false) warn.push(`AWS auto-stop is ${cloud.state || 'off'}.`);
+  if (cloud.armed === false && !gone) warn.push(`AWS auto-stop is ${cloud.state || 'off'}.`);
   if (running && by(2).armed === false) warn.push("The machine's own check is off - only AWS will stop it.");
   const sd = d.shutdown_action || {};
   if (sd.expected && !sd.ok) warn.push(`Shutdown behavior is ${sd.value === 'terminate' ? 'delete' : 'stop'}; expected ${sd.expected === 'terminate' ? 'delete' : 'stop'}.`);
-  if ((d.budget || {}).usd == null) warn.push('No budget alert set in AWS.');
+  if ((d.budget || {}).usd == null && !gone) warn.push('No budget alert set in AWS.');
   $('g-warn').textContent = '';
   for (const w of warn) {
     const el = document.createElement('span');
@@ -1758,7 +1809,7 @@ function paintGuards(d) {
   nets.textContent = '';
   for (const g of guards) {
     const [what, needs] = netWords(g, d);
-    const [state, tone] = netState(g);
+    const [state, tone] = netState(g, gone);
     // A card each: its place in the order, a circle; its name over what it
     // does and where it runs; whether it is on.
     const row = document.createElement('div');
@@ -2610,6 +2661,7 @@ function oneFieldFail(text, go) {
   box.textContent = text;
   $('onefield-go').disabled = false;
   $('onefield-go').textContent = go;
+  $('onefield-cancel').disabled = false;
   oneFieldPending = null;
 }
 // `args` is either the command, or a function of the typed value for a command
@@ -2644,6 +2696,7 @@ function openOneField({ title, note, label, placeholder, args, askId, save = 'Sa
   $('onefield-err').textContent = '';
   $('onefield-go').disabled = false;
   $('onefield-go').textContent = save;
+  $('onefield-cancel').disabled = false;
   $('onefield-go').onclick = async e => {
     e.preventDefault();
     const value = $('onefield-input').value.trim();
@@ -2653,6 +2706,9 @@ function openOneField({ title, note, label, placeholder, args, askId, save = 'Sa
     $('onefield-err').hidden = true;
     $('onefield-go').disabled = true;
     $('onefield-go').textContent = working;
+    // Closing does not stop cg: the value would be saved behind a Cancel, or
+    // cg would ask for it again in a popup of its own. A few seconds; wait.
+    $('onefield-cancel').disabled = true;
     const { rc, err } = await runCg(argv, { wantRc: true, collect: log });
     oneFieldPending = null;
     if (rc === 0) {
@@ -2748,6 +2804,7 @@ function openAwsKey(log) {
   $('awskey-err').textContent = '';
   $('awskey-go').disabled = false;
   $('awskey-go').textContent = 'Connect';
+  $('awskey-cancel').disabled = false;
   keepOpen($('awskey'));
   if (!$('awskey').open) $('awskey').showModal();
   $('awskey-id').focus();
@@ -2758,6 +2815,7 @@ function awsKeyFail(text) {
   box.textContent = text;
   $('awskey-go').disabled = false;
   $('awskey-go').textContent = 'Connect';
+  $('awskey-cancel').disabled = false;
   awsKeyPending = null;
 }
 $('awskey-cancel').onclick = e => { e.preventDefault(); awsKeyPending = null; $('awskey').close(); };
@@ -2769,6 +2827,8 @@ $('awskey-go').onclick = async e => {
   $('awskey-err').hidden = true;
   $('awskey-go').disabled = true;
   $('awskey-go').textContent = 'Checking with AWS\u2026';
+  // As the one-field dialog: closing would not stop cg saving the key.
+  $('awskey-cancel').disabled = true;
   const { rc, err } = await runCg(['creds', 'set'], { wantRc: true, collect: awsKeyLog });
   awsKeyPending = null;
   if (rc === 0) {
@@ -3018,7 +3078,7 @@ function settingRow(r) {
         return;
       }
       const out = await runCg(['config', 'get', r.key], { capture: true });
-      val.textContent = (out || '').trim() || '(empty)';
+      val.textContent = out === undefined ? `Not read: ${busyWhy()}` : out.trim() || '(empty)';
       glyph.textContent = ICON.visibility_off;   // click again to hide it
       shown = true;
     };
@@ -4486,6 +4546,9 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart,
       const why = `Waiting for ${cgName(res.args)} to finish.`;
       if (collect) $(collect).textContent = why + '\n';
       if (panel) $(panel).textContent = why;
+      // A step's read-back that never ran must not hold the step - and the
+      // add dialog's Close with it - waiting for it for good.
+      if (json && onbVerifying && onbPending.delete(json) && !onbPending.size) onbVerified();
       return resolve(wantRc ? { rc: null, err: why } : undefined);
     }
     jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, wantRc, onStep, group, aside,
@@ -4693,11 +4756,14 @@ function hostCard(h, full) {
 // it found - and the setup's own words under both.
 // One row of "What is working", on either kind of machine: a tick or a cross,
 // what was checked, and what was found.
+// `ok` null: not yet, and nothing wrong - a thing the next build sets up.
 function checkRow(ok, label, value) {
   const row = el('div', 'flex items-center gap-space-md px-space-lg py-space-md rounded-lg bg-surface-container-low');
   row.dataset.check = label;
+  row.dataset.ok = ok == null ? 'later' : ok ? 'yes' : 'no';
   row.append(el('span', 'w-7 h-7 shrink-0 rounded-full flex items-center justify-center font-body-sm text-body-sm '
-                      + (ok ? 'bg-primary/15 text-primary' : 'bg-error/15 text-error'), ok ? '✓' : '✗'),
+                      + (ok == null ? 'bg-surface-variant text-outline' : ok ? 'bg-primary/15 text-primary' : 'bg-error/15 text-error'),
+                ok == null ? '○' : ok ? '✓' : '✗'),
              el('span', 'font-body-md text-body-md flex-1', label),
              el('span', 'font-body-sm text-body-sm text-on-surface-variant text-right', value));
   return row;
@@ -4736,8 +4802,12 @@ function paintAwsChecks() {
     m ? [m.ready !== false, 'Set up', m.ready === false ? 'still building' : 'finished'] : null,
     m && g2 ? [g2.armed !== false, 'Auto-stop on the machine',
                g2.armed === false ? 'off' : g2.idle_min != null ? `after ${g2.idle_min} min idle` : 'on'] : null,
-    g3 ? [!!g3.armed, 'Auto-stop in AWS', g3.armed ? 'checks every 5 min' : 'off'] : null,
-    [limit != null, 'Budget alert', limit == null ? 'not set' : isFinite(limit) ? `${rs(limit)} a month` : 'set'],
+    // Both are set up by every build, before it launches anything - so with
+    // no machine, missing is "not yet", not a fault. A machine without them is.
+    g3 ? [g3.armed ? true : m ? false : null, 'Auto-stop in AWS',
+          g3.armed ? 'checks every 5 min' : m ? 'off' : 'turns on when you build'] : null,
+    [limit != null ? true : m ? false : null, 'Budget alert',
+     limit != null ? (isFinite(limit) ? `${rs(limit)} a month` : 'set') : m ? 'not set' : 'set when you build'],
     games ? [true, 'Saved games', games.length ? `${games.length} ready to restore` : 'none yet'] : null,
   ]) if (r) list.append(checkRow(...r));
 }
@@ -5812,6 +5882,12 @@ let onbWaiting = false;
 // marks and "Install them" - for as long as the re-read took, which looked like
 // the install had not happened.
 let onbVerifying = null;
+// Waiting for the reads before the step's command: nothing of its own is
+// running yet, so there is nothing for Stop to stop.
+let onbQueued = false;
+// Steps whose command is a write to .env on this laptop, done in a blink:
+// a Stop there would only ever be pressed after it was over.
+const ONB_NO_STOP = new Set(['where']);
 // Every read that has to answer before that step is judged again - for Tools,
 // both the tool list and the AWS CLI check - and the tools that were missing
 // when the install started, which show "…" until then rather than ✗ or ✓.
@@ -5954,7 +6030,10 @@ async function runInPipeline(key, args, status, started) {
   paintOnboard();
   if ([...jobs.values()].some(j => !hostRun(j))) {
     $('onb-live-' + key).textContent = 'Waiting for the last checks to finish…';
+    onbQueued = true;
+    paintOnboard();
     await readsSettled();
+    onbQueued = false;
     $('onb-live-' + key).textContent = status || 'Starting…';
   }
   const { rc, err } = await runCg(args, { collect: onbLogId(key), wantRc: true,
@@ -6151,6 +6230,12 @@ function paintOnboardSoon() {
 function paintOnboard() {
   const wrap = $('onb-steps');
   if (!wrap) return;
+  // Close waits while a step runs or its result is being read back: closed
+  // then, the step carried on unseen and the dialog lost track of it. A long
+  // step has its own Stop; stop it first, then close.
+  const stepBusy = !!(onbRunning || onbVerifying);
+  $('adddlg-close').disabled = stepBusy;
+  $('adddlg-close').title = stepBusy ? 'Waits for this step to finish' : '';
 
   // No engine. Not a stage you can be talked through - every command fails
   // identically without cg, and six broken reads is not what happened. One
@@ -6391,6 +6476,8 @@ function paintOnboard() {
     bar.className = 'flex flex-wrap items-center gap-space-sm mt-space-md';
     if (state === 'verifying') {
       // Nothing to press while the answer is on its way.
+    } else if (state === 'running' && (onbQueued || ONB_NO_STOP.has(r.key))) {
+      // Nothing to stop: the reads it waits on are the app's, and the write is instant.
     } else if (state === 'running') {
       // Stopping has to reach cg: a sign-in is waiting on a browser that may
       // never answer, and a package manager can be sitting on a lock.
@@ -6579,17 +6666,18 @@ $('goto').onclick = () => {
   if (target) goView(target);
 };
 $('cancel').onclick = async () => {
-  const mine = jobsHere();
+  const mine = jobsHere().filter(j => !headerSpares(j));
   if (!mine.length) return;
   const names = mine.map(j => 'cg ' + j.cmd.join(' ')).join(', ');
   const ok = await askConfirm({
     title: `Stop ${names}?`,
     body: mine.map(j => STOP_WARNING[j.cmd[0]]).find(Boolean)
-       || 'Read-only. Stopping them changes nothing.',
+       || (mine.some(j => j.write) ? 'It stops part-way. What it has done so far stays done.'
+                                   : 'Read-only. Stopping them changes nothing.'),
     yes: 'Stop', danger: true,
   });
   if (!ok) return;
-  for (const [id, j] of jobs) if (j.view === view && !hostRun(j)) window.cg.cancel(id);
+  for (const [id, j] of jobs) if (j.view === view && !headerSpares(j)) window.cg.cancel(id);
 };
 mountMachineCard($('d-hero'), 'd');
 mountMachineCard($('b-machine'), 'b');
@@ -6626,8 +6714,9 @@ $('log-cloud').onclick = async () => {
   const out = await runCg(['watchdog', 'logs'], { capture: true });
   btn.disabled = false;
   $('log-cloud-label').textContent = 'Load';
-  $('log-cloud-out').textContent = watchdogDigest(out || '')
-    || 'Nothing in the last 3 hours.';
+  // Refused - something runs alone - is not "nothing happened".
+  $('log-cloud-out').textContent = out === undefined ? `Not loaded: ${busyWhy()}`
+    : watchdogDigest(out) || 'Nothing in the last 3 hours.';
 };
 // The watchdog writes a line every 5 minutes, so three hours is ~40 copies of
 // "nothing to do" around the three hourly lines that say anything. A line seen

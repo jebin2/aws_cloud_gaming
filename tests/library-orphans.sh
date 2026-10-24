@@ -51,7 +51,7 @@ case "$args" in
     fi
     cat "$IDX" ;;
   *"s3 ls"*--recursive*) cat "$LISTING"; [[ $args == *summarize* ]] && printf '\nTotal Objects: 6\n   Total Size: 81419400077\n' ;;
-  *"s3 rm"*) exit 0 ;;
+  *"s3 rm"*) [[ ${RM_FAILS:-0} == 1 ]] && exit 1; exit 0 ;;
   *"s3 ls"*index.json*) [[ ${NO_INDEX:-0} == 1 ]] && exit 1; echo "index.json" ;;
   # A g6.xlarge's local disk, as AWS sizes it.
   *"describe-instance-types"*) echo 250 ;;
@@ -115,6 +115,12 @@ check "deleted the orphans"       "$(grep -c 's3 rm.*Diablo IV' "$T/log" || true
 check "and the orphan shadercache" "$(grep -c 's3 rm.*shadercache/2344520' "$T/log" || true)" "1"
 check "left Wukong alone"         "$(grep -c 's3 rm.*BlackMythWukong' "$T/log" || true)" "0"
 check "left its compatdata alone" "$(grep -c 's3 rm.*2358720' "$T/log" || true)" "0"
+
+echo "3a. a delete AWS refuses is a failure, not 'charges stop'"
+out=$(RM_FAILS=1 run "CLEAN" clean); rc=$?
+check    "exits non-zero"         "$rc" "1"
+contains "says how many are left" "$out" "could not delete 2 of them (2 in all) - they still bill"
+check    "never says charges stop" "$(grep -c 'storage charges for those stop now' <<<"$out" || true)" "0"
 
 echo "3b. an index it cannot READ deletes nothing at all"
 # The dangerous direction: an unreadable index looks like an empty one, and

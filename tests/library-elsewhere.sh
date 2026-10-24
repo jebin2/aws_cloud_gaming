@@ -71,6 +71,8 @@ case "$*" in
   *"s3 cp /"*"/steam/index.json"*)
     src=$3; dst=${4#s3://}; cp "$src" "$PUT/${dst%%/*}" ;;
   *"s3 sync"*) [[ -n ${SYNC_FAILS:-} ]] && exit 1; exit 0 ;;
+  # RM_FAILS: AWS refuses the delete of a game's folder - the rest goes.
+  *"s3 rm"*"/steam/steamapps/common/"*) [[ -n ${RM_FAILS:-} ]] && exit 1; exit 0 ;;
   *"s3 rm"*|*"s3 rb"*|*"s3 cp s3://"*) exit 0 ;;
   *) exit 1 ;;
 esac
@@ -148,6 +150,15 @@ contains "  and the emptied bucket"       "$calls" "s3 rb s3://$LEGB --force --r
 contains "  said plainly"                 "$out" "nothing else was saved in ap-south-2 - removed it"
 out=$(ANSWER=FORGET run library forget 2344520 --from "$FORB")
 contains "another account's: refused"     "$out" "not one of this rig's buckets"
+# AWS refuses part of it: said as a failure, and the game stays listed, so it
+# can be deleted again - dropped from the index, the rest would bill unseen.
+: > "$T/calls"; rm -f "$T/put/"*
+EXTRA=(RM_FAILS=1); out=$(ANSWER=FORGET run library forget 2344520 --from "$LEGB"); rc=$?; EXTRA=()
+check    "a refused delete fails"         "$rc" "1"
+contains "  saying what is left bills"    "$out" "only part of Diablo IV was deleted from ap-south-2 - what is left still bills"
+lacks    "  never 'stops billing'"        "$out" "stops billing"
+lacks    "  and it stays in the index"    "$(ls "$T/put")" "$LEGB"
+lacks    "  and its place stays"          "$(cat "$T/calls")" "s3 rb"
 
 echo "5b. a login copy in another place is forgotten there, after FORGET"
 : > "$T/calls"
@@ -182,6 +193,9 @@ contains "a copy that stops says so"      "$out" "nothing was deleted from ap-so
 lacks    "  and deletes nothing"          "$(cat "$T/calls")" "s3 rm"
 out=$(ANSWER=MOVE run library move 2344520 --from "$NOWB")
 contains "moving from the machine's own place is refused" "$out" "already where your machine is built"
+EXTRA=(RM_FAILS=1); out=$(ANSWER=MOVE run library move 2344520 --from "$LEGB"); rc=$?; EXTRA=()
+check    "moved, but the source not fully deleted: a failure" "$rc" "1"
+contains "  saying where it still bills"  "$out" "moved Diablo IV to ap-south-1, but part of it is still in ap-south-2 and still bills there"
 
 echo "6b. keep-for: the days, saved and applied together"
 out=$(run library keep-for soon)

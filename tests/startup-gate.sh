@@ -762,11 +762,20 @@ ENGINE="window.__after = async () => {
   // Something that changes something still gets its Stop, named.
   runCg(['library', 'clean']);
   await new Promise(r => setTimeout(r, 50));
-  return reads + ' | write=' + (document.getElementById('cancel').hidden ? 'none' : document.getElementById('cancel-label').textContent.trim());
+  const write = document.getElementById('cancel').hidden ? 'none' : document.getElementById('cancel-label').textContent.trim();
+  // A build has Cancel on its card, which deletes the machine too: no second
+  // button beside it that would stop cg and leave the machine billing.
+  for (const [id, j] of jobs) window.__emit(id, { t: 'exit', rc: 0 });
+  await new Promise(r => setTimeout(r, 50));
+  runCg(['init']);
+  await new Promise(r => setTimeout(r, 50));
+  const build = document.getElementById('cancel').hidden ? 'none' : document.getElementById('cancel-label').textContent.trim();
+  return reads + ' | write=' + write + ' | build=' + build;
 };"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP}")
 check "no Stop for reads" "$(row AFTER | cut -d'|' -f1-2 | sed 's/ $//')" "AFTER | stop=none"
 contains "  but a change still has one" "$(row AFTER)" "write=Stop "
+contains "  except a build, whose card has Cancel" "$(row AFTER)" "build=none"
 ENGINE=""
 
 echo "4d. a region that cannot rent the machine is not 'ready'"
@@ -794,6 +803,9 @@ ENGINE="window.__after = async () => {
     {key: 'GAME_REGION', kind: 'text', secret: false, is_set: true, value: 'ap-south-2'}];
   window.__ran = [];
   document.getElementById('whereto-use').click();
+  const wh = () => document.querySelector('#onb-steps [data-stage=\"where\"]');
+  const during = wh().dataset.state + ':stop=' + [...wh().querySelectorAll('button')].some(b => /^Stop/.test(b.textContent.trim()))
+    + ':close=' + (document.getElementById('adddlg-close').disabled ? 'off' : 'on');
   await new Promise(r => setTimeout(r, 60));
   const at = n => n === 'onb' ? (document.getElementById('adddlg').open ? 'shown' : 'hidden') : document.getElementById(n).hidden ? 'hidden' : 'shown';
   // The last step just went green: the finished list is held for a beat.
@@ -802,13 +814,14 @@ ENGINE="window.__after = async () => {
   await new Promise(r => setTimeout(r, 50));
   paintOnboard();
   const tick = document.querySelector('[data-stage=\"where\"] .onb-tick');
-  const held = 'held=' + at('onb') + '/' + at('d-main') + ' count='
+  const closeAfter = document.getElementById('adddlg-close').disabled ? 'off' : 'on';
+  const held = 'closeAfter=' + closeAfter + ' held=' + at('onb') + '/' + at('d-main') + ' count='
              + document.getElementById('onb-count').textContent.trim()
              + ' tick=' + !!tick
              // Redrawn since the change, so it must be resuming, not restarting.
              + ' resumed=' + (tick ? parseFloat(tick.style.animationDelay) < 0 : 'none');
   await new Promise(r => setTimeout(r, 1200));
-  return held + ' then=' + at('onb') + '/' + at('d-main')
+  return held + ' then=' + at('onb') + '/' + at('d-main') + ' during=' + during
        + ' use=' + useLabel + ' popup=' + popup + ' usable=' + usable
        + ' saved=' + window.__ran.includes('config set GAME_REGION ap-south-2')
        + ' reread=' + window.__ran.includes('config --json')
@@ -826,6 +839,11 @@ OUT=$(probe "{$READY, \"config --json\": $cfg_noregion, \"sweep --cached --json\
 contains "the pipeline stays up"        "$(row ONB)" "ONB | shown"
 contains "  with where it runs active"  "$(row STAGES)" "where=active"
 contains "  asking, not blaming"        "$(row STAGETEXT)" "Choose a region. Lower latency is better."
+# Saving a region is a write to .env, done in a blink: no Stop while it runs.
+contains "saving the region offers no Stop" "$(row AFTER)" "during=running:stop=false"
+# Closed mid-step, the step carried on unseen: Close waits for it.
+contains "  nor Close while it runs"        "$(row AFTER)" ":close=off"
+contains "  and Close is back once it is done" "$(row AFTER)" "closeAfter=on"
 lacks    "  and no region is accused"   "$(row STAGETEXT)" "no GPU quota"
 # The stage is judged on cg machines, which is behind the gate: it must not
 # be what keeps the gate shut, or the list it opens has nothing in it.
@@ -1577,8 +1595,15 @@ B10="window.__after = async () => {
   await wait(); await wait();
   const refused = 'popup=' + document.getElementById('refdlg').open + ' title=' + document.getElementById('refdlg-title').textContent
     + ' why=' + document.getElementById('refdlg-list').innerText.replace(/\\s+/g, ' ')
-    + ' close=' + !document.getElementById('refdlg-menu').hidden + ' view=' + view();
-  return 'during=' + during + ' | reading=' + reading + ' | after=' + after + ' | refused=' + refused;
+    + ' close=' + !document.getElementById('refdlg-menu').hidden + ' view=' + view()
+    + ' sub=' + document.getElementById('refdlg-sub').textContent;
+  // What a failure left, from cg's words: a move part-way, a setting half-applied.
+  const left = 'move=' + libraryLeft('the copy stopped - nothing was deleted from ap-south-2; run the move again to finish it')
+    + ' keep=' + libraryLeft('saved, but the cloud watchdog still counts the old days - run: cg watchdog install')
+    + ' forget=' + libraryLeft('only part of Diablo IV was deleted from ap-south-2 - what is left still bills; run the delete again to finish it')
+    + ' moved=' + libraryLeft('moved Diablo IV to ap-south-1, but part of it is still in ap-south-2 and still bills there - delete it there to finish')
+    + ' clean=' + libraryLeft('could not delete 2 of them (2 in all) - they still bill; run the clean up again');
+  return 'during=' + during + ' | reading=' + reading + ' | after=' + after + ' | refused=' + refused + ' | left=' + left;
 };"
 ENGINE="$B10"
 LIB='{"games": [{"appid": "2344520", "name": "Diablo IV", "bytes": 96636764160, "usd_month": 2.21, "pushed": "2026-10-12T00:00:00Z"}],
@@ -1595,6 +1620,12 @@ contains "  and closes, still on Library"    "$(row AFTER)" "after=view=library 
 contains "refused: the popup stays"          "$(row AFTER)" "refused=popup=true title=Deleting Diablo IV - not done"
 contains "  with cg's reason"                "$(row AFTER)" "aborted - nothing was deleted"
 contains "  a Close, and still on Library"   "$(row AFTER)" "close=true view=library"
+contains "  and nothing was changed"         "$(row AFTER)" "sub=Nothing was changed."
+contains "a move stopped part-way says so"   "$(row AFTER)" "move=The game is still where it was, untouched. Part of it may already be copied"
+contains "a half-applied keep-for says so"   "$(row AFTER)" "keep=The setting was saved, but auto-stop still counts the old days."
+contains "a half-done delete says what bills" "$(row AFTER)" "forget=Part of the game was deleted; the rest still bills."
+contains "a move half-deleted at the source"  "$(row AFTER)" "moved=The game was moved, but part of it is still in its old region"
+contains "a half-done clean up"               "$(row AFTER)" "clean=Some leftover files were deleted; the rest still bill."
 ENGINE=""
 
 echo "7k. one Games table: every game with its place and date; Reset, Move, Keep for"

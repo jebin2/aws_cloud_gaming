@@ -826,11 +826,17 @@ library_clean() {
   echo "  They are not restorable: with no manifest, Steam cannot see them."
   cg_ask_typed clean-orphans "type CLEAN to delete them: " CLEAN \
     || { echo "aborted - nothing was deleted"; return 1; }
+  local kept=0 all=0
   while IFS=$'\t' read -r bytes prefix; do
     [[ -n ${prefix:-} ]] || continue
-    aws s3 rm "s3://$GAME_S3_BUCKET/steam/steamapps/$prefix" --recursive >/dev/null 2>&1 \
-      && log "deleted $prefix" || log "could not delete $prefix"
+    all=$((all + 1))
+    if aws s3 rm "s3://$GAME_S3_BUCKET/steam/steamapps/$prefix" --recursive >/dev/null 2>&1; then
+      log "deleted $prefix"
+    else
+      log "could not delete $prefix"; kept=$((kept + 1))
+    fi
   done <<< "$rows"
+  (( kept == 0 )) || die "could not delete $kept of them ($all in all) - they still bill; run the clean up again"
   log "storage charges for those stop now"
 }
 
@@ -1054,7 +1060,7 @@ print("  which account a new box uses, not to save money.")'
 # once the copy is verified. A bucket that is not the one in use and holds no
 # game afterwards is removed too - nothing points at it, and it only bills.
 library_forget_at() {
-  local bucket=$1 region=$2 id=$3 idx=$4 dir pair tmp left
+  local bucket=$1 region=$2 id=$3 idx=$4 dir pair tmp left failed=0
   dir=$(printf '%s' "$idx" | python3 -c '
 import json,sys
 for a in json.load(sys.stdin).get("apps",[]):
@@ -1066,10 +1072,19 @@ for a in json.load(sys.stdin).get("apps",[]):
   for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
     # The trailing slash is the boundary: without it "common/Diablo IV" is a
     # prefix of "common/Diablo IV Expansion" too, and --recursive deletes both.
-    aws s3 rm "s3://$bucket/steam/steamapps/$pair/" --recursive --region "$region" >/dev/null 2>&1 || true
+    # A prefix with nothing under it deletes nothing and still succeeds, so a
+    # failure here is AWS refusing - and what it kept still bills.
+    aws s3 rm "s3://$bucket/steam/steamapps/$pair/" --recursive --region "$region" >/dev/null 2>&1 \
+      || failed=$((failed + 1))
   done
-  aws s3 rm "s3://$bucket/steam/steamapps/appmanifest_$id.acf" --region "$region" >/dev/null 2>&1 || true
-  aws s3 rm "s3://$bucket/steam/meta/symlinks-$id.tsv" --region "$region" >/dev/null 2>&1 || true
+  aws s3 rm "s3://$bucket/steam/steamapps/appmanifest_$id.acf" --region "$region" >/dev/null 2>&1 \
+    || failed=$((failed + 1))
+  aws s3 rm "s3://$bucket/steam/meta/symlinks-$id.tsv" --region "$region" >/dev/null 2>&1 \
+    || failed=$((failed + 1))
+  # Part of it is still there: leave it in the index, so it stays listed -
+  # with a price - and Delete can be run again to finish it. Dropped from the
+  # index, the rest would bill with nothing pointing at it.
+  (( failed == 0 )) || return 1
   # Drop it from the index too, or cg init keeps offering a game that is gone.
   tmp=$(mktemp)
   printf '%s' "$idx" | python3 -c '
@@ -1080,7 +1095,7 @@ except Exception: d={"apps":[]}
 print(json.dumps({"apps":[a for a in d.get("apps",[]) if str(a.get("appid"))!=appid]},indent=1))' "$id" > "$tmp"
   left=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["apps"]))' "$tmp")
   aws s3 cp "$tmp" "s3://$bucket/steam/index.json" --region "$region" >/dev/null 2>&1 \
-    || log "could not update the index"
+    || { rm -f "$tmp"; return 2; }
   rm -f "$tmp"
   cw_aws ssm delete-parameter --name "/cloud-gaming/$TS_HOST/kept/$bucket/$id" >/dev/null 2>&1 || true
   if [[ $left == 0 && $bucket != "$(cg_bucket 2>/dev/null)" ]]; then
@@ -1120,7 +1135,10 @@ for a in apps:
   cg_ask_typed forget-game "type FORGET to confirm: " FORGET \
     || { echo "aborted - nothing was deleted"; return 1; }
   say "deleting $name from $region"
-  library_forget_at "$bucket" "$region" "$id" "$idx"
+  local rc=0
+  library_forget_at "$bucket" "$region" "$id" "$idx" || rc=$?
+  (( rc != 1 )) || die "only part of $name was deleted from $region - what is left still bills; run the delete again to finish it"
+  (( rc != 2 )) || die "$name was deleted from $region, but the list of saved games there could not be updated - run the delete again to tidy it"
   log "forgot $name ($id) - ${gb} GB stops billing"
 }
 
@@ -1216,7 +1234,10 @@ print(json.dumps(d,indent=1))' "$id" > "$tmp"
     || { rm -f "$tmp"; die "copied, but the index in $dr could not be written - nothing was deleted from $sr"; }
   rm -f "$tmp"
   say "deleting it from $sr"
-  library_forget_at "$sb" "$sr" "$id" "$sidx"
+  local rc=0
+  library_forget_at "$sb" "$sr" "$id" "$sidx" || rc=$?
+  (( rc != 1 )) || die "moved $name to $dr, but part of it is still in $sr and still bills there - delete it there to finish"
+  (( rc != 2 )) || die "moved $name to $dr, but the list of saved games in $sr could not be updated - it may still show there"
   log "moved $name to $dr - a build there downloads it free"
 }
 

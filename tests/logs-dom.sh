@@ -69,6 +69,15 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('FETCHED | label=' + document.getElementById('log-cloud-label').textContent
       + ' disabled=' + document.getElementById('log-cloud').disabled);
     out.push('DIGEST | ' + document.getElementById('log-cloud-out').textContent.replace(/\n/g, ' // '));
+    // Refused - a build runs alone - is not an empty log.
+    const run0 = window.cg.run;
+    window.cg.run = () => Promise.resolve({ ok: false, reason: 'busy', args: ['init'] });
+    jobs.set(9999, { cmd: ['init'], view: 'build', write: true, out: [] });
+    document.getElementById('log-cloud').click();
+    await sleep(); await sleep();
+    out.push('REFUSED | ' + document.getElementById('log-cloud-out').textContent);
+    jobs.delete(9999);
+    window.cg.run = run0;
   } catch (e) { out.push('THREW | ' + e.message); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -115,6 +124,8 @@ contains "and is back when done"         "$(row FETCHED)"  "label=Load disabled=
 echo "3. the log reads as what was decided"
 contains "the 5-minute checks are one line" "$(row DIGEST)" "no running instance tagged gamevps - nothing to do  (36 checks)"
 check    "  said once"                   "$(row DIGEST | grep -o 'nothing to do' | wc -l)" "1"
+contains "a refused load says why, not nothing" "$(row REFUSED)" "Not loaded: waits for"
+lacks    "  never 'nothing in the last 3 hours'" "$(row REFUSED)" "Nothing in the last"
 contains "the hourly decisions are kept" "$(row DIGEST)" "archive: kept - last used 5h ago"
 contains "  each of them"                "$(row DIGEST)" "archive: kept - last used 6h ago"
 lacks    "no UTC stamps left"            "$(row DIGEST)" "2026-10-16T"
