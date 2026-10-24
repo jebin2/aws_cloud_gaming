@@ -36,6 +36,15 @@ cat > "$T/bin/aws" <<'FAKE'
 #!/usr/bin/env bash
 args="$*"
 echo "aws $args" >> "$LOG"
+# NOTFOUND: the machine no longer exists. START_FAILS: AWS refuses the start.
+if [[ -n ${NOTFOUND:-} && $args == *describe-instances* ]]; then
+  echo "An error occurred (InvalidInstanceID.NotFound) when calling the DescribeInstances operation: The instance ID 'i-test' does not exist" >&2
+  exit 254
+fi
+if [[ -n ${START_FAILS:-} && $args == *start-instances* ]]; then
+  echo "An error occurred (InsufficientInstanceCapacity) when calling the StartInstances operation: no capacity" >&2
+  exit 254
+fi
 case "$args" in
   *InstanceLifecycle*)   echo "${LIFECYCLE:-none}" ;;
   *SpotInstanceRequests*) echo "${SPOT_STATE:-active}" ;;
@@ -55,7 +64,8 @@ run() {
   rm -f "$T/log" "$T/run/cg-session-$(id -u).pid"
   ( cd "$T" && HOME="$T/home" LOG="$T/log" PATH="$T/bin:$PATH" XDG_RUNTIME_DIR="$T/run" \
       LIFECYCLE="${LIFECYCLE:-none}" SPOT_STATE="${SPOT_STATE:-active}" \
-      STATE="${STATE:-stopped}" timeout 25 bash ./lib/game up 2>&1 )
+      STATE="${STATE:-stopped}" NOTFOUND="${NOTFOUND:-}" START_FAILS="${START_FAILS:-}" \
+      timeout 25 bash ./lib/game up 2>&1 )
 }
 did() { grep -q "$1" "$T/log" 2>/dev/null && echo yes || echo no; }
 # `grep -c` PRINTS its count and EXITS non-zero when there are no matches, so
@@ -87,6 +97,22 @@ echo "4. an on-demand instance never consults the spot request at all"
 out=$(LIFECYCLE=none STATE=stopped run)
 check    "called start-instances"   "$(did 'start-instances')" "yes"
 check    "did not query spot"       "$(did 'SpotInstanceRequests')" "no"
+
+echo "4b. a machine already deleted is said to be, not started"
+# Auto-stop had deleted it; cg tried to start it, AWS refused on stderr, and
+# the session ended with nothing said.
+for st in terminated shutting-down; do
+  out=$(STATE=$st run); rc=$?
+  check    "$st: fails"               "$rc" "1"
+  contains "  saying it was deleted"  "$out" "there is no machine to start - it was deleted"
+  check    "  never starting it"      "$(did 'start-instances')" "no"
+done
+out=$(NOTFOUND=1 run)
+contains "not found at all: the same" "$out" "there is no machine to start - it was deleted"
+contains "  with the way on"          "$out" "Build a new one: cg init"
+out=$(START_FAILS=1 run); rc=$?
+check    "AWS refusing the start: fails" "$rc" "1"
+contains "  with AWS's reason"        "$out" "AWS would not start the machine: An error occurred (InsufficientInstanceCapacity)"
 
 echo "5. an already-running box is untouched"
 out=$(LIFECYCLE=spot SPOT_STATE=disabled STATE=running run)

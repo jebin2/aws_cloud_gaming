@@ -109,7 +109,19 @@ up() {
   fi
   session_claim
 
-  if [[ $(state) == running ]]; then
+  # The state, or why it could not be read. A machine already deleted - by
+  # auto-stop once it sat idle, by AWS taking a spot one back - used to be
+  # "started" anyway: AWS refused, its words went to stderr, and the session
+  # ended with nothing said at all.
+  local st
+  st=$(state 2>&1) || st="unread: $st"
+  case $st in
+    terminated|shutting-down|*InvalidInstanceID.NotFound*|*InvalidInstanceID.Malformed*)
+      die "there is no machine to start - it was deleted, most likely by auto-stop after it sat idle or by AWS taking back a spot machine. Build a new one: cg init" ;;
+    unread:*)
+      die "could not read the machine from AWS: $(grep -m1 -i 'error' <<<"$st" || tail -1 <<<"$st")" ;;
+  esac
+  if [[ $st == running ]]; then
     cg_echo "instance already running"
   else
     # Checked BEFORE calling start, so the explanation replaces the API error
@@ -142,7 +154,9 @@ up() {
       fi
     fi
     cg_echo "starting $INSTANCE_ID ..."
-    ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
+    local err
+    err=$(ec2 start-instances --instance-ids "$INSTANCE_ID" 2>&1 >/dev/null) \
+      || die "AWS would not start the machine: $(grep -m1 -i 'error' <<<"$err" || tail -1 <<<"$err")"
     wait_instance_state "$REGION" "$INSTANCE_ID" running
   fi
 

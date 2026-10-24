@@ -4022,8 +4022,11 @@ function paintRun() {
     : r.kind === 'open' && r.state === 'running' && OPEN_STEPS[r.idx] && OPEN_STEPS[r.idx].stream
       ? (r.streamEnded ? 'Session ended' : 'Playing') : head[r.state];
   title.className = 'font-headline-lg text-headline-lg ' + (r.state === 'failed' ? 'text-error' : '');
-  // The bill, in the heading, from the moment the machine is rented.
-  const so = r.billFrom && r.rate != null ? r.rate * ((machine ? Date.now() : now) - r.billFrom) / 3600000 : null;
+  // The bill, in the heading, from the moment the machine is rented - unless a
+  // session is over and the machine with it: "₹38 so far, ₹26.58 an hour"
+  // under a failed session read as a machine still billing that was gone.
+  const billing = r.billFrom && r.rate != null && !(r.kind === 'open' && r.state !== 'running' && !liveBox());
+  const so = billing ? r.rate * ((machine ? Date.now() : now) - r.billFrom) / 3600000 : null;
   $('b-strip-meta').textContent = [
     r.state === 'running' ? mins(now - r.start) : r.kind === 'machine' ? `up ${mins(now - r.start)}`
       : r.state === 'done' && r.kind === 'init' ? `built in ${mins(now - r.start)}` : null,
@@ -4031,7 +4034,7 @@ function paintRun() {
     // What a failed build left billing, beside what it cost: being deleted,
     // deleted, or nothing ever rented.
     r.kind === 'init' && r.state === 'failed' ? failedBill() : null,
-    r.billFrom && r.rate != null ? `${rsh(r.rate)} an hour` : null,
+    billing ? `${rsh(r.rate)} an hour` : null,
   ].filter(Boolean).join(' · ');
   const s = statusNow || {};
   $('b-run-sum').textContent = r.kind === 'init' || r.kind === 'machine' || r.kind === 'open'
