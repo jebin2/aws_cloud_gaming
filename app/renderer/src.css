@@ -6,6 +6,11 @@
    whatever size class it carries (font-code-* is Geist now). */
 pre[class*="font-code"], code, kbd { font-family: 'JetBrains Mono', monospace; }
 
+/* The app is dark, so what the system draws for it is too: a <select>'s open
+   list, scrollbars. They came out light grey on the console theme. */
+:root { color-scheme: dark; }
+select option { background: theme(colors.surface-container-high); color: theme(colors.on-surface); }
+
 /* The few repeated shapes from the Stitch screens, written once. Everything
    else stays inline utility classes, exactly as the export had them. */
 @layer components {
@@ -52,6 +57,14 @@ pre[class*="font-code"], code, kbd { font-family: 'JetBrains Mono', monospace; }
   .glance { @apply p-space-lg rounded-lg bg-surface-container-lowest border border-surface-variant/60 flex flex-col; }
   .glance-label, .section-label { @apply font-label-caps text-label-caps uppercase text-outline; }
   .section-label { @apply mb-space-md; }
+  /* One of a few, picked in place: the Machine page's machines. */
+  .seg { @apply inline-flex flex-wrap items-center gap-1 p-1 rounded-full bg-surface-container-low; }
+  .seg-item { @apply inline-flex items-center gap-space-sm px-space-md py-1.5 rounded-full font-body-sm text-body-sm
+                     text-on-surface-variant hover:text-on-surface transition-colors; }
+  .seg-item[aria-selected="true"] { @apply bg-surface-container-highest text-on-surface font-medium; }
+  .seg-dot { @apply w-2 h-2 rounded-full bg-outline/60; }
+  .seg-dot.up { @apply bg-primary; }
+  .seg-dot.warn { @apply bg-tertiary; }
   /* A page's own sections, listed down its side: Settings'. */
   .side-item { @apply text-left px-space-md py-space-sm rounded-lg font-body-md text-body-md text-on-surface-variant
                       hover:bg-surface-container-high hover:text-on-surface transition-colors; }

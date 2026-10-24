@@ -317,10 +317,12 @@ cat > "$T/r/probe.js" <<'PROBE'
     $$('d-build').click();
     await wait(50);
     out.push('BUILD GOES | view=' + view + ' aws=' + shown('b-aws') + ' own=' + shown('b-own') + ' title=' + txt($$('view-title')));
-    const pick = $$('machine-pick');
-    out.push('PICK | ' + shown('machine-pick') + ' ' + [...pick.options].map(o => o.text).join(',') + ' value=' + pick.value);
-    pick.value = 'homebox';
-    pick.dispatchEvent(new Event('change'));
+    // A pill each, in the theme: the one shown is the one selected.
+    const pills = () => [...$$('machine-pick').querySelectorAll('button')];
+    out.push('PICK | ' + shown('machine-pick') + ' ' + pills().map(b => b.textContent).join(',')
+      + ' value=' + (pills().find(b => b.getAttribute('aria-selected') === 'true') || {dataset: {}}).dataset.value);
+    pills().find(b => b.dataset.value === 'homebox').click();
+    const picked = () => (pills().find(b => b.getAttribute('aria-selected') === 'true') || { dataset: {} }).dataset.value;
     out.push('PICKED | aws=' + shown('b-aws') + ' own=' + shown('b-own') + ' card=' + !!document.querySelector('#b-hosts [data-host="homebox"]'));
     goView('dashboard');
     out.push('PICK OFF PAGE | ' + shown('machine-pick'));
@@ -328,11 +330,11 @@ cat > "$T/r/probe.js" <<'PROBE'
     await wait(50);
     document.querySelector('#d-hosts [data-host="homebox"] [data-f="details"]').click();
     await wait(50);
-    out.push('DETAILS PICKS | ' + pick.value + ' own=' + shown('b-own'));
+    out.push('DETAILS PICKS | ' + picked() + ' own=' + shown('b-own'));
     goView('dashboard');
     document.querySelector('.nav-item[data-view="build"]').click();
     await wait(50);
-    out.push('SIDEBAR | ' + pick.value + ' own=' + shown('b-own'));
+    out.push('SIDEBAR | ' + picked() + ' own=' + shown('b-own'));
     // A machine that is there is shown as itself, whatever the next build needs.
     statusNow = { box: { id: 'i-1', state: 'running', type: 'g6.xlarge', launched: new Date().toISOString(), ready: true, built: true },
                   rates: {}, budget: {}, config: {}, build: {} };

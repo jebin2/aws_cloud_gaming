@@ -783,6 +783,8 @@ function paintMachineCards() {
     }
   }
   paintAwsChecks();
+  // The Machine page's pills carry AWS's state as a dot.
+  if (view === 'build') paintMachineTab();
 }
 
 function paintDash() {
@@ -4797,21 +4799,25 @@ function paintMachineTab() {
   const host = machineTab !== 'aws';
   $('b-aws').hidden = host;
   $('b-own').hidden = !host;
+  // A pill each, its state a dot: up, needing you, or neither. Drawn in the
+  // theme - a native <select> opened as the system's own grey list.
   const pick = $('machine-pick');
   pick.hidden = view !== 'build' || choices.length < 2;
-  const sig = choices.map(([v]) => v).join('\n');
-  if (pick.dataset.sig !== sig) {
-    pick.textContent = '';
-    for (const [v, label] of choices) pick.append(new Option(label, v));
-    pick.dataset.sig = sig;
+  pick.textContent = '';
+  for (const [v, label] of choices) {
+    const b = el('button', 'seg-item');
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(v === machineTab));
+    b.dataset.value = v;
+    const box = v === 'aws' ? liveBox() : null;
+    const tone = v === 'aws' ? (box && box.state === 'running' ? 'up' : '')
+      : ({ ok: 'up', run: 'up', warn: 'warn', bad: 'warn' }[hostState((hostsNow || []).find(h => h.name === v) || { name: v }).tone] || '');
+    b.append(el('span', `seg-dot ${tone}`), document.createTextNode(label));
+    b.onclick = () => { machineTab = v; paintHostCards(); };
+    pick.append(b);
   }
-  pick.value = machineTab;
   if (view === 'build') $('view-title').textContent = 'Machine';
 }
-$('machine-pick').onchange = e => {
-  machineTab = e.target.value;
-  paintHostCards();
-};
 // The Machine page for the AWS machine - whichever machine it showed last.
 function goAws() {
   machineTab = 'aws';
