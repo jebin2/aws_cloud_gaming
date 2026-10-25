@@ -628,6 +628,31 @@ unknown states, fakes, oracle, wiring). The remaining read-only commands (Phase 
 smaller but there are about 15 of them, and the lifecycle and destruction phases (5 and 6) are the
 large ones. This is months of work, not weeks; the order in section 5 stands.
 
+### 8.10 Progress (2026-10-25)
+
+Ported, tested, and compared with the Bash `cg` on the real account (the Bash and Go outputs side
+by side, same moment): `cost` (all but its other-regions section, which needs `library elsewhere`),
+`status`, `watcher`/`guards`, `watchdog status` and `logs`, `ping`, `log`, `ssh`, `config`
+(show, get, set, `--json`), `deps` (status), `creds` (status), `machines`/`types`. Shared pieces
+that came with them: the output primitives (plain and NDJSON events), the settings registry and its
+validation, prices and the exchange rate, the session lock, the watchdog's definition (its package is
+byte-identical to Python's, its policy equal as data, its fingerprint equal to the shell's), the
+derived archive bucket name, the AWS fakes and the local-runner fake.
+
+Deliberate differences from the Bash found so far, all recorded in the commits that made them:
+
+- an archive with no games is empty (the Bash read `aws s3 ls`'s non-zero exit for an empty prefix
+  as a failed listing and called the Steam login "unknown");
+- an unreadable fact is `?` or null, never `0`, `none` or `false`;
+- `deps` lists ssh, Tailscale and Moonlight; python3, curl and the AWS CLI are no longer needed;
+- the egress cache lives in the cache directory, not beside the scripts;
+- the settings table pads by characters, not bytes, so a row with a dash lines up;
+- `machines` says when a quota could not be read (`quota_unknown`) and is several times faster.
+
+Still to port in Phase 2: `sweep`, `regions`, `quota status`, `host list`, the library reads,
+`games`, `snapshot --list`, `aws inventory`, and `cost`'s other-regions section. The styled
+terminal rendering is not ported (a terminal gets the plain text).
+
 ## 9. Phase 1: skeleton and shared runtime
 
 1. Create `cmd/cg` and the packages in section 7, using the module pinned in the pilot.
