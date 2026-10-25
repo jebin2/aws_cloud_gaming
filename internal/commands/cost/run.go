@@ -166,13 +166,7 @@ func otherRegions(ctx context.Context, env *config.Env, get config.Lookup, cfg a
 			regions = append(regions, aws.ToString(r.RegionName))
 		}
 	}
-	st := storage.Scan(ctx, regions, func(region string) *costfacts.Gatherer {
-		c, err := awscfg.New(ctx, region)
-		if err != nil {
-			return &costfacts.Gatherer{EC2: failingEC2{}, Host: host, TagKey: config.TagKey}
-		}
-		return &costfacts.Gatherer{EC2: ec2.NewFromConfig(c), Host: host, TagKey: config.TagKey}
-	})
+	st := storage.Scan(ctx, regions, storage.ForHost(ctx, host))
 	account := ""
 	if id, err := sts.NewFromConfig(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err == nil {
 		account = aws.ToString(id.Account)
@@ -186,12 +180,4 @@ func otherRegions(ctx context.Context, env *config.Env, get config.Lookup, cfg a
 		func(ctx context.Context, region, key string) *float64 { return pricing.For(ctx, popts, region, key) },
 		env.Int("GAME_ARCHIVE_EXPIRY_DAYS"))
 	return OtherRegions(el, st, here, rates)
-}
-
-// failingEC2 is a region whose client could not even be built: every read of it
-// fails, so the region is reported as unreadable rather than empty.
-type failingEC2 struct{ costfacts.EC2API }
-
-func (failingEC2) DescribeVolumes(context.Context, *ec2.DescribeVolumesInput, ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
-	return nil, fmt.Errorf("no client for the region")
 }

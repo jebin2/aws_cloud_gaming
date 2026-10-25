@@ -22,6 +22,9 @@ type Command struct {
 // Registry is every command cg-go implements. A command that is not in it is
 // not reachable. The pilot has only cost; the rest is added as it is ported.
 var Registry = []Command{
+	{Path: []string{"aws", "inventory"}, Summary: "everything of cg's in this AWS account, and what it bills", JSON: true},
+	{Path: []string{"snapshot"}, Summary: "saved images (--list for now)", JSON: true},
+	{Path: []string{"host"}, Summary: "your own machines (list for now; add, setup, status, open, remove to come)", JSON: true},
 	{Path: []string{"library"}, Aliases: [][]string{{"lib"}}, Summary: "the game archive: list, elsewhere, account (more as they are ported)", JSON: true},
 	{Path: []string{"regions"}, Summary: "the regions you have enabled; optin lists the rest, enable turns one on", JSON: true},
 	{Path: []string{"quota"}, Summary: "the GPU quota: what you have, how to ask for more, and the appeal text", JSON: true},

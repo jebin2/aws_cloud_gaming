@@ -13,21 +13,25 @@ import (
 	"runtime/debug"
 	"syscall"
 
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/awscmd"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/configcmd"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/cost"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/creds"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/deps"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/hostcmd"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/librarycmd"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/machines"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/quota"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/regions"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/remote"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/snapshot"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/sweep"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/watchdog"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/watcher"
 	"github.com/jebin2/aws_cloud_gaming/internal/config"
 	"github.com/jebin2/aws_cloud_gaming/internal/contract"
+	"github.com/jebin2/aws_cloud_gaming/internal/hosts"
 	"github.com/jebin2/aws_cloud_gaming/internal/output"
 )
 
@@ -148,6 +152,12 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			fmt.Fprintf(stdout, "  cg %-10s %s\n", c.Path[0], c.Summary)
 		}
 		return 0
+	case "aws":
+		return awscmd.Run(ctx, config.Load(get, repoDir(get)), args, jsonFlag, out)
+	case "snapshot":
+		return snapshot.Run(ctx, config.Load(get, repoDir(get)), args, jsonFlag, out)
+	case "host":
+		return hostcmd.Run(hosts.Store{Path: hosts.PathFor(get)}, args, jsonFlag, out)
 	case "library", "lib":
 		return librarycmd.Run(ctx, config.Load(get, repoDir(get)), get, args, jsonFlag, out)
 	case "regions":

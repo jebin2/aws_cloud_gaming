@@ -77,3 +77,23 @@ func rewrite(path, key string, value *string) error {
 	}
 	return os.Rename(tmp.Name(), path)
 }
+
+// FileValue is a setting as the settings FILE has it, whatever the environment
+// says: whether this computer was ever set up for something is a fact about the
+// file, not about a variable that happens to be exported.
+func (e *Env) FileValue(key string) string {
+	f, err := os.Open(e.File)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	val := ""
+	for sc.Scan() {
+		if v, ok := strings.CutPrefix(sc.Text(), key+"="); ok {
+			val = v
+		}
+	}
+	return val
+}
