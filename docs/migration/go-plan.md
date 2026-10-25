@@ -569,6 +569,65 @@ other command is started until the owner reviews it.
 
 
 
+### 8.9 Pilot findings (2026-10-25)
+
+What was built, on `go-migration-plan`: the module at the repo root; `--version`, `--contract`,
+`help` and global flags (`--json`, `--watch`, `--region`, `--host`); the output package (plain
+errors and NDJSON events); `internal/config` (settings file, exported values win); `internal/pricing`
+(Price List, cache, exchange rate, GST); `internal/costdaily` and `internal/costreport` (the two
+Python files); `internal/costfacts` (every AWS read `cost` makes, each saying whether it could be
+read); `internal/commands/cost` (human report, `--daily`, `--json`, the not-yet-billed estimate);
+`internal/testfixture` (scenario-driven AWS fakes). Static binary, about 13 MB, `CGO_ENABLED=0`.
+All tests pass, including with `-race`.
+
+**What the pilot settled**
+
+- The module belongs at the repo root so `go:embed` can reach `lib`, `host` and `lambda`.
+- The shared-helper check is done: the box-side scripts (`lib/bootstrap.d/*`, `host/*`) source
+  nothing from `lib/*.sh`, only `/etc/os-release`. All of `lib/common.sh` can be ported.
+- Two kinds of oracle work. For pure transforms (`cost-daily.py`, `cost-report.py`) the Python is
+  run on saved inputs and the Go output is compared to what it printed (64 captured outputs). For
+  everything that reads AWS, the shell suite's assertions are ported to Go tests over fake clients
+  (`internal/testfixture`), the way the price and exchange-rate tests were. Capturing golden output
+  of the Bash `cg` against a faked `aws` CLI was not worth building: the fake would have to emulate
+  `--query` and text output, and would be thrown away.
+- JSON is compared on values, keys and nulls; number formatting (`110` against `110.0`) is not part
+  of the contract. Rule 8 already says this; the Python-isms are not reproduced.
+- The AWS SDK needs no adapters: the SDK clients satisfy narrow interfaces, so fakes are a few lines
+  each, and a test that forgets cg's tag finds another project's disk and fails.
+
+**What the pilot found**
+
+- `cost` is not a clean first command. Its human report borrows lines from subsystems that are
+  ported later: the Steam login line (`login_line`), the archive countdown (`cw_archive_line`), the
+  IAM role lines (`iam_lines`), the stranded-spot note, and the other-regions section
+  (`cost_elsewhere`). They are shared with `status`.
+- The pilot's boundary is therefore: everything `cost` computes itself. The borrowed lines come
+  back with their owners (library, watchdog, `aws inventory`, `status`). Until then the Go report
+  omits them and `--json` has `archive.decision: null`. This is the one known gap, and it is
+  tracked, not forgotten.
+- Deliberate differences from the Bash `cg`, all of them fail-closed:
+  - an unreadable fact is `?` or `null`, never `0`, `none` or `false` (the Bash printed `0` for a
+    failed volume, image or key-pair read, and "EMPTY" for an archive it could not list);
+  - a month whose only charges are under half a cent shows its total;
+  - the report says `cg games --volume --delete`, which exists, not `cg games --delete`, which does
+    not;
+  - the day-by-day Cost Explorer call is always the single call, so `cost` without `--daily` no
+    longer makes a second, monthly one.
+- Exchange-rate fetch uses HTTP only. The Bash used `curl`, which also accepted `file://`; the
+  tests used that. The Go tests use a local server.
+
+**Not yet done in the pilot**
+
+- No real-AWS run. `cg-go cost` has never talked to AWS. One run is a read-only Cost Explorer call
+  at about $0.01 (about INR 1) plus free reads, and it needs the owner's approval (decision 14).
+- The app's Spending screen has not been run against `cg-go` (step 7 of 8.0).
+
+**Estimate for the rest**: `cost` took the most design because it set the patterns (facts with
+unknown states, fakes, oracle, wiring). The remaining read-only commands (Phase 2) are each
+smaller but there are about 15 of them, and the lifecycle and destruction phases (5 and 6) are the
+large ones. This is months of work, not weeks; the order in section 5 stands.
+
 ## 9. Phase 1: skeleton and shared runtime
 
 1. Create `cmd/cg` and the packages in section 7, using the module pinned in the pilot.

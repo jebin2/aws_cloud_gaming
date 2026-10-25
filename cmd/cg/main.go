@@ -4,11 +4,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"runtime/debug"
+	"syscall"
 
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/cost"
+	"github.com/jebin2/aws_cloud_gaming/internal/config"
 	"github.com/jebin2/aws_cloud_gaming/internal/contract"
+	"github.com/jebin2/aws_cloud_gaming/internal/output"
 )
 
 // version is set at release time with -ldflags "-X main.version=...".
@@ -23,11 +31,7 @@ func buildVersion() string {
 		for _, s := range bi.Settings {
 			switch s.Key {
 			case "vcs.revision":
-				if len(s.Value) > 7 {
-					rev = s.Value[:7]
-				} else {
-					rev = s.Value
-				}
+				rev = s.Value[:min(7, len(s.Value))]
 			case "vcs.modified":
 				if s.Value == "true" {
 					dirty = "-dirty"
@@ -41,19 +45,54 @@ func buildVersion() string {
 	return "unknown"
 }
 
-func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	os.Exit(run(ctx, os.Args[1:], os.LookupEnv, os.Stdout, os.Stderr))
+}
 
-func run(args []string, stdout, stderr *os.File) int {
+// repoDir is where cg's files live: CG_REPO, else beside the binary.
+func repoDir(get config.Lookup) string {
+	if v, ok := get("CG_REPO"); ok && v != "" {
+		return v
+	}
+	if exe, err := os.Executable(); err == nil {
+		return filepath.Dir(exe)
+	}
+	return ""
+}
+
+func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stderr io.Writer) int {
+	cgJSON, _ := lookup("CG_JSON")
+	out := output.Out{Stdout: stdout, Stderr: stderr, JSON: cgJSON == "1"}
+	overrides := map[string]string{}
+	get := func(k string) (string, bool) {
+		if v, ok := overrides[k]; ok {
+			return v, true
+		}
+		return lookup(k)
+	}
+
 	// Global flags come before the command, as in the Bash cg.
 	for len(args) > 0 && len(args[0]) > 0 && args[0][0] == '-' {
 		switch args[0] {
+		case "--json", "--watch":
+			args = args[1:]
+		case "--region", "--host":
+			if len(args) < 2 {
+				out.Die(fmt.Sprintf("%s needs a value (see: cg help)", args[0]))
+				return 1
+			}
+			key := map[string]string{"--region": "GAME_REGION", "--host": "GAME_TS_HOST"}[args[0]]
+			overrides[key] = args[1]
+			args = args[2:]
 		case "--version":
 			fmt.Fprintf(stdout, "cg %s\nevents %d\n", buildVersion(), contract.EventsVersion)
 			return 0
 		case "--contract":
 			b, err := contract.JSON()
 			if err != nil {
-				fmt.Fprintln(stderr, err)
+				out.Die(err.Error())
 				return 1
 			}
 			fmt.Fprintf(stdout, "%s\n", b)
@@ -61,22 +100,30 @@ func run(args []string, stdout, stderr *os.File) int {
 		case "-h", "--help":
 			args = []string{"help"}
 		default:
-			fmt.Fprintf(stderr, "unknown flag '%s' (see: cg help)\n", args[0])
+			out.Die(fmt.Sprintf("unknown flag '%s' (see: cg help)", args[0]))
 			return 1
 		}
 	}
 	cmd := "help"
 	if len(args) > 0 {
-		cmd = args[0]
+		cmd, args = args[0], args[1:]
 	}
-	if cmd == "help" {
+	switch cmd {
+	case "help":
 		fmt.Fprintln(stdout, "cg - cloud gaming (Go port, in progress)")
 		fmt.Fprintln(stdout)
 		for _, c := range contract.Registry {
 			fmt.Fprintf(stdout, "  cg %-10s %s\n", c.Path[0], c.Summary)
 		}
 		return 0
+	case "cost":
+		opts, err := cost.ParseArgs(args)
+		if err != nil {
+			out.Die(err.Error())
+			return 1
+		}
+		return cost.Run(ctx, config.Load(get, repoDir(get)), opts, out)
 	}
-	fmt.Fprintf(stderr, "cg: '%s' is not ported to Go yet (see: cg help)\n", cmd)
+	out.Die(fmt.Sprintf("'%s' is not ported to Go yet (see: cg help)", cmd))
 	return 1
 }

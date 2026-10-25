@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -36,5 +35,12 @@ func TestVersionAndUnknowns(t *testing.T) {
 	if err := c.Run(); err == nil {
 		t.Error("an unknown command should fail")
 	}
-	_ = os.Stdout
+}
+
+func TestCostRefusesAnUnknownOption(t *testing.T) {
+	bin := build(t)
+	out, err := exec.Command(bin, "cost", "--nope").CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "unknown option '--nope'") {
+		t.Errorf("got %v %q", err, out)
+	}
 }
