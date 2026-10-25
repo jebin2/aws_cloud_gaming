@@ -145,3 +145,51 @@ func TestDelete(t *testing.T) {
 		t.Error("nothing to delete with")
 	}
 }
+
+func TestDisableExpiryTouchesOnlyTheConnectedNodeOfThatName(t *testing.T) {
+	post := ""
+	disabled := false
+	devs := func(w http.ResponseWriter, r *http.Request) {
+		flag := "false"
+		if disabled {
+			flag = "true"
+		}
+		reply(200, `{"devices":[
+		 {"id":"old","name":"my-pc.tail1.ts.net","created":"2026-01-01T00:00:00Z","connectedToControl":false,"keyExpiryDisabled":false},
+		 {"id":"mid","name":"my-pc-1.tail1.ts.net","created":"2026-05-01T00:00:00Z","connectedToControl":true,"keyExpiryDisabled":false},
+		 {"id":"new","name":"my-pc.tail1.ts.net","created":"2026-09-01T00:00:00Z","connectedToControl":true,"keyExpiryDisabled":`+flag+`}]}`)(w, r)
+	}
+	c := server(t, map[string]func(http.ResponseWriter, *http.Request){
+		"GET /tailnet/-/devices": devs,
+		"POST /device/new/key": func(w http.ResponseWriter, r *http.Request) {
+			b, _ := io.ReadAll(r.Body)
+			post = string(b)
+			disabled = true
+			w.WriteHeader(200)
+		},
+	})
+	e := c.DisableExpiry(context.Background(), "my-pc")
+	if !e.Off || post != `{"keyExpiryDisabled": true}` || e.Lines[0] != "key expiry off for 'my-pc' - it will not drop off the tailnet" {
+		t.Errorf("%+v %q", e, post)
+	}
+	// Already off: nothing is posted.
+	post = ""
+	if e := c.DisableExpiry(context.Background(), "my-pc"); !e.Off || post != "" || e.Lines[0] != "key expiry already off for 'my-pc'" {
+		t.Errorf("%+v", e)
+	}
+	if e := c.DisableExpiry(context.Background(), "nobody"); e.Off || e.Lines[0] != "no connected tailnet node named 'nobody' - key expiry left on" {
+		t.Errorf("%+v", e)
+	}
+	if e := (Client{}).DisableExpiry(context.Background(), "x"); !e.NoToken || e.Off {
+		t.Errorf("%+v", e)
+	}
+	c.Token = "wrong"
+	if e := c.DisableExpiry(context.Background(), "my-pc"); e.Off || e.Lines[0] != "tailnet token rejected (401) - key expiry left on" || len(e.Lines) != 2 {
+		t.Errorf("%+v", e)
+	}
+	c.Base = "http://127.0.0.1:1"
+	c.Token = "tskey-api-abc123"
+	if e := c.DisableExpiry(context.Background(), "my-pc"); e.Off || !strings.Contains(e.Lines[0], "could not reach api.tailscale.com (000)") {
+		t.Errorf("%+v", e)
+	}
+}

@@ -64,7 +64,7 @@ func TestRun(t *testing.T) {
 	if rc := Run(context.Background(), Deps{Store: s}, []string{"list", "--json"}, false, out); rc != 0 || !strings.HasPrefix(o.String(), "[") {
 		t.Errorf("%q", o.String())
 	}
-	if rc := Run(context.Background(), Deps{Store: s}, []string{"setup", "x"}, false, out); rc != 1 || !strings.Contains(e.String(), "not ported") {
+	if rc := Run(context.Background(), Deps{Store: s}, []string{"setup", "x"}, false, out); rc != 1 || !strings.Contains(e.String(), "no machine called 'x'") {
 		t.Errorf("%q", e.String())
 	}
 	e.Reset()

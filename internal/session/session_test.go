@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -72,4 +73,25 @@ func TestFileLocation(t *testing.T) {
 			t.Errorf("got %s want %s", got, c.want)
 		}
 	}
+}
+
+func TestClaimAndReleaseOnlyDropTheirOwn(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "cg-session-1.pid")
+	Claim(p, time.Unix(1700000000, 0))
+	b, _ := os.ReadFile(p)
+	if string(b) != fmt.Sprintf("%d 1700000000\n", os.Getpid()) {
+		t.Errorf("%q", b)
+	}
+	// Someone else's lock is not ours to drop.
+	_ = os.WriteFile(p, []byte("999999 1\n"), 0o644)
+	Release(p)
+	if _, err := os.Stat(p); err != nil {
+		t.Error("released another process's lock")
+	}
+	Claim(p, time.Now())
+	Release(p)
+	if _, err := os.Stat(p); err == nil {
+		t.Error("our own lock stays")
+	}
+	Release(p) // nothing there: nothing happens
 }

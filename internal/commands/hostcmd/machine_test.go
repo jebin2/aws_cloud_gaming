@@ -20,7 +20,7 @@ import (
 	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
 )
 
-const linuxFacts = "os=Linux\nid=ubuntu\nid_like=debian\nuser=me\nhostname=Desk-PC.local\npretty=Ubuntu 24.04 LTS\narch=x86_64\nmachine_id=m-1\nnvidia=RTX 3060\nsession=x11\nsteam=/usr/bin/steam\nsudo=nopass\n"
+const linuxFacts = "os=Linux\nid=ubuntu\nid_like=debian\nuser=me\nhostname=Desk-PC.local\npretty=Ubuntu 24.04 LTS\nubuntu_version=24.04\narch=x86_64\nmachine_id=m-1\nnvidia=RTX 3060\nsession=x11\nsteam=/usr/bin/steam\nsudo=nopass\n"
 
 type rig struct {
 	d      Deps

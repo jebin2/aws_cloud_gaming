@@ -680,6 +680,28 @@ fakes, including that no EC2 create call exists in its client.
 Open: `cg-go check` on this server stops at "Tailscale refused the API token", as the Bash does;
 that token has probably expired.
 
+### 8.12 Phase 4 progress
+
+Done: `host add`, `host remove`, `host status`, `host setup`, `host open`, and every no-box library
+change (`forget`, `clean`, `reset`/`keep`, `keep-for`, `move`, `account forget`). Where a command can be
+run without changing anything (the refusals and the unconfirmed prompts of the library commands) it
+was compared with the Bash on the real account and is identical. Everything that writes is proven
+over fakes: an in-memory S3 for the archive, a scripted runner for ssh, and a Sunshine server that
+behaves as Sunshine does (first-run account, the pairing request, a client that is or is not saved).
+
+The shared pieces Phase 5's `init` and `open` reuse are now Go: `internal/render` (byte-identical to
+`lib/render.sh`, tested against it), `internal/build` (the log follower, the Steam wait and
+`build_finish`), `internal/sunshine` (the login rules and pairing), `internal/stream` (Moonlight's
+flags and the Intel-GPU choice), `internal/session` (claim/release) and the tailnet key-expiry call
+in `internal/tskey`.
+
+Not run live: no machine of yours exists on this server, so `host add`/`setup`/`open` were never
+pointed at a real one. They need the laptop and a test machine; that is the first thing to do there.
+
+Deliberate differences from the Bash: `library clean` and `forget` delete a folder with a trailing
+slash, so an orphan called "Diablo" no longer takes "Diablo IV" with it; `library clean` says when the
+archive could not be read instead of claiming nothing is orphaned; a copy over 5 GiB is made in parts.
+
 ## 9. Phase 1: skeleton and shared runtime
 
 1. Create `cmd/cg` and the packages in section 7, using the module pinned in the pilot.

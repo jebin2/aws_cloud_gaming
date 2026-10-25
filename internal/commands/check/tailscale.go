@@ -4,6 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/jebin2/aws_cloud_gaming/internal/config"
+	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
 )
 
 // ensureAuthKey: use what is stored if it is still good; replace it when it is
@@ -11,8 +15,18 @@ import (
 // because "the build asked me for a key again" needs a reason attached. It
 // returns false when it has nothing better than what it was given.
 func (c *Checker) ensureAuthKey(ctx context.Context, stored, host string) (string, bool) {
-	token := c.Env.Get("TAILSCALE_API_KEY")
-	ts := c.TS(token)
+	return EnsureAuthKey(ctx, c.Env, c.Out, c.TS, stored, host)
+}
+
+// EnsureAuthKey is that decision for a caller that is not the preflight: setting
+// up a machine of yours joins it with the same kind of key.
+func EnsureAuthKey(ctx context.Context, env *config.Env, out *output.Out, tsFor func(string) tskey.Client, stored, host string) (string, bool) {
+	token := env.Get("TAILSCALE_API_KEY")
+	ts := tsFor(token)
+	c := struct {
+		Out *output.Out
+		Env *config.Env
+	}{out, env}
 	if stored != "" {
 		switch ts.State(ctx, stored) {
 		case "ok":

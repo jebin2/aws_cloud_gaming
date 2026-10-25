@@ -84,3 +84,24 @@ func Running(path string, p Probe) (Lock, bool) {
 	}
 	return l, true
 }
+
+// Claim takes the lock for this process. It is a pid file, not flock: the app and
+// `cg status` want to SAY what is running, and a pid answers that. A lock that
+// cannot be written is no lock, and no reason to refuse a stream.
+func Claim(path string, now time.Time) {
+	_ = os.WriteFile(path, []byte(fmt.Sprintf("%d %d\n", os.Getpid(), now.Unix())), 0o644)
+}
+
+// Release drops the lock now, and only if it is this process's. Not End: that
+// ends whoever holds the lock, and when that is this process it would send TERM to
+// itself - every `cg host open` ended killed, exit 143, and the app called a
+// normal session a failed one.
+func Release(path string) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	if f := strings.Fields(string(b)); len(f) > 0 && f[0] == strconv.Itoa(os.Getpid()) {
+		_ = os.Remove(path)
+	}
+}

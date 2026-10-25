@@ -26,6 +26,10 @@ type Runner struct {
 	Exit map[string]int
 	// Hook sees a command line first. handled false falls through to the maps.
 	Hook func(line string) (handled bool, out string, err error)
+	Hang map[string]bool
+	// Stderr is what a failing command said, by command line.
+	Stderr  map[string]string
+	Started []*fakeProc
 }
 
 func (r *Runner) Has(name string) bool { return r.Installed[name] }
@@ -76,20 +80,66 @@ func (r *Runner) Run(ctx context.Context, c local.Cmd) ([]byte, error) {
 	}
 	r.Envs[line] = c.Env
 	b, err := r.Output(ctx, c.Name, c.Args...)
+	if c.Combined != nil {
+		_, _ = c.Combined.Write(b)
+		b = nil
+	}
 	if err != nil {
 		for _, k := range []string{line, c.Name} {
 			if n, ok := r.Exit[k]; ok {
-				return b, &exitErr{n}
+				return b, &exitErr{n, r.Stderr[line]}
 			}
 		}
 	}
 	return b, err
 }
 
-type exitErr struct{ code int }
+type exitErr struct {
+	code   int
+	stderr string
+}
+
+func (e *exitErr) StderrText() string { return e.stderr }
 
 func (e *exitErr) Error() string { return "exit status " + strconv.Itoa(e.code) }
 func (e *exitErr) ExitCode() int { return e.code }
+
+// Procs are the programs started in the background, and Hang keeps one running
+// until it is killed (by "name arg"); otherwise it has already exited.
+func (r *Runner) Start(_ context.Context, c local.Cmd) (local.Proc, error) {
+	line := strings.TrimSpace(c.Name + " " + strings.Join(c.Args, " "))
+	r.Ran = append(r.Ran, line)
+	if r.Envs == nil {
+		r.Envs = map[string][]string{}
+	}
+	r.Envs[line] = c.Env
+	if !r.Installed[c.Name] {
+		return nil, errors.New("not installed: " + c.Name)
+	}
+	p := &fakeProc{done: make(chan struct{})}
+	if r.Hang[line] || r.Hang[c.Name] {
+		r.Started = append(r.Started, p)
+	} else {
+		close(p.done)
+	}
+	return p, nil
+}
+
+type fakeProc struct {
+	done   chan struct{}
+	Killed bool
+}
+
+func (p *fakeProc) Done() <-chan struct{} { return p.done }
+func (p *fakeProc) Kill() {
+	if !p.Killed {
+		p.Killed = true
+		close(p.done)
+	}
+}
+
+// Killed is whether a background program was killed.
+func (p *fakeProc) WasKilled() bool { return p.Killed }
 
 func (r *Runner) Stream(ctx context.Context, w io.Writer, name string, args ...string) error {
 	b, err := r.Output(ctx, name, args...)

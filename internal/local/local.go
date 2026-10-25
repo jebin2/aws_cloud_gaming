@@ -27,6 +27,30 @@ type Runner interface {
 	// Run runs a program with an environment and standard input of its own and
 	// returns its standard output. Standard error is discarded.
 	Run(ctx context.Context, c Cmd) ([]byte, error)
+	// Start runs a program in the background, for one that has to be waiting
+	// while something else happens (Moonlight, while Sunshine is asked to
+	// approve its pairing request).
+	Start(ctx context.Context, c Cmd) (Proc, error)
+}
+
+// Proc is a program started in the background.
+type Proc interface {
+	// Done is closed when the program has exited.
+	Done() <-chan struct{}
+	// Kill ends it; harmless when it has already exited.
+	Kill()
+}
+
+type execProc struct {
+	cmd  *exec.Cmd
+	done chan struct{}
+}
+
+func (p *execProc) Done() <-chan struct{} { return p.done }
+func (p *execProc) Kill() {
+	if p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+	}
 }
 
 // Cmd is a program to run. Env is added to this process's environment; Stdin
@@ -36,6 +60,9 @@ type Cmd struct {
 	Args  []string
 	Env   []string
 	Stdin io.Reader
+	// Combined, when set, receives standard output and standard error together,
+	// and Run returns no output of its own.
+	Combined io.Writer
 }
 
 // ExitCode is a program's exit status: 0 for no error, -1 when it did not run.
@@ -61,7 +88,23 @@ func (Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
 	cmd.Env = append(os.Environ(), c.Env...)
 	cmd.Stdin = c.Stdin
+	if c.Combined != nil {
+		cmd.Stdout, cmd.Stderr = c.Combined, c.Combined
+		return nil, cmd.Run()
+	}
 	return cmd.Output()
+}
+
+func (Exec) Start(ctx context.Context, c Cmd) (Proc, error) {
+	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
+	cmd.Env = append(os.Environ(), c.Env...)
+	cmd.Stdin = c.Stdin
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	p := &execProc{cmd: cmd, done: make(chan struct{})}
+	go func() { _ = cmd.Wait(); close(p.done) }()
+	return p, nil
 }
 
 func (Exec) Has(name string) bool {
@@ -87,4 +130,18 @@ func (Exec) Passthrough(ctx context.Context, name string, args ...string) int {
 		return ee.ExitCode()
 	}
 	return 127
+}
+
+// Stderr is what a program that failed said on standard error, when it was
+// captured: "" when there is none.
+func Stderr(err error) string {
+	var se interface{ StderrText() string }
+	if errors.As(err, &se) {
+		return se.StderrText()
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return string(ee.Stderr)
+	}
+	return ""
 }

@@ -14,7 +14,9 @@ package sunshine
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -44,21 +46,35 @@ func (c Client) url(ip, path string) string {
 }
 
 func (c Client) code(ctx context.Context, method, ip, path string, timeout time.Duration, user, pass string) int {
+	code, _ := c.do(ctx, method, ip, path, timeout, user, pass, "")
+	return code
+}
+
+// do is one request: the status (0 when nothing answered) and the body.
+func (c Client) do(ctx context.Context, method, ip, path string, timeout time.Duration, user, pass, jsonBody string) (int, []byte) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, c.url(ip, path), nil)
+	var body io.Reader
+	if jsonBody != "" {
+		body = strings.NewReader(jsonBody)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.url(ip, path), body)
 	if err != nil {
-		return 0
+		return 0, nil
+	}
+	if jsonBody != "" {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	if user != "" {
 		req.SetBasicAuth(user, pass)
 	}
 	resp, err := c.client().Do(req)
 	if err != nil {
-		return 0
+		return 0, nil
 	}
-	resp.Body.Close()
-	return resp.StatusCode
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return resp.StatusCode, b
 }
 
 // Answers is whether anything answers the welcome page: any HTTP status counts,
