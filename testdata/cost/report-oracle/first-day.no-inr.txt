@@ -1,0 +1,10 @@
+  USAGE TYPE                            QTY      USD     INR
+  BoxUsage:g6.xlarge                   0.50     0.50       ?
+  ---------------------------------------------------------
+  TOTAL                                         0.50       ?
+
+    0.5 h on demand  $  0.50 (INR     ?)   $1.000/hr
+
+  egress (streaming) 0.0 GB of 100 GB free - 100 GB left
+    ~11.1 more hours of streaming at 20 Mbps before it costs anything
+    after that: $0.1093/GB, about $0.98 (INR ?) an hour

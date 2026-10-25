@@ -1,0 +1,92 @@
+[
+ {
+  "d": "2026-09-01",
+  "g": [
+   {
+    "u": "APS5-DataTransfer-Out-Bytes",
+    "c": "0.00",
+    "q": "30"
+   },
+   {
+    "u": "APS5-BoxUsage:g6.xlarge",
+    "c": "1.00",
+    "q": "1.0"
+   }
+  ]
+ },
+ {
+  "d": "2026-09-02",
+  "g": [
+   {
+    "u": "APS5-DataTransfer-Out-Bytes",
+    "c": "0.00",
+    "q": "30"
+   },
+   {
+    "u": "APS5-BoxUsage:g6.xlarge",
+    "c": "1.00",
+    "q": "1.0"
+   }
+  ]
+ },
+ {
+  "d": "2026-09-03",
+  "g": [
+   {
+    "u": "APS5-DataTransfer-Out-Bytes",
+    "c": "0.00",
+    "q": "30"
+   },
+   {
+    "u": "APS5-BoxUsage:g6.xlarge",
+    "c": "1.00",
+    "q": "1.0"
+   }
+  ]
+ },
+ {
+  "d": "2026-09-04",
+  "g": [
+   {
+    "u": "APS5-DataTransfer-Out-Bytes",
+    "c": "0.00",
+    "q": "30"
+   },
+   {
+    "u": "APS5-BoxUsage:g6.xlarge",
+    "c": "1.00",
+    "q": "1.0"
+   }
+  ]
+ },
+ {
+  "d": "2026-09-05",
+  "g": [
+   {
+    "u": "APS5-DataTransfer-Out-Bytes",
+    "c": "0.00",
+    "q": "30"
+   },
+   {
+    "u": "APS5-BoxUsage:g6.xlarge",
+    "c": "1.00",
+    "q": "1.0"
+   }
+  ]
+ },
+ {
+  "d": "2026-09-06",
+  "g": [
+   {
+    "u": "APS5-DataTransfer-Out-Bytes",
+    "c": "0.20",
+    "q": "30"
+   },
+   {
+    "u": "APS5-BoxUsage:g6.xlarge",
+    "c": "1.00",
+    "q": "1.0"
+   }
+  ]
+ }
+]

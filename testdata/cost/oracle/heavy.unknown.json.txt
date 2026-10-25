@@ -1,0 +1,102 @@
+{
+  "days": [
+    {
+      "date": "2026-09-01",
+      "hours": 1.0,
+      "compute": 1.0,
+      "s3": 0.0,
+      "disk": 0.0,
+      "egress": 0.0,
+      "api": 0.0,
+      "other": 0.0,
+      "total": 1.0
+    },
+    {
+      "date": "2026-09-02",
+      "hours": 1.0,
+      "compute": 1.0,
+      "s3": 0.0,
+      "disk": 0.0,
+      "egress": 0.0,
+      "api": 0.0,
+      "other": 0.0,
+      "total": 1.0
+    },
+    {
+      "date": "2026-09-03",
+      "hours": 1.0,
+      "compute": 1.0,
+      "s3": 0.0,
+      "disk": 0.0,
+      "egress": 0.0,
+      "api": 0.0,
+      "other": 0.0,
+      "total": 1.0
+    },
+    {
+      "date": "2026-09-04",
+      "hours": 1.0,
+      "compute": 1.0,
+      "s3": 0.0,
+      "disk": 0.0,
+      "egress": 0.0,
+      "api": 0.0,
+      "other": 0.0,
+      "total": 1.0
+    },
+    {
+      "date": "2026-09-05",
+      "hours": 1.0,
+      "compute": 1.0,
+      "s3": 0.0,
+      "disk": 0.0,
+      "egress": 0.0,
+      "api": 0.0,
+      "other": 0.0,
+      "total": 1.0
+    },
+    {
+      "date": "2026-09-06",
+      "hours": 1.0,
+      "compute": 1.0,
+      "s3": 0.0,
+      "disk": 0.0,
+      "egress": 0.2,
+      "api": 0.0,
+      "other": 0.0,
+      "total": 1.2
+    }
+  ],
+  "usage": [
+    {
+      "type": "BoxUsage:g6.xlarge",
+      "qty": 6.0,
+      "usd": 6.0
+    },
+    {
+      "type": "DataTransfer-Out-Bytes",
+      "qty": 180.0,
+      "usd": 0.2
+    }
+  ],
+  "total_usd": 6.2,
+  "total_inr": null,
+  "days_elapsed": 6,
+  "days_in_month": 30,
+  "projected_usd": 30.0,
+  "projected_inr": null,
+  "hours": {
+    "on_demand": 6.0,
+    "spot": 0.0
+  },
+  "usd_per_hour": {
+    "on_demand": 1.0,
+    "spot": null
+  },
+  "egress": {
+    "gb_used": 180.0,
+    "gb_free": 100.0,
+    "gb_left": 0.0
+  },
+  "inr_per_usd": null
+}

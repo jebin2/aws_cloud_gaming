@@ -1,0 +1,13 @@
+  USAGE TYPE                            QTY      USD     INR
+  BoxUsage:g6.xlarge                  10.00    10.00     880
+  SpotUsage:g6.xlarge                  1.00     0.20      18
+  ---------------------------------------------------------
+  TOTAL                                        10.20     898
+
+   10.0 h on demand  $ 10.00 (INR   880)   $1.000/hr
+    1.0 h on spot    $  0.20 (INR    18)   $0.200/hr
+  those on-demand hours would have been $2.00 (INR 176) on spot - 80% less
+
+  egress (streaming) 0.0 GB of 100 GB free - 100 GB left
+    ~11.1 more hours of streaming at 20 Mbps before it costs anything
+    after that: $0.1093/GB, about $0.98 (INR 87) an hour

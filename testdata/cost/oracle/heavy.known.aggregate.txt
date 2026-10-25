@@ -1,0 +1,1 @@
+[{"u": "APS5-DataTransfer-Out-Bytes", "c": "0.2000000000", "q": "180.000000"}, {"u": "APS5-BoxUsage:g6.xlarge", "c": "6.0000000000", "q": "6.000000"}]

@@ -1,0 +1,9 @@
+  USAGE TYPE                            QTY      USD     INR
+  BoxUsage:g6.xlarge                   0.50     0.50      44
+  ---------------------------------------------------------
+  TOTAL                                         0.50      44
+
+    0.5 h on demand  $  0.50 (INR    44)   $1.000/hr
+
+  egress (streaming) 0.0 GB - the free allowance is not known
+    after that: $0.1093/GB, about $0.98 (INR 87) an hour

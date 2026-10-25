@@ -1,0 +1,8 @@
+  USAGE TYPE                            QTY      USD     INR
+  DataTransfer-Out-Bytes             110.00     0.90      79
+  TimedStorage-ByteHrs                13.00     0.30      26
+  ---------------------------------------------------------
+  TOTAL                                         1.21     107
+
+  egress (streaming) 110.0 GB - the free allowance is not known
+    after that: $0.1093/GB, about $0.98 (INR 87) an hour

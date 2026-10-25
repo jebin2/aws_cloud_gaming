@@ -1,0 +1,10 @@
+  USAGE TYPE                            QTY      USD     INR
+  BoxUsage:g6.xlarge                   6.00     6.00     528
+  DataTransfer-Out-Bytes             180.00     0.20      18
+  ---------------------------------------------------------
+  TOTAL                                         6.20     546
+
+    6.0 h on demand  $  6.00 (INR   528)   $1.000/hr
+
+  egress (streaming) 180.0 GB - the free allowance is not known
+    after that: $0.1093/GB, about $0.98 (INR 87) an hour

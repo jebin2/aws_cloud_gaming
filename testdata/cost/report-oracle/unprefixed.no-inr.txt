@@ -1,0 +1,9 @@
+  USAGE TYPE                            QTY      USD     INR
+  DataTransfer-Out-Bytes             110.00     0.90       ?
+  TimedStorage-ByteHrs                13.00     0.30       ?
+  ---------------------------------------------------------
+  TOTAL                                         1.21       ?
+
+  egress (streaming) 110.0 GB of 100 GB free - 0 GB left
+    FREE ALLOWANCE USED - streaming now costs about $0.98 (INR ?) an hour at 20 Mbps
+    lowering the Moonlight bitrate cuts this proportionally

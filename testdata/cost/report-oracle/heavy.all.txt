@@ -1,0 +1,11 @@
+  USAGE TYPE                            QTY      USD     INR
+  BoxUsage:g6.xlarge                   6.00     6.00     528
+  DataTransfer-Out-Bytes             180.00     0.20      18
+  ---------------------------------------------------------
+  TOTAL                                         6.20     546
+
+    6.0 h on demand  $  6.00 (INR   528)   $1.000/hr
+
+  egress (streaming) 180.0 GB of 100 GB free - 0 GB left
+    FREE ALLOWANCE USED - streaming now costs about $0.98 (INR 87) an hour at 20 Mbps
+    lowering the Moonlight bitrate cuts this proportionally
