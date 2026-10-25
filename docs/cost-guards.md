@@ -22,7 +22,11 @@ They are **armed in roughly the reverse order**: the budget and the cloud watchd
 anything launches, and the on-host watchdog during the build. A guard that only exists after
 the build cannot protect the build.
 
-Worst-case leak with all three armed is about 30 minutes of runtime.
+Worst-case leak with all three armed is about 30 minutes of runtime. A box left **stopped**
+(on demand) no longer runs but its disk bills; the cloud watchdog deletes it once it has been
+stopped for `GAME_ARCHIVE_EXPIRY_DAYS` (14 by default, "Keep saved games" in the app), with a
+phone warning a day before. Its games were saved to S3 when it stopped, and are kept that many
+days again. `0` keeps both forever.
 
 ## Layer 3: the cloud watchdog
 

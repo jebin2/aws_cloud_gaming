@@ -1428,8 +1428,10 @@ function paintLibraryPage() {
       pills.append(b);
     }
   }
-  $('lib-keep').textContent = !days ? 'Kept until you delete them.'
-    : `Deleted ${days} days after last played. Keep restarts the timer for one game.`;
+  // The same days decide a machine left stopped - its disk bills while it is.
+  $('lib-keep').textContent = !days ? 'Kept until you delete them. A stopped machine is kept too.'
+    : `Deleted ${days} days after last played. Keep restarts the timer for one game. `
+      + `A machine left stopped is deleted after ${days} days; its games stay here.`;
 
   $('lib-orphan-box').hidden = !d.orphan_bytes;
   if (d.orphan_bytes) {

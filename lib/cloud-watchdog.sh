@@ -144,7 +144,7 @@ JSON
  {"Sid":"MarkWhenFirstSeenGoingDown","Effect":"Allow","Action":"ec2:CreateTags",
   "Resource":"arn:aws:ec2:$REGION:$1:instance/*",
   "Condition":{"StringEquals":{"ec2:ResourceTag/Name":"$TS_HOST"},
-               "ForAllValues:StringEquals":{"aws:TagKeys":["cg-going-down-since","cg-slow-noted","cg-forced"]}}},
+               "ForAllValues:StringEquals":{"aws:TagKeys":["cg-going-down-since","cg-slow-noted","cg-forced","cg-stopped-since","cg-stopped-warned"]}}},
  {"Sid":"OwnLogs","Effect":"Allow","Action":["logs:CreateLogStream","logs:PutLogEvents"],
   "Resource":"arn:aws:logs:$REGION:$1:log-group:$CW_LOGS:*"}$extra
 ]}

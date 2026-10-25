@@ -889,4 +889,67 @@ contains "the other region's games are still expired" "$(field 2 "$r")" "delete-
 r=$(games_ 'cw = CW(gb=None); del s3.b[OLD_B]; del s3.b[NOW_B]')
 check "and with no other bucket of ours, nothing to expire" "$(field 1 "$r")" "absent"
 
+
+echo "40. an on-demand box left stopped is deleted after the days games are kept"
+# Stopped, it billed for its disk with no end, and kept the archive "in use" as
+# long. Same days as the archive; a day's warning; 0 keeps it.
+stopped_() {
+  PYTHONDONTWRITEBYTECODE=1 python3 - "$1" <<'PY' 2>&1
+import sys, io, contextlib
+from datetime import datetime, timedelta, timezone
+sys.path.insert(0, "lambda")
+import cloud_watchdog as w
+w.TS_HOST, w.EXPIRY_DAYS, w.NTFY_URL = "gamevps", 14, "u"
+calls = []
+w.send = lambda url, title, message, priority, tags: calls.append("notify:" + title)
+NOW = datetime(2026, 10, 25, 12, 2, 0, tzinfo=timezone.utc)
+def days(n): return NOW - timedelta(days=n)
+def gmt(t): return "User initiated (%s GMT)" % t.strftime("%Y-%m-%d %H:%M:%S")
+class EC2:
+    def __init__(s, instances): s.instances = instances
+    def describe_instances(s, Filters): return {"Reservations": [{"Instances": s.instances}]}
+    def terminate_instances(s, **kw): calls.append("terminate:" + kw["InstanceIds"][0]); return {}
+    def stop_instances(s, **kw): calls.append("stop:" + kw["InstanceIds"][0]); return {}
+    def create_tags(s, Resources, Tags): calls.append("tag:%s=%s" % (Tags[0]["Key"], Tags[0]["Value"]))
+def box(stopped=None, spot=False, launched=30, tags=None, state="stopped"):
+    d = {"InstanceId": "i-s", "State": {"Name": state}, "LaunchTime": days(launched),
+         "StateTransitionReason": gmt(stopped) if stopped else "", "Tags": tags or []}
+    if spot: d["InstanceLifecycle"] = "spot"
+    return d
+dry = False; ec2 = None
+exec(sys.argv[1])
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    res = w.expire_stopped(ec2, NOW, dry)
+print("%s | %s | %s" % (",".join(r["action"] for r in res or []) or "-", ",".join(calls) or "-",
+                         buf.getvalue().replace("\n", " / ").strip()))
+PY
+}
+r=$(stopped_ 'ec2 = EC2([box(stopped=days(3))])')
+check    "stopped 3 days of 14: kept, nothing done" "$(field 1 "$r") | $(field 2 "$r")" "kept | -"
+contains "  and when it goes is said"   "$r" "deleted in 11d unless it is started"
+r=$(stopped_ 'ec2 = EC2([box(stopped=days(13.5))])')
+check    "inside the last day: warned"  "$(field 2 "$r")" "notify:gamevps: stopped box deleted tomorrow,tag:cg-stopped-warned=2026-10-12T00:02:00Z"
+r=$(stopped_ 'ec2 = EC2([box(stopped=days(13.5), tags=[{"Key": "cg-stopped-warned", "Value": "2026-10-12T00:02:00Z"}])])')
+check    "  once"                       "$(field 2 "$r")" "-"
+r=$(stopped_ 'ec2 = EC2([box(stopped=days(15))])')
+check    "past the 14 days: deleted"    "$(field 1 "$r") | $(field 2 "$r")" "terminate | terminate:i-s,notify:gamevps: stopped box deleted"
+contains "  saying its games stay in S3" "$r" "its games stay in S3 for 14 days"
+r=$(stopped_ 'ec2 = EC2([box(stopped=days(15), spot=True)])')
+check    "a spot box is not this check's" "$(field 1 "$r") | $(field 2 "$r")" "- | -"
+r=$(stopped_ 'ec2 = EC2([box()])')
+check    "no AWS timestamp: counted from now, recorded" "$(field 1 "$r") | $(field 2 "$r")" "kept | tag:cg-stopped-since=2026-10-25T12:02:00Z"
+r=$(stopped_ 'ec2 = EC2([box(tags=[{"Key": "cg-stopped-since", "Value": "2026-10-01T00:00:00Z"}], launched=40)])')
+check    "  and deleted once that is past" "$(field 1 "$r")" "terminate"
+r=$(stopped_ 'ec2 = EC2([box(tags=[{"Key": "cg-stopped-since", "Value": "2026-09-01T00:00:00Z"}], launched=2)])')
+check    "  a record from an earlier stop does not count" "$(field 1 "$r") | $(field 2 "$r")" "kept | tag:cg-stopped-since=2026-10-25T12:02:00Z"
+r=$(stopped_ 'dry = True; ec2 = EC2([box(stopped=days(15))])')
+check    "a dry run deletes nothing"    "$(field 1 "$r") | $(field 2 "$r")" "would-terminate | -"
+r=$(stopped_ 'w.EXPIRY_DAYS = 0; ec2 = EC2([box(stopped=days(400))])')
+check    "kept forever (0 days): nothing" "$(field 1 "$r") | $(field 2 "$r")" "- | -"
+r=$(stopped_ 'ec2 = EC2([box(stopped=days(15))]); NOW = NOW.replace(minute=30)')
+check    "hourly, as the archive check: not at half past" "$(field 1 "$r") | $(field 2 "$r")" "- | -"
+contains "it runs with the other checks" "$(cat lambda/cloud_watchdog.py)" 'result["stopped"] = expire_stopped(ec2, now, dry)'
+contains "the watchdog may tag a stopped box" "$(cat lib/cloud-watchdog.sh)" '"cg-stopped-since","cg-stopped-warned"'
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

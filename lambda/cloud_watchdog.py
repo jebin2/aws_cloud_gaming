@@ -21,6 +21,13 @@ still stuck going down an hour later is forced, whichever guard started it.
 Every decision is printed with the numbers behind it, prefixed "cg-watchdog:",
 which is what `cg watchdog logs` filters on.
 
+It also deletes an ON-DEMAND BOX LEFT STOPPED for EXPIRY_DAYS - the days games
+are kept for. Stopped, it bills for its disk with no end, and kept the archive
+alive as "in use" for as long. Its games went to S3 when it stopped; deleted, the
+archive's own countdown begins, so they are kept that long again. A day before,
+it warns. When the stop is not timestamped by AWS, it counts from when it first
+saw the box stopped - never from a guess.
+
 It also expires the GAME ARCHIVE. Once no box has existed for EXPIRY_DAYS, the
 S3 bucket - the only thing that bills while no box exists - is emptied and
 deleted. Deleting the only copy of every game is not something to get wrong, so
@@ -50,6 +57,10 @@ SINCE_TAG = "cg-going-down-since"
 SLOW_MINUTES = 30
 SLOW_TAG = "cg-slow-noted"
 FORCED_TAG = "cg-forced"
+# When a stopped box was first seen stopped, where AWS did not timestamp the stop,
+# and the stop a warning of its deletion was sent for - so it is sent once.
+STOPPED_SINCE_TAG = "cg-stopped-since"
+STOPPED_WARNED_TAG = "cg-stopped-warned"
 
 STATE_EVENT = "EC2 Instance State-change Notification"
 SPOT_EVENT = "EC2 Spot Instance Interruption Warning"
@@ -177,6 +188,11 @@ def run_all(ec2, cw, s3, ssm, trail, now, dry=False, s3_for=None):
         result = run(ec2, cw, now, dry)
     except Exception as exc:
         failure, result = exc, {"decisions": []}
+    try:
+        result["stopped"] = expire_stopped(ec2, now, dry)
+    except Exception as exc:
+        say("stopped box: check FAILED - nothing deleted: %s" % exc)
+        failure = failure or exc
     try:
         result["archive"] = expire_archive(ec2, s3, ssm, cw, trail, now, dry, s3_for)
     except Exception as exc:
@@ -431,6 +447,73 @@ def tag_time(inst):
             return None
         return t
     return None
+
+
+# --- a box left stopped ---------------------------------------------------------
+
+def stopped_since(ec2, inst, now, dry):
+    """When it stopped: AWS's timestamp on a stop through the API, else the time
+    this first saw it stopped, recorded on the box. A record older than its last
+    start is from an earlier stop, and does not count."""
+    t = transition_time(inst.get("StateTransitionReason"))
+    if t is not None:
+        return t
+    v = tag_value(inst, STOPPED_SINCE_TAG)
+    try:
+        t = datetime.strptime(v, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) if v else None
+    except ValueError:
+        t = None
+    launched = inst.get("LaunchTime")
+    if t is not None and (launched is None or t >= launched):
+        return t
+    if not dry:
+        ec2.create_tags(Resources=[inst["InstanceId"]], Tags=[{"Key": STOPPED_SINCE_TAG, "Value": iso(now)}])
+    return now
+
+
+def expire_stopped(ec2, now, dry=False):
+    """An on-demand box stopped for EXPIRY_DAYS is deleted. Hourly, as the archive
+    check is; 0 days keeps it, as it keeps the archive."""
+    if EXPIRY_DAYS <= 0:
+        return None
+    if not dry and now.minute >= 5:
+        return None
+    resp = ec2.describe_instances(Filters=[
+        {"Name": "tag:Name", "Values": [TS_HOST]},
+        {"Name": "instance-state-name", "Values": ["stopped"]}])
+    window, out = timedelta(days=EXPIRY_DAYS), []
+    for inst in [i for r in resp.get("Reservations", []) for i in r.get("Instances", [])]:
+        iid = inst["InstanceId"]
+        # A spot box is never left stopped - it is terminated - and a request's
+        # own instance is not this check's to end.
+        if inst.get("State", {}).get("Name") != "stopped" or inst.get("InstanceLifecycle") == "spot":
+            continue
+        since = stopped_since(ec2, inst, now, dry)
+        stopped_for = now - since
+        if stopped_for < window:
+            left = window - stopped_for
+            say("%s stopped %s ago - deleted in %s unless it is started" % (iid, span(stopped_for), span(left)))
+            if not dry and left <= timedelta(hours=24) and tag_value(inst, STOPPED_WARNED_TAG) != iso(since):
+                notify("stopped box deleted tomorrow",
+                       "%s has been stopped for %s; its disk still bills. It is deleted in %s unless it is "
+                       "started - its games are in S3, kept %d days more." % (iid, span(stopped_for), span(left), EXPIRY_DAYS),
+                       "high", "hourglass")
+                ec2.create_tags(Resources=[iid], Tags=[{"Key": STOPPED_WARNED_TAG, "Value": iso(since)}])
+            out.append({"instance": iid, "action": "kept", "left": span(left)})
+            continue
+        why = "stopped for %s, past the %d days games are kept" % (span(stopped_for), EXPIRY_DAYS)
+        if dry:
+            say("%s %s - WOULD DELETE it (dry run)" % (iid, why))
+            out.append({"instance": iid, "action": "would-terminate"})
+            continue
+        call(ec2, "terminate", iid)
+        say("%s %s - deleted; its disk no longer bills, and its games stay in S3 for %d days"
+            % (iid, why, EXPIRY_DAYS))
+        notify("stopped box deleted",
+               "%s was %s. Its disk no longer bills. Its games are in S3, kept %d days more - "
+               "the next build restores them." % (iid, why, EXPIRY_DAYS), "high", "wastebasket")
+        out.append({"instance": iid, "action": "terminate"})
+    return out
 
 
 # --- archive expiry ------------------------------------------------------------
