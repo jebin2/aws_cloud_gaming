@@ -54,7 +54,7 @@ func ParseArgs(args []string) (Options, error) {
 }
 
 // Run is `cg cost`. It returns the exit code.
-func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, out output.Out) int {
+func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, out *output.Out) int {
 	region := env.Region()
 	home, _ := os.UserHomeDir()
 	cfg, err := awscfg.New(ctx, region)
@@ -111,7 +111,7 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, 
 		fmt.Fprintf(out.Stdout, "%s\n", b)
 		return 0
 	}
-	fmt.Fprint(out.Stdout, in.Human(opts.Daily, ""))
+	out.Report("", in.Human(opts.Daily, ""))
 	return 0
 }
 

@@ -56,7 +56,7 @@ func ParseArgs(args []string) (Options, error) {
 
 // Run is `cg status`. It returns the exit code. Nothing in it stops at the
 // first failed read: a probe that fails is a fact.
-func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, out output.Out) int {
+func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, out *output.Out) int {
 	if opts.On != "" {
 		out.Die("status --on <machine> is not ported to Go yet (see: cg host status)")
 		return 1
@@ -112,8 +112,7 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, 
 		fmt.Fprintf(out.Stdout, "%s\n", b)
 		return 0
 	}
-	fmt.Fprint(out.Stdout, v.Human())
-	fmt.Fprint(out.Stdout, g.Tail(ctx, env.Get("GAME_INSTANCE_ID"), filepath.Join(cacheDir, "egress")))
+	out.Report("", v.Human()+g.Tail(ctx, env.Get("GAME_INSTANCE_ID"), filepath.Join(cacheDir, "egress")))
 	return 0
 }
 

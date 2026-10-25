@@ -63,9 +63,16 @@ func repoDir(get config.Lookup) string {
 	return ""
 }
 
-func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stderr io.Writer) int {
+func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stderr io.Writer) (rc int) {
 	cgJSON, _ := lookup("CG_JSON")
-	out := output.Out{Stdout: stdout, Stderr: stderr, JSON: cgJSON == "1"}
+	out := &output.Out{Stdout: stdout, Stderr: stderr, JSON: cgJSON == "1"}
+	// Every step ends - on success, on failure and on interrupt.
+	defer func() {
+		if ctx.Err() != nil {
+			rc = 130
+		}
+		out.End(rc)
+	}()
 	overrides := map[string]string{}
 	get := func(k string) (string, bool) {
 		if v, ok := overrides[k]; ok {
