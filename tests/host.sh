@@ -373,6 +373,9 @@ lacks    "the list carries no password"    "$(cgh list --json)" "sunshine_pass"
 contains "  but every machine"             "$(cgh list --json)" '"name": "mypc"'
 cgh open mypc >/dev/null
 contains "it streams from the machine's tailnet address" "$(cat "$T/stream.log")" "stream"
+# A display mode left in .env by the window mode that was removed is not passed on.
+GAME_DISPLAY_MODE=windowed cgh open mypc >/dev/null
+lacks    "no display mode is ever passed"   "$(tail -1 "$T/stream.log")" "--display-mode"
 contains "  at 100.64.0.9"                 "$(cat "$T/stream.log")" "100.64.0.9 Desktop"
 # Moonlight's debug log is its own file: thousands of decoder lines used to
 # arrive in cg's output and bury the one that said why a stream ended.

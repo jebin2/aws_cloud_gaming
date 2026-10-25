@@ -34,8 +34,6 @@ EMAIL_ALERTS|email|||Where budget alerts are sent. Comma separated for several.|
 GAME_RES|text|||Moonlight resolution, e.g. 1920x1080. Empty leaves Moonlight's own setting.|stream resolution|The stream
 GAME_FPS|number|60|24|Moonlight frame rate.|stream fps|The stream
 GAME_BITRATE_KBPS|number|20000|500|Moonlight bitrate. Lower it to cut streaming egress proportionally.|stream bitrate (kbps)|The stream
-GAME_DISPLAY_MODE|choice|fullscreen|fullscreen,windowed|Moonlight full screen, or in a window.|stream display|The stream
-GAME_WINDOW_SIZE|text|||In a window, its size, e.g. 1280x720. Moonlight sizes the window to the stream, so the stream runs at this size. Empty uses the stream resolution.|stream window size|The stream
 ROWS
 }
 
@@ -49,10 +47,6 @@ config_validate() {
   kind=$(config_field "$key" 2); rule=$(config_field "$key" 4)
   [[ -n $kind ]] || { echo "unknown setting '$key'"; return; }
   [[ $value == *$'\n'* ]] && { echo "a setting cannot contain a newline"; return; }
-  # A size Moonlight is handed as --resolution: WIDTHxHEIGHT, or nothing.
-  case $key in GAME_RES|GAME_WINDOW_SIZE)
-    [[ -z $value || $value =~ ^[1-9][0-9]{2,4}x[1-9][0-9]{2,4}$ ]] || { echo "must be a size like 1280x720"; return; } ;;
-  esac
   case $kind in
     number)
       [[ $value =~ ^[0-9]+$ ]] || { echo "must be a whole number"; return; }

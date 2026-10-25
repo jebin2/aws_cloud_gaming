@@ -1475,7 +1475,7 @@ B6H="window.__after = async () => {
   const starting = 'view=' + view + ' tab=' + machineTab + ' card=' + where() + ' steps=' + st()
     + ' kicker=' + txt('b-run-kicker') + ' now=' + txt('b-run-now') + ' count=' + txt('b-run-step');
   window.__emit(id, { t: 'step', text: 'streaming from homebox' });
-  window.__emit(id, { t: 'line', text: '    stream: --display-mode fullscreen' });
+  window.__emit(id, { t: 'line', text: '    stream: --fps 60' });
   await wait();
   const playing = 'title=' + txt('b-strip-title') + ' steps=' + st()
     + ' text=' + document.getElementById('b-steps').innerText.replace(/\\s+/g, ' ') + ' meta=' + txt('b-strip-meta');

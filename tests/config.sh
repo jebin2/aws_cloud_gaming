@@ -38,7 +38,7 @@ check    "valid JSON"                    "$(python3 -c 'import json,sys;print(ty
 # one added and one silently dropped.
 check    "and these are the settings" \
          "$(python3 -c 'import json,sys;print(" ".join(r["key"] for r in json.load(sys.stdin)))' <<<"$j")" \
-         "GAME_DISK_GB GAME_DISK_RESERVE_GB GAME_ARCHIVE_EXPIRY_DAYS GAME_INSTANCE_TYPE GAME_REGION GAME_SPOT GAME_STEAM_LOGIN GAME_BUDGET_INR GAME_WATCHDOG_IDLE_MIN GAME_WATCHDOG_STUCK_MIN GAME_NTFY_URL TAILSCALE_API_KEY EMAIL_ALERTS GAME_RES GAME_FPS GAME_BITRATE_KBPS GAME_DISPLAY_MODE GAME_WINDOW_SIZE"
+         "GAME_DISK_GB GAME_DISK_RESERVE_GB GAME_ARCHIVE_EXPIRY_DAYS GAME_INSTANCE_TYPE GAME_REGION GAME_SPOT GAME_STEAM_LOGIN GAME_BUDGET_INR GAME_WATCHDOG_IDLE_MIN GAME_WATCHDOG_STUCK_MIN GAME_NTFY_URL TAILSCALE_API_KEY EMAIL_ALERTS GAME_RES GAME_FPS GAME_BITRATE_KBPS"
 check    "a set value is reported"       "$(jq_ GAME_DISK_GB value <<<"$j")" '"80"'
 check    "  with its default"            "$(jq_ GAME_DISK_GB default <<<"$j")" '"50"'
 check    "  and its minimum"             "$(jq_ GAME_DISK_GB rule <<<"$j")" '"30"'
@@ -110,23 +110,6 @@ contains "  every row is there, to the last" "$out" "GAME_BITRATE_KBPS"
 contains "  an unset one with no default is a dash" "$out" "$(printf '%-28s %-12s' GAME_NTFY_URL '–')"
 check    "  secrets as set or not"       "$(grep -o 'TAILSCALE_API_KEY *[a-z ]*set ' <<<"$out" | awk '{print $2}')" "set"
 lacks    "  and never a secret's value"  "$out" "tskey-api-abc123"
-
-echo "5b. Moonlight full screen or in a window"
-check    "full screen unless said otherwise" "$(jq_ GAME_DISPLAY_MODE effective <<<"$j")" '"fullscreen"'
-check    "  or in a window"              "$(jq_ GAME_DISPLAY_MODE rule <<<"$j")" '"fullscreen,windowed"'
-out=$(cg_ config set GAME_WINDOW_SIZE big)
-contains "a window size is a size"       "$out" "must be a size like 1280x720"
-out=$(cg_ config set GAME_RES 1920)
-contains "  and so is the resolution"    "$out" "must be a size like 1280x720"
-cg_ config set GAME_WINDOW_SIZE 1280x720 >/dev/null
-contains "a real one is taken"           "$(envfile)" "GAME_WINDOW_SIZE=1280x720"
-flags() { ( cd "$T/repo" && env -i PATH="$PATH" "$@" bash -c 'source lib/common.sh; source lib/session.sh; a=(); moonlight_flags a; echo "${a[*]}"' ); }
-check    "Moonlight: full screen by default" "$(flags GAME_RES=1920x1080)" "--resolution 1920x1080 --display-mode fullscreen"
-check    "  in a window, sized as asked" "$(flags GAME_RES=1920x1080 GAME_DISPLAY_MODE=windowed GAME_WINDOW_SIZE=1280x720)" \
-         "--resolution 1280x720 --display-mode windowed"
-check    "  no size: the stream's"       "$(flags GAME_RES=1920x1080 GAME_DISPLAY_MODE=windowed)" "--resolution 1920x1080 --display-mode windowed"
-check    "  full screen ignores the window size" "$(flags GAME_RES=1920x1080 GAME_WINDOW_SIZE=1280x720)" \
-         "--resolution 1920x1080 --display-mode fullscreen"
 
 echo "6. wired in"
 check "cg dispatches config"             "$(grep -c '^  config)' cg)" "1"

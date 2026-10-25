@@ -610,7 +610,7 @@ contains "the registry carries the grouping" "$(./cg config --json)" '"group"'
 contains "  and the name to show"            "$(./cg config --json)" '"label"'
 # Settings shows only what nothing else sets: the stream, the disk and the two
 # accounts. Each other setting has one home on the page it is about.
-contains "Settings is the stream and the disk" "$js" "['GAME_DISPLAY_MODE', 'GAME_WINDOW_SIZE', 'GAME_RES', 'GAME_FPS', 'GAME_BITRATE_KBPS']"
+contains "Settings is the stream and the disk" "$js" "['GAME_RES', 'GAME_FPS', 'GAME_BITRATE_KBPS']"
 contains "  and the disk"                "$js" "['Machine disk', '', ['GAME_DISK_GB']]"
 lacks    "  not the guards' settings again" "$js" "'The guards': "
 lacks    "  nor the jargon line"          "$html" "Editing one here runs"
