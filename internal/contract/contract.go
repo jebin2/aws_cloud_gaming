@@ -22,6 +22,7 @@ type Command struct {
 // Registry is every command cg-go implements. A command that is not in it is
 // not reachable. The pilot has only cost; the rest is added as it is ported.
 var Registry = []Command{
+	{Path: []string{"machines"}, Aliases: [][]string{{"types"}}, Summary: "what GPU shapes a region rents, and what each costs", JSON: true},
 	{Path: []string{"deps"}, Aliases: [][]string{{"dependencies"}}, Summary: "the tools this computer needs, and what is missing", JSON: true},
 	{Path: []string{"creds"}, Aliases: [][]string{{"credentials"}}, Summary: "the AWS access key and the Tailscale token, and whether each works", JSON: true},
 	{Path: []string{"config"}, Summary: "what .env decides; set validates and writes, get reveals one", JSON: true},
