@@ -15,6 +15,8 @@ import (
 
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/configcmd"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/cost"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/creds"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/deps"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/remote"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/watchdog"
@@ -131,6 +133,10 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			fmt.Fprintf(stdout, "  cg %-10s %s\n", c.Path[0], c.Summary)
 		}
 		return 0
+	case "deps", "dependencies":
+		return deps.Main(ctx, args, jsonFlag, out)
+	case "creds", "credentials":
+		return creds.Run(ctx, config.Load(get, repoDir(get)), args, jsonFlag, out)
 	case "config":
 		return configcmd.Run(config.Load(get, repoDir(get)), args, jsonFlag, out)
 	case "ping":
