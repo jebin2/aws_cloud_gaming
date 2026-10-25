@@ -7,8 +7,10 @@ package testfixture
 import (
 	"context"
 	"errors"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -22,9 +24,13 @@ import (
 	cetypes "github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/eventbridge"
+	ebtypes "github.com/aws/aws-sdk-go-v2/service/eventbridge/types"
 	"github.com/aws/aws-sdk-go-v2/service/freetier"
 	fttypes "github.com/aws/aws-sdk-go-v2/service/freetier/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/lambda"
+	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
 	sqtypes "github.com/aws/aws-sdk-go-v2/service/servicequotas/types"
@@ -111,6 +117,25 @@ type Scenario struct {
 	Ingress               [][3]string // protocol, port, cidr
 	KeyName               string
 	Spent                 string
+
+	// For the watchdog.
+	WD WatchdogState
+
+	mu sync.Mutex // the watchdog reads concurrently
+}
+
+// WatchdogState is the deployed cloud watchdog.
+type WatchdogState struct {
+	Installed                  bool
+	CodeSHA, State, Update     string
+	Role, Description, Runtime string
+	RuleState, Schedule        string
+	Target                     string
+	StateRuleState             string
+	StateTarget                string
+	Permission                 string
+	PolicyJSON                 string
+	NoLogGroup                 bool
 }
 
 // LogEvent is a line in the watchdog's log.
@@ -127,6 +152,8 @@ func (e apiError) ErrorMessage() string          { return e.msg }
 func (e apiError) ErrorFault() smithy.ErrorFault { return smithy.FaultClient }
 
 func (s *Scenario) hit(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.Calls == nil {
 		s.Calls = map[string]int{}
 	}
@@ -461,9 +488,83 @@ func (l Logs) FilterLogEvents(_ context.Context, in *cloudwatchlogs.FilterLogEve
 	if err := l.S.hit("FilterLogEvents"); err != nil {
 		return nil, err
 	}
+	if l.S.WD.NoLogGroup {
+		return nil, apiError{"ResourceNotFoundException", "The specified log group does not exist"}
+	}
+	pattern := strings.Trim(aws.ToString(in.FilterPattern), `"`)
 	out := &cloudwatchlogs.FilterLogEventsOutput{}
 	for _, e := range l.S.LogEvents {
+		if !strings.Contains(e.Msg, pattern) || (in.StartTime != nil && e.At.UnixMilli() < *in.StartTime) {
+			continue
+		}
 		out.Events = append(out.Events, logtypes.FilteredLogEvent{Message: aws.String(e.Msg), Timestamp: aws.Int64(e.At.UnixMilli())})
 	}
 	return out, nil
+}
+
+// Lambda is the fake Lambda client.
+type Lambda struct{ S *Scenario }
+
+func (l Lambda) GetFunctionConfiguration(context.Context, *lambda.GetFunctionConfigurationInput, ...func(*lambda.Options)) (*lambda.GetFunctionConfigurationOutput, error) {
+	if err := l.S.hit("GetFunctionConfiguration"); err != nil {
+		return nil, err
+	}
+	w := l.S.WD
+	if !w.Installed {
+		return nil, apiError{"ResourceNotFoundException", "Function not found"}
+	}
+	return &lambda.GetFunctionConfigurationOutput{CodeSha256: aws.String(w.CodeSHA), State: lambdatypes.State(w.State),
+		LastUpdateStatus: lambdatypes.LastUpdateStatus(w.Update), Role: aws.String(w.Role), Description: aws.String(w.Description),
+		Runtime: lambdatypes.Runtime(w.Runtime)}, nil
+}
+
+func (l Lambda) GetPolicy(context.Context, *lambda.GetPolicyInput, ...func(*lambda.Options)) (*lambda.GetPolicyOutput, error) {
+	if err := l.S.hit("GetPolicy"); err != nil {
+		return nil, err
+	}
+	return &lambda.GetPolicyOutput{Policy: aws.String(l.S.WD.Permission)}, nil
+}
+
+// Events is the fake EventBridge client.
+type Events struct{ S *Scenario }
+
+func (e Events) DescribeRule(_ context.Context, in *eventbridge.DescribeRuleInput, _ ...func(*eventbridge.Options)) (*eventbridge.DescribeRuleOutput, error) {
+	if err := e.S.hit("DescribeRule"); err != nil {
+		return nil, err
+	}
+	w := e.S.WD
+	if strings.HasSuffix(aws.ToString(in.Name), "-state") {
+		if w.StateRuleState == "" {
+			return nil, apiError{"ResourceNotFoundException", "no rule"}
+		}
+		return &eventbridge.DescribeRuleOutput{State: ebtypes.RuleState(w.StateRuleState)}, nil
+	}
+	if w.RuleState == "" {
+		return nil, apiError{"ResourceNotFoundException", "no rule"}
+	}
+	return &eventbridge.DescribeRuleOutput{State: ebtypes.RuleState(w.RuleState), ScheduleExpression: aws.String(w.Schedule)}, nil
+}
+
+func (e Events) ListTargetsByRule(_ context.Context, in *eventbridge.ListTargetsByRuleInput, _ ...func(*eventbridge.Options)) (*eventbridge.ListTargetsByRuleOutput, error) {
+	if err := e.S.hit("ListTargetsByRule"); err != nil {
+		return nil, err
+	}
+	arn := e.S.WD.Target
+	if strings.HasSuffix(aws.ToString(in.Rule), "-state") {
+		arn = e.S.WD.StateTarget
+	}
+	if arn == "" {
+		return &eventbridge.ListTargetsByRuleOutput{}, nil
+	}
+	return &eventbridge.ListTargetsByRuleOutput{Targets: []ebtypes.Target{{Arn: aws.String(arn)}}}, nil
+}
+
+// RolePolicies is the fake IAM role-policy reader; IAM above has GetRole.
+type RolePolicies struct{ S *Scenario }
+
+func (r RolePolicies) GetRolePolicy(context.Context, *iam.GetRolePolicyInput, ...func(*iam.Options)) (*iam.GetRolePolicyOutput, error) {
+	if err := r.S.hit("GetRolePolicy"); err != nil {
+		return nil, err
+	}
+	return &iam.GetRolePolicyOutput{PolicyDocument: aws.String(url.QueryEscape(r.S.WD.PolicyJSON))}, nil
 }

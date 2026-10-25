@@ -24,6 +24,8 @@ github.com/aws/aws-sdk-go-v2/service/costexplorer v1.74.3 h1:n41F2z+KbBLPZhAN9H8
 github.com/aws/aws-sdk-go-v2/service/costexplorer v1.74.3/go.mod h1:kBJcNrSJh7iCpRJM6Up2l2IU/nFSi6+6cFpNzFXwVKk=
 github.com/aws/aws-sdk-go-v2/service/ec2 v1.341.0 h1:NvtY2nTE0PZeUeYlR/BB5xedUF3B6nhBJRbEyYhiy60=
 github.com/aws/aws-sdk-go-v2/service/ec2 v1.341.0/go.mod h1:5sMueYq4QuoMZ1Ruh/q75UF9OdVKf0OndZlT23Jqs5Y=
+github.com/aws/aws-sdk-go-v2/service/eventbridge v1.55.5 h1:fPjZfSNHPyGpCvb7O5AdutYMXrzzP5X496PRzhCXzp0=
+github.com/aws/aws-sdk-go-v2/service/eventbridge v1.55.5/go.mod h1:Wegdzx+3ajWtfQrAlrhi+Cs/PuAHAb0xC8V7gs9MceU=
 github.com/aws/aws-sdk-go-v2/service/freetier v1.25.3 h1:W6jezcBQyZz5xmz3EnFJ3nD19HSUuMNjqPu9CRHQAOs=
 github.com/aws/aws-sdk-go-v2/service/freetier v1.25.3/go.mod h1:RVpEPm9yTM8FaYBv8K5fwfR30Dbwm4WoyLJZHgGZs40=
 github.com/aws/aws-sdk-go-v2/service/iam v1.64.5 h1:14GZ+z05ntZkgfUT/snvrs+hE+SODOflfQPugMAzOlU=
@@ -36,6 +38,8 @@ github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.7 h1:6MSlRo7ai
 github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.7/go.mod h1:OqapjZfp6VW4YJKKO4l68UdPvS4FIEYuEoq1JNkxCL0=
 github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.7 h1:6lQFbSJxvtqn19hbh+2+g5pRV8U4Etrq5x6sL6mD35U=
 github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.7/go.mod h1:WAsCkzxO1H7/m1uYtLymru0aDH23BR7CWUA+8MpuUFY=
+github.com/aws/aws-sdk-go-v2/service/lambda v1.113.3 h1:oSHldse7GDHpdq81XeAJnhIbsdDKP9bMIt00G8W6uXI=
+github.com/aws/aws-sdk-go-v2/service/lambda v1.113.3/go.mod h1:Y//K046w4uhiR3o77beo/y52Jv2uEY13iJ+3+jicLO8=
 github.com/aws/aws-sdk-go-v2/service/pricing v1.51.0 h1:9LPnotQ9Puz+1aVQydhPgvX9aY3S8fDuBawqQlJGw1E=
 github.com/aws/aws-sdk-go-v2/service/pricing v1.51.0/go.mod h1:Xql1mNTfKm9lkTfpba8f64+DPSoQQliIwNxUmx9WD+4=
 github.com/aws/aws-sdk-go-v2/service/s3 v1.114.5 h1:97+lZymtcztX5RPNyW+B9pV6e60GQ7RBULVVRKhUTfk=
