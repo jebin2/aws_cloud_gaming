@@ -59,11 +59,14 @@ if [[ $* == *PubkeyAuthentication=no* ]]; then
   [[ -n ${NOSTICK:-} ]] && exit 3
   printf '%s\n' "$cmd" > "$T/install.cmd"; touch "$T/keyed"; exit 0
 fi
-case $cmd in "sh -s"|*mktemp*|*"sudo -S"*) ;;
+case $cmd in "sh -s"|*mktemp*|*"sudo -S"*|*sunshine-login*) ;;
   *) [[ $(readlink /proc/self/fd/0) == /dev/null ]] || echo "STDIN-OPEN $cmd" >> "$T/stdin.log" ;; esac
 case $cmd in
   exit) [[ -n ${KEYLESS:-} && ! -f $T/keyed ]] && exit 255; exit 0 ;;
-  "sh -s") cat > /dev/null; [[ -n ${WINDOWS:-} ]] && exit 127; cat "$T/facts" ;;
+  "sh -s") cat > /dev/null; [[ -n ${WINDOWS:-} ]] && exit 127; cat "$T/facts"
+           # The login every device shares, as the machine keeps it.
+           echo "sunlogin=$(base64 -w0 "$T/shared" 2>/dev/null)" ;;
+  *sunshine-login.new*) cat > "$T/shared" ;;
   ver) [[ -n ${WINDOWS:-} ]] && echo "Microsoft Windows [Version 10.0.22631]" || exit 127 ;;
   *mktemp*) n=$(( $(ls "$T"/script-* 2>/dev/null | wc -l) + 1 )); cat > "$T/script-$n"; echo "/tmp/script-$n" ;;
   *"sudo -S -p"*" -v"*) IFS= read -r pw; [[ $pw == hunter2 ]] ;;
@@ -360,6 +363,36 @@ facts <<<"$LINUX"; sed -i 's/^ts_ip=.*/ts_ip=100.64.0.9/' "$T/facts"
 printf 'admin %s' "$(field mypc sunshine_pass)" > "$T/box"   # the machine as setup left it
 j=$(cgh status mypc --json)
 check    "status is data"                  "$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["online"], d["sunshine"], d["login_ok"], d["paired"], d["set_up"])' <<<"$j")" "True True True True True"
+
+echo "6a. one Sunshine login for every device"
+# Each device kept its own copy, so a setup from one - a new login - left the
+# others holding a password Sunshine no longer took: "not verified" there.
+check    "setup keeps the login on the machine" "$(sed -n 2p "$T/shared")" "$(field mypc sunshine_pass)"
+lacks    "  never on a command line there"    "$(cat "$T/ssh.log")" "$(field mypc sunshine_pass)"
+# Another device set a new one: this device's copy no longer works.
+good=$(field mypc sunshine_pass)
+python3 -c 'import json,sys; f=sys.argv[1]; d=json.load(open(f)); d["mypc"]["sunshine_pass"]="stale"; json.dump(d,open(f,"w"))' "$XDG_CONFIG_HOME/cg/hosts.json"
+j=$(cgh status mypc --json)
+check    "a stale copy here: the machine's is read, and works" \
+         "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["login_ok"])' <<<"$j")" "True"
+check    "  and is kept here"                 "$(field mypc sunshine_pass)" "$good"
+# A device holding the working one, where the machine has none: it is put there.
+rm -f "$T/shared"
+cgh status mypc --json >/dev/null
+check    "a working copy is put on the machine for the others" "$(sed -n 2p "$T/shared")" "$good"
+# Neither works: not verified, and nothing invented.
+printf 'admin %s' "elsewhere" > "$T/box"
+j=$(cgh status mypc --json)
+check    "neither works: not verified"        "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["login_ok"])' <<<"$j")" "False"
+check    "  the copy here left as it was"     "$(field mypc sunshine_pass)" "$good"
+printf 'admin %s' "$good" > "$T/box"
+# Setup from a device with the stale copy: the machine's login is used, not
+# reset - a reset here is what broke every other device.
+python3 -c 'import json,sys; f=sys.argv[1]; d=json.load(open(f)); d["mypc"]["sunshine_pass"]="stale"; json.dump(d,open(f,"w"))' "$XDG_CONFIG_HOME/cg/hosts.json"
+out=$(cgh setup mypc 2>&1)
+contains "setup with a stale copy uses the machine's login" "$out" "already configured, and the saved login works"
+check    "  Sunshine's login left as it was"  "$(cut -d' ' -f2 "$T/box")" "$good"
+check    "  and kept here"                    "$(field mypc sunshine_pass)" "$good"
 check    "  named as it names itself"      "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["os_name"])' <<<"$j")" "CachyOS Linux"
 # One unanswered tailscale ping beside a Sunshine that answered at the tailnet
 # address: the real home server, whose card said "not connected" beside Play.

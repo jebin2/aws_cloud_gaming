@@ -173,6 +173,9 @@ echo "dm=$dm"
 echo "sinks=$(XDG_RUNTIME_DIR=/run/user/$(id -u) pactl list short sinks 2>/dev/null | wc -l)"
 echo "nvidia_card=$(lspci 2>/dev/null | grep -E " (VGA compatible|3D) controller: " | grep -ci nvidia)"
 echo "flatpak=$(command -v flatpak || true)"
+# The Sunshine login every device shares, base64 so it is one line whatever it
+# holds. Read with the rest, and never printed: facts are read a field at a time.
+echo "sunlogin=$(base64 -w0 ~/.config/cg/sunshine-login 2>/dev/null)"
 '
 
 # host_facts <target> - the facts, or nothing when the machine cannot be asked.
@@ -192,6 +195,26 @@ host_facts() {
   printf '%s\n' "$out"
 }
 _fact() { sed -n "s/^$2=//p" <<<"$1" | head -1; }
+
+# The Sunshine login is kept on the machine too, in cg's folder there, readable
+# by its user alone. Each device used to keep its own copy, so a setup from one
+# - which sets a new login - left every other device holding a password
+# Sunshine no longer took. Now a device whose copy fails reads the machine's,
+# and one whose copy works puts it there, so they all agree on one.
+# host_login_shared <facts> - "user<TAB>pass" as the machine keeps it, or nothing.
+host_login_shared() {
+  local b; b=$(_fact "$1" sunlogin)
+  [[ -n $b ]] || return 0
+  base64 -d <<<"$b" 2>/dev/null | head -2 | paste -sd $'\t' -
+}
+# host_login_share <target> <user> <pass> - keep it on the machine. Over stdin,
+# so the password is in no command line there.
+host_login_share() {
+  [[ -n ${2:-} && -n ${3:-} ]] || return 1
+  printf '%s\n%s\n' "$2" "$3" | host_ssh_raw --in "$1" \
+    'umask 077; mkdir -p ~/.config/cg && cat > ~/.config/cg/sunshine-login.new && mv -f ~/.config/cg/sunshine-login.new ~/.config/cg/sunshine-login' \
+    >/dev/null 2>&1
+}
 
 # The distribution family, which decides how Sunshine is installed - read from
 # os-release (ID, then ID_LIKE), so CachyOS or Manjaro count as Arch.
@@ -402,6 +425,13 @@ cmd_host_setup() {
   source lib/build.sh
   build_after_stream() {
     facts=$(host_facts "$t")
+    # The machine's login, when another device has put one there: the one to
+    # check first - a setup from here resets it only when that fails too.
+    local shared; shared=$(host_login_shared "$facts")
+    if [[ -n $shared ]]; then
+      SUNSHINE_USER=${shared%%$'\t'*} SUNSHINE_PASS=${shared#*$'\t'}
+      _host_save_login SUNSHINE_USER "$SUNSHINE_USER"; _host_save_login SUNSHINE_PASS "$SUNSHINE_PASS"
+    fi
     BUILD_IP=$(host_ts_ip "$(_fact "$facts" ts_ip)")
     [[ -n $BUILD_IP ]] || die "$name is on Tailscale, but not on the tailnet this laptop is on - sign it in to the same one"
     log "on the tailnet at $BUILD_IP"
@@ -416,6 +446,9 @@ cmd_host_setup() {
   BUILD_SSH="$t" BUILD_KEY="" BUILD_IP="" BUILD_SAVE=_host_save_login BUILD_NAME="$name" BUILD_TARGET=host
   [[ -f $(host_key) ]] && BUILD_KEY=$(host_key)
   build_finish || die "the build on $name did not finish - its log is /var/log/cloud-gaming-bootstrap.log there"
+  # The login it ended with, kept on the machine for every other device.
+  host_login_share "$t" "$(host_get "$name" sunshine_user)" "$(host_get "$name" sunshine_pass)" \
+    || log "note: could not keep the Sunshine login on $name - other devices may need to run setup"
 
   # What cg does not change, said rather than fixed.
   [[ -n $(_fact "$facts" session) ]] || log "note: no desktop is signed in on $name right now - Sunshine streams a signed-in desktop"
@@ -442,7 +475,18 @@ cmd_host_status() {
     # Once a process: a status read stands alone, and nothing loaded it before.
     # shellcheck source=lib/sunshine-login.sh
     declare -F sun_login_ok >/dev/null || source lib/sunshine-login.sh
-    sun_login_ok "$ip" "$(host_get "$name" sunshine_user)" "$(host_get "$name" sunshine_pass)" && login=yes
+    local lu lp shared su sp
+    lu=$(host_get "$name" sunshine_user); lp=$(host_get "$name" sunshine_pass)
+    shared=$(host_login_shared "$facts"); su=${shared%%$'\t'*}; sp=${shared#*$'\t'}
+    if sun_login_ok "$ip" "$lu" "$lp"; then
+      login=yes
+      # This device holds the one that works: kept on the machine, so the others find it.
+      if [[ $ssh_ok == yes && ( $su != "$lu" || $sp != "$lp" ) ]]; then host_login_share "$t" "$lu" "$lp" || true; fi
+    elif [[ -n $shared ]] && sun_login_ok "$ip" "$su" "$sp"; then
+      # Another device's, which works: this one takes it.
+      login=yes
+      host_set "$name" sunshine_user "$su"; host_set "$name" sunshine_pass "$sp"
+    fi
     command -v moonlight >/dev/null && timeout 20 moonlight list "$ip" 2>/dev/null | grep -q . && paired=yes
   fi
   if cg_json || [[ ${2:-} == --json ]]; then
