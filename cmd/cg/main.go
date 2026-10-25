@@ -20,6 +20,7 @@ import (
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/machines"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/remote"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/sweep"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/watchdog"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/watcher"
 	"github.com/jebin2/aws_cloud_gaming/internal/config"
@@ -134,7 +135,19 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			fmt.Fprintf(stdout, "  cg %-10s %s\n", c.Path[0], c.Summary)
 		}
 		return 0
+	case "sweep", "regions-sweep":
+		return sweep.Run(ctx, config.Load(get, repoDir(get)), get, args, jsonFlag, out)
 	case "machines", "types":
+		// `cg machines [region] --sweep` is the sweep, whatever region was named.
+		for i, a := range args {
+			if a == "--sweep" || a == "sweep" {
+				rest := append(append([]string{}, args[:i]...), args[i+1:]...)
+				if len(rest) > 0 && machines.IsRegion(rest[0]) {
+					rest = rest[1:]
+				}
+				return sweep.Run(ctx, config.Load(get, repoDir(get)), get, rest, jsonFlag, out)
+			}
+		}
 		return machines.Run(ctx, config.Load(get, repoDir(get)), get, args, jsonFlag, out)
 	case "deps", "dependencies":
 		return deps.Main(ctx, args, jsonFlag, out)
