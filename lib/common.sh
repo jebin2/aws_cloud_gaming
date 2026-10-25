@@ -264,6 +264,70 @@ cg_owned_volumes() {
   ) | awk 'NF && $1 != "None" && !seen[$1]++'
 }
 
+# cg_storage_everywhere <dir> - cg's disks, images and loose snapshots in every
+# region the account has enabled, each asked at once: a region move left them
+# behind where nothing here looked. Into <dir>: volumes ("<id>\t<GB>\t<region>"),
+# images ("<id>\t<GB>\t<region>\t<snapshot,...>", GB over all its disks) and
+# snapshots ("<id>\t<GB>\t<region>", cg's tagged ones that back no cg image) -
+# and failed, the regions AWS would not answer for.
+cg_storage_everywhere() {
+  local d=$1 r k=${CG_TAG_KEY:-cg:host}
+  rm -rf "$d/per"; mkdir -p "$d/per"
+  for r in $(aws ec2 describe-regions --query 'Regions[].RegionName' --output text 2>/dev/null || echo "$REGION"); do
+    (
+      v=$(cg_owned_volumes "$r" 'Volumes[].[VolumeId,Size]' games) \
+        && i=$(cg_owned_images "$r" 'Images[].[ImageId,sum(BlockDeviceMappings[].Ebs.VolumeSize),join(`,`,BlockDeviceMappings[].Ebs.SnapshotId)]') \
+        && s=$(aws ec2 describe-snapshots --region "$r" --owner-ids self --filters "Name=tag:$k,Values=$TS_HOST" \
+                 --query 'Snapshots[].[SnapshotId,VolumeSize]' --output text) \
+        || { echo "$r" > "$d/per/$r.failed"; exit 0; }
+      awk -v r="$r" 'NF >= 2 && $1 != "None" {print $1 "\t" $2 "\t" r}' <<<"$v" > "$d/per/$r.volumes"
+      awk -v r="$r" 'NF >= 2 && $1 != "None" {print $1 "\t" $2 "\t" r "\t" $3}' <<<"$i" > "$d/per/$r.images"
+      # A snapshot that backs one of those images goes with it; the rest are loose.
+      awk -v r="$r" -v backing="$(cut -f3 <<<"$i" | tr ',\n' '  ')" '
+        BEGIN { n = split(backing, b, " "); for (j = 1; j <= n; j++) used[b[j]] = 1 }
+        NF >= 2 && $1 != "None" && !used[$1] {print $1 "\t" $2 "\t" r}' <<<"$s" > "$d/per/$r.snapshots"
+    ) &
+  done
+  wait
+  for k in volumes images snapshots failed; do cat "$d"/per/*."$k" 2>/dev/null > "$d/$k" || true; done
+  rm -rf "$d/per"
+}
+
+# cg_clean_everywhere - delete what cg_storage_everywhere finds: each image and
+# every snapshot behind it, each disk, each loose snapshot. A delete AWS refuses
+# is said, and the whole fails - never "done" over something still billing.
+cg_clean_everywhere() {
+  local d f=0 id gb r snaps s
+  d=$(mktemp -d)
+  cg_storage_everywhere "$d"
+  [[ ! -s $d/failed ]] || { log_as fail "AWS would not say what is in: $(paste -sd' ' "$d/failed")"; f=1; }
+  while IFS=$'\t' read -r id gb r snaps; do
+    [[ -n $id ]] || continue
+    say "deregistering the image $id in $r"
+    if aws ec2 deregister-image --region "$r" --image-id "$id" >/dev/null 2>&1; then
+      for s in ${snaps//,/ }; do
+        [[ -n $s && $s != None ]] || continue
+        aws ec2 delete-snapshot --region "$r" --snapshot-id "$s" >/dev/null 2>&1 \
+          || { log_as fail "could not delete the snapshot $s in $r"; f=1; }
+      done
+    else log_as fail "could not deregister $id in $r"; f=1; fi
+  done < "$d/images"
+  while IFS=$'\t' read -r id gb r; do
+    [[ -n $id ]] || continue
+    say "deleting the disk $id in $r ($gb GB)"
+    aws ec2 delete-volume --region "$r" --volume-id "$id" >/dev/null 2>&1 \
+      || { log_as fail "could not delete the disk $id in $r"; f=1; }
+  done < "$d/volumes"
+  while IFS=$'\t' read -r id gb r; do
+    [[ -n $id ]] || continue
+    say "deleting the snapshot $id in $r ($gb GB)"
+    aws ec2 delete-snapshot --region "$r" --snapshot-id "$id" >/dev/null 2>&1 \
+      || { log_as fail "could not delete the snapshot $id in $r"; f=1; }
+  done < "$d/snapshots"
+  rm -rf "$d"
+  return "$f"
+}
+
 say() {
   if cg_json; then
     _cg_section_end 0

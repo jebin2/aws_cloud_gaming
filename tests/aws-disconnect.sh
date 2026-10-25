@@ -34,6 +34,9 @@ seed() {
   # A watchdog in each region - one a region move left behind - and the role
   # they share, which is global.
   touch "$S/here" "$S/old" "$S/vol" "$S/img" "$S/cw-ap-south-2" "$S/cw-ap-south-1" "$S/cwrole" "$S/budget" "$S/login"
+  # What a region move left in the old region: a disk, an image with its
+  # snapshot, and a loose snapshot - all cg's, by its tag.
+  touch "$S/oldvol" "$S/oldimg" "$S/oldsnap"
   # cg's settings in SSM: a game's keep timer here, and one in the old region.
   printf 'ap-south-2 /cloud-gaming/gamevps/kept/%s/2\nap-south-1 /cloud-gaming/gamevps/kept/%s/1\nap-south-2 /cloud-gaming/gamevps/archive-last-seen\n' \
     "$HERE" "$OLD" > "$S/marks"
@@ -62,17 +65,35 @@ case $a in
     for i in $(sed -n 's/.*--instance-ids \(.*\)$/\1/p' <<<"$a" | sed 's/ --region.*//'); do
       awk -F'\t' -v i="$i" '$1 != i' "$S/machine" > "$S/m.n"; mv "$S/m.n" "$S/machine"; done
     [[ -s $S/machine ]] || rm -f "$S/machine" ;;
+  # Disks, images and snapshots, each in its region: vol-1/ami-1 where the
+  # settings say, vol-9/ami-9 (backed by snap-9) and loose snap-7 in the old one.
   *describe-volumes*)
-    if q 'status,Values=available'; then
-      [[ -f $S/vol ]] || exit 0
-      if q '[VolumeId,Size]'; then printf 'vol-1\t50\n'; else printf 'vol-1\tNone\n'; fi
-    elif q volume-ids; then echo available
+    r=$(sed -n 's/.*--region \([^ ]*\).*/\1/p' <<<"$a"); r=${r:-ap-south-2}
+    if q volume-ids; then echo available
+    elif q 'tag:cg:host'; then
+      [[ $r == ap-south-2 && -f $S/vol ]] && printf 'vol-1\t50\n'
+      [[ $r == ap-south-1 && -f $S/oldvol ]] && printf 'vol-9\t30\n'; :
+    elif q 'status,Values=available' && ! q 'tag:'; then
+      [[ $r == ap-south-2 && -f $S/vol ]] && echo vol-1; :
+    elif q 'status,Values=available'; then :
     else printf 'None\tNone\n'; fi ;;
-  *delete-volume*) rm -f "$S/vol" ;;
+  *delete-volume*) q vol-9 && rm -f "$S/oldvol"; q vol-1 && rm -f "$S/vol"; : ;;
   *describe-images*)
-    if q image-ids; then echo snap-1
-    elif [[ -f $S/img ]]; then if q '[ImageId'; then printf 'ami-1\t30\n'; else echo ami-1; fi; fi ;;
-  *deregister-image*) rm -f "$S/img" ;;
+    r=$(sed -n 's/.*--region \([^ ]*\).*/\1/p' <<<"$a"); r=${r:-ap-south-2}
+    if q image-ids; then q ami-9 && echo snap-9 || echo snap-1
+    elif q 'tag:cg:host'; then
+      if [[ $r == ap-south-2 && -f $S/img ]]; then q '[ImageId' && printf 'ami-1\t30\tsnap-1\n' || echo ami-1; fi
+      if [[ $r == ap-south-1 && -f $S/oldimg ]]; then q '[ImageId' && printf 'ami-9\t30\tsnap-9\n' || echo ami-9; fi; :
+    elif q 'tag:'; then :
+    else [[ $r == ap-south-2 && -f $S/img ]] && echo ami-1; : ; fi ;;
+  *deregister-image*) q ami-9 && rm -f "$S/oldimg"; q ami-1 && rm -f "$S/img"; : ;;
+  *describe-snapshots*)
+    r=$(sed -n 's/.*--region \([^ ]*\).*/\1/p' <<<"$a")
+    if [[ $r == ap-south-1 ]]; then
+      [[ -f $S/oldimg ]] && printf 'snap-9\t30\n'
+      [[ -f $S/oldsnap ]] && printf 'snap-7\t20\n'
+    fi; : ;;
+  *delete-snapshot*) q snap-7 && { [[ -n ${SNAP_STUCK:-} ]] && exit 1; rm -f "$S/oldsnap"; }; : ;;
   *"s3api head-bucket"*)
     q "$HERE" && [[ -f $S/here ]] && exit 0
     q "$OLD" && [[ -f $S/old ]] && exit 0
@@ -113,7 +134,8 @@ chmod +x "$T/bin/aws"
 cgr() { # cgr <args...> - cg in the sandbox, its output, then rc=N
   ( cd "$T/repo" && env -i PATH="$T/bin:$PATH" HOME="$T/home" CG_COLOR=never CG_INR_PER_USD=88 CG_SLEEP_PCT=1 \
       CG_PRICES_FILE="$OLDPWD/tests/prices.env" S="$S" HERE="$HERE" OLD="$OLD" \
-      AWS_DOWN="${AWS_DOWN:-}" OLD_STUCK="${OLD_STUCK:-}" BUDGET_STUCK="${BUDGET_STUCK:-}" CG_JSON="${CG_JSON_MODE:-}" bash ./cg "$@" 2>&1; echo "rc=$?" )
+      AWS_DOWN="${AWS_DOWN:-}" OLD_STUCK="${OLD_STUCK:-}" BUDGET_STUCK="${BUDGET_STUCK:-}" SNAP_STUCK="${SNAP_STUCK:-}" \
+      CG_JSON="${CG_JSON_MODE:-}" bash ./cg "$@" 2>&1; echo "rc=$?" )
 }
 env_reset() { printf 'GAME_REGION=ap-south-2\nGAME_INSTANCE_ID=i-1\nGAME_RES=1920x1080\n' > "$T/repo/.env"; }
 region() { grep -c '^GAME_REGION=' "$T/repo/.env"; }
@@ -124,14 +146,17 @@ env_reset; seed
 j=$(cgr aws inventory --json)
 kinds=$(sed '$d' <<<"$j" | python3 -c 'import json,sys; print(" ".join(i["kind"] for i in json.load(sys.stdin)["items"]))')
 contains "the watchdog in both regions"   "$j" '"detail": "function, schedule, role, logs in ap-south-1, ap-south-2"'
-check    "both machines, both regions' games, disks, images, watchdog, budget, settings" "$kinds" "machine machine games games disks images watchdog budget settings"
+check    "both machines, both regions' games, disks, images, snapshots, watchdog, budget, settings" "$kinds" "machine machine games games disks images snapshots watchdog budget settings"
+contains "disks in every region, the other named" "$j" '"detail": "2, 80 GB - in ap-south-1"'
+contains "  images too"                   "$j" '"detail": "2, with their snapshots - in ap-south-1"'
+contains "  and a loose snapshot, not the one behind an image" "$j" '"detail": "1, 20 GB - in ap-south-1"'
 contains "  the one in another region, named so" "$j" '"detail": "g4dn.xlarge, stopped in ap-south-1"'
 contains "  the machine as it is"         "$j" '"detail": "g6.xlarge, running"'
 contains "  the games here, counted, and the Steam login with them" "$j" '"detail": "1 game, 1.0 GB and the saved Steam login"'
 contains "  every region's settings in SSM" "$j" '"detail": "3 settings in SSM"'
 contains "  and those in another region"  "$j" '"detail": "1 game, 2.0 GB in ap-south-1"'
 contains "  a running machine bills by the hour" "$j" '"hourly": true'
-check    "  and it is only a look"        "$(there)" "budget cw-ap-south-1 cw-ap-south-2 cwrole here img login machine marks old vol"
+check    "  and it is only a look"        "$(there)" "budget cw-ap-south-1 cw-ap-south-2 cwrole here img login machine marks old oldimg oldsnap oldvol vol"
 contains "a laptop without AWS has nothing to show" "$(printf 'GAME_RES=x\n' > "$T/repo/.env"; CG_JSON_MODE= cgr aws inventory --json)" '"connected": false'
 
 echo "2. not confirmed: nothing deleted"
@@ -142,7 +167,7 @@ contains "  having said what goes"        "$out" "Saved games elsewhere"
 contains "  and what stays"               "$out" "region opt-ins and GPU quota stay"
 contains "anything else is a no"          "$out" "nothing was deleted"
 contains "  and fails"                    "$out" "rc=1"
-check    "  everything is still there"    "$(there)" "budget cw-ap-south-1 cw-ap-south-2 cwrole here img login machine marks old vol"
+check    "  everything is still there"    "$(there)" "budget cw-ap-south-1 cw-ap-south-2 cwrole here img login machine marks old oldimg oldsnap oldvol vol"
 check    "  and AWS still set up"         "$(region)" "1"
 
 echo "3. confirmed: nothing of cg's is left"
@@ -154,6 +179,9 @@ check    "  and nothing is: the login and every region's settings went too" "$(t
 contains "the other region's games went too" "$(cat "$T/deleted.log")" "$OLD"
 contains "  and the machine in the other region was ended" "$out" "ending the machine i-2 in ap-south-1"
 contains "  and its watchdog, and the role they shared" "$out" "removing the cloud watchdog in ap-south-1"
+contains "the old region's disk went"     "$out" "deleting the disk vol-9 in ap-south-1"
+contains "  its image, with its snapshot" "$out" "deregistering the image ami-9 in ap-south-1"
+contains "  and the loose snapshot"       "$out" "deleting the snapshot snap-7 in ap-south-1"
 check    "the region leaves .env"         "$(region)" "0"
 check    "  and nothing else does"        "$(grep -c '^GAME_RES=1920x1080' "$T/repo/.env")" "1"
 check    "the access key is kept"         "$(grep -c AKIDEXAMPLE "$T/home/.aws/credentials")" "1"
@@ -163,7 +191,7 @@ env_reset; seed
 out=$(printf 'DELETE\n' | AWS_DOWN=1 CG_JSON_MODE=1 cgr aws disconnect)
 contains "it says so"                     "$out" "AWS could not be asked what is there - nothing was deleted"
 contains "  with its own code"            "$out" "rc=3"
-check    "  and everything is still there" "$(there)" "budget cw-ap-south-1 cw-ap-south-2 cwrole here img login machine marks old vol"
+check    "  and everything is still there" "$(there)" "budget cw-ap-south-1 cw-ap-south-2 cwrole here img login machine marks old oldimg oldsnap oldvol vol"
 
 echo "5. something will not go: said, and AWS stays set up to see it"
 env_reset; seed
@@ -180,6 +208,15 @@ out=$(printf 'DELETE\n' | BUDGET_STUCK=1 CG_JSON_MODE=1 cgr aws disconnect)
 contains "it names it"                    "$out" "still there: Budget alert"
 contains "  and fails"                    "$out" "rc=1"
 check    "  AWS stays set up"             "$(region)" "1"
+
+echo "6b. a snapshot that will not go: said, never 'nothing is left'"
+env_reset; seed
+out=$(printf 'DELETE\n' | SNAP_STUCK=1 CG_JSON_MODE=1 cgr aws disconnect)
+contains "the refusal is said"            "$out" "could not delete the snapshot snap-7 in ap-south-1"
+contains "  and the final look finds it"  "$out" "still there: Disk snapshots - 1, 20 GB - in ap-south-1"
+contains "  and fails"                    "$out" "rc=1"
+check    "  AWS stays set up"             "$(region)" "1"
+check    "  but the rest went - the other region's machine and games too" "$(there)" "oldsnap"
 
 echo "7. cg cost, with AWS refusing: says so, rather than nothing at all"
 # Every read in the report is an assignment under set -e with its error thrown

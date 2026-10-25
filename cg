@@ -1424,7 +1424,7 @@ cmd_destroy() {
 # copy, with no versioning and no snapshot. So it asks for a typed word rather
 # than trusting a flag - a mis-typed flag is exactly what must not reach here.
 destroy_everything() {
-  local force="${1:-0}" vol size b n sz out a i
+  local force="${1:-0}" vol size b n sz out a i failed=0
   b="${GAME_S3_BUCKET:-}"
   read -r vol size < <(ec2 describe-volumes --filters "Name=tag:Name,Values=${TS_HOST}-games" \
     --query 'Volumes[0].[VolumeId,Size]' --output text 2>/dev/null)
@@ -1463,8 +1463,11 @@ destroy_everything() {
   fi
   (( role_x || cw_x )) || echo "  IAM             nothing - no role or watchdog exists"
   echo
-  echo "Nothing is left behind. cg init recreates all of it - the bucket name is"
-  echo "derived from your account, so it comes back identical."
+  echo "  leftovers       cg's disks, images and snapshots, in every region"
+  echo
+  echo "Saved games and machines in other regions are cg aws disconnect's. cg init"
+  echo "recreates all of this - the bucket name comes from your account, this host and"
+  echo "the region, so it comes back identical."
   echo
   if (( ! force )); then
     cg_ask_typed destroy-all "type DESTROY-ALL to confirm: " DESTROY-ALL \
@@ -1475,23 +1478,28 @@ destroy_everything() {
 
   if [[ -n $b ]]; then
     say "deleting the game archive and its bucket s3://$b"
-    # --force empties the bucket first; a bucket with anything in it cannot be
-    # removed, and that includes incomplete multipart uploads, which appear in
-    # no listing and are the usual reason a "delete the bucket" step fails.
+    # Incomplete multipart uploads appear in no listing, are not emptied by
+    # --force, and are the usual reason a bucket will not go: aborted first.
+    local key uid
+    while IFS=$'\t' read -r key uid; do
+      [[ -n ${uid:-} && $uid != None ]] || continue
+      aws s3api abort-multipart-upload --bucket "$b" --key "$key" --upload-id "$uid" >/dev/null 2>&1 || true
+    done < <(aws s3api list-multipart-uploads --bucket "$b" --query 'Uploads[].[Key,UploadId]' --output text 2>/dev/null)
     if aws s3 rb "s3://$b" --force >/dev/null 2>&1; then
       log "bucket deleted - storage charges stop now"
+      # Out of .env only once it is gone. Removed whatever happened, a bucket
+      # that would not delete kept billing with nothing here pointing at it:
+      # cg cost no longer showed it, and the next --all no longer tried.
+      local envf; envf=$(cg_env_file)
+      if [[ -f $envf ]]; then
+        local tmp; tmp=$(mktemp)
+        grep -vE '^GAME_S3_BUCKET=' "$envf" > "$tmp" 2>/dev/null || true
+        cat "$tmp" > "$envf"; rm -f "$tmp"; chmod 600 "$envf"
+      fi
     else
-      log "could not delete the bucket; check: aws s3 ls s3://$b --recursive --summarize"
-      log "  incomplete multipart uploads also block it:"
-      log "  aws s3api list-multipart-uploads --bucket $b"
-    fi
-    # .env must not keep pointing at a bucket that no longer exists, or the next
-    # status prints a name for something deleted.
-    local envf; envf=$(cg_env_file)
-    if [[ -f $envf ]]; then
-      local tmp; tmp=$(mktemp)
-      grep -vE '^GAME_S3_BUCKET=' "$envf" > "$tmp" 2>/dev/null || true
-      cat "$tmp" > "$envf"; rm -f "$tmp"; chmod 600 "$envf"
+      log_as fail "could not delete the bucket s3://$b - it still bills, and stays in .env so it is still seen"
+      log "  check: aws s3 ls s3://$b --recursive --summarize"
+      failed=1
     fi
   fi
 
@@ -1515,19 +1523,26 @@ destroy_everything() {
   say "removing the cloud watchdog $CW_NAME"
   cw_remove
 
-  [[ -n ${vol:-} && $vol != None ]] || return 0
-  # Terminating the instance detaches it, but AWS takes a moment to let go.
-  say "deleting the old game library volume $vol"
-  for i in $(seq 1 40); do
-    [[ $(ec2 describe-volumes --volume-ids "$vol" --query 'Volumes[0].State' \
-         --output text 2>/dev/null) == available ]] && break
-    cg_sleep 3
-  done
-  if ec2 delete-volume --volume-id "$vol" >/dev/null 2>&1; then
-    log "deleted $vol - storage charges stop now"
-  else
-    log "could not delete $vol; retry with: cg games --delete"
+  if [[ -n ${vol:-} && $vol != None ]]; then
+    # Terminating the instance detaches it, but AWS takes a moment to let go.
+    say "deleting the old game library volume $vol"
+    for i in $(seq 1 40); do
+      [[ $(ec2 describe-volumes --volume-ids "$vol" --query 'Volumes[0].State' \
+           --output text 2>/dev/null) == available ]] && break
+      cg_sleep 3
+    done
+    if ec2 delete-volume --volume-id "$vol" >/dev/null 2>&1; then
+      log "deleted $vol - storage charges stop now"
+    else
+      log_as fail "could not delete $vol; retry with: cg games --delete"; failed=1
+    fi
   fi
+
+  # cg's disks, images and snapshots wherever they are: a region move left
+  # them behind, and only this region was ever looked at.
+  say "looking for cg's disks, images and snapshots in every region"
+  cg_clean_everywhere || failed=1
+  return "$failed"
 }
 
 # Layer 3: the cloud watchdog. The pieces are in lib/cloud-watchdog.sh.
@@ -2018,12 +2033,15 @@ aws_inventory_json() {
     aws s3 ls "s3://$b/steam/account/" 2>/dev/null | grep . >/dev/null && echo yes > "$work/here.login"
   fi
   library_elsewhere_json > "$work/elsewhere" 2>/dev/null || true
-  # Disks and disk images left over, which bill by the GB with nothing attached -
-  # cg's only, by the names it gives them, as destroy deletes them: another
-  # project's disk or image in the region is neither listed nor touched.
-  cg_owned_volumes "$REGION" 'Volumes[].[VolumeId,Size]' games > "$work/volumes" 2>/dev/null || echo ERR > "$work/volumes"
-  cg_owned_images "$REGION" 'Images[].[ImageId,BlockDeviceMappings[0].Ebs.VolumeSize]' \
-      > "$work/images" 2>/dev/null || echo ERR > "$work/images"
+  # Disks, disk images and snapshots left over, which bill by the GB with nothing
+  # attached - cg's only (its tag, or the names it used before it), and in every
+  # region: a region move left them where only the current one was looked at.
+  cg_storage_everywhere "$work/st" 2>/dev/null
+  if [[ -s $work/st/failed ]]; then
+    echo ERR > "$work/volumes"
+  else
+    cp "$work/st/volumes" "$work/volumes"; cp "$work/st/images" "$work/images"; cp "$work/st/snapshots" "$work/snaps"
+  fi
   # Its settings in SSM - the watchdog's marks and each game's keep timer -
   # free, but cg's: in this region and every region that has saved games.
   local r regions
@@ -2083,15 +2101,24 @@ else:
                       "games": n, "detail": "%d game%s, %.1f GB in %s%s" % (n, "" if n == 1 else "s", (p["bytes"] or 0) / GB, p["region"],
                                                                       " and a saved Steam login" if p.get("login") else ""),
                       "usd_month": p.get("usd_month"), "bills": True})
+# Where they are, said when it is not here.
+def where(rs):
+    rs = sorted({r[2] for r in rs if len(r) > 2 and r[2] != os.environ["REGION"]})
+    return " - in " + ", ".join(rs) if rs else ""
 vols = rows("volumes")
 if vols:
     gb = sum(num(v[1]) or 0 for v in vols if len(v) > 1)
-    items.append({"kind": "disks", "label": "Leftover disks", "detail": "%d, %d GB" % (len(vols), gb),
+    items.append({"kind": "disks", "label": "Leftover disks", "detail": "%d, %d GB%s" % (len(vols), gb, where(vols)),
                   "usd_month": month(gb, EBS), "bills": True})
 imgs = rows("images")
 if imgs:
     gb = sum(num(i[1]) or 0 for i in imgs if len(i) > 1)
-    items.append({"kind": "images", "label": "Disk images", "detail": "%d, with their snapshots" % len(imgs),
+    items.append({"kind": "images", "label": "Disk images", "detail": "%d, with their snapshots%s" % (len(imgs), where(imgs)),
+                  "usd_month": month(gb, SNAP), "bills": True})
+snaps = rows("snaps")
+if snaps:
+    gb = sum(num(x[1]) or 0 for x in snaps if len(x) > 1)
+    items.append({"kind": "snapshots", "label": "Disk snapshots", "detail": "%d, %d GB%s" % (len(snaps), gb, where(snaps)),
                   "usd_month": month(gb, SNAP), "bills": True})
 wd = sorted(set(read("watchdogs").split()))
 if read("watchdog").strip() or wd:
@@ -2146,8 +2173,11 @@ for i in json.loads(os.environ["INV"])["items"]: print("  %-22s %s" % (i["label"
     || { log "not confirmed - nothing was deleted"; return 1; }
 
   # The machine, this region's archive, IAM, the watchdog, the budget, leftovers.
+  # Carried on past a failure here: one snapshot AWS would not delete must not
+  # leave another region's machine or saved games billing. The look at the end
+  # says what is still there, and fails if anything is.
   GAME_S3_BUCKET=$(cg_bucket 2>/dev/null || true) cmd_destroy --all --force \
-    || die "the delete stopped - see above; what is left is still listed by cg aws disconnect --plan"
+    || log_as fail "not everything here could be deleted - carrying on; the check at the end says what is left"
   # The watchdog in any other region: each removed as this one was, and the
   # last of them, finding none left that uses the shared role, takes it too.
   while read -r r; do
@@ -2175,6 +2205,11 @@ for i in json.load(sys.stdin)["items"]:
   done < <(REGION="$REGION" python3 -I -c 'import json,os,sys
 for i in json.load(sys.stdin)["items"]:
     if i["kind"] == "machine" and i.get("region") and i["region"] != os.environ["REGION"]: print(i["id"] + "\t" + i["region"])' <<<"$inv")
+
+  # cg's disks, images and snapshots in every region - this one's went with
+  # destroy above; a region move left others behind. Their machines are gone
+  # by now, and a disk goes with its machine.
+  cg_clean_everywhere || log_as fail "some of cg's disks, images or snapshots could not be deleted"
 
   # Every other region's saved games.
   while IFS=$'\t' read -r b r; do

@@ -50,7 +50,9 @@ cat > "$T/bin/aws" <<'FAKE'
 args="$*"
 echo "aws $args" >> "$LOG"
 case "$args" in
-  *"s3 rb"*)            echo "remove_bucket: s3://bucket-test" ;;
+  *"s3 rb"*)            [[ ${RB_FAILS:-0} == 1 ]] && exit 1; echo "remove_bucket: s3://bucket-test" ;;
+  # One upload left unfinished: it blocks the bucket's removal and is listed nowhere else.
+  *list-multipart-uploads*) printf 'steam/steamapps/common/x.pak\tUPLOAD-1\n' ;;
   *"s3 rm"*)            echo "delete: s3://bucket-test/steam/x" ;;
   *"s3 ls"*)            printf 'Total Objects: 13271\n   Total Size: 3106357075\n' ;;
   *describe-instances*) echo "${BOX_STATE:-stopped}" ;;
@@ -102,7 +104,7 @@ run() { # run <stdin> <args...>
   # destroy ask to close it first, and that question would eat the typed word.
   mkdir -p "$T/run"
   printf '%s\n' "$input" | ( cd "$T" && HOME="$T/home" XDG_RUNTIME_DIR="$T/run" LOG="$T/log" PATH="$T/bin:$PATH" \
-    BOX_STATE="${BOX_STATE:-stopped}" \
+    BOX_STATE="${BOX_STATE:-stopped}" RB_FAILS="${RB_FAILS:-0}" \
     ROLE_EXISTS="${ROLE_EXISTS:-1}" IAM_FAILS="${IAM_FAILS:-0}" CW_EXISTS="${CW_EXISTS:-0}" \
     bash ./cg destroy "$@" 2>&1 )
 }
@@ -146,6 +148,17 @@ check "no IAM user looked up" "$(did 'iam get-user')" "no"
 # The reassurance that games are safe must NOT be printed on the path that
 # deletes them.
 check "setup told games go too" "$(did 'CG_DESTROY_ALL=1')" "no"
+
+echo "3b. a bucket that will not delete stays in .env, and --all fails"
+# Removed from .env whatever happened, a bucket that would not go kept billing
+# with nothing here pointing at it - cg cost no longer showed it.
+seed_env
+out=$(RB_FAILS=1 run "DESTROY-ALL" --all; echo "rc=$?")
+check "unfinished uploads are aborted first" "$(did 'abort-multipart-upload --bucket bucket-test --key steam/steamapps/common/x.pak --upload-id UPLOAD-1')" "yes"
+check "the bucket stays in .env"   "$(grep -c '^GAME_S3_BUCKET=bucket-test' "$T/.env")" "1"
+check "  it says so"               "$(grep -c 'could not delete the bucket s3://bucket-test - it still bills' <<<"$out")" "1"
+check "  and fails"                "$(grep -c '^rc=1$' <<<"$out")" "1"
+seed_env
 
 echo "4. --all --force skips the prompt (for scripts), and still removes everything"
 seed_env

@@ -2,7 +2,9 @@
 
 `cg destroy` is the everyday end of a session; `cg destroy --all` is for leaving AWS entirely.
 
-`cg destroy` removes the **box**. `cg destroy --all` removes the **account footprint**.
+`cg destroy` removes the **box**. `cg destroy --all` removes everything cg made in this
+region, plus cg's leftover disks, images and snapshots in **every** region.
+`cg aws disconnect` goes further: machines and saved games in other regions too.
 
 | | `cg destroy` | `--all` |
 |---|---|---|
@@ -13,14 +15,15 @@
 | Per-box `.env` lines (instance id, node, Sunshine login) | cleared | cleared |
 | The box's leftover volumes (tagged with its name) | gone | gone |
 | Images made by `cg snapshot` (tagged `<host>-image`), and their snapshots | gone | gone |
+| cg's disks, images and loose snapshots in **other** regions | kept | gone |
 | **Monthly budget** | **kept** | gone |
 | **S3 archive and its bucket** | **kept** | gone |
 | **`<host>-box` role + instance profile** | **kept** | gone |
 | **Cloud watchdog: function, schedule, role, logs** | **kept** | gone |
 | Old EBS game volume, if you still have one | **kept** | gone |
 
-**Only cg's own.** Images and volumes are deleted only when they carry the names cg gives
-them. Anything else in the region - another project's image or disk - is listed as left
+**Only cg's own.** Images, volumes and snapshots are deleted only when they carry cg's tag
+(`cg:host=<host>`), or the exact name cg gave them before that tag existed. Anything else in the region - another project's image or disk - is listed as left
 alone and never touched.
 
 **A plain destroy removes only what bills.** The security group, the key pair and the
