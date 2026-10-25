@@ -101,3 +101,36 @@ func TestIntFloorsAndDefaults(t *testing.T) {
 		t.Errorf("registry default: %q", e.Setting("GAME_DISK_GB"))
 	}
 }
+
+func TestSetKeepsOtherLinesAndTheMode(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "sub", ".env")
+	e := Load(lookup(map[string]string{"CG_ENV_FILE": f}), "")
+	if err := e.Set("A", "1"); err != nil {
+		t.Fatal(err)
+	}
+	_ = e.Set("B", "two words")
+	_ = e.Set("A", "3")
+	b, _ := os.ReadFile(f)
+	if string(b) != "B=two words\nA=3\n" {
+		t.Errorf("file %q", b)
+	}
+	if st, _ := os.Stat(f); st.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v: the file holds keys", st.Mode().Perm())
+	}
+	if e.Get("A") != "3" || !e.Has("B") {
+		t.Error("the view must follow the file")
+	}
+	_ = e.Unset("B")
+	b, _ = os.ReadFile(f)
+	if string(b) != "A=3\n" || e.Has("B") {
+		t.Errorf("unset: %q", b)
+	}
+	// An empty value is a choice, remembered as mentioned.
+	_ = e.Set("C", "")
+	if !e.Has("C") || e.Get("C") != "" {
+		t.Error("empty is mentioned")
+	}
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(f), ".env-*")); len(left) != 0 {
+		t.Errorf("temp files left: %v", left)
+	}
+}
