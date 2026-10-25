@@ -36,6 +36,8 @@ type Laptop struct {
 	Runner local.Runner
 	Getenv func(string) string
 	TTY    func() bool // is standard input a terminal
+	// LookPath resolves a program to an absolute path; nil uses exec.LookPath.
+	LookPath func(string) (string, error)
 }
 
 // New is the real one.

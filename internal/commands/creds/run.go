@@ -9,11 +9,13 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
+	"github.com/jebin2/aws_cloud_gaming/internal/ask"
 	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
 	"github.com/jebin2/aws_cloud_gaming/internal/config"
 	"github.com/jebin2/aws_cloud_gaming/internal/laptop"
 	"github.com/jebin2/aws_cloud_gaming/internal/local"
 	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
 )
 
 // Run is `cg creds [status|--json]` and `cg creds tailscale [status|--json]`.
@@ -48,9 +50,12 @@ func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out
 		case "--json":
 			jsonFlag = true
 		case "status", "":
-		case "set", "signin", "up", "authkey":
-			out.Die("creds tailscale " + tsub + " is not ported to Go yet")
-			return 1
+		case "set":
+			return setter(env, out).SetToken(ctx)
+		case "authkey":
+			return setter(env, out).SetAuthKey(ctx)
+		case "signin", "up":
+			return signin(ctx, l, out)
 		default:
 			out.Die("usage: setup creds tailscale [status|signin|set|authkey|--json]")
 			return 1
@@ -61,11 +66,43 @@ func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out
 		}
 		return rc(ShowTS(t, out))
 	case "set":
-		out.Die("creds set is not ported to Go yet")
+		which := "aws"
+		if len(args) > 0 {
+			which = args[0]
+		}
+		switch which {
+		case "aws", "":
+			return setter(env, out).SetAWS(ctx, env.Region())
+		case "tailscale", "ts":
+			return setter(env, out).SetToken(ctx)
+		}
+		out.Die("usage: setup creds set [aws|tailscale]")
 		return 1
 	}
 	out.Die("usage: setup creds [status|set [aws|tailscale]|tailscale ...|--json]")
 	return 1
+}
+
+func setter(env *config.Env, out *output.Out) Setter {
+	home, _ := os.UserHomeDir()
+	return Setter{Out: out, Ask: ask.New(out, os.Getenv("CG_YES") == "1"), Env: env, Verify: VerifyKey, Home: home, Getenv: os.Getenv,
+		TS: func(token string) tskey.Client { return tskey.Client{Token: token} }}
+}
+
+// signin is `cg creds tailscale signin`.
+func signin(ctx context.Context, l laptop.Laptop, out *output.Out) int {
+	if l.Runner.Has("tailscale") && !l.TailscaleDown(ctx) {
+		out.LogAs("ok", "already signed in")
+		return 0
+	}
+	out.Say("tailscale sign-in")
+	return rc(l.TailscaleUp(ctx, func(kind, text string) {
+		if kind == "log" {
+			out.Log(text)
+		} else {
+			out.LogAs(kind, text)
+		}
+	}))
 }
 
 func rc(ok bool) int {
