@@ -854,13 +854,15 @@ for l in os.environ["VR"].splitlines():
 print("%.4f" % t)' 2>/dev/null || echo 0)
   awk -v h="${hours:-0}" -v r="$rate" -v g="${disk_gb:-0}" -v gm="${gbm:-0}" -v sg="${snap_gb:-0}" -v day="$(date -u +%d)" -v kind="$kind" \
       -v mdays="$(date -u -d "$(date -u +%Y-%m-01) +1 month -1 day" +%d)" \
-      -v ebs="${CG_EBS_USD_GB_MONTH:-}" -v snap="${CG_SNAPSHOT_USD_GB_MONTH:-}" -v inr="${CG_INR_PER_USD:-}" '
+      -v ebs="${CG_EBS_USD_GB_MONTH:-}" -v snap="${CG_SNAPSHOT_USD_GB_MONTH:-}" -v inr="${CG_INR_PER_USD:-}" \
+      -v ip="${CG_IPV4_USD_HOUR:-}" '
   function usd(v, ok) { return ok ? sprintf("$%6.2f", v) : "      ?" }
   function rup(v, ok) { return (ok && inr != "") ? sprintf("INR %5.0f", v*inr) : "INR     ?" }
   BEGIN{
-    c=h*r; s=gm*ebs; n=sg*snap*(day/mdays);
-    okc = r != ""; oks = ebs != "" || g == 0; okn = snap != "" || sg == 0;
-    printf "  compute   %6.1f hrs  %s  (%s)  THIS instance only, %s\n", h, usd(c, okc), rup(c, okc), kind;
+    # The box has a public IPv4 address, billed by the hour beside it.
+    c=h*(r+ip); s=gm*ebs; n=sg*snap*(day/mdays);
+    okc = r != "" && ip != ""; oks = ebs != "" || g == 0; okn = snap != "" || sg == 0;
+    printf "  compute   %6.1f hrs  %s  (%s)  THIS instance only, %s, with its IPv4\n", h, usd(c, okc), rup(c, okc), kind;
     printf "  storage   %6d GB   %s  (%s)  month so far, accrues while stopped\n", g, usd(s, oks), rup(s, oks);
     if (sg>0) printf "  snapshots %6d GB   %s  (%s)  at most - AWS bills only the changed blocks\n", sg, usd(n, okn), rup(n, okn);
     printf "  ---------------------------------------\n";

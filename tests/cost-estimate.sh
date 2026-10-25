@@ -50,13 +50,17 @@ run() { ( cd "$T/repo" && env -i CG_PRICES_FILE="$OLDPWD/tests/prices.env" CG_IN
 echo "1. the machine as it is"
 out=$(run)
 contains "spot is priced at the spot price"   "$out" "THIS instance only, spot, price now"
-contains "  10 hours at \$0.20"                "$out" "10.0 hrs  \$  2.00"
+contains "  10 hours at \$0.20, and its IPv4 at \$0.005" "$out" "10.0 hrs  \$  2.05"
 out=$(run ONDEMAND=1)
 contains "on demand at the on-demand price"   "$out" "THIS instance only, on demand"
-contains "  10 hours at \$0.9664"              "$out" "10.0 hrs  \$  9.66"
+contains "  10 hours at \$0.9664 and \$0.005"  "$out" "10.0 hrs  \$  9.71"
 out=$(run NOPRICE=1)
 contains "a price AWS would not give is ?"    "$out" "10.0 hrs        ?"
-lacks    "  never the one written in the code" "$out" "9.66"
+lacks    "  never the one written in the code" "$out" "9.71"
+grep -v '^CG_IPV4_USD_HOUR=' tests/prices.env > "$T/no-ip.env"
+out=$( cd "$T/repo" && env -i CG_PRICES_FILE="$T/no-ip.env" CG_INR_PER_USD=88 PATH="$T/bin:$PATH" \
+         HOME="$T/home" CG_COLOR=never TODAY="$TODAY" bash lib/setup cost 2>&1 )
+contains "an IPv4 price AWS would not give is ? too" "$out" "10.0 hrs        ?"
 
 echo "2. cg's disks, by when each was made"
 out=$(run)
