@@ -1800,7 +1800,8 @@ PY
       say "creating image $name (several minutes)"
       ami=$(ec2 create-image --instance-id "$INSTANCE_ID" --name "$name" \
         --description "cloud_gaming saved desktop" \
-        --tag-specifications "ResourceType=image,Tags=[{Key=Name,Value=${TS_HOST}-image}]" \
+        --tag-specifications "ResourceType=image,Tags=[{Key=Name,Value=${TS_HOST}-image},{Key=$CG_TAG_KEY,Value=$TS_HOST}]" \
+                          "ResourceType=snapshot,Tags=[{Key=$CG_TAG_KEY,Value=$TS_HOST}]" \
         --query ImageId --output text)
       log "$ami"
       wait_image_available "$REGION" "$ami"
@@ -2020,11 +2021,9 @@ aws_inventory_json() {
   # Disks and disk images left over, which bill by the GB with nothing attached -
   # cg's only, by the names it gives them, as destroy deletes them: another
   # project's disk or image in the region is neither listed nor touched.
-  ec2 describe-volumes --filters Name=status,Values=available "Name=tag:Name,Values=$TS_HOST,${TS_HOST}-games" \
-      --query 'Volumes[].[VolumeId,Size]' --output text > "$work/volumes" 2>/dev/null || echo ERR > "$work/volumes"
-  ec2 describe-images --owners self --filters "Name=tag:Name,Values=${TS_HOST}-image" \
-      --query 'Images[].[ImageId,BlockDeviceMappings[0].Ebs.VolumeSize]' \
-      --output text > "$work/images" 2>/dev/null || echo ERR > "$work/images"
+  cg_owned_volumes "$REGION" 'Volumes[].[VolumeId,Size]' games > "$work/volumes" 2>/dev/null || echo ERR > "$work/volumes"
+  cg_owned_images "$REGION" 'Images[].[ImageId,BlockDeviceMappings[0].Ebs.VolumeSize]' \
+      > "$work/images" 2>/dev/null || echo ERR > "$work/images"
   # Its settings in SSM - the watchdog's marks and each game's keep timer -
   # free, but cg's: in this region and every region that has saved games.
   local r regions

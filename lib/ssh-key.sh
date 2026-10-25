@@ -59,6 +59,7 @@ key_ensure() {
   echo "==> creating key pair -> $pem"
   mkdir -p "$(dirname "$pem")"
   if ! ( umask 077; aws ec2 create-key-pair --region "$region" --key-name "$name" \
+           --tag-specifications "ResourceType=key-pair,Tags=[{Key=${CG_TAG_KEY:-cg:host},Value=$name}]" \
            --query KeyMaterial --output text > "$pem" ); then
     rm -f "$pem"
     return 1

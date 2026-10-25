@@ -315,6 +315,8 @@ cw_install() {
       --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
       >/dev/null 2>&1 || { log "could not create the role $CW_NAME (needs iam:CreateRole)"; return 1; }
   fi
+  # cg's tag (lib/env-file.sh), apart from creating it and never fatal.
+  aws iam tag-role --role-name "$CW_NAME" --tags "Key=$CG_TAG_KEY,Value=$TS_HOST" >/dev/null 2>&1 || true
   # put-role-policy overwrites, so this also repairs a policy edited by hand.
   aws iam put-role-policy --role-name "$CW_NAME" --policy-name "$CW_POLICY_NAME" \
     --policy-document "$(cw_policy "$acct")" >/dev/null 2>&1 \
@@ -369,6 +371,9 @@ cw_install() {
   rm -rf "$d"
 
   fn_arn="arn:aws:lambda:$REGION:$acct:function:$CW_NAME"
+  # cg's tag on the function and its logs - never fatal, as above.
+  cw_aws lambda tag-resource --resource "$fn_arn" --tags "$CG_TAG_KEY=$TS_HOST" >/dev/null 2>&1 || true
+  cw_aws logs tag-log-group --log-group-name "$CW_LOGS" --tags "$CG_TAG_KEY=$TS_HOST" >/dev/null 2>&1 || true
   rule_arn=$(cw_aws events put-rule --name "$CW_NAME" --schedule-expression "rate($CW_EVERY_MIN minutes)" \
       --state ENABLED --description "Runs the cloud_gaming idle watchdog" \
       --query RuleArn --output text 2>/dev/null) \

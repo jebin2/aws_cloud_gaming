@@ -242,6 +242,28 @@ cg_ask_typed() { # cg_ask_typed <id> <prompt> <word> - 0 when that word was type
 
 # Progress and action output. Reports (status, cost) deliberately do not go
 # through these - a timestamp on every row of a table is noise, not context.
+# cg_owned_images <region> <query> / cg_owned_volumes <region> <query> [games]
+# The images and unattached volumes that are cg's: by cg's own tag
+# (CG_TAG_KEY=<host>, lib/env-file.sh), or by the exact name cg gave them before
+# that tag existed - <host>-image for an image, <host>-games for the old games
+# volume, asked for with "games". Nothing else, whatever its Name says. One line
+# per resource, as <query> prints it; fails when AWS cannot be asked.
+cg_owned_images() {
+  local r=$1 q=$2 k=${CG_TAG_KEY:-cg:host}
+  ( set -e
+    aws ec2 describe-images --region "$r" --owners self --filters "Name=tag:$k,Values=$TS_HOST" --query "$q" --output text
+    aws ec2 describe-images --region "$r" --owners self --filters "Name=tag:Name,Values=${TS_HOST}-image" --query "$q" --output text
+  ) | awk 'NF && $1 != "None" && !seen[$1]++'
+}
+cg_owned_volumes() {
+  local r=$1 q=$2 k=${CG_TAG_KEY:-cg:host}
+  ( set -e
+    aws ec2 describe-volumes --region "$r" --filters Name=status,Values=available "Name=tag:$k,Values=$TS_HOST" --query "$q" --output text
+    [[ ${3:-} != games ]] || aws ec2 describe-volumes --region "$r" \
+      --filters Name=status,Values=available "Name=tag:Name,Values=${TS_HOST}-games" --query "$q" --output text
+  ) | awk 'NF && $1 != "None" && !seen[$1]++'
+}
+
 say() {
   if cg_json; then
     _cg_section_end 0

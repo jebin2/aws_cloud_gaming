@@ -337,7 +337,8 @@ destroy() {
     echo "creating image $name (several minutes) ..."
     ami=$(ec2 create-image --instance-id "$INSTANCE_ID" --name "$name" \
       --description "cloud_gaming saved desktop" \
-      --tag-specifications "ResourceType=image,Tags=[{Key=Name,Value=${TS_HOST}-image}]" \
+      --tag-specifications "ResourceType=image,Tags=[{Key=Name,Value=${TS_HOST}-image},{Key=$CG_TAG_KEY,Value=$TS_HOST}]" \
+                          "ResourceType=snapshot,Tags=[{Key=$CG_TAG_KEY,Value=$TS_HOST}]" \
       --query ImageId --output text)
     echo "  $ami"
     wait_image_available "$REGION" "$ami"

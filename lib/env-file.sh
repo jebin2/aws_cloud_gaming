@@ -20,6 +20,14 @@
 # XDG is for the case the repo cannot serve - scripts installed read-only,
 # where there is nowhere in the install to write.
 
+# The tag every AWS resource cg creates carries, valued with the box's name:
+# cg:host=<host>. What cg deletes is chosen by it, never by a Name alone - a
+# Name is a label anyone can give anything, and another project's disk named
+# like ours was one destroy away. Defined here because every script that
+# creates or deletes in AWS loads this file first. AWS reserves only "aws:".
+# shellcheck disable=SC2034  # read by the scripts that load this file
+CG_TAG_KEY=cg:host
+
 # Where the scripts live. CG_REPO wins, so a packaged app can say.
 cg_repo_dir() {
   if [[ -n ${CG_REPO:-} ]]; then printf '%s' "$CG_REPO"; return 0; fi

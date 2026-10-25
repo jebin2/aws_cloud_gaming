@@ -906,19 +906,18 @@ destroy_all() {
     --filters "Name=tag:Name,Values=$TS_HOST" \
               "Name=instance-state-name,Values=pending,running,stopping,stopped" \
     --query 'Reservations[].Instances[].InstanceId' --output text)
-  # cg's own and nothing else. This took every image the account owned and
-  # every unattached volume in the region - another project's AMI or disk went
-  # with an ordinary destroy. An image is cg's by the tag `cg snapshot` gives it;
-  # a volume by the box's name, which a launch now tags its disk with. The games
-  # volume is kept, as before. Anything untagged is said, never touched.
-  img=$(ec2 describe-images --owners self --filters "Name=tag:Name,Values=${TS_HOST}-image" \
-          --query 'Images[].ImageId' --output text)
-  vols=$(ec2 describe-volumes --filters Name=status,Values=available "Name=tag:Name,Values=$TS_HOST" \
-           --query 'Volumes[].VolumeId' --output text)
-  others=$( { ec2 describe-images --owners self --query 'Images[].[ImageId,Tags[?Key==`Name`]|[0].Value]' --output text
-              ec2 describe-volumes --filters Name=status,Values=available \
-                --query 'Volumes[].[VolumeId,Tags[?Key==`Name`]|[0].Value]' --output text
-            } 2>/dev/null | awk -v h="$TS_HOST" '$1 != "None" && $2 != h"-image" && $2 != h && $2 != h"-games" {print $1}' | paste -sd' ' -)
+  # cg's own and nothing else (cg_owned_images/volumes, lib/common.sh). This
+  # took every image the account owned and every unattached volume in the
+  # region - another project's AMI or disk went with an ordinary destroy. The
+  # games volume is kept, as before. Anything not cg's is said, never touched.
+  img=$(cg_owned_images "$REGION" 'Images[].ImageId' | paste -sd' ' -)
+  vols=$(cg_owned_volumes "$REGION" 'Volumes[].VolumeId' | paste -sd' ' -)
+  local games; games=$(cg_owned_volumes "$REGION" 'Volumes[].VolumeId' games | paste -sd' ' -)
+  others=$( { ec2 describe-images --owners self --query 'Images[].ImageId' --output text
+              ec2 describe-volumes --filters Name=status,Values=available --query 'Volumes[].VolumeId' --output text
+            } 2>/dev/null | tr -s ' \t' '\n' \
+            | awk -v mine="$img $vols $games" 'BEGIN { n = split(mine, m, " "); for (i = 1; i <= n; i++) c[m[i]] = 1 }
+                                               NF && $1 != "None" && !c[$1]' | paste -sd' ' -)
 
   # A plain destroy removes only what BILLS. The security group, the key pair
   # and the tailnet node cost nothing, and cg init reuses every one of them:

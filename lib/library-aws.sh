@@ -137,6 +137,13 @@ aws iam put-role-policy --role-name "$ROLE" --policy-name library-rw \
                  \"s3:AbortMultipartUpload\",\"s3:ListMultipartUploadParts\"],
      \"Resource\":\"arn:aws:s3:::$BUCKET/*\"}]}" >/dev/null
 
+# cg's tag (lib/env-file.sh), on the role and the bucket - every run, so ones
+# made before the tag existed get it too. Tagged apart from creating them, and
+# never fatal: a key without the tagging permissions still builds.
+aws iam tag-role --role-name "$ROLE" --tags "Key=$CG_TAG_KEY,Value=$TS_HOST" >/dev/null 2>&1 || true
+aws s3api put-bucket-tagging --bucket "$BUCKET" --region "$REGION" \
+  --tagging "TagSet=[{Key=$CG_TAG_KEY,Value=$TS_HOST}]" >/dev/null 2>&1 || true
+
 # --- instance profile ----------------------------------------------------------
 # An instance profile is a separate object that wraps the role; run-instances
 # takes the profile, not the role, and the two are easy to confuse.
@@ -144,6 +151,7 @@ if ! aws iam get-instance-profile --instance-profile-name "$PROFILE" >/dev/null 
   note "creating instance profile $PROFILE"
   aws iam create-instance-profile --instance-profile-name "$PROFILE" >/dev/null
 fi
+aws iam tag-instance-profile --instance-profile-name "$PROFILE" --tags "Key=$CG_TAG_KEY,Value=$TS_HOST" >/dev/null 2>&1 || true
 if ! aws iam get-instance-profile --instance-profile-name "$PROFILE" \
       --query 'InstanceProfile.Roles[0].RoleName' --output text 2>/dev/null | grep -qx "$ROLE"; then
   aws iam add-role-to-instance-profile --instance-profile-name "$PROFILE" \

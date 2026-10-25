@@ -88,11 +88,14 @@ else
     echo "==> creating security group (tailscale UDP only)"
     SG=$(ec2 create-security-group --group-name "$SG_NAME" \
       --description "cloud gaming host; reachable over Tailscale only" \
+      --tag-specifications "ResourceType=security-group,Tags=[{Key=$CG_TAG_KEY,Value=$TS_HOST}]" \
       --query GroupId --output text)
     ec2 authorize-security-group-ingress --group-id "$SG" \
       --ip-permissions "IpProtocol=udp,FromPort=41641,ToPort=41641,IpRanges=[{CidrIp=0.0.0.0/0,Description='tailscale direct path'}]" \
       >/dev/null
   fi
+  # cg's tag on it, made before the tag existed or not - never fatal.
+  ec2 create-tags --resources "$SG" --tags "Key=$CG_TAG_KEY,Value=$TS_HOST" >/dev/null 2>&1 || true
   echo "    $SG"
 
   # A restored image is already built; re-running bootstrap would reinstall over
@@ -279,7 +282,8 @@ else
       --iam-instance-profile "Name=$INSTANCE_PROFILE" \
       --instance-initiated-shutdown-behavior "$SHUTDOWN_BEHAVIOR" \
       --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=$DISK_GB,VolumeType=gp3,DeleteOnTermination=true}" \
-      --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$TS_HOST}]" "ResourceType=volume,Tags=[{Key=Name,Value=$TS_HOST}]" \
+      --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$TS_HOST},{Key=$CG_TAG_KEY,Value=$TS_HOST}]" \
+                           "ResourceType=volume,Tags=[{Key=Name,Value=$TS_HOST},{Key=$CG_TAG_KEY,Value=$TS_HOST}]" \
       ${UD[@]+"${UD[@]}"} \
       ${MARKET[@]+"${MARKET[@]}"} \
       ${PLACE[@]+"${PLACE[@]}"} \
