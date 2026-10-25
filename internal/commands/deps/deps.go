@@ -108,7 +108,7 @@ func Report(ctx context.Context, l laptop.Laptop, out *output.Out, afterFix bool
 	return ready
 }
 
-// Run is `cg deps [status|--json]`; install is a separate port.
+// Run is `cg deps [status|install [tool...]|--json]`.
 func Run(ctx context.Context, l laptop.Laptop, args []string, jsonFlag bool, out *output.Out) int {
 	sub := "status"
 	if len(args) > 0 {
@@ -119,8 +119,7 @@ func Run(ctx context.Context, l laptop.Laptop, args []string, jsonFlag bool, out
 		jsonFlag = true
 	case "status", "":
 	case "install":
-		out.Die("deps install is not ported to Go yet")
-		return 1
+		return Install(ctx, l, &laptop.Installer{L: l, Say: sayTo(out)}, args[1:], out)
 	default:
 		out.Die("usage: setup deps [status|install [tool...]|--json]")
 		return 1
@@ -143,4 +142,69 @@ func Run(ctx context.Context, l laptop.Laptop, args []string, jsonFlag bool, out
 // Main is `cg deps` against this computer.
 func Main(ctx context.Context, args []string, jsonFlag bool, out *output.Out) int {
 	return Run(ctx, laptop.New(local.Exec{}), args, jsonFlag, out)
+}
+
+func sayTo(out *output.Out) laptop.Say {
+	return func(kind, text string) {
+		if kind == "log" {
+			out.Log(text)
+		} else {
+			out.LogAs(kind, text)
+		}
+	}
+}
+
+// Install is `cg deps install [tool...]`: what is missing, or just the tools named.
+func Install(ctx context.Context, l laptop.Laptop, in *laptop.Installer, want []string, out *output.Out) int {
+	missing := l.Missing()
+	if len(missing) == 0 {
+		out.LogAs("ok", "nothing to install - every tool cg needs is here")
+		// Installed but signed out is the other half of being ready.
+		if !l.TailscaleDown(ctx) {
+			return 0
+		}
+		out.Log("Tailscale is installed but not signed in")
+		if !l.TTY() {
+			out.Log("  signing in needs a terminal:  sudo tailscale up")
+			return 1
+		}
+		if l.TailscaleUp(ctx, sayTo(out)) {
+			return 0
+		}
+		return 1
+	}
+	pm := l.PackageManager()
+	if pm == "" {
+		out.Log("no supported package manager (pacman, apt, dnf, zypper) - install these by hand:")
+		for _, t := range missing {
+			out.Log("  " + laptop.Label(t) + ": " + laptop.Manual(t))
+		}
+		return 1
+	}
+	if len(want) == 0 {
+		want = missing
+	}
+	out.Say("installing")
+	rc := 0
+	for _, t := range want {
+		if !laptop.In(missing, t) {
+			out.LogAs("ok", laptop.Label(t)+" is already here")
+			continue
+		}
+		out.Log("installing " + laptop.Label(t) + " - " + laptop.Plan(pm, t))
+		if in.Install(ctx, pm, t) {
+			out.LogAs("ok", laptop.Label(t)+" installed")
+			continue
+		}
+		out.LogAs("fail", "could not install "+laptop.Label(t))
+		// -Sy without -u is a partial upgrade: the database is current and the
+		// installed system is not, so a package can want a library that is newer
+		// than the one here. That is the one failure a refresh cannot fix.
+		if pm == "pacman" {
+			out.Log("  if it asked for a newer library, this system is behind: sudo pacman -Syu")
+		}
+		out.Log("  by hand: " + laptop.Manual(t))
+		rc = 1
+	}
+	return rc
 }
