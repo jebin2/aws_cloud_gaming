@@ -1,91 +1,49 @@
-# aws_cloud_gaming
+# Cloud Gaming
 
-Your own Linux gaming desktop on an AWS GPU, streamed to any device with
-[Sunshine](https://github.com/LizardByte/Sunshine) and [Moonlight](https://github.com/moonlight-stream)
-over Tailscale. Build it to play, destroy it when done - your games come back next time.
+Stream games to your laptop from a GPU machine rented on AWS, or from a Linux server of your own.
+A desktop app for Linux, built on [Sunshine](https://github.com/LizardByte/Sunshine),
+[Moonlight](https://github.com/moonlight-stream) and [Tailscale](https://tailscale.com).
 
-> **⚠️ This spends real money on your AWS account.** No warranty, see [LICENSE](LICENSE). Details: [docs/cost.md](docs/cost.md).
+> **Beta.** An AWS machine bills by the hour while it runs. No warranty - see [LICENSE](LICENSE)
+> and [docs/cost.md](docs/cost.md).
+
+## Install
+
+Download from [Releases](https://github.com/jebin2/aws_cloud_gaming/releases):
+
+| File | For | Install |
+|---|---|---|
+| `.pacman` | Arch, CachyOS, Omarchy | `sudo pacman -U <file>` |
+| `.deb` | Debian, Ubuntu, Mint | `sudo dpkg -i <file>` |
+| `.tar.gz` | Any Linux | Extract and run `cg` |
+| `.AppImage` | Any Linux with FUSE 2 | Make executable and run |
 
 ## What you need
 
-- **An AWS account on a paid plan, with an approved GPU quota.** The Free Plan cannot launch GPU
-  instances at all, and quota approval can take days - start this first.
-  [Step-by-step setup](docs/aws-account-setup.md)
-- **A [Tailscale](https://tailscale.com) account**, plus a pre-auth key
+- A [Tailscale](https://tailscale.com) account
+- **Your own server:** a Linux machine you can reach over SSH
+- **AWS:** an account on a paid plan with a GPU quota - [setup guide](docs/aws-account-setup.md)
 
-Everything else is automatic:
+The app installs anything missing on this computer when you add a machine.
 
-- **Laptop tools** - `./cg check --fix` installs the AWS CLI, Tailscale,
-  [Moonlight](https://github.com/moonlight-stream), OpenSSH, `curl` and `python3` after asking, with
-  pacman, apt, dnf or zypper. Moonlight needs the distro's `moonlight-qt` package, which Arch-based
-  distros have; where there is none, `cg check` stops with a link, for you to install it yourself
-- **Sign-ins** - `--fix` starts the Tailscale login and asks for an AWS access key if none works
-- **AWS setup** - `cg init` creates the ssh key pair, the S3 bucket for your games, the box's IAM
-  role, the budget alert and the cloud watchdog
-- **Tailnet** - with `TAILSCALE_API_KEY` set, old box entries are removed and the box's key never
-  expires
-- **The box** - NVIDIA driver, desktop, audio, Sunshine, Steam and Tailscale, plus the idle
-  watchdog that shuts it down when you stop playing
-- **Moonlight pairing** on this laptop
-- **Your games and Steam sign-in** - restored from S3 on every build, saved back when you destroy
-- **Notifications** - to your phone through ntfy, when `GAME_NTFY_URL` is set
+## Use
 
-To play on a phone or TV too, install Tailscale and Moonlight there and join the same tailnet. Add
-the box in Moonlight by its Tailscale name, then enter the PIN it shows on the Sunshine page `cg init`
-prints (the user it shows, and `SUNSHINE_PASS` from `.env`).
+1. Open the app and choose **Add a machine** - AWS, or your own server.
+2. Press **Play**. Moonlight opens with the machine's desktop.
+3. Close Moonlight to end the session.
 
-## Get started
+An AWS machine keeps running after a session until auto-stop ends it or you press **Delete**.
+Your games are saved when it is deleted and restored on the next build.
 
-    git clone git@github.com:jebin2/aws_cloud_gaming.git
-    cd aws_cloud_gaming
-    cp .env.example .env     # Tailscale key, alert email, region
-    ./cg check --fix         # install what the laptop is missing, then check everything
-    ./cg init                # build the box and pair Moonlight (10-20 min)
-    ./cg open                # play
+## From source
 
-`cg init` asks which archived games to restore, then builds the box while restoring them. When you
-quit Moonlight, `cg open` offers to destroy the box: that saves your games and Steam sign-in to S3
-and stops the bill. The next `cg init` brings everything back.
+    git clone https://github.com/jebin2/aws_cloud_gaming.git
+    cd aws_cloud_gaming/app && npm install && npm start
 
-## Everyday commands
-
-| Command | What it does |
-|---|---|
-| `cg init` | Build a box and restore the games you pick |
-| `cg open` | Stream; offers to destroy the box when you quit |
-| `cg destroy` | Save games and Steam login to S3, then delete the box |
-| `cg status` | What exists, and whether every guard is armed |
-| `cg cost` | What you have spent this month |
-| `cg games` | What Steam has installed, downloading or running |
-| `cg library list` | Archived games and what storing them costs |
-
-Every command, and what is safe to run twice: [docs/commands.md](docs/commands.md).
-
-## A window, if you prefer one
-
-    cd app && npm install && npm start
-
-A desktop app over the same commands: the box and what it is spending, the archive, the guards and
-what they last decided, and a build you can watch step by step. It holds no AWS logic - it runs
-`cg` and renders what it says, so the scripts stay the only thing that decides anything.
-[app/README.md](app/README.md).
+The app runs the `cg` scripts in this repository. To use them directly, see [cg.md](cg.md).
 
 ## Documentation
 
-| | |
-|---|---|
-| [AWS account setup](docs/aws-account-setup.md) | Step by step: paid plan, GPU quotas with example requests, how to verify - followable by a person or an AI |
-| [Getting started](docs/getting-started.md) | Credentials, configuration, the first build and pairing |
-| [Commands](docs/commands.md) | Every command, the terminal output, running things twice |
-| [The desktop app](docs/app-design.md) | What each screen shows and the command behind every field |
-| [Cost](docs/cost.md) | What every charge is, measured, and why spot is the default |
-| [Cost guards](docs/cost-guards.md) | The guards that stop a forgotten box, and the cloud watchdog's IAM role |
-| [Destroy](docs/destroy.md) | What `cg destroy` and `cg destroy --all` remove, and what they keep |
-| [Game library](docs/game-library.md) | How games and the Steam login persist in S3 |
-| [Streaming](docs/streaming.md) | Moonlight and Steam settings, GPU performance, anti-cheat |
-| [Architecture](docs/architecture.md) | How Tailscale, Sunshine, Moonlight and the storage fit together |
-| [Desktop app design](docs/app-design.md) | What a GUI would show, and the command behind every field |
-| [Testing](docs/testing.md) | Repository layout and the test suites |
-| [Troubleshooting](docs/troubleshooting.md) | Every failure hit while building this, and why each fix works |
-
-Tested on Ubuntu 24.04, `g6.xlarge` in `ap-south-2`, streamed to an Arch-based Linux client.
+[Cost](docs/cost.md) · [AWS setup](docs/aws-account-setup.md) · [Streaming](docs/streaming.md) ·
+[Troubleshooting](docs/troubleshooting.md) · [Architecture](docs/architecture.md) ·
+[All commands](docs/commands.md)
