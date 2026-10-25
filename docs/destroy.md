@@ -11,12 +11,17 @@
 | Security group, key pair, `~/.ssh/<host>.pem` | **kept** - `cg init` reuses them | gone |
 | Tailnet nodes | **kept** offline - `cg init` prunes them | gone |
 | Per-box `.env` lines (instance id, node, Sunshine login) | cleared | cleared |
-| Untagged orphaned volumes | gone | gone |
+| The box's leftover volumes (tagged with its name) | gone | gone |
+| Images made by `cg snapshot` (tagged `<host>-image`), and their snapshots | gone | gone |
 | **Monthly budget** | **kept** | gone |
 | **S3 archive and its bucket** | **kept** | gone |
 | **`<host>-box` role + instance profile** | **kept** | gone |
 | **Cloud watchdog: function, schedule, role, logs** | **kept** | gone |
 | Old EBS game volume, if you still have one | **kept** | gone |
+
+**Only cg's own.** Images and volumes are deleted only when they carry the names cg gives
+them. Anything else in the region - another project's image or disk - is listed as left
+alone and never touched.
 
 **A plain destroy removes only what bills.** The security group, the key pair and the
 tailnet node cost nothing, and the next build reuses each of them: `provision.sh` reuses a

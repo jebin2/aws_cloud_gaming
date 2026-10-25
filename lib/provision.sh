@@ -279,7 +279,7 @@ else
       --iam-instance-profile "Name=$INSTANCE_PROFILE" \
       --instance-initiated-shutdown-behavior "$SHUTDOWN_BEHAVIOR" \
       --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=$DISK_GB,VolumeType=gp3,DeleteOnTermination=true}" \
-      --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$TS_HOST}]" \
+      --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$TS_HOST}]" "ResourceType=volume,Tags=[{Key=Name,Value=$TS_HOST}]" \
       ${UD[@]+"${UD[@]}"} \
       ${MARKET[@]+"${MARKET[@]}"} \
       ${PLACE[@]+"${PLACE[@]}"} \

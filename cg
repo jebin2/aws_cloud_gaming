@@ -2017,10 +2017,13 @@ aws_inventory_json() {
     aws s3 ls "s3://$b/steam/account/" 2>/dev/null | grep . >/dev/null && echo yes > "$work/here.login"
   fi
   library_elsewhere_json > "$work/elsewhere" 2>/dev/null || true
-  # Disks and disk images left over, which bill by the GB with nothing attached.
-  ec2 describe-volumes --filters Name=status,Values=available \
+  # Disks and disk images left over, which bill by the GB with nothing attached -
+  # cg's only, by the names it gives them, as destroy deletes them: another
+  # project's disk or image in the region is neither listed nor touched.
+  ec2 describe-volumes --filters Name=status,Values=available "Name=tag:Name,Values=$TS_HOST,${TS_HOST}-games" \
       --query 'Volumes[].[VolumeId,Size]' --output text > "$work/volumes" 2>/dev/null || echo ERR > "$work/volumes"
-  ec2 describe-images --owners self --query 'Images[].[ImageId,BlockDeviceMappings[0].Ebs.VolumeSize]' \
+  ec2 describe-images --owners self --filters "Name=tag:Name,Values=${TS_HOST}-image" \
+      --query 'Images[].[ImageId,BlockDeviceMappings[0].Ebs.VolumeSize]' \
       --output text > "$work/images" 2>/dev/null || echo ERR > "$work/images"
   # Its settings in SSM - the watchdog's marks and each game's keep timer -
   # free, but cg's: in this region and every region that has saved games.

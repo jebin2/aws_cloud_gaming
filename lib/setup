@@ -900,13 +900,25 @@ rebuild() {
 # key pair, local key and .env entries. Nothing is kept, nothing is saved.
 destroy_all() {
   ec2() { aws ec2 "$@" --region "$REGION"; }
-  local inst img snap sg="" key="" all=0
+  local inst img snap sg="" key="" all=0 vols others
   [[ ${CG_DESTROY_ALL:-0} == 1 ]] && all=1
   inst=$(ec2 describe-instances \
     --filters "Name=tag:Name,Values=$TS_HOST" \
               "Name=instance-state-name,Values=pending,running,stopping,stopped" \
     --query 'Reservations[].Instances[].InstanceId' --output text)
-  img=$(ec2 describe-images --owners self --query 'Images[].ImageId' --output text)
+  # cg's own and nothing else. This took every image the account owned and
+  # every unattached volume in the region - another project's AMI or disk went
+  # with an ordinary destroy. An image is cg's by the tag `cg snapshot` gives it;
+  # a volume by the box's name, which a launch now tags its disk with. The games
+  # volume is kept, as before. Anything untagged is said, never touched.
+  img=$(ec2 describe-images --owners self --filters "Name=tag:Name,Values=${TS_HOST}-image" \
+          --query 'Images[].ImageId' --output text)
+  vols=$(ec2 describe-volumes --filters Name=status,Values=available "Name=tag:Name,Values=$TS_HOST" \
+           --query 'Volumes[].VolumeId' --output text)
+  others=$( { ec2 describe-images --owners self --query 'Images[].[ImageId,Tags[?Key==`Name`]|[0].Value]' --output text
+              ec2 describe-volumes --filters Name=status,Values=available \
+                --query 'Volumes[].[VolumeId,Tags[?Key==`Name`]|[0].Value]' --output text
+            } 2>/dev/null | awk -v h="$TS_HOST" '$1 != "None" && $2 != h"-image" && $2 != h && $2 != h"-games" {print $1}' | paste -sd' ' -)
 
   # A plain destroy removes only what BILLS. The security group, the key pair
   # and the tailnet node cost nothing, and cg init reuses every one of them:
@@ -930,6 +942,7 @@ destroy_all() {
   echo "This permanently deletes the box and everything listed here:"
   echo "  instances       ${inst:-none}"
   echo "  images          ${img:-none}"
+  echo "  volumes         ${vols:-none}"
   if (( all )); then
     echo "  security group  ${sg:-none}"
     echo "  key pair        ${key:-none}  (and ~/.ssh/${TS_HOST}.pem)"
@@ -971,6 +984,7 @@ touches it, and GAME_ARCHIVE_EXPIRY_DAYS=0 keeps it forever."
     fi
   fi
   echo
+  if [[ -n ${others// /} ]]; then echo "Left alone - not cg's: ${others}"; echo; fi
   } | cg_block "🧾" "What this destroy does"
 
   # A persistent spot request relaunches the moment its instance dies.
@@ -1001,20 +1015,13 @@ touches it, and GAME_ARCHIVE_EXPIRY_DAYS=0 keeps it forever."
     done
   done
 
-  # Any volume left detached after termination still bills - except the game
-  # library, which is the entire point of keeping it on its own volume. AWS
-  # filters cannot express "not this tag", so filter here and skip by name.
-  # Deleting it needs an explicit `cg games --delete`.
-  while read -r v name; do
+  # A disk of the box's left detached still bills. Only one carrying the box's
+  # name - the games volume has its own, and is kept: cg games --delete.
+  for v in $vols; do
     [[ -z ${v:-} || $v == None ]] && continue
-    if [[ $name == "${TS_HOST}-games" ]]; then
-      log "keeping the game library volume $v ($name) - cg games --delete removes it"
-      continue
-    fi
-    say "deleting orphaned volume $v"
+    say "deleting the box's leftover volume $v"
     ec2 delete-volume --volume-id "$v" >/dev/null || true
-  done < <(ec2 describe-volumes --filters Name=status,Values=available \
-             --query 'Volumes[].[VolumeId,Tags[?Key==`Name`]|[0].Value]' --output text)
+  done
 
   if (( all )); then
   say "removing the budget"
