@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -203,4 +204,41 @@ func (a AWSSource) FX(ctx context.Context) (float64, error) {
 		return 0, err
 	}
 	return d.Value, nil
+}
+
+// OnDemandHourly is the Linux, shared-tenancy on-demand price an hour for an
+// instance type in a region; nil when AWS would not say. Never a number written
+// here: an unknown price is unknown, not a guess.
+func OnDemandHourly(ctx context.Context, api Products, instanceType, region string) *float64 {
+	if api == nil || instanceType == "" || region == "" {
+		return nil
+	}
+	raw, err := api.Products(ctx, "AmazonEC2", [][2]string{
+		{"instanceType", instanceType}, {"regionCode", region}, {"operatingSystem", "Linux"},
+		{"tenancy", "Shared"}, {"preInstalledSw", "NA"}, {"capacitystatus", "Used"}})
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	var it item
+	if json.Unmarshal([]byte(raw[0]), &it) != nil {
+		return nil
+	}
+	var keys []string
+	for k := range it.Terms.OnDemand {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		var dks []string
+		for d := range it.Terms.OnDemand[k].PriceDimensions {
+			dks = append(dks, d)
+		}
+		sort.Strings(dks)
+		for _, d := range dks {
+			if v, err := strconv.ParseFloat(it.Terms.OnDemand[k].PriceDimensions[d].PricePerUnit.USD, 64); err == nil {
+				return &v
+			}
+		}
+	}
+	return nil
 }
