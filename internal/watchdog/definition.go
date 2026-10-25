@@ -59,6 +59,26 @@ func (s Settings) Env() string {
 		opt("CG_S3_USD_GB_MONTH", s.S3GBMonth), opt("CG_INR_PER_USD", s.INRPerUSD), opt("CG_NTFY_URL", s.NtfyURL))
 }
 
+// EnvMap is the same environment as a map, for the API: the text form above is
+// what the fingerprint hashes, this is what Lambda is given.
+func (s Settings) EnvMap() map[string]string {
+	m := map[string]string{
+		"CG_TS_HOST": s.Host, "CG_IDLE_MINUTES": fmt.Sprint(s.IdleMinutes), "CG_BOOT_GRACE_MINUTES": fmt.Sprint(BootGrace),
+		"CG_STUCK_MINUTES": fmt.Sprint(s.StuckMinutes), "CG_BUCKET": s.Bucket, "CG_ACCOUNT": s.Account,
+		"CG_ARCHIVE_EXPIRY_DAYS": fmt.Sprint(s.ExpiryDays),
+	}
+	if s.S3GBMonth != "" {
+		m["CG_S3_USD_GB_MONTH"] = s.S3GBMonth
+	}
+	if s.INRPerUSD != "" {
+		m["CG_INR_PER_USD"] = s.INRPerUSD
+	}
+	if s.NtfyURL != "" {
+		m["CG_NTFY_URL"] = s.NtfyURL
+	}
+	return m
+}
+
 // Fingerprint is everything about the function that is not its code, as one
 // short hash kept in its description - so drift in any of it reads as "not
 // current".
@@ -189,4 +209,9 @@ func Zip(source []byte) (zip []byte, codeSHA256 string) {
 
 	sum := sha256.Sum256(b.Bytes())
 	return b.Bytes(), base64.StdEncoding.EncodeToString(sum[:])
+}
+
+func sha256b64(b []byte) string {
+	sum := sha256.Sum256(b)
+	return base64.StdEncoding.EncodeToString(sum[:])
 }

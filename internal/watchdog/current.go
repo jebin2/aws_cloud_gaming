@@ -220,3 +220,9 @@ func (r *Reader) Since(ctx context.Context, pattern string, since time.Time) ([]
 
 // Itoa formats a count of minutes.
 func Itoa(n int) string { return strconv.Itoa(n) }
+
+// IsNotFound is whether AWS said the thing is not there: the one error that means
+// "no". Anything else means it could not be asked.
+func IsNotFound(err error) bool {
+	return code(err) == "ResourceNotFoundException" || code(err) == "NoSuchEntity"
+}

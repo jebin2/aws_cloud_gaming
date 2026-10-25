@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/eventbridge"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -38,14 +39,26 @@ func NewReader(ctx context.Context, env *config.Env) (*wd.Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	rates := pricing.Load(ctx, pricing.Options{Getenv: env.Get,
-		Source: pricing.AWSSource{API: pricing.SDKProducts{Client: awspricing.NewFromConfig(us)}}}, region)
+	rates := ratesFrom(ctx, env, us)
 	host := env.Host()
 	return &wd.Reader{
 		Lambda: lambda.NewFromConfig(cfg), Events: eventbridge.NewFromConfig(cfg), IAM: iam.NewFromConfig(cfg),
 		Logs: cloudwatchlogs.NewFromConfig(cfg), Now: time.Now, Host: host, Region: region, Source: src,
 		Settings: func(account string) wd.Settings { return SettingsFor(env, rates, account) },
 	}, nil
+}
+
+func ratesFrom(ctx context.Context, env *config.Env, us aws.Config) pricing.Rates {
+	return pricing.Load(ctx, pricing.Options{Getenv: env.Get,
+		Source: pricing.AWSSource{API: pricing.SDKProducts{Client: awspricing.NewFromConfig(us)}}}, env.Region())
+}
+
+func ratesOf(ctx context.Context, env *config.Env) pricing.Rates {
+	us, err := awscfg.New(ctx, "us-east-1")
+	if err != nil {
+		return pricing.Rates{}
+	}
+	return ratesFrom(ctx, env, us)
 }
 
 // SettingsFor is what the watchdog is deployed with, from .env and the prices
@@ -82,18 +95,18 @@ func Run(ctx context.Context, env *config.Env, args []string, watch bool, out *o
 		}
 	}
 	switch sub {
-	case "status", "logs":
-	case "check", "install", "remove":
-		out.Die("watchdog " + sub + " is not ported to Go yet")
-		return 1
+	case "status", "logs", "check", "install", "remove":
 	default:
-		out.Die(fmt.Sprintf("usage: cg watchdog [status|check|logs|install|remove]"))
+		out.Die("usage: cg watchdog [status|check|logs [--watch]|install|remove]")
 		return 1
 	}
 	r, err := NewReader(ctx, env)
 	if err != nil {
 		out.Die(err.Error())
 		return 1
+	}
+	if sub == "check" || sub == "install" || sub == "remove" {
+		return mutate(ctx, env, r, sub, out)
 	}
 	if sub == "logs" {
 		return Logs(ctx, r, watch, out.Stdout)

@@ -22,6 +22,7 @@ import (
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/hostcmd"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/librarycmd"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/machines"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/notify"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/quota"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/regions"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/remote"
@@ -153,6 +154,8 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			fmt.Fprintf(stdout, "  cg %-10s %s\n", c.Path[0], c.Summary)
 		}
 		return 0
+	case "notify":
+		return notify.Send(ctx, nil, config.Load(get, repoDir(get)), out)
 	case "games":
 		return games.Run(ctx, config.Load(get, repoDir(get)), args, out)
 	case "aws":
