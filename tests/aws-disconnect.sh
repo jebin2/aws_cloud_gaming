@@ -95,9 +95,10 @@ case $a in
     fi; : ;;
   *delete-snapshot*) q snap-7 && { [[ -n ${SNAP_STUCK:-} ]] && exit 1; rm -f "$S/oldsnap"; }; : ;;
   *"s3api head-bucket"*)
+    [[ -n ${S3_DENIED:-} ]] && { echo "An error occurred (403) when calling the HeadBucket operation: Forbidden" >&2; exit 254; }
     q "$HERE" && [[ -f $S/here ]] && exit 0
     q "$OLD" && [[ -f $S/old ]] && exit 0
-    exit 254 ;;
+    echo "An error occurred (404) when calling the HeadBucket operation: Not Found" >&2; exit 254 ;;
   *"s3api list-buckets"*) n=""; [[ -f $S/here ]] && n="$HERE"; [[ -f $S/old ]] && n="$n $OLD"; echo "${n# }" ;;
   *get-bucket-location*) q "$OLD" && echo ap-south-1 || echo ap-south-2 ;;
   *"s3 ls"*)
@@ -134,7 +135,7 @@ chmod +x "$T/bin/aws"
 cgr() { # cgr <args...> - cg in the sandbox, its output, then rc=N
   ( cd "$T/repo" && env -i PATH="$T/bin:$PATH" HOME="$T/home" CG_COLOR=never CG_INR_PER_USD=88 CG_SLEEP_PCT=1 \
       CG_PRICES_FILE="$OLDPWD/tests/prices.env" S="$S" HERE="$HERE" OLD="$OLD" \
-      AWS_DOWN="${AWS_DOWN:-}" OLD_STUCK="${OLD_STUCK:-}" BUDGET_STUCK="${BUDGET_STUCK:-}" SNAP_STUCK="${SNAP_STUCK:-}" \
+      AWS_DOWN="${AWS_DOWN:-}" S3_DENIED="${S3_DENIED:-}" OLD_STUCK="${OLD_STUCK:-}" BUDGET_STUCK="${BUDGET_STUCK:-}" SNAP_STUCK="${SNAP_STUCK:-}" \
       CG_JSON="${CG_JSON_MODE:-}" bash ./cg "$@" 2>&1; echo "rc=$?" )
 }
 env_reset() { printf 'GAME_REGION=ap-south-2\nGAME_INSTANCE_ID=i-1\nGAME_RES=1920x1080\n' > "$T/repo/.env"; }
@@ -217,6 +218,27 @@ contains "  and the final look finds it"  "$out" "still there: Disk snapshots - 
 contains "  and fails"                    "$out" "rc=1"
 check    "  AWS stays set up"             "$(region)" "1"
 check    "  but the rest went - the other region's machine and games too" "$(there)" "oldsnap"
+
+echo "6c. cg cost: the archive found without .env, and the other regions said"
+# Its bucket only came from .env, and a failed delete used to drop it from
+# there while it billed. "nothing is billing" was printed under an archive that
+# was, and no other region was looked at.
+env_reset; seed
+out=$(cgr cost)
+echo "$out" > "$T/cost.out"
+contains "the archive, by its derived name" "$out" "game library    s3://$HERE"
+lacks    "never 'nothing is billing'"     "$out" "nothing is billing"
+contains "the other regions, looked at"   "$out" "other regions:"
+contains "  the saved games left there"   "$out" "saved games     2.0 GB in ap-south-1"
+contains "  a disk"                       "$out" "disk            vol-9, 30 GB in ap-south-1"
+contains "  an image"                     "$out" "image           ami-9, 30 GB in ap-south-1"
+contains "  a loose snapshot"             "$out" "snapshot        snap-7, 20 GB in ap-south-1"
+contains "  and how to remove them"       "$out" "removed by: cg aws disconnect"
+out=$(S3_DENIED=1 cgr cost)
+contains "an archive it cannot read is said, never EMPTY" "$out" "game library    s3://$HERE  COULD NOT BE READ - An error occurred (403)"
+rm -f "$S/here"
+out=$(cgr cost)
+contains "one that does not exist is said so" "$out" "game library    none - s3://$HERE does not exist"
 
 echo "7. cg cost, with AWS refusing: says so, rather than nothing at all"
 # Every read in the report is an assignment under set -e with its error thrown

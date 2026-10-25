@@ -1999,6 +1999,44 @@ print(sum(len(p.get("games") or []) for p in d.get("places") or []))' 2>/dev/nul
 # would delete, read live, with what each bills a month. An unknown price is
 # null, never 0; "error" says AWS could not be asked, and then nothing else in
 # it can be trusted.
+# cost_elsewhere - what cg has in OTHER regions, which cg cost's report of
+# this one never looked at: saved games a region move left behind, and cg's
+# disks, images and snapshots. Each with its monthly cost where it is known.
+cost_elsewhere() {
+  local d el
+  d=$(mktemp -d)
+  el=$(library_elsewhere_json 2>/dev/null) || el=""
+  cg_storage_everywhere "$d" 2>/dev/null
+  EL="$el" D="$d" REGION="$REGION" S3="${CG_S3_USD_GB_MONTH:-}" EBS="${CG_EBS_USD_GB_MONTH:-}" \
+  SNAP="${CG_SNAPSHOT_USD_GB_MONTH:-}" python3 -I -c '
+import json, os
+here, d = os.environ["REGION"], os.environ["D"]
+def rate(k):
+    try: return float(os.environ[k])
+    except (KeyError, ValueError): return None
+def cost(gb, r): return "  ($%.2f/mo)" % (gb * r) if r is not None else ""
+def rows(f):
+    try: return [l.split("\t") for l in open(os.path.join(d, f)).read().splitlines() if l.strip()]
+    except OSError: return []
+out = []
+try: el = json.loads(os.environ["EL"] or "null")
+except ValueError: el = None
+for p in (el or {}).get("places") or []:
+    gb = (p.get("bytes") or 0) / 1073741824
+    out.append("  saved games     %.1f GB in %s%s" % (gb, p.get("region"), "  ($%.2f/mo)" % p["usd_month"] if p.get("usd_month") is not None else ""))
+for f, label, r in (("volumes", "disk", rate("EBS")), ("images", "image", rate("SNAP")), ("snapshots", "snapshot", rate("SNAP"))):
+    for x in rows(f):
+        if len(x) > 2 and x[2] != here:
+            gb = float(x[1]) if x[1].replace(".", "", 1).isdigit() else 0
+            out.append("  %-15s %s, %d GB in %s%s" % (label, x[0], gb, x[2], cost(gb, r)))
+failed = rows("failed")
+print("other regions:")
+if out: print("\n".join(out)); print("  removed by: cg aws disconnect")
+elif el is None or failed: print("  could not be read%s" % (" - " + ", ".join(r[0] for r in failed) if failed else ""))
+else: print("  nothing of cg'"'"'s")'
+  rm -rf "$d"
+}
+
 aws_inventory_json() {
   local work acct b
   work=$(mktemp -d)
@@ -2428,8 +2466,12 @@ case "$CMD" in
                fi
                stream_usage; } | cg_report ;;
   # --json is the app's view of the same single Cost Explorer call.
-  cost)      if (( JSON )); then cg_exec lib/setup cost --json; fi
-             lib/setup cost "$@" | cg_report ;;
+  # The bucket from .env, else derived: a bucket that would not delete used to
+  # drop out of .env while still billing, and cost stopped seeing it.
+  cost)      cost_bucket=$(cg_bucket 2>/dev/null) || cost_bucket=""
+             if (( JSON )); then GAME_S3_BUCKET=$cost_bucket cg_exec lib/setup cost --json; fi
+             GAME_S3_BUCKET=$cost_bucket lib/setup cost "$@" | cg_report
+             cost_elsewhere | cg_report ;;
   clean)     cg_exec lib/setup clean ;;
   destroy)   cmd_destroy "$@" ;;
   open|up)   ensure_moonlight_syskeys

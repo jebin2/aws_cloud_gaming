@@ -91,6 +91,17 @@ _login_print() { # _login_print <yes|no|""> <bytes> <pushed>
 archive_line() {
   local b="${GAME_S3_BUCKET:-}" out n sz
   [[ -n $b ]] || { printf '  game library    not set up yet - cg init creates it\n'; return; }
+  # Could it be read at all? A listing that fails prints nothing, which read as
+  # EMPTY - the reassurance this line exists to give, given when it was false.
+  local err
+  if ! err=$(aws s3api head-bucket --bucket "$b" 2>&1 >/dev/null); then
+    if [[ $err == *"Not Found"* || $err == *404* ]]; then
+      printf '  game library    none - s3://%s does not exist\n' "$b"
+    else
+      printf '  game library    s3://%s  COULD NOT BE READ - %s\n' "$b" "$(grep . <<<"$err" | tail -1)"
+    fi
+    return 0
+  fi
   # steamapps/ only. The archived Steam login is under steam/account/ and is
   # reported by login_line - counting it here announced "1 objects, 22KB" under
   # the heading "game library" for an archive holding no games whatsoever.
@@ -750,9 +761,12 @@ cost() {
   fi
   printf '  budget          %s\n' "$([[ -z $budget || $budget == None ]] && echo none || printf '$%.0f/month' "$budget")"
 
+  # Said for what it covers: this region's machine and disks. It read "nothing
+  # is billing" right under a game archive that was, and with other regions
+  # never looked at - those follow, from cg cost.
   if [[ -z $id && ${disk_gb:-0} == 0 && ${snap_gb:-0} == 0 && $imgs == 0 ]]; then
     echo
-    echo "nothing is billing - no instance, volumes, snapshots or images."
+    echo "no machine, disks, snapshots or images in $REGION."
     echo
   fi
 
