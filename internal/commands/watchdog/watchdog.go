@@ -58,7 +58,11 @@ func ArchiveText(st wd.State, days int, now time.Time) string {
 // WatcherLines are layer 3's rows in `cg watcher`: is the schedule firing, and
 // what did it last decide. Each is (kind, text).
 func WatcherLines(ctx context.Context, r *wd.Reader) [][2]string {
-	st := r.Current(ctx)
+	return RowsFor(r.Current(ctx), r.Host, r.Now())
+}
+
+// RowsFor is the same rows from a state already read.
+func RowsFor(st wd.State, host string, now time.Time) [][2]string {
 	rule := st.Rule
 	kind := "warn"
 	if rule == "ENABLED" {
@@ -68,10 +72,10 @@ func WatcherLines(ctx context.Context, r *wd.Reader) [][2]string {
 	if shown == "" {
 		shown = "not installed"
 	}
-	lines := [][2]string{{kind, fmt.Sprintf("cloud watchdog    %s  (Lambda %s, every %d min)", shown, wd.Name(r.Host), wd.EveryMin)}}
+	lines := [][2]string{{kind, fmt.Sprintf("cloud watchdog    %s  (Lambda %s, every %d min)", shown, wd.Name(host), wd.EveryMin)}}
 	switch {
 	case st.LastMS > 0:
-		lines = append(lines, [2]string{"", fmt.Sprintf("  last            %s ago: %s", wd.Age(st.LastMS, r.Now()), st.LastMsg)})
+		lines = append(lines, [2]string{"", fmt.Sprintf("  last            %s ago: %s", wd.Age(st.LastMS, now), st.LastMsg)})
 		if m := st.LastMsg; strings.Contains(m, "CANNOT QUERY AWS") || strings.Contains(m, "DENIED") || strings.Contains(m, "FAILED") {
 			lines = append(lines, [2]string{"fail", "  ^ it cannot act on your account, so layer 3 is decoration"})
 		}

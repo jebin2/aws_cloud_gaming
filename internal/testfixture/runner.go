@@ -3,6 +3,7 @@ package testfixture
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 )
 
@@ -43,4 +44,10 @@ func (r *Runner) Output(_ context.Context, name string, args ...string) ([]byte,
 		return []byte(a), nil
 	}
 	return nil, nil
+}
+
+func (r *Runner) Stream(ctx context.Context, w io.Writer, name string, args ...string) error {
+	b, err := r.Output(ctx, name, args...)
+	_, _ = w.Write(b)
+	return err
 }

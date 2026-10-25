@@ -117,6 +117,7 @@ type Scenario struct {
 	Ingress               [][3]string // protocol, port, cidr
 	KeyName               string
 	Spent                 string
+	ShutdownBehavior      string
 
 	// For the watchdog.
 	WD WatchdogState
@@ -345,6 +346,13 @@ func (e EC2) DescribeSpotInstanceRequests(context.Context, *ec2.DescribeSpotInst
 		out.SpotInstanceRequests = []ec2types.SpotInstanceRequest{{State: ec2types.SpotInstanceState(e.S.SpotRequest)}}
 	}
 	return out, nil
+}
+
+func (e EC2) DescribeInstanceAttribute(context.Context, *ec2.DescribeInstanceAttributeInput, ...func(*ec2.Options)) (*ec2.DescribeInstanceAttributeOutput, error) {
+	if err := e.S.hit("DescribeInstanceAttribute"); err != nil {
+		return nil, err
+	}
+	return &ec2.DescribeInstanceAttributeOutput{InstanceInitiatedShutdownBehavior: &ec2types.AttributeValue{Value: aws.String(e.S.ShutdownBehavior)}}, nil
 }
 
 // CloudWatch is the fake CloudWatch client.

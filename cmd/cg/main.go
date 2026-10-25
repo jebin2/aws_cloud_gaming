@@ -16,6 +16,7 @@ import (
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/cost"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/watchdog"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/watcher"
 	"github.com/jebin2/aws_cloud_gaming/internal/config"
 	"github.com/jebin2/aws_cloud_gaming/internal/contract"
 	"github.com/jebin2/aws_cloud_gaming/internal/output"
@@ -125,6 +126,13 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			fmt.Fprintf(stdout, "  cg %-10s %s\n", c.Path[0], c.Summary)
 		}
 		return 0
+	case "watcher", "guards":
+		opts, err := watcher.ParseArgs(args)
+		if err != nil {
+			out.Die(err.Error())
+			return 1
+		}
+		return watcher.Run(ctx, config.Load(get, repoDir(get)), opts, out)
 	case "watchdog":
 		watch := false
 		for _, a := range args {

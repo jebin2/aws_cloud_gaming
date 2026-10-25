@@ -120,27 +120,34 @@ func (g *Gatherer) Extras(ctx context.Context, instanceID, bucket string) Extras
 	e.Decision = watchdog.ArchiveDecision(ctx, g.Logs, g.Host, g.ExpiryDays, g.Now())
 	e.RoleBox = g.role(ctx, g.Host+"-box")
 	e.RoleWD = g.role(ctx, watchdog.Name(g.Host))
-	if instanceID != "" {
-		if r, err := g.EC2.DescribeInstances(ctx, &ec2.DescribeInstancesInput{InstanceIds: []string{instanceID}}); err == nil &&
-			len(r.Reservations) > 0 && len(r.Reservations[0].Instances) > 0 {
-			i := r.Reservations[0].Instances[0]
-			b := &Box{ID: instanceID, Lifecycle: "on-demand"}
-			if i.State != nil {
-				b.State = string(i.State.Name)
-			}
-			if i.InstanceLifecycle == "spot" {
-				b.Lifecycle = "spot"
-			}
-			if len(i.BlockDeviceMappings) > 0 && i.BlockDeviceMappings[0].Ebs != nil {
-				if v, err := g.EC2.DescribeVolumes(ctx, &ec2.DescribeVolumesInput{
-					VolumeIds: []string{aws.ToString(i.BlockDeviceMappings[0].Ebs.VolumeId)}}); err == nil && len(v.Volumes) > 0 {
-					b.DiskGB = ok2(int(aws.ToInt32(v.Volumes[0].Size)))
-				}
-			}
-			e.Stranded = g.stranded(ctx, b)
-		}
-	}
+	e.Stranded = g.StrandedFor(ctx, instanceID)
 	return e
 }
 
 func ok2(n int) Known[int] { return Known[int]{V: n, OK: true} }
+
+// StrandedFor is the stranded-spot note for the box with this id ("" for none).
+func (g *Gatherer) StrandedFor(ctx context.Context, instanceID string) *Stranded {
+	if instanceID == "" {
+		return nil
+	}
+	r, err := g.EC2.DescribeInstances(ctx, &ec2.DescribeInstancesInput{InstanceIds: []string{instanceID}})
+	if err != nil || len(r.Reservations) == 0 || len(r.Reservations[0].Instances) == 0 {
+		return nil
+	}
+	i := r.Reservations[0].Instances[0]
+	b := &Box{ID: instanceID, Lifecycle: "on-demand"}
+	if i.State != nil {
+		b.State = string(i.State.Name)
+	}
+	if i.InstanceLifecycle == "spot" {
+		b.Lifecycle = "spot"
+	}
+	if len(i.BlockDeviceMappings) > 0 && i.BlockDeviceMappings[0].Ebs != nil {
+		if v, err := g.EC2.DescribeVolumes(ctx, &ec2.DescribeVolumesInput{
+			VolumeIds: []string{aws.ToString(i.BlockDeviceMappings[0].Ebs.VolumeId)}}); err == nil && len(v.Volumes) > 0 {
+			b.DiskGB = ok2(int(aws.ToInt32(v.Volumes[0].Size)))
+		}
+	}
+	return g.stranded(ctx, b)
+}
