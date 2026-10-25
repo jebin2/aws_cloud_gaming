@@ -17,6 +17,7 @@ import (
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/cost"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/creds"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/deps"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/librarycmd"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/machines"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/quota"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/regions"
@@ -129,6 +130,16 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 	if len(args) > 0 {
 		cmd, args = args[0], args[1:]
 	}
+	// Flags are also accepted after the subcommand, which is how people
+	// actually type them.
+	for _, a := range args {
+		switch a {
+		case "--json":
+			jsonFlag = true
+		case "--watch":
+			watchFlag = true
+		}
+	}
 	switch cmd {
 	case "help":
 		fmt.Fprintln(stdout, "cg - cloud gaming (Go port, in progress)")
@@ -137,6 +148,8 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			fmt.Fprintf(stdout, "  cg %-10s %s\n", c.Path[0], c.Summary)
 		}
 		return 0
+	case "library", "lib":
+		return librarycmd.Run(ctx, config.Load(get, repoDir(get)), get, args, jsonFlag, out)
 	case "regions":
 		return regions.Run(ctx, config.Load(get, repoDir(get)), args, jsonFlag, out)
 	case "quota":

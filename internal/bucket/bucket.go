@@ -14,3 +14,10 @@ func Name(account, host, region string) string {
 	sum := sha256.Sum256([]byte(account + "-" + host + "-" + region))
 	return fmt.Sprintf("cg-library-%x", sum)[:len("cg-library-")+12]
 }
+
+// NameNoRegion is the name cg used before the region was in the hash. A bucket
+// still carrying it is cg's, and is recognised, never created.
+func NameNoRegion(account, host string) string {
+	sum := sha256.Sum256([]byte(account + "-" + host))
+	return fmt.Sprintf("cg-library-%x", sum)[:len("cg-library-")+12]
+}
