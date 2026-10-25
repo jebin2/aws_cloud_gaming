@@ -97,6 +97,46 @@ session_end_first() {
 # moonlight_flags <array-name> - the stream settings from .env as Moonlight's
 # arguments, into the named array. One copy, for every machine a stream starts
 # from: the AWS box (lib/game) and your own (lib/host.sh).
+# moonlight_gpu - on a laptop with an Intel and an NVIDIA GPU, Moonlight runs on
+# the Intel one and never touches NVIDIA's. Before it streams, Moonlight tries
+# every GPU it can find - a test window, a test decode - and a hung NVIDIA
+# driver (Xid 109, seen on one such laptop) freezes any process that opens it:
+# Moonlight sat at "connecting" and never asked the host for anything. Intel
+# decodes a game stream perfectly well. Only what is installed is set, and a
+# choice already made in the environment is left alone. Exported once, here,
+# for every Moonlight cg starts - the stream, pairing, the "is it paired" check
+# - and said in MOONLIGHT_GPU. CG_GPU_ROOT is for tests.
+moonlight_gpu() {
+  local root=${CG_GPU_ROOT:-} d drv intel="" va="" vk="" egl
+  MOONLIGHT_GPU=""
+  if [[ -n ${__GLX_VENDOR_LIBRARY_NAME:-}${__EGL_VENDOR_LIBRARY_FILENAMES:-}${LIBVA_DRIVER_NAME:-}${VK_DRIVER_FILES:-}${VK_ICD_FILENAMES:-} ]]; then
+    # Chosen already - by you, or by the app, which makes the same choice for
+    # itself before it starts cg. Said when it is this one.
+    [[ ${__GLX_VENDOR_LIBRARY_NAME:-} == mesa ]] && MOONLIGHT_GPU="the Intel GPU (NVIDIA left alone)"
+    return 0
+  fi
+  [[ -e $root/dev/nvidiactl || -e $root/proc/driver/nvidia/version ]] || return 0
+  for d in "$root"/sys/class/drm/renderD*/device/driver; do
+    drv=$(readlink -f "$d" 2>/dev/null) || continue
+    case ${drv##*/} in i915|xe) intel=1 ;; esac
+  done
+  [[ -n $intel ]] || return 0
+  egl=$root/usr/share/glvnd/egl_vendor.d/50_mesa.json
+  for vk in "$root/usr/share/vulkan/icd.d/intel_icd.$(uname -m).json" "$root/usr/share/vulkan/icd.d/intel_icd.json" ""; do
+    [[ -z $vk || -f $vk ]] && break
+  done
+  for d in "$root/usr/lib/dri" "$root/usr/lib64/dri" "$root/usr/lib/x86_64-linux-gnu/dri"; do
+    if [[ -f $d/iHD_drv_video.so ]]; then va=iHD; break; fi
+    [[ -f $d/i965_drv_video.so ]] && va=i965
+  done
+  export __GLX_VENDOR_LIBRARY_NAME=mesa
+  if [[ -f $egl ]]; then export __EGL_VENDOR_LIBRARY_FILENAMES=$egl; fi
+  if [[ -n $vk ]]; then export VK_DRIVER_FILES=$vk VK_ICD_FILENAMES=$vk; fi
+  if [[ -n $va ]]; then export LIBVA_DRIVER_NAME=$va; fi
+  MOONLIGHT_GPU="the Intel GPU (NVIDIA left alone)"
+}
+[[ $(uname -s) == Linux ]] && moonlight_gpu
+
 # No display mode: Moonlight keeps its own, full screen unless changed there. A
 # GAME_DISPLAY_MODE left in .env by the window mode that was tried and removed
 # is not passed on.
@@ -130,6 +170,7 @@ stream_play() {
   mkdir -p "${mlog%/*}"
   moonlight_flags mlf
   (( ${#mlf[@]} )) && cg_echo "    stream: ${mlf[*]}" || true
+  [[ -n ${MOONLIGHT_GPU:-} ]] && cg_echo "    decoding on $MOONLIGHT_GPU" || true
   moonlight stream ${mlf[@]+"${mlf[@]}"} "$ip" "$app" > "$mlog" 2>&1 || true
   took=$(( SECONDS - t0 ))
   if (( took < 20 )); then
