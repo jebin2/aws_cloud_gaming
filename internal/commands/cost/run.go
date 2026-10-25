@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/budgets"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
@@ -18,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	awspricing "github.com/aws/aws-sdk-go-v2/service/pricing"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
@@ -25,8 +27,10 @@ import (
 	"github.com/jebin2/aws_cloud_gaming/internal/config"
 	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
 	"github.com/jebin2/aws_cloud_gaming/internal/costreport"
+	"github.com/jebin2/aws_cloud_gaming/internal/library"
 	"github.com/jebin2/aws_cloud_gaming/internal/output"
 	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
+	"github.com/jebin2/aws_cloud_gaming/internal/storage"
 )
 
 // Options are what the command line said.
@@ -112,6 +116,7 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, 
 		return 0
 	}
 	out.Report("", in.Human(opts.Daily, ""))
+	out.Report("", otherRegions(ctx, env, get, cfg, region, rates, g.Host))
 	return 0
 }
 
@@ -150,4 +155,43 @@ func firstLine(err error) string {
 		return "no AWS access key was found on this computer"
 	}
 	return msg
+}
+
+// otherRegions reads what cg has in the regions this report did not look at.
+func otherRegions(ctx context.Context, env *config.Env, get config.Lookup, cfg aws.Config, here string, rates pricing.Rates, host string) string {
+	regions := []string{here}
+	if o, err := ec2.NewFromConfig(cfg).DescribeRegions(ctx, &ec2.DescribeRegionsInput{}); err == nil {
+		regions = nil
+		for _, r := range o.Regions {
+			regions = append(regions, aws.ToString(r.RegionName))
+		}
+	}
+	st := storage.Scan(ctx, regions, func(region string) *costfacts.Gatherer {
+		c, err := awscfg.New(ctx, region)
+		if err != nil {
+			return &costfacts.Gatherer{EC2: failingEC2{}, Host: host, TagKey: config.TagKey}
+		}
+		return &costfacts.Gatherer{EC2: ec2.NewFromConfig(c), Host: host, TagKey: config.TagKey}
+	})
+	account := ""
+	if id, err := sts.NewFromConfig(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err == nil {
+		account = aws.ToString(id.Account)
+	}
+	us, _ := awscfg.New(ctx, "us-east-1")
+	products := pricing.SDKProducts{Client: awspricing.NewFromConfig(us)}
+	popts := pricing.Options{Getenv: env.Get, Source: pricing.AWSSource{API: products}}
+	lib := library.Library{S3: &library.AWSStore{Home: here}, Host: host, Region: here, Account: account,
+		Bucket: env.Get("GAME_S3_BUCKET"), S3USD: rates.S3GBMonth, INR: rates.INRPerUSD}
+	el := lib.ReadElsewhere(ctx, library.SSMParams{Client: ssm.NewFromConfig(cfg)},
+		func(ctx context.Context, region, key string) *float64 { return pricing.For(ctx, popts, region, key) },
+		env.Int("GAME_ARCHIVE_EXPIRY_DAYS"))
+	return OtherRegions(el, st, here, rates)
+}
+
+// failingEC2 is a region whose client could not even be built: every read of it
+// fails, so the region is reported as unreadable rather than empty.
+type failingEC2 struct{ costfacts.EC2API }
+
+func (failingEC2) DescribeVolumes(context.Context, *ec2.DescribeVolumesInput, ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+	return nil, fmt.Errorf("no client for the region")
 }

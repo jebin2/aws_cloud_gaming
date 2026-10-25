@@ -285,3 +285,38 @@ func parseFloat(s string) *float64 {
 	}
 	return &v
 }
+
+// Owned is what cg owns in one region: the disks it left behind (and the legacy
+// games volume), its images with the snapshots behind them, and its tagged
+// snapshots - every one of them either tagged cg:host=<host> or named the exact
+// way cg named them before the tag. A failed read of any of the three fails the
+// whole answer: "nothing of cg's" must never be said about a region AWS would
+// not answer for.
+func (g *Gatherer) Owned(ctx context.Context) (vols []Volume, imgs []Image, snaps []Snapshot, err error) {
+	if g.TagKey == "" {
+		g.TagKey = "cg:host"
+	}
+	if vols, err = g.ownedVolumes(ctx, true); err != nil {
+		return nil, nil, nil, err
+	}
+	if imgs, err = g.images(ctx); err != nil {
+		return nil, nil, nil, err
+	}
+	loose, err := g.taggedSnapshots(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	// A snapshot that backs one of those images goes with it; the rest are loose.
+	backing := map[string]bool{}
+	for _, im := range imgs {
+		for _, s := range im.Snapshots {
+			backing[s.ID] = true
+		}
+	}
+	for _, s := range loose {
+		if !backing[s.ID] {
+			snaps = append(snaps, s)
+		}
+	}
+	return vols, imgs, snaps, nil
+}
