@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
 	"github.com/jebin2/aws_cloud_gaming/internal/costdaily"
 	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
 	"github.com/jebin2/aws_cloud_gaming/internal/costreport"
@@ -24,6 +25,10 @@ type Inputs struct {
 	BitrateKBPS    float64
 	Now            time.Time
 	CacheEgress    costreport.Cache
+	// Extras are the lines cost borrows from the status report: the Steam
+	// login, the archive countdown, the IAM roles and a stranded spot box. Nil
+	// leaves them out.
+	Extras *status.Extras
 }
 
 func (in Inputs) instance() *costfacts.Instance {
@@ -150,6 +155,16 @@ func (in Inputs) resources() string {
 			f.Legacy.V.ID, f.Legacy.V.GB, f.Legacy.V.AZ, cost)
 	} else {
 		b.WriteString(in.archiveLine())
+		if x := in.Extras; x != nil {
+			if f.Bucket.Name != "" {
+				b.WriteString(status.LoginLine(x.Login, x.Bytes, x.Pushed))
+			}
+			// The countdown belongs here too: this is the command people run
+			// while thinking about money, and the archive is what still bills.
+			fmt.Fprintf(&b, "  game archive    %s\n", x.Decision)
+			b.WriteString(status.RoleLines(x.RoleBox, x.RoleWD, in.Host))
+			b.WriteString(status.StrandedLines(x.Stranded, in.Rates))
+		}
 	}
 	switch {
 	case !f.Budget.OK:

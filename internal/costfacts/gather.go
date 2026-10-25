@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
+	"github.com/jebin2/aws_cloud_gaming/internal/bucket"
 	"github.com/jebin2/aws_cloud_gaming/internal/costdaily"
 )
 
@@ -55,8 +56,9 @@ type Gatherer struct {
 	STS        STSAPI
 
 	Host   string
+	Region string
 	TagKey string
-	Bucket string // the archive bucket, "" if none is known
+	Bucket string // the archive bucket; derived from the account when empty
 	EnvID  string // GAME_INSTANCE_ID, which CloudWatch can still count after a destroy
 	Now    func() time.Time
 }
@@ -142,6 +144,11 @@ func (g *Gatherer) Gather(ctx context.Context) (Facts, error) {
 		return f, &AWSRefused{err}
 	}
 	f.Account = ok(aws.ToString(id.Account))
+	// The bucket from .env, else derived: a bucket that would not delete used to
+	// drop out of .env while still billing, and cost stopped seeing it.
+	if g.Bucket == "" && g.Region != "" && f.Account.V != "" {
+		g.Bucket = bucket.Name(f.Account.V, g.Host, g.Region)
+	}
 
 	f.Instance = g.instance(ctx)
 	// Every volume and snapshot bills, attached or not - orphans are the classic

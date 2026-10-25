@@ -11,14 +11,17 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/budgets"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/freetier"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	awspricing "github.com/aws/aws-sdk-go-v2/service/pricing"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
 	"github.com/jebin2/aws_cloud_gaming/internal/config"
 	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
 	"github.com/jebin2/aws_cloud_gaming/internal/costreport"
@@ -68,7 +71,7 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, 
 		EC2: ec2.NewFromConfig(cfg), CloudWatch: cloudwatch.NewFromConfig(cfg),
 		CE: costexplorer.NewFromConfig(us), Budgets: budgets.NewFromConfig(us),
 		FreeTier: freetier.NewFromConfig(us), S3: s3.NewFromConfig(cfg), STS: sts.NewFromConfig(cfg),
-		Host: env.Host(), TagKey: config.TagKey, Bucket: env.Get("GAME_S3_BUCKET"), EnvID: env.Get("GAME_INSTANCE_ID"),
+		Host: env.Host(), Region: region, TagKey: config.TagKey, Bucket: env.Get("GAME_S3_BUCKET"), EnvID: env.Get("GAME_INSTANCE_ID"),
 	}
 	facts, err := g.Gather(ctx)
 	if err != nil {
@@ -90,6 +93,13 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, 
 	// spot box is priced at the spot price, already read with the facts.
 	if inst := in.instance(); inst == nil || inst.Lifecycle != "spot" {
 		in.OnDemandRate = pricing.OnDemandHourly(ctx, products, in.MachineType(), region)
+	}
+
+	if !opts.JSON {
+		sg := &status.Gatherer{EC2: ec2.NewFromConfig(cfg), S3: g.S3, IAM: iam.NewFromConfig(cfg), Logs: cloudwatchlogs.NewFromConfig(cfg),
+			Host: env.Host(), ExpiryDays: env.Int("GAME_ARCHIVE_EXPIRY_DAYS"), Now: time.Now}
+		x := sg.Extras(ctx, env.Get("GAME_INSTANCE_ID"), facts.Bucket.Name)
+		in.Extras = &x
 	}
 
 	if opts.JSON {

@@ -30,16 +30,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
 
+	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
 	"github.com/jebin2/aws_cloud_gaming/internal/local"
 	"github.com/jebin2/aws_cloud_gaming/internal/session"
 	"github.com/jebin2/aws_cloud_gaming/internal/watchdog"
 )
 
-// Known is a value and whether it could be read.
-type Known[T any] struct {
-	V  T
-	OK bool
-}
+// Known is a value and whether it could be read; the same type cost uses.
+type Known[T any] = costfacts.Known[T]
 
 func ok[T any](v T) Known[T] { return Known[T]{V: v, OK: true} }
 

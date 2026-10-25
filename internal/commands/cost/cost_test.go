@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
 	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
 	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
 	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
@@ -237,4 +238,30 @@ func TestOneCostExplorerCall(t *testing.T) {
 	if s.Calls["GetCostAndUsage"] != 1 {
 		t.Errorf("Cost Explorer bills $0.01 a call; made %d", s.Calls["GetCostAndUsage"])
 	}
+}
+
+func TestTheLinesBorrowedFromStatus(t *testing.T) {
+	s := box(false)
+	s.Instances = nil
+	s.Volumes = nil
+	in := inputs(gather(t, s), nil)
+	in.Extras = &status.Extras{Login: costfacts.Known[bool]{V: false, OK: true},
+		Decision: "kept - last used 16h ago; deleted in 6d 7h unless a box is launched  (checked 6 min ago)",
+		RoleBox:  costfacts.Known[bool]{V: true, OK: true}, RoleWD: costfacts.Known[bool]{V: true, OK: true}}
+	out := in.Human(false, "")
+	has(t, out, "steam login     none archived - a new box will ask you to sign in",
+		"game archive    kept - last used 16h ago; deleted in 6d 7h unless a box is launched  (checked 6 min ago)",
+		"instance role   gamevps-box", "watchdog role   gamevps-cloud-watchdog")
+	// In the order the Bash printed them: library, login, countdown, roles, budget.
+	order := []string{"game library", "steam login", "game archive", "instance role", "watchdog role", "budget"}
+	last := -1
+	for _, k := range order {
+		i := strings.Index(out, k)
+		if i < last {
+			t.Errorf("%q is out of order", k)
+		}
+		last = i
+	}
+	in.Extras = nil
+	lacks(t, in.Human(false, ""), "steam login", "instance role")
 }

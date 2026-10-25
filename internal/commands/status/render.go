@@ -211,52 +211,10 @@ func (v View) resources(b *strings.Builder) {
 		fmt.Fprintf(b, "  game library    s3://%s  %d objects, %s%s\n", a.Bucket, a.Objects, format.IEC(a.Bytes), usd)
 	}
 	if a.Bucket != "" {
-		switch {
-		case !a.Login.Present.OK:
-			// Unknown is its own answer. Saying "none" because the listing
-			// failed is the lie this file keeps having to unlearn.
-			b.WriteString("  steam login     unknown - the archive could not be listed\n")
-		case a.Login.Present.V:
-			size := ""
-			if a.Login.Bytes > 0 {
-				size = ", " + format.IEC(a.Login.Bytes)
-			}
-			fmt.Fprintf(b, "  steam login     archived%s - a new box comes up signed in  (cg library account)\n", size)
-			if a.Login.Pushed != "" {
-				fmt.Fprintf(b, "                  pushed %s\n", a.Login.Pushed)
-			}
-		default:
-			b.WriteString("  steam login     none archived - a new box will ask you to sign in\n")
-		}
+		b.WriteString(LoginLine(a.Login.Present, a.Login.Bytes, a.Login.Pushed))
 	}
-	// Status used to show no IAM at all, and that is how a live access key
-	// survived `cg destroy --all` unnoticed: anything that can act on the
-	// account, or cost money, belongs in a status view.
-	role := func(k Known[bool], label, name, what string) {
-		switch {
-		case !k.OK:
-			fmt.Fprintf(b, "  %s ? (AWS could not be asked)\n", label)
-		case k.V:
-			fmt.Fprintf(b, "  %s %s  (%s)\n", label, name, what)
-		default:
-			fmt.Fprintf(b, "  %s none - cg init creates it\n", label)
-		}
-	}
-	role(f.RoleBox, "instance role  ", v.Host+"-box", "lets the box read/write its library bucket")
-	role(f.RoleWatchdog, "watchdog role  ", v.Host+"-cloud-watchdog", "the cloud watchdog: ends only the "+v.Host+" box")
-	if s := f.Stranded; s != nil {
-		fmt.Fprintf(b, "  STRANDED       this stopped spot box can never start again (request: %s)\n", s.Request)
-		g := float64(s.GB)
-		switch {
-		case v.Rates.EBSGBMonth == nil:
-			fmt.Fprintf(b, "                 its %d GB root volume still bills, every month\n", s.GB)
-		case v.Rates.INRPerUSD == nil:
-			fmt.Fprintf(b, "                 its %d GB root volume still bills $%.2f/mo\n", s.GB, g**v.Rates.EBSGBMonth)
-		default:
-			fmt.Fprintf(b, "                 its %d GB root volume still bills $%.2f/mo (INR %.0f)\n", s.GB, g**v.Rates.EBSGBMonth, g**v.Rates.EBSGBMonth**v.Rates.INRPerUSD)
-		}
-		b.WriteString("                 reclaim it: cg destroy\n")
-	}
+	b.WriteString(RoleLines(f.RoleBox, f.RoleWatchdog, v.Host))
+	b.WriteString(StrandedLines(f.Stranded, v.Rates))
 }
 
 func orQ(k Known[string]) string {
