@@ -146,7 +146,7 @@ const STATUS = {
       "elastic_ips": 0,
       "images": 0,
       "key_pair": "gamevps",
-      "security_group": "sg-05822edde423b6956",
+      "security_group": "sg-0123456789abcdef0",
       "snapshots": 0,
       "volumes_gb": 50
     },

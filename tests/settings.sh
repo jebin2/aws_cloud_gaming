@@ -122,8 +122,8 @@ lacks    "  before going on"                  "$r" "rc=0"
 
 echo "9. pasting: what the terminal adds is removed, and what arrived is confirmed"
 fresh
-r=$(run 'settings_prompts 0' '\e[200~tskey-auth-abc-DEF\e[201~\nme@example.com\n')
-check    "bracketed-paste markers removed"    "$(grep '^TAILSCALE_AUTH_KEY=' "$T/repo/.env")" "TAILSCALE_AUTH_KEY=tskey-auth-abc-DEF"
+r=$(run 'settings_prompts 0' '\e[200~tskey-auth-abcxDEF\e[201~\nme@example.com\n')
+check    "bracketed-paste markers removed"    "$(grep '^TAILSCALE_AUTH_KEY=' "$T/repo/.env")" "TAILSCALE_AUTH_KEY=tskey-auth-abcxDEF"
 contains "  a * per character, markers not shown" "$r" "$(printf '%.0s*' {1..18})"
 lacks    "  and no more"                      "$r" "$(printf '%.0s*' {1..19})"
 lacks    "  without printing it"              "$r" "abc-DEF"

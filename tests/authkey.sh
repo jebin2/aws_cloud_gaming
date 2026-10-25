@@ -23,6 +23,13 @@ contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 lacks()    { if [[ $2 != *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: output has '$3'"; fail=$((fail+1)); fi; }
 
+# The fake keys, each put together from two halves so that no line here holds
+# one whole: GitHub's secret scanning reads tskey-<kind>-<id>-<secret> as a real
+# Tailscale key and opens an alert for every one in the repository.
+k=tskey
+OLD_KEY="$k-auth-kOLD1-sec" NEW_KEY="$k-auth-kNEW111CNTRL-freshsecret" API_TOKEN="$k-api-tok1-secret"
+ABC_KEY="$k-auth-kABC123CNTRL-thesecret" WHAT_TOKEN="$k-api-kWHAT456-thesecret"
+
 mkdir -p "$T/bin" "$T/home"
 for b in bash sh env grep sed awk python3 cat cut tr sort head tail date stat \
          mktemp rm mv cp chmod id uname dirname basename readlink wc find sleep \
@@ -49,7 +56,7 @@ case "$method $url" in
   *"DELETE"*/keys/*) printf '200'; exit 0 ;;
   *POST*/keys)
     if [[ -n ${POST_FAIL:-} ]]; then printf '%s\n%s' "${POST_BODY:-{\"message\":\"calling user does not have access\"}}" "$POST_FAIL"; exit 0; fi
-    printf '%s\n200' "${POST_BODY:-{\"key\":\"tskey-auth-kNEW111CNTRL-freshsecret\",\"id\":\"kNEW111CNTRL\"}}"; exit 0 ;;
+    printf '%s\n200' "${POST_BODY:-{\"key\":\"$NEW_KEY\",\"id\":\"kNEW111CNTRL\"}}"; exit 0 ;;
   *GET*/keys/*)
     [[ ${KEYGET:-} == 404 ]] && { printf '{"message":"key not found"}\n404'; exit 0; }
     [[ ${KEYGET:-} == 401 ]] && { printf '{"message":"API token invalid"}\n401'; exit 0; }
@@ -66,7 +73,8 @@ run() { # run '<code>' - with lib/ loaded and the fake API on PATH
   ( cd "$PWD" && env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=88 PATH="$T/bin" HOME="$T/home" CG_COLOR=never \
       API_LOG="$T/apilog" KEYGET="${KEYGET:-}" POST_FAIL="${POST_FAIL:-}" \
       POST_BODY="${POST_BODY:-}" \
-      TAILSCALE_API_KEY="${TAILSCALE_API_KEY-tskey-api-tok1-secret}" \
+      TAILSCALE_API_KEY="${TAILSCALE_API_KEY-$API_TOKEN}" \
+      OLD_KEY="$OLD_KEY" NEW_KEY="$NEW_KEY" ABC_KEY="$ABC_KEY" WHAT_TOKEN="$WHAT_TOKEN" \
       TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY-}" \
       CG_ENV_FILE="$T/home/.env" \
       bash -c 'source lib/common.sh; source lib/env-file.sh; source lib/laptop.sh; '"$1" 2>&1 )
@@ -78,27 +86,27 @@ d = int(sys.argv[1])
 print((datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=d)).isoformat().replace('+00:00','Z'))" "$1"; }
 
 echo "1. the id, which is what the API knows a key by"
-check "an auth key"      "$(run 'tskey_auth_id tskey-auth-kABC123CNTRL-thesecret')" "kABC123CNTRL"
-check "  an api token"   "$(run 'tskey_auth_id tskey-api-kWHAT456-thesecret')"      "kWHAT456"
+check "an auth key"      "$(run 'tskey_auth_id "$ABC_KEY"')" "kABC123CNTRL"
+check "  an api token"   "$(run 'tskey_auth_id "$WHAT_TOKEN"')"      "kWHAT456"
 check "  and nothing"    "$(run 'tskey_auth_id ""')"                                 ""
 
 echo "2. a key that is still good is kept"
 KEYGET="{\"id\":\"kOLD1\",\"expires\":\"$(at_days 60)\"}"
-out=$(TAILSCALE_AUTH_KEY=tskey-auth-kOLD1-sec run 'tskey_auth_ensure gamevps')
+out=$(TAILSCALE_AUTH_KEY=$OLD_KEY run 'tskey_auth_ensure gamevps')
 contains "it says so"              "$out" "still valid"
-contains "  and hands it back"     "$out" "tskey-auth-kOLD1-sec"
+contains "  and hands it back"     "$out" "$OLD_KEY"
 lacks    "  minting nothing"       "$(cat "$T/apilog")" "POST"
 lacks    "  and deleting nothing"  "$(cat "$T/apilog")" "DELETE"
 
 echo "3. an expired key is replaced, and the dead one deleted"
 rm -f "$T/apilog"
 KEYGET="{\"id\":\"kOLD1\",\"expires\":\"$(at_days -1)\"}"
-out=$(TAILSCALE_AUTH_KEY=tskey-auth-kOLD1-sec run 'tskey_auth_ensure gamevps')
+out=$(TAILSCALE_AUTH_KEY=$OLD_KEY run 'tskey_auth_ensure gamevps')
 contains "it says what happened"   "$out" "has expired - replacing it"
 contains "  mints a new one"       "$(cat "$T/apilog")" "POST https://api.tailscale.com/api/v2/tailnet/-/keys"
 contains "  deletes the old one"   "$(cat "$T/apilog")" "DELETE https://api.tailscale.com/api/v2/tailnet/-/keys/kOLD1"
 contains "  and says so"           "$out" "the old key was deleted"
-contains "  handing back the new"  "$out" "tskey-auth-kNEW111CNTRL-freshsecret"
+contains "  handing back the new"  "$out" "$NEW_KEY"
 # Order matters: deleting first and then failing to mint would leave the laptop
 # with no key at all.
 check "the new key exists before the old one goes" \
@@ -111,19 +119,19 @@ rm -f "$T/apilog"
 KEYGET="{\"id\":\"kOLD1\",\"expires\":\"$(python3 -I -c '
 import datetime
 print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(minutes=20)).isoformat().replace("+00:00","Z"))')\"}"
-out=$(TAILSCALE_AUTH_KEY=tskey-auth-kOLD1-sec run 'tskey_auth_ensure gamevps')
+out=$(TAILSCALE_AUTH_KEY=$OLD_KEY run 'tskey_auth_ensure gamevps')
 contains "it is replaced too"      "$out" "replacing it"
 
 echo "5. a key the console deleted"
 rm -f "$T/apilog"
 KEYGET=404
-out=$(TAILSCALE_AUTH_KEY=tskey-auth-kOLD1-sec run 'tskey_auth_ensure gamevps')
+out=$(TAILSCALE_AUTH_KEY=$OLD_KEY run 'tskey_auth_ensure gamevps')
 contains "it says it is gone"      "$out" "no longer exists - replacing it"
 contains "  and mints one"         "$(cat "$T/apilog")" "POST"
 
 echo "6. a revoked key"
 KEYGET='{"id":"kOLD1","invalid":true,"expires":"2099-01-01T00:00:00Z"}'
-out=$(TAILSCALE_AUTH_KEY=tskey-auth-kOLD1-sec run 'tskey_auth_ensure gamevps')
+out=$(TAILSCALE_AUTH_KEY=$OLD_KEY run 'tskey_auth_ensure gamevps')
 contains "invalid counts as expired" "$out" "expired - replacing it"
 
 echo "7. no key stored at all"
@@ -133,15 +141,15 @@ contains "one is minted"           "$out" "minted a Tailscale auth key"
 contains "  and saved"             "$out" "saved"
 contains "  from a POST"           "$(cat "$T/apilog")" "POST"
 lacks    "  with nothing to delete" "$(cat "$T/apilog")" "DELETE"
-contains "it is written to .env"   "$(cat "$T/home/.env" 2>/dev/null)" "TAILSCALE_AUTH_KEY=tskey-auth-kNEW111CNTRL-freshsecret"
+contains "it is written to .env"   "$(cat "$T/home/.env" 2>/dev/null)" "TAILSCALE_AUTH_KEY=$NEW_KEY"
 
 echo "8. the API cannot be asked: the stored key is used, not thrown away"
 # A flat network would otherwise delete a working key and then fail to mint its
 # replacement - leaving nothing at all.
 rm -f "$T/apilog"
 KEYGET="" POST_FAIL=000
-out=$(TAILSCALE_API_KEY= TAILSCALE_AUTH_KEY=tskey-auth-kOLD1-sec run 'tskey_auth_ensure gamevps'; echo "rc=$?")
-contains "the stored key comes back" "$out" "tskey-auth-kOLD1-sec"
+out=$(TAILSCALE_API_KEY= TAILSCALE_AUTH_KEY=$OLD_KEY run 'tskey_auth_ensure gamevps'; echo "rc=$?")
+contains "the stored key comes back" "$out" "$OLD_KEY"
 lacks    "  nothing is deleted"      "$(cat "$T/apilog" 2>/dev/null)" "DELETE"
 
 echo "9. no token and no key: the build has to ask"
@@ -153,7 +161,7 @@ echo "10. the mint is refused"
 # untagged key, and cg cannot guess what tag to ask for.
 rm -f "$T/apilog"
 KEYGET=404 POST_FAIL=403 POST_BODY='{"message":"requested tags [] are invalid or not permitted"}'
-out=$(TAILSCALE_AUTH_KEY=tskey-auth-kOLD1-sec run 'tskey_auth_ensure gamevps; echo "rc=$?"')
+out=$(TAILSCALE_AUTH_KEY=$OLD_KEY run 'tskey_auth_ensure gamevps; echo "rc=$?"')
 contains "it says it could not"    "$out" "could not mint an auth key (403)"
 contains "  quoting Tailscale"     "$out" "not permitted"
 contains "  and where to make one" "$out" "login.tailscale.com/admin/settings/keys"
@@ -164,8 +172,8 @@ lacks    "nothing was deleted"     "$(cat "$T/apilog")" "DELETE"
 echo "11. the key is never printed where it can be read back"
 rm -f "$T/apilog"
 KEYGET="{\"id\":\"kOLD1\",\"expires\":\"$(at_days 60)\"}"
-out=$(TAILSCALE_AUTH_KEY=tskey-auth-kOLD1-sec run 'tskey_auth_ensure gamevps >/dev/null')
-lacks "the log does not carry it"  "$out" "tskey-auth-kOLD1-sec"
+out=$(TAILSCALE_AUTH_KEY=$OLD_KEY run 'tskey_auth_ensure gamevps >/dev/null')
+lacks "the log does not carry it"  "$out" "$OLD_KEY"
 
 echo "12. what the build does with all this"
 s=$(cat lib/settings.sh)
@@ -178,23 +186,23 @@ echo "13. every build checks the key first, and stops when it cannot"
 # A key revoked with its token went unchecked - no token, no check - and the
 # box it was given never joined, half an hour into the bill.
 KEYGET="{\"id\":\"kOLD1\",\"expires\":\"$(at_days 60)\"}"
-out=$(run 'tskey_preflight tskey-auth-kOLD1-sec; echo "rc=$?"')
+out=$(run 'tskey_preflight "$OLD_KEY"; echo "rc=$?"')
 contains "a working key passes"        "$out" "the Tailscale auth key works"
 contains "  and the build goes on"     "$out" "rc=0"
-out=$(TAILSCALE_API_KEY= run 'tskey_preflight tskey-auth-kOLD1-sec; echo "rc=$?"')
+out=$(TAILSCALE_API_KEY= run 'tskey_preflight "$OLD_KEY"; echo "rc=$?"')
 contains "no token: it stops"          "$out" "no Tailscale API token is saved"
 contains "  before anything launched"  "$out" "Nothing was launched"
 lacks    "  and goes no further"       "$out" "rc=0"
 KEYGET=401
-out=$(run 'tskey_preflight tskey-auth-kOLD1-sec; echo "rc=$?"')
+out=$(run 'tskey_preflight "$OLD_KEY"; echo "rc=$?"')
 contains "a refused token: it says so" "$out" "Tailscale refused the API token"
 lacks    "  and stops"                 "$out" "rc=0"
 KEYGET=down
-out=$(run 'tskey_preflight tskey-auth-kOLD1-sec; echo "rc=$?"')
+out=$(run 'tskey_preflight "$OLD_KEY"; echo "rc=$?"')
 contains "Tailscale unreachable"       "$out" "api.tailscale.com did not answer"
 lacks    "  stops too"                 "$out" "rc=0"
 KEYGET=404
-out=$(run 'tskey_preflight tskey-auth-kOLD1-sec; echo "rc=$?"')
+out=$(run 'tskey_preflight "$OLD_KEY"; echo "rc=$?"')
 contains "a dead key stops it"         "$out" "expired or been revoked"
 lacks    "  as well"                   "$out" "rc=0"
 contains "the build runs it"           "$(cat lib/setup)" 'tskey_preflight "${GAME_TS_AUTHKEY:-}"'
@@ -209,7 +217,7 @@ lacks    "  and goes no further"       "$out" "rc=0"
 out=$(run 'tskey_need_token; echo "rc=$?"')
 contains "with a token it passes"      "$out" "rc=0"
 KEYGET='<html>sign in to this wifi</html>'
-out=$(run 'tskey_preflight tskey-auth-kOLD1-sec; echo "rc=$?"')
+out=$(run 'tskey_preflight "$OLD_KEY"; echo "rc=$?"')
 contains "an answer that is not Tailscale's, said" "$out" "answered with something that is not Tailscale's"
 lacks    "  and stops"                 "$out" "rc=0"
 
