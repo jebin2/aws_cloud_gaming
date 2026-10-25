@@ -1,0 +1,62 @@
+{
+  "days": [
+    {
+      "date": "2026-09-20",
+      "hours": 0.0,
+      "compute": 0.0,
+      "s3": 0.308,
+      "disk": 0.0,
+      "egress": 0.9,
+      "api": 0.0,
+      "other": 0.004,
+      "total": 1.212
+    }
+  ],
+  "usage": [
+    {
+      "type": "DataTransfer-Out-Bytes",
+      "qty": 110.0,
+      "usd": 0.9
+    },
+    {
+      "type": "TimedStorage-ByteHrs",
+      "qty": 13.0,
+      "usd": 0.3
+    },
+    {
+      "type": "Requests-Tier1",
+      "qty": 800.0,
+      "usd": 0.004
+    },
+    {
+      "type": "Requests-Tier2",
+      "qty": 9000.0,
+      "usd": 0.004
+    },
+    {
+      "type": "CW:Requests",
+      "qty": 400.0,
+      "usd": 0.004
+    }
+  ],
+  "total_usd": 1.212,
+  "total_inr": 107,
+  "days_elapsed": 1,
+  "days_in_month": null,
+  "projected_usd": null,
+  "projected_inr": null,
+  "hours": {
+    "on_demand": 0.0,
+    "spot": 0.0
+  },
+  "usd_per_hour": {
+    "on_demand": null,
+    "spot": null
+  },
+  "egress": {
+    "gb_used": 110.0,
+    "gb_free": 100.0,
+    "gb_left": 0.0
+  },
+  "inr_per_usd": 88.0
+}

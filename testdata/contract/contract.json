@@ -1,0 +1,21 @@
+{
+  "events": 1,
+  "runs_alone": [
+    ["init"], ["destroy"], ["open"],
+    ["library", "push"], ["library", "pull"], ["library", "forget"],
+    ["library", "clean"], ["library", "account"], ["library", "move"],
+    ["library", "reset"], ["library", "keep-for"],
+    ["creds", "set"],
+    ["creds", "tailscale", "signin"],
+    ["creds", "tailscale", "authkey"],
+    ["deps", "install"],
+    ["aws", "disconnect"]
+  ],
+  "asks": [
+    "aws-access-key-id", "aws-secret-access-key",
+    "tailscale-api-token", "tailscale-auth-key",
+    "alert-email", "session-end", "fix-go-ahead", "steam-login",
+    "clean-orphans", "delete-volume", "destroy-all", "forget-game", "forget-login",
+    "move-game", "host-sudo", "host-ssh-password", "aws-disconnect"
+  ]
+}

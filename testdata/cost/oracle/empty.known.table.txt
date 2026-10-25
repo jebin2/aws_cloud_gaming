@@ -1,0 +1,2 @@
+billed day by day (the whole AWS account, every region - lags a day):
+  nothing billed yet this month

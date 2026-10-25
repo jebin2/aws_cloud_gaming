@@ -1,0 +1,83 @@
+{
+  "days": [
+    {
+      "date": "2026-09-14",
+      "hours": 3.3,
+      "compute": 3.2,
+      "s3": 0.07,
+      "disk": 0.0,
+      "egress": 0.0,
+      "api": 0.01,
+      "other": 0.0,
+      "total": 3.28
+    },
+    {
+      "date": "2026-09-16",
+      "hours": 2.0,
+      "compute": 0.42,
+      "s3": 0.0,
+      "disk": 0.05,
+      "egress": 0.0,
+      "api": 0.0,
+      "other": 0.01,
+      "total": 0.48
+    }
+  ],
+  "usage": [
+    {
+      "type": "BoxUsage:g6.xlarge",
+      "qty": 3.3,
+      "usd": 3.2
+    },
+    {
+      "type": "SpotUsage:g6.xlarge",
+      "qty": 2.0,
+      "usd": 0.42
+    },
+    {
+      "type": "TimedStorage-ByteHrs",
+      "qty": 2.8,
+      "usd": 0.07
+    },
+    {
+      "type": "EBS:VolumeUsage.gp3",
+      "qty": 1.1,
+      "usd": 0.05
+    },
+    {
+      "type": "APIRequest",
+      "qty": 1.0,
+      "usd": 0.01
+    },
+    {
+      "type": "PublicIPv4:InUseAddress",
+      "qty": 2.0,
+      "usd": 0.01
+    },
+    {
+      "type": "DataTransfer-Out-Bytes",
+      "qty": 9.4,
+      "usd": 0.0
+    }
+  ],
+  "total_usd": 3.76,
+  "total_inr": null,
+  "days_elapsed": 3,
+  "days_in_month": 30,
+  "projected_usd": 49.2,
+  "projected_inr": null,
+  "hours": {
+    "on_demand": 3.3,
+    "spot": 2.0
+  },
+  "usd_per_hour": {
+    "on_demand": 0.9697,
+    "spot": 0.21
+  },
+  "egress": {
+    "gb_used": 9.4,
+    "gb_free": 100.0,
+    "gb_left": 90.6
+  },
+  "inr_per_usd": null
+}

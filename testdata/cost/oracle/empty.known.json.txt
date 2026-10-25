@@ -1,0 +1,24 @@
+{
+  "days": [],
+  "usage": [],
+  "total_usd": 0,
+  "total_inr": 0,
+  "days_elapsed": 0,
+  "days_in_month": null,
+  "projected_usd": null,
+  "projected_inr": null,
+  "hours": {
+    "on_demand": 0.0,
+    "spot": 0.0
+  },
+  "usd_per_hour": {
+    "on_demand": null,
+    "spot": null
+  },
+  "egress": {
+    "gb_used": 0.0,
+    "gb_free": 100.0,
+    "gb_left": 100.0
+  },
+  "inr_per_usd": 88.0
+}

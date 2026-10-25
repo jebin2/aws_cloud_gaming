@@ -1,0 +1,42 @@
+{
+  "days": [
+    {
+      "date": "2026-09-01",
+      "hours": 0.5,
+      "compute": 0.5,
+      "s3": 0.0,
+      "disk": 0.0,
+      "egress": 0.0,
+      "api": 0.0,
+      "other": 0.0,
+      "total": 0.5
+    }
+  ],
+  "usage": [
+    {
+      "type": "BoxUsage:g6.xlarge",
+      "qty": 0.5,
+      "usd": 0.5
+    }
+  ],
+  "total_usd": 0.5,
+  "total_inr": 44,
+  "days_elapsed": 1,
+  "days_in_month": null,
+  "projected_usd": null,
+  "projected_inr": null,
+  "hours": {
+    "on_demand": 0.5,
+    "spot": 0.0
+  },
+  "usd_per_hour": {
+    "on_demand": 1.0,
+    "spot": null
+  },
+  "egress": {
+    "gb_used": 0.0,
+    "gb_free": 100.0,
+    "gb_left": 100.0
+  },
+  "inr_per_usd": 88.0
+}

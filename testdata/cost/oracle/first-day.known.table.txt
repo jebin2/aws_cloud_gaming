@@ -1,0 +1,6 @@
+billed day by day (the whole AWS account, every region - lags a day):
+  DATE          HRS  COMPUTE       S3     DISK   EGRESS      API    OTHER    TOTAL     INR
+  2026-09-01    0.5     0.50        -        -        -        -        -     0.50      44
+  ----------------------------------------------------------------------------------------
+  TOTAL         0.5     0.50        -        -        -        -        -     0.50      44
+  USD before tax, and INR at 88.00 a dollar.

@@ -1,8 +1,8 @@
 # Go Migration Plan: every CLI-first command
 
-Revision: 6 (adds the pilot slice, cross-OS targets, and a looser human-text contract)
+Revision: 7 (no legacy fallback: the port completes and the Bash CLI is deleted in this branch)
 
-Status: plan for review. No Go code, scaffolding, or fixtures have been created. The current Bash
+Status: approved 2026-10-25; the pilot slice is in progress on the `go-migration-plan` branch, which is not merged to `main`. The current Bash
 CLI remains the source of truth until a phase gate passes.
 
 Scope: replace the `cg` CLI and its command surface with one Go binary. The Electron app,
@@ -18,7 +18,18 @@ verification, which stays gated and approved by the owner (section 5).
 
 ## 0. What changed in this revision
 
-### Revision 6 (this one)
+### Revision 7 (this one)
+
+- **No legacy fallback.** The owner decided (2026-10-25) that the migration is completed in the
+  `go-migration-plan` branch with no `cg-legacy` and no one-release overlap. The Bash CLI stays in
+  the tree only as the test oracle while commands are ported, and is deleted in this branch once the
+  port is complete and the real-AWS gates have passed. `main` is not touched: it keeps the Bash CLI
+  and is the rollback until the owner chooses to merge. Rules 1, 3 and 11, the definition of done,
+  15.2, decision 6 and the risks table are updated to match.
+- The consequence is that the real-AWS gates (section 5) and the contract tests are the only safety
+  net, so neither may be skipped or shortened.
+
+### Revision 6
 
 - Added a **pilot slice** (section 8.0): the module, a minimal registry, the Phase 1 basics, and
   `cost` ported with its fixtures, before the rest of Phase 0 is done. It settles layout, embed,
@@ -73,12 +84,14 @@ verification, which stays gated and approved by the owner (section 5).
 
 1. **One deployable binary, not one source file.** Split the Go source into focused packages under
    `internal/`. Final releases ship `cg` as one static binary; during the transition the package may
-   also carry `cg-legacy` and its legacy assets (section 16).
+   also carry the Bash tree as the oracle (section 16). No `cg-legacy` ships.
 2. **The CLI contract is the product.** `cg --contract`, stdout JSON, stderr NDJSON events, exit
    codes, prompts, aliases, defaults, and report content are frozen before the first command is
    ported (rule 8 says how tightly).
-3. **No big-bang cutover.** Build `cg-go` beside `cg`. Move one command at a time. Keep `cg-legacy`
-   as the rollback path until a full build/destroy/restore cycle has run against real AWS.
+3. **No big-bang port, and no legacy fallback.** Build `cg-go` beside the Bash `cg`. Move one
+   command at a time; the Bash CLI is the oracle until the port is complete, then it is deleted in
+   this branch. `main` keeps the Bash CLI until the owner merges, and that is the only rollback.
+   Nothing is merged to `main` without the owner's say-so.
 4. **No shelling out to the AWS CLI for normal operation.** Use AWS SDK for Go v2. Keep a tiny
    adapter only for a service the SDK does not cover, and isolate it behind an interface.
 5. **No shell string construction for local commands.** Use `exec.CommandContext` with argument
@@ -100,7 +113,8 @@ verification, which stays gated and approved by the owner (section 5).
 10. **Do not copy Bash structure.** Read the comments for the failures they encode, then express the
     invariant in Go and lock it with a test.
 11. **The old CLI is the migration oracle.** Until a command's phase gate passes, its current
-    behavior wins over a cleaner design.
+    behavior wins over a cleaner design. Once the port is complete the oracle is retired, and the
+    checked-in fixtures and schemas are the contract from then on.
 12. **Every intentional behavior change is recorded.** A parity exception gets a reason, a test, and
     a note in this plan. "It seemed better" is not enough.
 13. **Aliases, defaults, and flag placement are contract.** `up`, `down`, `guards`, `lib`, `types`,
@@ -166,7 +180,8 @@ The migration is done when:
   (or with only the data-only CLI-04 change if open decision 7 is lifted).
 - `go test ./...`, `go vet ./...`, race tests for concurrent command paths, and the static binary
   build all pass, for each supported OS on a real machine or runner.
-- The Bash CLI can be removed without losing a documented behavior.
+- The Bash CLI, its libraries and its shell tests are deleted in this branch without losing a
+  documented behavior. No `cg-legacy` is shipped.
 
 
 
@@ -214,7 +229,7 @@ Required artifact per command:
 | 4 | Host and no-box library | Own-machine commands and library operations that need no box work; no box lifecycle yet | 2, 3 |
 | 5 | Box lifecycle | `init`, `open`, `stop`, `pair`, `clean`, `snapshot`, on-box `library status/check/push/pull`, `games --volume --delete`, normal `destroy` work | 3, 4 |
 | 6 | Account destruction | `destroy --all`, `aws forget`, and `aws disconnect` work and fail closed; inventory hardening is included | 5 |
-| 7 | App integration and cutover | Electron drives `cg-go`; legacy route remains available | 2 for basic read screens; 4 for host and no-box library screens; 6 for default cutover |
+| 7 | App integration and cutover | Electron drives `cg`; the Bash tree is deleted when the real-AWS gates have passed | 2 for basic read screens; 4 for host and no-box library screens; 6 for default cutover |
 | W | Native Windows and macOS packaging | Each OS passes the black-box suite on a real machine or runner; installs, Moonlight/Tailscale launch, SSH keys and Stop work natively | 3 and 7 for the pieces it touches |
 
 Ordering rules:
@@ -1056,7 +1071,7 @@ Do not enable `cg-go init` by default until this phase's real-AWS test passes.
    gate real transfers on a disposable box.
 
 Phase 5 exit gate: one real build/open/pair/stop/destroy/rebuild cycle and one library restore
-succeed with `cg-go`, and `cg-legacy` remains available.
+succeed with `cg-go`.
 
 
 
@@ -1124,21 +1139,21 @@ empty.
 7. Tests: `app.sh`, `app-packaged.sh`, `app-gpu.sh`, `json-events.sh`, `ask-events.sh`,
    `interrupt.sh`, `tail-exit.sh`, `startup-gate.sh`.
 
-### 15.2 Cutover mechanics
+### 15.2 Completing the port (no legacy fallback)
 
-1. Build the Go binary as `cg-go`; keep the tracked Bash `cg` unchanged.
-2. Install `cg-legacy` as a renamed copy of the Bash entrypoint and its assets.
-3. Point a development wrapper at `cg-go` only when the read-only slice passes golden tests.
-4. Move screens in this order: status/cost/watcher, machines/sweep, config, library reads, library
+1. Build the Go binary as `cg-go` beside the Bash `cg` while commands are ported; the Bash CLI is the
+   oracle and stays unchanged.
+2. Point a development wrapper at `cg-go` only when the read-only slice passes golden tests.
+3. Move screens in this order: status/cost/watcher, machines/sweep, config, library reads, library
    writes, host, lifecycle, destruction.
-5. Keep `cg-legacy` (the Bash CLI) available for one release after Go becomes the default.
-6. Update docs and `--contract` only after the new binary is the default.
-7. Remove the Bash CLI and `cg-legacy` only after the full real-AWS cycle and an app smoke test
-   pass, and after that one-release window. Do not remove the rollback path early.
-8. Make the packaging step explicit. During the transition, the app package still ships the legacy
-   `lib`, `lambda`, `host`, `.env.example`, and embedded assets because `cg-legacy` and the existing
-   packaging tests need them. After `cg-legacy` is removed, update `tests/app.sh` and the package
-   config so the release is only the Go `cg`, not a second copy of every asset tree.
+4. When every command is ported and the Phase 5 and Phase 6 real-AWS gates have passed, in this
+   branch: rename the binary to `cg`, delete the Bash `cg`, `lib/*.sh` and `lib/*.py` that were
+   ported, and the shell tests that were replaced by Go tests. There is no `cg-legacy`.
+5. Update docs and `--contract` in the same change.
+6. The app package then ships only the Go `cg` and the embedded box-side assets (`lib/bootstrap.d`,
+   `host`, `lambda`). Update `tests/app.sh` and the package config accordingly.
+7. Merging to `main` is a separate decision for the owner. Until then `main` and its Bash CLI are
+   untouched and are the rollback.
 
 ### 15.3 Track W: native Windows and macOS
 
@@ -1249,6 +1264,7 @@ test that reads a source file, and mark each "runs against the binary", "needs a
 | Real-AWS gates cost money unexpectedly | Each gate is estimated and approved by the owner first; cheapest honest test (section 5) |
 | No human reviews every diff | Mechanical safety net: schemas, goldens, compiler, vet, race tests (rule 16) |
 | Rust temptation mid-port | Finish Go parity; keep Rust for a later host-agent decision |
+| No legacy fallback inside the branch | The real-AWS gates and contract tests may not be skipped; `main` keeps the Bash CLI until the owner merges |
 | Lambda rewrite distracts | Keep Python Lambda; port only the CLI orchestration that deploys it |
 
 
@@ -1279,25 +1295,25 @@ Use these as starting points; line numbers will move as the plan is implemented.
 
 ## 20. Open decisions
 
-These still need explicit approval. Recommendations are defaults only; none are adopted until the
-Status column says so.
+All fourteen were approved by the owner on 2026-10-25 as recommended. This migration lives on the
+`go-migration-plan` branch and is not merged to `main`.
 
 | # | Decision | Recommendation | Why | Status |
 | --- | --- | --- | --- | --- |
-| 1 | First port is CLI only, or CLI plus Lambda/watchdog runtime? | CLI only | Keeps the risky contract in one language; Lambda already works | Pending |
-| 2 | "One file" means source or binary? | One binary | A 10k-line source file would make AI maintenance worse | Pending |
-| 3 | Embed shell assets or ship beside the binary? | Embed, with `go.mod` and the embedding package at the repository root | One artifact; avoids missing `host/` or `lib/` at runtime; `go:embed` cannot reach parent directories | Pending |
-| 4 | Preserve human output byte-for-byte or by content? | By content: exact JSON, NDJSON, exit codes and prompt IDs; human text on fields and wording, not spacing | Byte-exact text is expensive and brittle; the app depends on the machine contracts | Pending |
-| 5 | Fix audit bugs during the port or after parity? | Fix the remaining fail-closed cost paths and COST-07 only-sub-cent branch in the port; preserve the COST-06/08 fixes already landed; everything else after parity | They are exactly the bugs the port must not preserve, and the new commits only partly closed them | Pending |
-| 6 | Cut over `destroy --all` immediately or one release later? | One release later | Normal destroy must be proven first | Pending |
-| 7 | Freeze the Electron renderer? | Yes, except CLI-01/03 in the main process | UI rewrite is a separate project | Pending |
-| 8 | Accept global flags after the subcommand for all flags? | Yes, as a documented parity exception | Current partial parsing already causes argument leaks | Pending |
-| 9 | Is Rust still wanted for the host agent? | Defer | One language until parity; revisit with measured data | Pending |
-| 10 | Are undocumented forms such as `aws disconnect --plan` public? | Treat `--plan` as internal but tested | `aws inventory` is the public read path | Pending |
-| 11 | Which operating systems? | Linux and macOS first, then native Windows; WSL stays until then; the AWS box and own servers stay Linux | The goal is other people on every OS; both first targets are Unix; native Windows needs a real machine to test | Pending |
-| 12 | What should `--json` do on mutating `deps install` / `creds set` forms? | Reject `--json` on mutating forms; JSON only for reads | The current dispatch prints status JSON and silently skips the mutation | Pending |
-| 13 | Start with the pilot slice before the full Phase 0? | Yes: module, minimal registry, Phase 1 basics, and `cost` first; review before continuing | Proves layout, embed, harness and app boundary cheaply on a read-only command | Pending |
-| 14 | Who approves a real-AWS gate? | The owner, each time, with an estimate first | The port is free to write; the real-AWS cycles bill | Pending |
+| 1 | First port is CLI only, or CLI plus Lambda/watchdog runtime? | CLI only | Keeps the risky contract in one language; Lambda already works | Approved 2026-10-25 |
+| 2 | "One file" means source or binary? | One binary | A 10k-line source file would make AI maintenance worse | Approved 2026-10-25 |
+| 3 | Embed shell assets or ship beside the binary? | Embed, with `go.mod` and the embedding package at the repository root | One artifact; avoids missing `host/` or `lib/` at runtime; `go:embed` cannot reach parent directories | Approved 2026-10-25 |
+| 4 | Preserve human output byte-for-byte or by content? | By content: exact JSON, NDJSON, exit codes and prompt IDs; human text on fields and wording, not spacing | Byte-exact text is expensive and brittle; the app depends on the machine contracts | Approved 2026-10-25 |
+| 5 | Fix audit bugs during the port or after parity? | Fix the remaining fail-closed cost paths and COST-07 only-sub-cent branch in the port; preserve the COST-06/08 fixes already landed; everything else after parity | They are exactly the bugs the port must not preserve, and the new commits only partly closed them | Approved 2026-10-25 |
+| 6 | Cut over `destroy --all` immediately or one release later? | Superseded by the no-fallback decision: there is no release overlap, so `destroy --all` is ported last and gated on a disposable-account run | Normal destroy must be proven first | Approved 2026-10-25; revised 2026-10-25 |
+| 7 | Freeze the Electron renderer? | Yes, except CLI-01/03 in the main process | UI rewrite is a separate project | Approved 2026-10-25 |
+| 8 | Accept global flags after the subcommand for all flags? | Yes, as a documented parity exception | Current partial parsing already causes argument leaks | Approved 2026-10-25 |
+| 9 | Is Rust still wanted for the host agent? | Defer | One language until parity; revisit with measured data | Approved 2026-10-25 |
+| 10 | Are undocumented forms such as `aws disconnect --plan` public? | Treat `--plan` as internal but tested | `aws inventory` is the public read path | Approved 2026-10-25 |
+| 11 | Which operating systems? | Linux and macOS first, then native Windows; WSL stays until then; the AWS box and own servers stay Linux | The goal is other people on every OS; both first targets are Unix; native Windows needs a real machine to test | Approved 2026-10-25 |
+| 12 | What should `--json` do on mutating `deps install` / `creds set` forms? | Reject `--json` on mutating forms; JSON only for reads | The current dispatch prints status JSON and silently skips the mutation | Approved 2026-10-25 |
+| 13 | Start with the pilot slice before the full Phase 0? | Yes: module, minimal registry, Phase 1 basics, and `cost` first; review before continuing | Proves layout, embed, harness and app boundary cheaply on a read-only command | Approved 2026-10-25 |
+| 14 | Who approves a real-AWS gate? | The owner, each time, with an estimate first | The port is free to write; the real-AWS cycles bill | Approved 2026-10-25 |
 
 
 

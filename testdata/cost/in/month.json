@@ -1,0 +1,51 @@
+[
+ {
+  "d": "2026-09-14",
+  "g": [
+   {
+    "u": "APS5-BoxUsage:g6.xlarge",
+    "c": "3.20",
+    "q": "3.3"
+   },
+   {
+    "u": "APS5-TimedStorage-ByteHrs",
+    "c": "0.07",
+    "q": "2.8"
+   },
+   {
+    "u": "APS5-DataTransfer-Out-Bytes",
+    "c": "0",
+    "q": "9.4"
+   },
+   {
+    "u": "USE1-APIRequest",
+    "c": "0.01",
+    "q": "1"
+   }
+  ]
+ },
+ {
+  "d": "2026-09-15",
+  "g": []
+ },
+ {
+  "d": "2026-09-16",
+  "g": [
+   {
+    "u": "APS5-SpotUsage:g6.xlarge",
+    "c": "0.42",
+    "q": "2.0"
+   },
+   {
+    "u": "APS5-EBS:VolumeUsage.gp3",
+    "c": "0.05",
+    "q": "1.1"
+   },
+   {
+    "u": "APS5-PublicIPv4:InUseAddress",
+    "c": "0.01",
+    "q": "2.0"
+   }
+  ]
+ }
+]
