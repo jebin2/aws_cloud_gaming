@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/budgets"
@@ -69,7 +70,7 @@ func Run(ctx context.Context, env *config.Env, opts Options, out output.Out) int
 	}
 	facts, err := g.Gather(ctx)
 	if err != nil {
-		out.Die(fmt.Sprintf("%v - check the access key: cg creds", err))
+		out.Die(fmt.Sprintf("%v - check the access key: cg creds", firstLine(err)))
 		return 1
 	}
 
@@ -117,4 +118,14 @@ func cacheEgress(outGB float64, free *float64) {
 	}
 	_ = os.WriteFile(filepath.Join(".cg-cache", "egress"),
 		[]byte(fmt.Sprintf("%d %.3f %.0f\n", time.Now().Unix(), outGB, f)), 0o644)
+}
+
+// firstLine is AWS's refusal in one line: the SDK wraps it in layers of
+// "operation error ...", and the last clause is the reason.
+func firstLine(err error) string {
+	msg := err.Error()
+	if i := strings.Index(msg, "failed to refresh cached credentials"); i >= 0 {
+		return "no AWS access key was found on this computer"
+	}
+	return msg
 }
