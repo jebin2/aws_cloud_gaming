@@ -1116,8 +1116,9 @@ function renderMonth(box, { hint } = {}) {
   const now = new Date();
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
   total.textContent = m.total_usd != null ? r(m.total_usd) : '—';
+  // AWS's bill is the account's - every region, and anything not cg's.
   sub.textContent = m.total_usd == null ? 'No response from AWS.'
-    : `so far${(d.rates || {}).tax_pct ? `, with ${d.rates.tax_pct}% GST` : ''} · ${hours.toFixed(1)} h runtime`
+    : `so far on the whole AWS account${(d.rates || {}).tax_pct ? `, with ${d.rates.tax_pct}% GST` : ''} · ${hours.toFixed(1)} h runtime`
       + (projected != null ? ` · projected ${r(projected)} by ${monthEnd.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : '');
   // Your number, in rupees, as you set it. AWS keeps it in dollars, converted
   // when it was made; turned back at today's rate it read Rs 5,412 for 5,000.

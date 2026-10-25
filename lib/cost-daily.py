@@ -11,6 +11,7 @@
 import calendar
 import json
 import os
+import re
 import sys
 
 # The rate lib/rates.sh settled on, so this total and every other rupee figure
@@ -33,10 +34,20 @@ except (KeyError, ValueError):
 COLS = ["compute", "s3", "disk", "egress", "api", "other"]
 
 
+# A region prefix: AWS writes it in capitals - APS5-, USE1-, EU-. Cutting at the
+# first dash instead took "DataTransfer-" off DataTransfer-Out-Bytes and
+# "TimedStorage-" off TimedStorage-ByteHrs, wherever AWS gave no prefix, and
+# egress and S3 storage landed in "other".
+REGION_PREFIX = re.compile(r"^[A-Z]{2,4}[0-9]{0,2}-")
+
+
+def strip_region(usage_type):
+    return REGION_PREFIX.sub("", usage_type, count=1)
+
+
 def bucket(usage_type):
-    """Which column a usage type belongs in. The region prefix (APS5-) is
-    stripped first, as the monthly table does."""
-    u = usage_type.split("-", 1)[-1]
+    """Which column a usage type belongs in, its region prefix stripped first."""
+    u = strip_region(usage_type)
     if u.startswith(("BoxUsage", "SpotUsage")):        return "compute"
     if u.startswith("DataTransfer-Out-Bytes"):         return "egress"
     if u.startswith(("TimedStorage", "Requests-Tier")): return "s3"
@@ -173,7 +184,7 @@ def as_json(days):
         day_hours = 0.0
         for g in day.get("g") or []:
             c, q = float(g["c"]), float(g["q"])
-            u = g["u"].split("-", 1)[-1]
+            u = strip_region(g["u"])
             cols[bucket(g["u"])] += c
             t = usage.setdefault(u, {"type": u, "qty": 0.0, "usd": 0.0})
             t["qty"] += q; t["usd"] += c
@@ -215,7 +226,7 @@ def main():
     elif "--aggregate" in sys.argv:
         aggregate(days)
     else:
-        print("billed day by day (lags a day, like the totals below):")
+        print("billed day by day (the whole AWS account, every region - lags a day):")
         table(days)
 
 

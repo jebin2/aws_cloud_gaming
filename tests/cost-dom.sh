@@ -226,7 +226,7 @@ row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
 echo "1. the month, in rupees at cg's one rate"
 contains "the total in rupees"           "$(row 'REAL c-month')" "₹167"
-contains "  hours played and the pace"   "$(row 'REAL c-month-sub')" "so far · 2.4 h runtime · projected ₹553 by 31 Oct"
+contains "  hours played and the pace"   "$(row 'REAL c-month-sub')" "so far on the whole AWS account · 2.4 h runtime · projected ₹553 by 31 Oct"
 contains "the budget is yours, as set"   "$(row 'REAL c-cap-note')" "Budget ₹5,000/month. Alert by email only; nothing is stopped."
 lacks    "  not AWS's dollars turned back" "$(row 'REAL c-cap-note')" "5,412"
 contains "  and the bar's verdict"       "$(row 'REAL CHIP')" "under budget"

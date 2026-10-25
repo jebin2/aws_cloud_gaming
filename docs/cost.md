@@ -67,11 +67,12 @@ restore so far. The upload and the restore cost requests and nothing else.
 ## Seeing what you spend
 
 `cg cost` is the authoritative view. Its **billed so far** section is Cost Explorer, broken down by
-usage type: the real charges, but about a day behind. Above that, a **not yet billed** estimate
+usage type: the real charges, but about a day behind, and for the whole AWS account - every region,
+and anything on it that cg did not make. Above that, a **not yet billed** estimate
 has no lag, because it counts CloudWatch's hourly datapoints for the current instance. That
 estimate covers only the box that exists now: on a rig where every session is a new box, it
-misses the month's earlier sessions. `cg cost` also lists **every** volume and snapshot, not just
-the running instance's - orphaned volumes are the usual way people keep paying for a machine they
+misses the month's earlier sessions. `cg cost` also lists every volume and snapshot cg made, not
+just the running instance's - orphaned volumes are the usual way people keep paying for a machine they
 believe they deleted.
 
 `cg cost`'s resources block also shows what the game archive costs a month and when the cloud

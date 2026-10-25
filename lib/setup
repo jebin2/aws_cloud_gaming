@@ -432,7 +432,7 @@ status() { # status [--json]
     printf '  snapshots       %s\n' "${F[res.snapshots]:-}"
     printf '  saved images    %s\n' "${F[res.images]:-}"
     printf '  elastic ips     %s%s\n' "${F[res.elastic_ips]:-}" \
-      "$([[ ${F[res.elastic_ips]:-} != 0 ]] && echo '   <- these bill while idle' || true)"
+      "$([[ ${F[res.elastic_ips]:-} != 0 ]] && echo '   <- in this region, not made by cg; they bill while idle' || true)"
     printf '  key pair        %s\n' "${F[res.key_pair]:-}"
     printf '  security group  %s\n' "${F[res.security_group]:-}"
     if [[ -n ${F[old_volume.id]:-} ]]; then
@@ -675,11 +675,13 @@ today = now.strftime("%Y-%m-%d")
 days = [d for d in (ce.get("days") or []) if d.get("date", "") < today and (d.get("s3") or 0) > 0]
 recent = [d["s3"] for d in days[-3:]]
 billed = round(max(recent) * 30, 2) if recent else None
-known = archive_usd or 0.0
+# No archive is 0; an archive whose price could not be read is unknown, and so
+# is what it leaves unexplained - as 0 it put the whole bill down to elsewhere.
+known = archive_usd
 out["storage"] = {
   "billed_usd_month": billed,
-  "known_usd_month": round(known, 2),
-  "unknown_usd_month": round(max(0.0, billed - known), 2) if billed is not None else None,
+  "known_usd_month": r2(known),
+  "unknown_usd_month": round(max(0.0, billed - known), 2) if billed is not None and known is not None else None,
 }
 out["standby"] = {
   "usd_month": r2(standby),
@@ -695,7 +697,7 @@ print(json.dumps(out, indent=2, sort_keys=True))
 }
 
 cost() {
-  local id state rate hours disk_gb snap_gb imgs eips budget key sg DAILY=0 JSON=0
+  local id state rate hours disk_gb snap_gb imgs eips budget key sg DAILY=0 JSON=0 vol_rows itype lc az kind
   case ${1:-} in
     --daily) DAILY=1 ;;
     --json)  DAILY=1; JSON=1 ;;   # the JSON view is always day by day
@@ -720,11 +722,22 @@ cost() {
         --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo "-")
 
   # Every volume and snapshot bills, attached or not - orphans are the classic
-  # way to keep paying for a machine you think you deleted.
-  disk_gb=$(ec2 describe-volumes --query 'sum(Volumes[].Size)' --output text 2>/dev/null || echo 0)
-  snap_gb=$(ec2 describe-snapshots --owner-ids self --query 'sum(Snapshots[].VolumeSize)' --output text 2>/dev/null || echo 0)
-  imgs=$(ec2 describe-images --owners self --query 'length(Images)' --output text 2>/dev/null || echo 0)
-  # An Elastic IP bills by the hour, attached or not.
+  # way to keep paying for a machine you think you deleted. cg's own: the box's
+  # disks and cg's leftovers, cg's images and the snapshots behind them, and
+  # cg's tagged snapshots (lib/common.sh). Every one in the region was counted,
+  # another project's too, and called cg's - and "ORPHANED" when no box was up.
+  vol_rows=$( { [[ -z $id ]] || ec2 describe-volumes --filters "Name=attachment.instance-id,Values=$id" \
+                  --query 'Volumes[].[VolumeId,Size,CreateTime]' --output text
+                cg_owned_volumes "$REGION" 'Volumes[].[VolumeId,Size,CreateTime]' games; } 2>/dev/null \
+              | awk 'NF >= 3 && $1 != "None" && !seen[$1]++' || true)
+  disk_gb=$(awk '{t += $2} END {print t + 0}' <<<"$vol_rows")
+  imgs=$(cg_owned_images "$REGION" 'Images[].ImageId' 2>/dev/null | grep -c . || true)
+  snap_gb=$( { cg_owned_images "$REGION" 'Images[].BlockDeviceMappings[].Ebs.[SnapshotId,VolumeSize]' 2>/dev/null
+               ec2 describe-snapshots --owner-ids self --filters "Name=tag:${CG_TAG_KEY:-cg:host},Values=$TS_HOST" \
+                 --query 'Snapshots[].[SnapshotId,VolumeSize]' --output text 2>/dev/null; } \
+             | awk 'NF >= 2 && $1 != "None" && !seen[$1]++ {t += $2} END {print t + 0}' || echo 0)
+  # An Elastic IP bills by the hour, attached or not. cg never makes one, so
+  # these are the region's, counted because they bill with no box all the same.
   eips=$(ec2 describe-addresses --query 'length(Addresses)' --output text 2>/dev/null || echo 0)
   key=$(ec2 describe-key-pairs --key-names "$TS_HOST" --query 'length(KeyPairs)' --output text 2>/dev/null || echo 0)
   sg=$(ec2 describe-security-groups --filters "Name=group-name,Values=${TS_HOST}-sg" \
@@ -770,16 +783,35 @@ cost() {
     echo
   fi
 
-  # Prices are per-region and change; read them rather than hard-coding.
+  # The machine as it is - its type, and spot or on demand - not the settings,
+  # which were priced as on demand whatever the box was: a spot rig's estimate
+  # read four or five times what it cost.
+  itype=$TYPE kind="on demand"
+  if [[ -n $id ]]; then
+    read -r itype lc az < <(ec2 describe-instances --instance-ids "$id" \
+      --query 'Reservations[0].Instances[0].[InstanceType,InstanceLifecycle,Placement.AvailabilityZone]' \
+      --output text 2>/dev/null) || true
+    [[ -n ${itype:-} && $itype != None ]] || itype=$TYPE
+  fi
+  # Prices are per-region and change; read them rather than hard-coding. One
+  # AWS would not give is "?", never a number written here.
+  if [[ ${lc:-} == spot ]]; then
+    kind="spot, price now"
+    rate=$(ec2 describe-spot-price-history --instance-types "$itype" --product-descriptions Linux/UNIX \
+      --availability-zone "$az" --start-time "$(date -u +%Y-%m-%dT%H:%M:%S)" \
+      --query 'SpotPriceHistory[0].SpotPrice' --output text 2>/dev/null || true)
+    [[ $rate =~ ^[0-9.]+$ ]] || rate=""
+  else
   rate=$(aws pricing get-products --region us-east-1 --service-code AmazonEC2 \
-    --filters "Type=TERM_MATCH,Field=instanceType,Value=$TYPE" \
+    --filters "Type=TERM_MATCH,Field=instanceType,Value=$itype" \
               "Type=TERM_MATCH,Field=regionCode,Value=$REGION" \
               "Type=TERM_MATCH,Field=operatingSystem,Value=Linux" \
               "Type=TERM_MATCH,Field=tenancy,Value=Shared" \
               "Type=TERM_MATCH,Field=preInstalledSw,Value=NA" \
               "Type=TERM_MATCH,Field=capacitystatus,Value=Used" \
     --query 'PriceList[0]' --output text 2>/dev/null \
-    | python3 -c 'import json,sys;d=json.load(sys.stdin);print([x["pricePerUnit"]["USD"] for t in d["terms"]["OnDemand"].values() for x in t["priceDimensions"].values()][0])' 2>/dev/null || echo 0.9664)
+    | python3 -c 'import json,sys;d=json.load(sys.stdin);print([x["pricePerUnit"]["USD"] for t in d["terms"]["OnDemand"].values() for x in t["priceDimensions"].values()][0])' 2>/dev/null || true)
+  fi
 
   # An hourly CPU datapoint exists only for hours the instance was up, so
   # counting them measures runtime with none of the ~24h billing-data lag.
@@ -801,17 +833,36 @@ cost() {
   echo "not yet billed (Cost Explorer lags about a day):"
   # A price AWS could not be asked for prints as "?", never as $0.00: an
   # unknown is not free. The month so far is this month's share of its days.
-  awk -v h="${hours:-0}" -v r="$rate" -v g="${disk_gb:-0}" -v sg="${snap_gb:-0}" -v day="$(date -u +%d)" \
+  # Each disk from when it was made, not the 1st: one made yesterday was
+  # charged as if it had existed all month. In GB-months so far.
+  local gbm
+  gbm=$(VR="$vol_rows" python3 -I -c '
+import os
+from datetime import datetime, timezone
+now = datetime.now(timezone.utc)
+start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+end = (start.replace(month=start.month % 12 + 1, year=start.year + start.month // 12))
+t = 0.0
+for l in os.environ["VR"].splitlines():
+    f = l.split("\t")
+    if len(f) < 3: continue
+    try:
+        made = datetime.fromisoformat(f[2].replace("Z", "+00:00"))
+        gb = float(f[1])
+    except ValueError: continue
+    t += gb * max(0.0, (now - max(made, start)).total_seconds()) / (end - start).total_seconds()
+print("%.4f" % t)' 2>/dev/null || echo 0)
+  awk -v h="${hours:-0}" -v r="$rate" -v g="${disk_gb:-0}" -v gm="${gbm:-0}" -v sg="${snap_gb:-0}" -v day="$(date -u +%d)" -v kind="$kind" \
       -v mdays="$(date -u -d "$(date -u +%Y-%m-01) +1 month -1 day" +%d)" \
       -v ebs="${CG_EBS_USD_GB_MONTH:-}" -v snap="${CG_SNAPSHOT_USD_GB_MONTH:-}" -v inr="${CG_INR_PER_USD:-}" '
   function usd(v, ok) { return ok ? sprintf("$%6.2f", v) : "      ?" }
   function rup(v, ok) { return (ok && inr != "") ? sprintf("INR %5.0f", v*inr) : "INR     ?" }
   BEGIN{
-    c=h*r; s=g*ebs*(day/mdays); n=sg*snap*(day/mdays);
+    c=h*r; s=gm*ebs; n=sg*snap*(day/mdays);
     okc = r != ""; oks = ebs != "" || g == 0; okn = snap != "" || sg == 0;
-    printf "  compute   %6.1f hrs  %s  (%s)  THIS instance only\n", h, usd(c, okc), rup(c, okc);
+    printf "  compute   %6.1f hrs  %s  (%s)  THIS instance only, %s\n", h, usd(c, okc), rup(c, okc), kind;
     printf "  storage   %6d GB   %s  (%s)  month so far, accrues while stopped\n", g, usd(s, oks), rup(s, oks);
-    if (sg>0) printf "  snapshots %6d GB   %s  (%s)\n", sg, usd(n, okn), rup(n, okn);
+    if (sg>0) printf "  snapshots %6d GB   %s  (%s)  at most - AWS bills only the changed blocks\n", sg, usd(n, okn), rup(n, okn);
     printf "  ---------------------------------------\n";
     all = okc && oks && okn;
     printf "  estimate              %s  (%s)\n", usd(c+s+n, all), rup(c+s+n, all);
@@ -835,7 +886,9 @@ cost() {
   # cover the CURRENT instance, so across rebuilds they undercount badly - it
   # once read 2.0 hrs against 10.6 actually billed. The quantity on the compute
   # line below is the real number.
-  echo "billed so far (lags a day - these are the real charges):"
+  # Cost Explorer answers for the account: every service, every region, and
+  # anything else on it - not only what cg made.
+  echo "billed so far (the whole AWS account, every region - lags a day):"
   if (( ${DAILY:-0} )); then
     # ONE call, day by day: the table comes from it, and so does the summary
     # below - Cost Explorer charges per request, so it is never asked twice.

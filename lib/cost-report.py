@@ -7,7 +7,7 @@
 # Lifted out of lib/setup unchanged so that `cg cost --daily` can render the
 # same summary from the same single call - see lib/cost-daily.py.
 
-import json,os,sys
+import json,os,re,sys
 # Every rate is lib/rates.sh's, which read it from AWS - never a number typed in
 # here. INR is a dollar of AWS charges in rupees, GST included.
 def env(k):
@@ -23,6 +23,9 @@ except Exception: print("  (Cost Explorer unavailable)"); sys.exit()
 # and any "hide the small rows" filter drops the very line worth watching.
 # Pull it out before filtering.
 out_gb=sum(float(x["q"]) for x in g if "DataTransfer-Out-Bytes" in x["u"])
+# The total is everything billed, the rows hidden for being under half a cent
+# included - it was summed from what was shown, and left them out.
+whole=sum(float(x["c"]) for x in g)
 g=[x for x in g if float(x["c"])>0.004]
 g.sort(key=lambda x:-float(x["c"]))
 if not g and not out_gb: print("  nothing billed yet this month"); sys.exit()
@@ -35,12 +38,12 @@ print("  %-32s%9s %8s %7s" % ("USAGE TYPE","QTY","USD","INR"))
 tot=0.0; sp_h=sp_c=od_h=od_c=0.0
 for x in g:
     c=float(x["c"]); q=float(x["q"]); tot+=c
-    u=x["u"].split("-",1)[-1]          # strip the region prefix
+    u=re.sub(r"^[A-Z]{2,4}[0-9]{0,2}-","",x["u"],count=1)   # the region prefix only - see lib/cost-daily.py
     if "SpotUsage" in u:  sp_h+=q; sp_c+=c
     elif "BoxUsage" in u: od_h+=q; od_c+=c
     print("  %-32s%9.2f %8.2f %s" % (u,q,c,inr(c)))
 print("  " + "-"*57)
-print("  %-32s%9s %8.2f %s" % ("TOTAL","",tot,inr(tot)))
+print("  %-32s%9s %8.2f %s" % ("TOTAL","",whole,inr(whole)))
 if sp_h or od_h:
     print("")
     if od_h: print("  %5.1f h on demand  $%6.2f (INR %s)   $%.3f/hr" % (od_h, od_c, inr(od_c,5), od_c/od_h))

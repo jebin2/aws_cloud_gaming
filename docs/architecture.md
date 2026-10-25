@@ -333,7 +333,9 @@ allowances. The full list: [cost-guards.md](cost-guards.md#notifications).
 - **Cost first.** Everything added around the box fits inside AWS's free allowances, and anything
   that would bill is designed out rather than accepted as small: the archive-expiry marks are free
   SSM parameters rather than bucket tags, and the archive's size comes from S3's free daily
-  CloudWatch metric rather than an S3 request. With no box, the S3 archive is the only charge.
+  CloudWatch metric rather than an S3 request. With no box, the S3 archive is the only charge cg
+  means to leave. A disk, image or snapshot still there is a leftover, and `cg cost` names it with
+  its monthly cost; an Elastic IP is listed too, though cg never makes one.
 - **Games on local NVMe, kept in S3.** The instance store is the fastest disk on the box and free,
   and S3 pins no availability zone. It replaced an EBS volume costing INR 1,284 a month. See
   [game-library.md](game-library.md).

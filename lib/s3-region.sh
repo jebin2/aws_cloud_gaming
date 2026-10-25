@@ -2,9 +2,11 @@
 # Which region a bucket is actually in.
 #
 # Not the same question as "which region is configured", and conflating them
-# cost a 30-minute build. `cg config set GAME_REGION ap-south-1` moves the box,
-# but the bucket name is derived from the account and the host - not the region -
-# so a move finds the SAME bucket, still sitting in ap-south-2.
+# cost a 30-minute build. `cg config set GAME_REGION ap-south-1` moved the box,
+# but the bucket name was then derived from the account and the host alone, so
+# the move found the SAME bucket, still sitting in ap-south-2. The region is in
+# the name now (cg_bucket_name below), but an older bucket can still be asked
+# about from another region, so the question stays.
 #
 # `aws s3 cp` survives that: the CLI follows S3's redirect and retries against
 # the right region, so the upload worked and looked fine. `aws s3 presign` does

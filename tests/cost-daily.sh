@@ -122,7 +122,8 @@ case "$*" in
   *"ce get-cost-and-usage"*) echo '[{"d":"2026-09-16","g":[]}]' ;;
   *accountPlanRemainingCredits*) echo 139.35 ;;
   *"s3 ls"*) printf 'Total Objects: 10\n   Total Size: 171986001052\n' ;;
-  *"describe-volumes"*sum*) echo 50 ;;
+  # cg's own disk, by its tag - another project's are not counted.
+  *"describe-volumes"*"tag:cg:host"*) printf 'vol-1\t50\t2026-01-01T00:00:00.000Z\n' ;;
   *) echo None ;;
 esac
 FAKE
@@ -173,6 +174,13 @@ check "the month in rupees at the one rate" "$(jq2 month.total_inr)" "$(python3 
 cj=$( cd "$T/repo" && env -i CG_PRICES_FILE="${CG_PRICES_FILE:-}" CG_INR_PER_USD=94.95 SIZE=171986001052 PATH="$T/bin:$PATH" HOME="$T/home" \
         CG_COLOR=never bash lib/setup cost --json 2>/dev/null )
 check "a bucket that explains it leaves nothing over" "$(jq2 storage.unknown_usd_month)" "0.0"
+# An S3 price AWS did not answer: the bucket's share is unknown, and so is what
+# is left over - not the whole bill put down to somewhere else.
+grep -v '^CG_S3_USD_GB_MONTH=' "${CG_PRICES_FILE:-tests/prices.env}" > "$T/no-s3.env"
+cj=$( cd "$T/repo" && env -i CG_PRICES_FILE="$T/no-s3.env" CG_INR_PER_USD=94.95 SIZE=171986001052 PATH="$T/bin:$PATH" HOME="$T/home" \
+        CG_COLOR=never bash lib/setup cost --json 2>/dev/null )
+check "an unknown S3 price explains nothing known" "$(jq2 storage.known_usd_month)" "null"
+check "  and leaves nothing claimed as elsewhere"  "$(jq2 storage.unknown_usd_month)" "null"
 
 echo "5. wired in"
 check "cg passes the flag through"     "$(grep -c 'lib/setup cost "$@"' cg)" "1"
@@ -188,5 +196,26 @@ check "the app does no date arithmetic of its own" \
 check "  it renders cg's projection"  "$(grep -c 'projected ${r(projected)}' app/renderer/app.js)" "1"
 # The archive is the only thing still billing with no box, so cg cost says when it goes.
 check "cost shows the archive countdown"  "$(sed -n '/^cost() {/,/^}/p' lib/setup | grep -c 'game archive    %s')" "1"
+
+echo "6. a usage type AWS gave no region prefix"
+# Cutting at the first dash took "DataTransfer-" and "TimedStorage-" off these,
+# and egress and S3 landed in "other". Only a region prefix is stripped.
+cat > "$T/bare.json" <<'JSON'
+[{"d":"2026-09-20","g":[{"u":"DataTransfer-Out-Bytes","c":"0.90","q":"110"},
+                        {"u":"TimedStorage-ByteHrs","c":"0.30","q":"13"},
+                        {"u":"Requests-Tier1","c":"0.004","q":"800"},
+                        {"u":"Requests-Tier2","c":"0.004","q":"9000"},
+                        {"u":"APS5-CW:Requests","c":"0.004","q":"400"}]}]
+JSON
+r=$(IN="$T/bare.json" daily)
+contains "egress is egress, S3 and its requests are S3"  "$r" "2026-09-20      -        -     0.31        -     0.90"
+j=$(IN="$T/bare.json" daily --json)
+check    "  the egress GB are counted" "$(python3 -c 'import json,sys;print(json.load(sys.stdin)["egress"]["gb_used"])' <<<"$j")" "110.0"
+r=$(cd "$T" && IN="$T/bare.json" daily --aggregate | python3 "$REPO/lib/cost-report.py" 2>&1)
+contains "  and named in full"         "$r" "DataTransfer-Out-Bytes"
+lacks    "  not cut short"             "$r" "  Out-Bytes"
+# Each of the last three is under half a cent, so not listed - but billed.
+lacks    "a row under half a cent is not listed" "$r" "Requests-Tier1"
+contains "  but is in the total"       "$r" "1.21"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]
