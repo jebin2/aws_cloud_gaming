@@ -630,28 +630,39 @@ large ones. This is months of work, not weeks; the order in section 5 stands.
 
 ### 8.10 Progress (2026-10-25)
 
-Ported, tested, and compared with the Bash `cg` on the real account (the Bash and Go outputs side
-by side, same moment): `cost` (all but its other-regions section, which needs `library elsewhere`),
-`status`, `watcher`/`guards`, `watchdog status` and `logs`, `ping`, `log`, `ssh`, `config`
-(show, get, set, `--json`), `deps` (status), `creds` (status), `machines`/`types`. Shared pieces
-that came with them: the output primitives (plain and NDJSON events), the settings registry and its
-validation, prices and the exchange rate, the session lock, the watchdog's definition (its package is
-byte-identical to Python's, its policy equal as data, its fingerprint equal to the shell's), the
-derived archive bucket name, the AWS fakes and the local-runner fake.
+**Phase 2 (the read-only commands) is done.** Each was ported, tested over fakes, and compared with
+the Bash `cg` on the real account (both outputs side by side, same moment): `cost`, `status`,
+`watcher`/`guards`, `watchdog` (status, logs), `ping`, `log`, `ssh`, `config` (show, get, set,
+`--json`), `deps` (status), `creds` (status), `machines`/`types`, `sweep`, `regions` (list, optin,
+enable), `quota` (status, request, appeal), `host list`, `library` (list, elsewhere, account,
+`--bucket`), `games` (and `--volume`), `snapshot --list`, and `aws inventory`. Text and JSON are
+identical to the Bash's except for the deliberate differences below.
 
-Deliberate differences from the Bash found so far, all recorded in the commits that made them:
+Shared pieces that came with them: the output primitives (plain and NDJSON events), the settings
+registry and its validation, prices and the exchange rate, the session lock, the watchdog's
+definition (its package is byte-identical to Python's, its policy equal as data, its fingerprint
+equal to the shell's), the derived archive bucket name, the library reads, the every-region storage
+scan, and the AWS and local-runner fakes.
+
+Deliberate differences from the Bash, all recorded in the commits that made them:
 
 - an archive with no games is empty (the Bash read `aws s3 ls`'s non-zero exit for an empty prefix
   as a failed listing and called the Steam login "unknown");
-- an unreadable fact is `?` or null, never `0`, `none` or `false`;
+- an unreadable fact is `?` or null, never `0`, `none` or `false`; `cost` says "could not be read"
+  where the Bash said "nothing of cg's" about a region or a library scan that had failed;
 - `deps` lists ssh, Tailscale and Moonlight; python3, curl and the AWS CLI are no longer needed;
 - the egress cache lives in the cache directory, not beside the scripts;
 - the settings table pads by characters, not bytes, so a row with a dash lines up;
-- `machines` says when a quota could not be read (`quota_unknown`) and is several times faster.
+- `machines` says when a quota could not be read (`quota_unknown`) and is several times faster;
+  `sweep` is about twice as fast and fills in `store_gb`, which the Bash always left null;
+- the quota appeal states the forced-shutdown time that is actually set (the Bash printed 180
+  minutes whatever the setting), and names the city without its nesting parentheses;
+- `games --volume` tells you to `cg games --volume --delete`, a command that exists;
+- flags are accepted after the subcommand everywhere, as people type them.
 
-Still to port in Phase 2: `sweep`, `regions`, `quota status`, `host list`, the library reads,
-`games`, `snapshot --list`, `aws inventory`, and `cost`'s other-regions section. The styled
-terminal rendering is not ported (a terminal gets the plain text).
+Not ported yet (the Bash prints the same pieces): the styled terminal rendering (a terminal gets the
+plain text), `games --volume --delete`, `snapshot create/--delete`, the box-side `library`
+commands, and everything in Phases 3 to 6.
 
 ## 9. Phase 1: skeleton and shared runtime
 

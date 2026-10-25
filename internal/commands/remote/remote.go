@@ -37,6 +37,9 @@ func (b Box) IP(ctx context.Context) (string, error) {
 }
 
 // sshArgs is ssh to the box: no prompt, a ten second connect timeout.
+// SSHArgs is ssh to the box with a command.
+func (b Box) SSHArgs(ip string, command ...string) []string { return b.sshArgs(ip, command...) }
+
 func (b Box) sshArgs(ip string, command ...string) []string {
 	a := []string{"-i", b.Home + "/.ssh/" + b.Host + ".pem", "-o", "StrictHostKeyChecking=accept-new",
 		"-o", "ConnectTimeout=10", "-o", "BatchMode=yes", "ubuntu@" + ip}

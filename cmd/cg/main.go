@@ -18,6 +18,7 @@ import (
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/cost"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/creds"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/deps"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/games"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/hostcmd"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/librarycmd"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/machines"
@@ -152,6 +153,8 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			fmt.Fprintf(stdout, "  cg %-10s %s\n", c.Path[0], c.Summary)
 		}
 		return 0
+	case "games":
+		return games.Run(ctx, config.Load(get, repoDir(get)), args, out)
 	case "aws":
 		return awscmd.Run(ctx, config.Load(get, repoDir(get)), args, jsonFlag, out)
 	case "snapshot":
