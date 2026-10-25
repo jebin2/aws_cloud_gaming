@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/cost"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/remote"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/watchdog"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/watcher"
@@ -76,6 +77,7 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 		out.End(rc)
 	}()
 	overrides := map[string]string{}
+	var jsonFlag, watchFlag bool
 	get := func(k string) (string, bool) {
 		if v, ok := overrides[k]; ok {
 			return v, true
@@ -86,8 +88,10 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 	// Global flags come before the command, as in the Bash cg.
 	for len(args) > 0 && len(args[0]) > 0 && args[0][0] == '-' {
 		switch args[0] {
-		case "--json", "--watch":
-			args = args[1:]
+		case "--json":
+			jsonFlag, args = true, args[1:]
+		case "--watch":
+			watchFlag, args = true, args[1:]
 		case "--region", "--host":
 			if len(args) < 2 {
 				out.Die(fmt.Sprintf("%s needs a value (see: cg help)", args[0]))
@@ -126,6 +130,12 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			fmt.Fprintf(stdout, "  cg %-10s %s\n", c.Path[0], c.Summary)
 		}
 		return 0
+	case "ping":
+		return remote.RunPing(ctx, config.Load(get, repoDir(get)), args, jsonFlag, watchFlag, out)
+	case "log", "logs":
+		return remote.RunLog(ctx, config.Load(get, repoDir(get)), args, out)
+	case "ssh":
+		return remote.RunSSH(ctx, config.Load(get, repoDir(get)), args, out)
 	case "watcher", "guards":
 		opts, err := watcher.ParseArgs(args)
 		if err != nil {

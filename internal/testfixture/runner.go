@@ -51,3 +51,15 @@ func (r *Runner) Stream(ctx context.Context, w io.Writer, name string, args ...s
 	_, _ = w.Write(b)
 	return err
 }
+
+func (r *Runner) Passthrough(ctx context.Context, name string, args ...string) int {
+	line := strings.TrimSpace(name + " " + strings.Join(args, " "))
+	r.Ran = append(r.Ran, line)
+	if !r.Installed[name] {
+		return 127
+	}
+	if r.Failing[name] || r.Failing[line] {
+		return 255
+	}
+	return 0
+}

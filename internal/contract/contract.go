@@ -22,6 +22,9 @@ type Command struct {
 // Registry is every command cg-go implements. A command that is not in it is
 // not reachable. The pilot has only cost; the rest is added as it is ported.
 var Registry = []Command{
+	{Path: []string{"ping"}, Summary: "latency to the box, and whether the path is direct", JSON: true, Watch: true},
+	{Path: []string{"log"}, Aliases: [][]string{{"logs"}}, Summary: "the box's build, steam, watchdog, disk or sunshine log", Watch: true},
+	{Path: []string{"ssh"}, Summary: "a shell on the box, or one command"},
 	{Path: []string{"watcher"}, Aliases: [][]string{{"guards"}}, Summary: "every guard, and whether each is armed", JSON: true, Watch: true},
 	{Path: []string{"watchdog"}, Summary: "layer 3: the cloud watchdog (Lambda) - status and logs", Watch: true},
 	{Path: []string{"status"}, Summary: "what exists, and whether every safeguard is on", JSON: true},
