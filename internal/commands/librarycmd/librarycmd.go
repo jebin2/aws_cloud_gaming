@@ -139,7 +139,8 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string,
 	}
 	switch sub {
 	case "list", "elsewhere", "account", "login", "--bucket", "bucket":
-	case "status", "", "push", "sync", "pull", "restore", "check", "forget", "clean", "reset", "keep", "keep-for", "move":
+	case "forget", "clean", "reset", "keep", "keep-for", "move":
+	case "status", "", "push", "sync", "pull", "restore", "check":
 		out.Die("library " + sub + " is not ported to Go yet")
 		return 1
 	default:
@@ -152,6 +153,24 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string,
 		return 1
 	}
 	switch sub {
+	case "forget", "clean", "reset", "keep", "keep-for", "move":
+		c, err := NewChanger(ctx, r, env, out)
+		if err != nil {
+			out.Die(err.Error())
+			return 1
+		}
+		switch sub {
+		case "forget":
+			return c.Forget(ctx, args)
+		case "clean":
+			return c.Clean(ctx)
+		case "reset", "keep":
+			return c.Reset(ctx, args)
+		case "keep-for":
+			return c.KeepFor(ctx, args)
+		default:
+			return c.Move(ctx, args)
+		}
 	case "--bucket", "bucket":
 		if r.BucketOK {
 			fmt.Fprintf(out.Stdout, "%s\n", r.Bucket)
@@ -196,7 +215,14 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string,
 		}
 		switch a {
 		case "status", "":
-		case "forget", "delete", "rm", "push", "pull", "restore":
+		case "forget", "delete", "rm":
+			c, err := NewChanger(ctx, r, env, out)
+			if err != nil {
+				out.Die(err.Error())
+				return 1
+			}
+			return c.ForgetLogin(ctx, args[1:], fileCache{r.CacheDir})
+		case "push", "pull", "restore":
 			out.Die("library account " + a + " is not ported to Go yet")
 			return 1
 		default:

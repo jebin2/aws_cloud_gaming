@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/aws/smithy-go"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
@@ -179,4 +180,17 @@ func (p SSMParams) Path(ctx context.Context, path string) (map[string]string, er
 		}
 	}
 	return out, nil
+}
+
+// SSMMarks writes the marks.
+type SSMMarks struct{ Client *ssm.Client }
+
+func (p SSMMarks) Put(ctx context.Context, name, value string) error {
+	_, err := p.Client.PutParameter(ctx, &ssm.PutParameterInput{Name: aws.String(name), Value: aws.String(value), Type: ssmtypes.ParameterTypeString, Overwrite: aws.Bool(true)})
+	return err
+}
+
+func (p SSMMarks) Delete(ctx context.Context, name string) error {
+	_, err := p.Client.DeleteParameter(ctx, &ssm.DeleteParameterInput{Name: aws.String(name)})
+	return err
 }

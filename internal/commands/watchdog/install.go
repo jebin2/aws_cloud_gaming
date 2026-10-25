@@ -133,3 +133,16 @@ func mutate(ctx context.Context, env *config.Env, r *wd.Reader, sub string, out 
 	}
 	return 0
 }
+
+// Reinstall redeploys the cloud watchdog with the settings now in force, as
+// `cg watchdog install` does. It is what a setting that the watchdog carries -
+// how long saved games are kept - needs to take effect.
+func Reinstall(ctx context.Context, env *config.Env, out *output.Out) int {
+	r, err := NewReader(ctx, env)
+	if err != nil {
+		out.Log("cannot reach AWS - the cloud watchdog was not installed")
+		out.Die("the cloud watchdog was not installed")
+		return 1
+	}
+	return mutate(ctx, env, r, "install", out)
+}
