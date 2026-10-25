@@ -664,6 +664,22 @@ Not ported yet (the Bash prints the same pieces): the styled terminal rendering 
 plain text), `games --volume --delete`, `snapshot create/--delete`, the box-side `library`
 commands, and everything in Phases 3 to 6.
 
+### 8.11 Phase 3 progress
+
+Done and compared (where it reads only) with the Bash on the real account: `config set`, `notify`,
+`watchdog install/check/remove`, the ask layer (with a masked secret read, so a pasted key shows
+`*`), `creds set [aws|tailscale]`, `creds tailscale set/authkey/signin`, `deps install`, and
+`check` / `check --fix` (identical to the Bash apart from the deps list). The Tailscale key client
+(`internal/tskey`), the ssh-key comparison (`internal/sshkey`, the fingerprint is computed in Go,
+no openssl) and the root-run helper (`internal/laptop/root.go`) are shared with Phase 5's `init`.
+
+Nothing that changes the account has been run live: `check` was run only where it made no change
+(every setting present and the stored key probed, not replaced), and its writes are proven over
+fakes, including that no EC2 create call exists in its client.
+
+Open: `cg-go check` on this server stops at "Tailscale refused the API token", as the Bash does;
+that token has probably expired.
+
 ## 9. Phase 1: skeleton and shared runtime
 
 1. Create `cmd/cg` and the packages in section 7, using the module pinned in the pilot.

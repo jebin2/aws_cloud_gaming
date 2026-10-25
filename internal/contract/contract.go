@@ -32,6 +32,7 @@ var Registry = []Command{
 	{Path: []string{"quota"}, Summary: "the GPU quota: what you have, how to ask for more, and the appeal text", JSON: true},
 	{Path: []string{"sweep"}, Aliases: [][]string{{"regions-sweep"}}, Summary: "every region scored for latency, capacity and quota", JSON: true},
 	{Path: []string{"machines"}, Aliases: [][]string{{"types"}}, Summary: "what GPU shapes a region rents, and what each costs", JSON: true},
+	{Path: []string{"check"}, Summary: "the preflight: tools, AWS, region, quota, keys, settings. --fix installs and asks. Creates nothing, but can save settings and mint a Tailscale key"},
 	{Path: []string{"deps"}, Aliases: [][]string{{"dependencies"}}, Summary: "the tools this computer needs, and what is missing", JSON: true},
 	{Path: []string{"creds"}, Aliases: [][]string{{"credentials"}}, Summary: "the AWS access key and the Tailscale token, and whether each works", JSON: true},
 	{Path: []string{"config"}, Summary: "what .env decides; set validates and writes, get reveals one", JSON: true},

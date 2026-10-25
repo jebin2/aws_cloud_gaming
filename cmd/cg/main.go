@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/awscmd"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/check"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/configcmd"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/cost"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/creds"
@@ -184,6 +185,8 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			}
 		}
 		return machines.Run(ctx, config.Load(get, repoDir(get)), get, args, jsonFlag, out)
+	case "check":
+		return check.Run(ctx, config.Load(get, repoDir(get)), args, out)
 	case "deps", "dependencies":
 		return deps.Main(ctx, args, jsonFlag, out)
 	case "creds", "credentials":

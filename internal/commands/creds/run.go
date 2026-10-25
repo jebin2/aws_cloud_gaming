@@ -31,7 +31,7 @@ func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out
 	l := laptop.New(local.Exec{})
 	switch sub {
 	case "status", "":
-		a := awsFacts(ctx, env)
+		a := AWSFacts(ctx, env)
 		if jsonFlag {
 			return emit(a, out)
 		}
@@ -122,7 +122,8 @@ func emit(v any, out *output.Out) int {
 	return 0
 }
 
-func awsFacts(ctx context.Context, env *config.Env) AWS {
+// AWSFacts reads which AWS key is in force and whether AWS takes it.
+func AWSFacts(ctx context.Context, env *config.Env) AWS {
 	cfg, err := awscfg.New(ctx, env.Region())
 	if err != nil {
 		reason, msg := "no-key", err.Error()

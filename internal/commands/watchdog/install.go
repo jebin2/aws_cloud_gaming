@@ -88,6 +88,18 @@ func adoptNtfy(ctx context.Context, env *config.Env, r *wd.Reader, out *output.O
 	out.LogAs("ok", "notifications: copied the ntfy address from the cloud watchdog into .env")
 }
 
+// AdoptNtfy is adoptNtfy for a caller that has no reader of its own: `cg check`,
+// which does it before it asks for the address. Any trouble reading the
+// watchdog is the same as there being nothing to adopt.
+func AdoptNtfy(ctx context.Context, env *config.Env, out *output.Out) {
+	if env.Has("GAME_NTFY_URL") {
+		return
+	}
+	if r, err := NewReader(ctx, env); err == nil {
+		adoptNtfy(ctx, env, r, out)
+	}
+}
+
 func mutate(ctx context.Context, env *config.Env, r *wd.Reader, sub string, out *output.Out) int {
 	switch sub {
 	case "install":

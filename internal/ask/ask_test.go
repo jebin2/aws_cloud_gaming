@@ -105,3 +105,21 @@ func TestConfirmAndTypedWords(t *testing.T) {
 		t.Error("the exact word")
 	}
 }
+
+func TestMaskedReadShowsStarsAndSkipsEscapes(t *testing.T) {
+	var w bytes.Buffer
+	// A bracketed paste wraps the key in escape sequences; an arrow key is another.
+	got, err := MaskedRead(strings.NewReader("\x1b[200~tskey-abc\x1b[201~\x1b[A\x7fd!\r"), &w)
+	if err != nil || got != "tskey-abd!" {
+		t.Errorf("%q %v", got, err)
+	}
+	if strings.Count(w.String(), "*") != 11 || !strings.Contains(w.String(), "\b \b") {
+		t.Errorf("%q", w.String())
+	}
+	if _, err := MaskedRead(strings.NewReader(""), &w); err == nil {
+		t.Error("end of input with nothing typed is no answer")
+	}
+	if got, _ := MaskedRead(strings.NewReader("abc"), &w); got != "abc" {
+		t.Error("input that ends without Enter still counts")
+	}
+}

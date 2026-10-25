@@ -14,8 +14,6 @@ import (
 	"os"
 	"strings"
 
-	"golang.org/x/term"
-
 	"github.com/jebin2/aws_cloud_gaming/internal/output"
 )
 
@@ -83,8 +81,7 @@ func (a *Asker) Secret(id, prompt string) string {
 	case a.ReadSecret != nil:
 		s, _ = a.ReadSecret()
 	case a.TTY:
-		b, _ := term.ReadPassword(int(os.Stdin.Fd()))
-		s = string(b)
+		s, _ = readMasked(a.Prompts)
 	default:
 		s, _ = a.line()
 	}
