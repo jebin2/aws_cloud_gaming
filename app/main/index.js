@@ -8,6 +8,18 @@ const path = require('node:path');
 const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require('electron');
 const { run, answer, interrupt } = require('./runner');
 const { findRepo } = require('./repo');
+const { intelOnly } = require('./gpu');
+
+// Off the NVIDIA GPU of a laptop that has an Intel one too - see main/gpu.js.
+// Here, before anything starts: Chromium's GPU process is launched later, with
+// the environment as it is then, and so is every cg the app runs.
+{
+  const intel = intelOnly();
+  if (intel) {
+    Object.assign(process.env, intel);
+    console.error('cg: drawing on the Intel GPU (NVIDIA left alone)');
+  }
+}
 
 // Where the scripts are - see main/repo.js, which owns the order and the one
 // rule that matters: `cg` has to be a file, not a directory with that name.
