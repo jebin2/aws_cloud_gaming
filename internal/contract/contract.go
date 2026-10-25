@@ -22,6 +22,8 @@ type Command struct {
 // Registry is every command cg-go implements. A command that is not in it is
 // not reachable. The pilot has only cost; the rest is added as it is ported.
 var Registry = []Command{
+	{Path: []string{"regions"}, Summary: "the regions you have enabled; optin lists the rest, enable turns one on", JSON: true},
+	{Path: []string{"quota"}, Summary: "the GPU quota: what you have, how to ask for more, and the appeal text", JSON: true},
 	{Path: []string{"sweep"}, Aliases: [][]string{{"regions-sweep"}}, Summary: "every region scored for latency, capacity and quota", JSON: true},
 	{Path: []string{"machines"}, Aliases: [][]string{{"types"}}, Summary: "what GPU shapes a region rents, and what each costs", JSON: true},
 	{Path: []string{"deps"}, Aliases: [][]string{{"dependencies"}}, Summary: "the tools this computer needs, and what is missing", JSON: true},
