@@ -2,6 +2,7 @@ package hostcmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -56,18 +57,18 @@ func TestRun(t *testing.T) {
 	var o, e bytes.Buffer
 	out := &output.Out{Stdout: &o, Stderr: &e}
 	s := store(t, two)
-	if rc := Run(s, nil, false, out); rc != 0 || !strings.Contains(o.String(), "homeserver") {
+	if rc := Run(context.Background(), Deps{Store: s}, nil, false, out); rc != 0 || !strings.Contains(o.String(), "homeserver") {
 		t.Errorf("default is list: %d %q", rc, o.String())
 	}
 	o.Reset()
-	if rc := Run(s, []string{"list", "--json"}, false, out); rc != 0 || !strings.HasPrefix(o.String(), "[") {
+	if rc := Run(context.Background(), Deps{Store: s}, []string{"list", "--json"}, false, out); rc != 0 || !strings.HasPrefix(o.String(), "[") {
 		t.Errorf("%q", o.String())
 	}
-	if rc := Run(s, []string{"remove", "x"}, false, out); rc != 1 || !strings.Contains(e.String(), "not ported") {
+	if rc := Run(context.Background(), Deps{Store: s}, []string{"setup", "x"}, false, out); rc != 1 || !strings.Contains(e.String(), "not ported") {
 		t.Errorf("%q", e.String())
 	}
 	e.Reset()
-	if rc := Run(s, []string{"bogus"}, false, out); rc != 1 || !strings.Contains(e.String(), "usage: cg host [list|add") {
+	if rc := Run(context.Background(), Deps{Store: s}, []string{"bogus"}, false, out); rc != 1 || !strings.Contains(e.String(), "usage: cg host [list|add") {
 		t.Errorf("%q", e.String())
 	}
 }

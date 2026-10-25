@@ -34,7 +34,6 @@ import (
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/watcher"
 	"github.com/jebin2/aws_cloud_gaming/internal/config"
 	"github.com/jebin2/aws_cloud_gaming/internal/contract"
-	"github.com/jebin2/aws_cloud_gaming/internal/hosts"
 	"github.com/jebin2/aws_cloud_gaming/internal/output"
 )
 
@@ -164,7 +163,7 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 	case "snapshot":
 		return snapshot.Run(ctx, config.Load(get, repoDir(get)), args, jsonFlag, out)
 	case "host":
-		return hostcmd.Run(hosts.Store{Path: hosts.PathFor(get)}, args, jsonFlag, out)
+		return hostcmd.Run(ctx, hostcmd.New(get, config.Load(get, repoDir(get)), out), args, jsonFlag, out)
 	case "library", "lib":
 		return librarycmd.Run(ctx, config.Load(get, repoDir(get)), get, args, jsonFlag, out)
 	case "regions":

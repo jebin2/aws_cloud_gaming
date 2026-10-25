@@ -24,6 +24,30 @@ type Runner interface {
 	Passthrough(ctx context.Context, name string, args ...string) int
 	// Has reports whether name is installed.
 	Has(name string) bool
+	// Run runs a program with an environment and standard input of its own and
+	// returns its standard output. Standard error is discarded.
+	Run(ctx context.Context, c Cmd) ([]byte, error)
+}
+
+// Cmd is a program to run. Env is added to this process's environment; Stdin
+// nil is the null device, so a program cannot swallow cg's own input.
+type Cmd struct {
+	Name  string
+	Args  []string
+	Env   []string
+	Stdin io.Reader
+}
+
+// ExitCode is a program's exit status: 0 for no error, -1 when it did not run.
+func ExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ee interface{ ExitCode() int }
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
 }
 
 // Exec is the real Runner.
@@ -31,6 +55,13 @@ type Exec struct{}
 
 func (Exec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).Output()
+}
+
+func (Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
+	cmd.Env = append(os.Environ(), c.Env...)
+	cmd.Stdin = c.Stdin
+	return cmd.Output()
 }
 
 func (Exec) Has(name string) bool {
