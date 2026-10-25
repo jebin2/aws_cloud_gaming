@@ -22,7 +22,7 @@ Download from [Releases](https://github.com/jebin2/aws_cloud_gaming/releases):
 
 - A [Tailscale](https://tailscale.com) account
 - **Your own server:** a Linux machine you can reach over SSH
-- **AWS:** an account on a paid plan with a GPU quota - [setup guide](docs/aws-account-setup.md)
+- **AWS:** an account on a paid plan
 
 The app installs anything missing on this computer when you add a machine.
 
@@ -33,7 +33,9 @@ The app installs anything missing on this computer when you add a machine.
 3. Close Moonlight to end the session.
 
 An AWS machine keeps running after a session until auto-stop ends it or you press **Delete**.
-Your games are saved when it is deleted and restored on the next build.
+Your games are saved to S3 when it is deleted and restored on the next build. Saved games are a
+recurring monthly cost, by size, for as long as they are kept - 14 days after the last machine by
+default, adjustable on the Games page.
 
 ## From source
 
