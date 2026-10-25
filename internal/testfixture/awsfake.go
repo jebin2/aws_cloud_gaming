@@ -7,6 +7,7 @@ package testfixture
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,13 +16,18 @@ import (
 	budgetstypes "github.com/aws/aws-sdk-go-v2/service/budgets/types"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	cwtypes "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	logtypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
 	cetypes "github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/freetier"
 	fttypes "github.com/aws/aws-sdk-go-v2/service/freetier/types"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
+	sqtypes "github.com/aws/aws-sdk-go-v2/service/servicequotas/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
 )
@@ -29,6 +35,8 @@ import (
 // Instance is a box.
 type Instance struct {
 	ID, State, Type, Lifecycle, AZ, Name string
+	PublicIP, RootVolume                 string
+	Launched                             time.Time
 }
 
 // Volume is a disk with its tags.
@@ -55,8 +63,9 @@ type Snapshot struct {
 
 // Object is an S3 object.
 type Object struct {
-	Key  string
-	Size int64
+	Key      string
+	Size     int64
+	Modified time.Time
 }
 
 // Day is one day of Cost Explorer's answer: usage type -> {cost, qty}.
@@ -87,6 +96,27 @@ type Scenario struct {
 	Month      []Day
 	Fail       map[string]bool // API names that fail: "DescribeVolumes", "GetCostAndUsage", ...
 	Calls      map[string]int
+
+	// For status.
+	Plan                  string
+	VCPUs, MemMiB, GPUMem int32
+	GPU                   string
+	QuotaOnDemand         float64
+	QuotaSpot             float64
+	Roles                 map[string]bool
+	Notifications         int
+	LogEvents             []LogEvent
+	SpotRequest           string // the state of the spot request of the box
+	SGID                  string
+	Ingress               [][3]string // protocol, port, cidr
+	KeyName               string
+	Spent                 string
+}
+
+// LogEvent is a line in the watchdog's log.
+type LogEvent struct {
+	At  time.Time
+	Msg string
 }
 
 type apiError struct{ code, msg string }
@@ -148,6 +178,16 @@ func (e EC2) DescribeInstances(_ context.Context, in *ec2.DescribeInstancesInput
 		if i.Lifecycle != "" {
 			inst.InstanceLifecycle = ec2types.InstanceLifecycleType(i.Lifecycle)
 		}
+		if i.PublicIP != "" {
+			inst.PublicIpAddress = aws.String(i.PublicIP)
+		}
+		if !i.Launched.IsZero() {
+			t := i.Launched
+			inst.LaunchTime = &t
+		}
+		if i.RootVolume != "" {
+			inst.BlockDeviceMappings = []ec2types.InstanceBlockDeviceMapping{{Ebs: &ec2types.EbsInstanceBlockDevice{VolumeId: aws.String(i.RootVolume)}}}
+		}
 		out.Reservations = append(out.Reservations, ec2types.Reservation{Instances: []ec2types.Instance{inst}})
 	}
 	return &out, nil
@@ -159,6 +199,15 @@ func (e EC2) DescribeVolumes(_ context.Context, in *ec2.DescribeVolumesInput, _ 
 	}
 	var out ec2.DescribeVolumesOutput
 	for _, v := range e.S.Volumes {
+		if len(in.VolumeIds) > 0 {
+			hit := false
+			for _, id := range in.VolumeIds {
+				hit = hit || id == v.ID
+			}
+			if !hit {
+				continue
+			}
+		}
 		attr := map[string]string{"status": v.State, "attachment.instance-id": v.Instance}
 		if !match(in.Filters, attr, v.Tags) {
 			continue
@@ -216,7 +265,7 @@ func (e EC2) DescribeKeyPairs(context.Context, *ec2.DescribeKeyPairsInput, ...fu
 	if !e.S.KeyPair {
 		return nil, apiError{"InvalidKeyPair.NotFound", "no such key pair"}
 	}
-	return &ec2.DescribeKeyPairsOutput{KeyPairs: []ec2types.KeyPairInfo{{}}}, nil
+	return &ec2.DescribeKeyPairsOutput{KeyPairs: []ec2types.KeyPairInfo{{KeyName: aws.String(e.S.KeyName)}}}, nil
 }
 
 func (e EC2) DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGroupsInput, ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
@@ -225,7 +274,13 @@ func (e EC2) DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGroups
 	}
 	out := &ec2.DescribeSecurityGroupsOutput{}
 	if e.S.SecGroup {
-		out.SecurityGroups = []ec2types.SecurityGroup{{}}
+		sg := ec2types.SecurityGroup{GroupId: aws.String(e.S.SGID)}
+		for _, p := range e.S.Ingress {
+			port, _ := strconv.Atoi(p[1])
+			sg.IpPermissions = append(sg.IpPermissions, ec2types.IpPermission{IpProtocol: aws.String(p[0]), FromPort: aws.Int32(int32(port)),
+				IpRanges: []ec2types.IpRange{{CidrIp: aws.String(p[2])}}})
+		}
+		out.SecurityGroups = []ec2types.SecurityGroup{sg}
 	}
 	return out, nil
 }
@@ -237,6 +292,30 @@ func (e EC2) DescribeSpotPriceHistory(context.Context, *ec2.DescribeSpotPriceHis
 	out := &ec2.DescribeSpotPriceHistoryOutput{}
 	if e.S.SpotPrice != "" {
 		out.SpotPriceHistory = []ec2types.SpotPrice{{SpotPrice: aws.String(e.S.SpotPrice)}}
+	}
+	return out, nil
+}
+
+func (e EC2) DescribeInstanceTypes(context.Context, *ec2.DescribeInstanceTypesInput, ...func(*ec2.Options)) (*ec2.DescribeInstanceTypesOutput, error) {
+	if err := e.S.hit("DescribeInstanceTypes"); err != nil {
+		return nil, err
+	}
+	t := ec2types.InstanceTypeInfo{
+		VCpuInfo:   &ec2types.VCpuInfo{DefaultVCpus: aws.Int32(e.S.VCPUs)},
+		MemoryInfo: &ec2types.MemoryInfo{SizeInMiB: aws.Int64(int64(e.S.MemMiB))},
+		GpuInfo: &ec2types.GpuInfo{Gpus: []ec2types.GpuDeviceInfo{{Name: aws.String(e.S.GPU), Count: aws.Int32(1),
+			MemoryInfo: &ec2types.GpuDeviceMemoryInfo{SizeInMiB: aws.Int32(e.S.GPUMem)}}}},
+	}
+	return &ec2.DescribeInstanceTypesOutput{InstanceTypes: []ec2types.InstanceTypeInfo{t}}, nil
+}
+
+func (e EC2) DescribeSpotInstanceRequests(context.Context, *ec2.DescribeSpotInstanceRequestsInput, ...func(*ec2.Options)) (*ec2.DescribeSpotInstanceRequestsOutput, error) {
+	if err := e.S.hit("DescribeSpotInstanceRequests"); err != nil {
+		return nil, err
+	}
+	out := &ec2.DescribeSpotInstanceRequestsOutput{}
+	if e.S.SpotRequest != "" {
+		out.SpotInstanceRequests = []ec2types.SpotInstanceRequest{{State: ec2types.SpotInstanceState(e.S.SpotRequest)}}
 	}
 	return out, nil
 }
@@ -280,8 +359,18 @@ func (b Budgets) DescribeBudget(context.Context, *budgets.DescribeBudgetInput, .
 	if b.S.Budget == "" {
 		return nil, &budgetstypes.NotFoundException{Message: aws.String("no budget")}
 	}
-	return &budgets.DescribeBudgetOutput{Budget: &budgetstypes.Budget{
-		BudgetLimit: &budgetstypes.Spend{Amount: aws.String(b.S.Budget), Unit: aws.String("USD")}}}, nil
+	bud := &budgetstypes.Budget{BudgetLimit: &budgetstypes.Spend{Amount: aws.String(b.S.Budget), Unit: aws.String("USD")}}
+	if b.S.Spent != "" {
+		bud.CalculatedSpend = &budgetstypes.CalculatedSpend{ActualSpend: &budgetstypes.Spend{Amount: aws.String(b.S.Spent), Unit: aws.String("USD")}}
+	}
+	return &budgets.DescribeBudgetOutput{Budget: bud}, nil
+}
+
+func (b Budgets) DescribeNotificationsForBudget(context.Context, *budgets.DescribeNotificationsForBudgetInput, ...func(*budgets.Options)) (*budgets.DescribeNotificationsForBudgetOutput, error) {
+	if err := b.S.hit("DescribeNotificationsForBudget"); err != nil {
+		return nil, err
+	}
+	return &budgets.DescribeNotificationsForBudgetOutput{Notifications: make([]budgetstypes.Notification, b.S.Notifications)}, nil
 }
 
 // FreeTier is the fake Free Tier client.
@@ -295,6 +384,7 @@ func (f FreeTier) GetAccountPlanState(context.Context, *freetier.GetAccountPlanS
 	if !f.S.NoCredits {
 		out.AccountPlanRemainingCredits = &fttypes.MonetaryAmount{Amount: f.S.Credits}
 	}
+	out.AccountPlanType = fttypes.AccountPlanType(f.S.Plan)
 	return out, nil
 }
 
@@ -335,4 +425,45 @@ func (s STS) GetCallerIdentity(context.Context, *sts.GetCallerIdentityInput, ...
 		return nil, errors.New("The security token included in the request is invalid")
 	}
 	return &sts.GetCallerIdentityOutput{Account: aws.String(s.S.Account)}, nil
+}
+
+// Quotas is the fake Service Quotas client.
+type Quotas struct{ S *Scenario }
+
+func (q Quotas) GetServiceQuota(_ context.Context, in *servicequotas.GetServiceQuotaInput, _ ...func(*servicequotas.Options)) (*servicequotas.GetServiceQuotaOutput, error) {
+	if err := q.S.hit("GetServiceQuota"); err != nil {
+		return nil, err
+	}
+	v := q.S.QuotaSpot
+	if aws.ToString(in.QuotaCode) == "L-DB2E81BA" {
+		v = q.S.QuotaOnDemand
+	}
+	return &servicequotas.GetServiceQuotaOutput{Quota: &sqtypes.ServiceQuota{Value: aws.Float64(v)}}, nil
+}
+
+// IAM is the fake IAM client.
+type IAM struct{ S *Scenario }
+
+func (i IAM) GetRole(_ context.Context, in *iam.GetRoleInput, _ ...func(*iam.Options)) (*iam.GetRoleOutput, error) {
+	if err := i.S.hit("GetRole"); err != nil {
+		return nil, err
+	}
+	if !i.S.Roles[aws.ToString(in.RoleName)] {
+		return nil, apiError{"NoSuchEntity", "The role cannot be found"}
+	}
+	return &iam.GetRoleOutput{}, nil
+}
+
+// Logs is the fake CloudWatch Logs client.
+type Logs struct{ S *Scenario }
+
+func (l Logs) FilterLogEvents(_ context.Context, in *cloudwatchlogs.FilterLogEventsInput, _ ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.FilterLogEventsOutput, error) {
+	if err := l.S.hit("FilterLogEvents"); err != nil {
+		return nil, err
+	}
+	out := &cloudwatchlogs.FilterLogEventsOutput{}
+	for _, e := range l.S.LogEvents {
+		out.Events = append(out.Events, logtypes.FilteredLogEvent{Message: aws.String(e.Msg), Timestamp: aws.Int64(e.At.UnixMilli())})
+	}
+	return out, nil
 }

@@ -6,5 +6,5 @@ import (
 )
 
 func s3object(o Object) s3types.Object {
-	return s3types.Object{Key: aws.String(o.Key), Size: aws.Int64(o.Size)}
+	return s3types.Object{Key: aws.String(o.Key), Size: aws.Int64(o.Size), LastModified: &o.Modified}
 }

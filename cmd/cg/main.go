@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/cost"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
 	"github.com/jebin2/aws_cloud_gaming/internal/config"
 	"github.com/jebin2/aws_cloud_gaming/internal/contract"
 	"github.com/jebin2/aws_cloud_gaming/internal/output"
@@ -116,13 +117,20 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			fmt.Fprintf(stdout, "  cg %-10s %s\n", c.Path[0], c.Summary)
 		}
 		return 0
+	case "status":
+		opts, err := status.ParseArgs(args)
+		if err != nil {
+			out.Die(err.Error())
+			return 1
+		}
+		return status.Run(ctx, config.Load(get, repoDir(get)), get, opts, out)
 	case "cost":
 		opts, err := cost.ParseArgs(args)
 		if err != nil {
 			out.Die(err.Error())
 			return 1
 		}
-		return cost.Run(ctx, config.Load(get, repoDir(get)), opts, out)
+		return cost.Run(ctx, config.Load(get, repoDir(get)), get, opts, out)
 	}
 	out.Die(fmt.Sprintf("'%s' is not ported to Go yet (see: cg help)", cmd))
 	return 1

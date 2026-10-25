@@ -2,7 +2,6 @@ package cost
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/jebin2/aws_cloud_gaming/internal/costdaily"
 	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
 	"github.com/jebin2/aws_cloud_gaming/internal/costreport"
+	"github.com/jebin2/aws_cloud_gaming/internal/format"
 	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
 )
 
@@ -83,24 +83,6 @@ func count(k costfacts.Known[float64], unit string) string {
 	return strconv.FormatFloat(k.V, 'f', -1, 64)
 }
 
-// iec is numfmt --to=iec --suffix=B: 1024-based, rounded up, one decimal under 10.
-func iec(n int64) string {
-	v := float64(n)
-	units := []string{"", "K", "M", "G", "T", "P"}
-	i := 0
-	for v >= 1024 && i < len(units)-1 {
-		v /= 1024
-		i++
-	}
-	if i == 0 {
-		return fmt.Sprintf("%dB", n)
-	}
-	if v < 10 {
-		return fmt.Sprintf("%.1f%sB", math.Ceil(v*10)/10, units[i])
-	}
-	return fmt.Sprintf("%.0f%sB", math.Ceil(v), units[i])
-}
-
 func lastLine(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	return strings.TrimSpace(lines[len(lines)-1])
@@ -123,10 +105,10 @@ func (in Inputs) archiveLine() string {
 	case a.V.Objects == 0:
 		return fmt.Sprintf("  game library    s3://%s  EMPTY - no games archived\n", b.Name)
 	case in.Rates.S3GBMonth != nil:
-		return fmt.Sprintf("  game library    s3://%s  %d objects, %s  ($%.2f/mo)\n", b.Name, a.V.Objects, iec(a.V.Bytes),
+		return fmt.Sprintf("  game library    s3://%s  %d objects, %s  ($%.2f/mo)\n", b.Name, a.V.Objects, format.IEC(a.V.Bytes),
 			float64(a.V.Bytes)/1073741824**in.Rates.S3GBMonth)
 	}
-	return fmt.Sprintf("  game library    s3://%s  %d objects, %s\n", b.Name, a.V.Objects, iec(a.V.Bytes))
+	return fmt.Sprintf("  game library    s3://%s  %d objects, %s\n", b.Name, a.V.Objects, format.IEC(a.V.Bytes))
 }
 
 // resources is the block that says what exists in the region.

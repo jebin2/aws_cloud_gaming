@@ -21,6 +21,7 @@ import (
 	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
 	"github.com/jebin2/aws_cloud_gaming/internal/config"
 	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
+	"github.com/jebin2/aws_cloud_gaming/internal/costreport"
 	"github.com/jebin2/aws_cloud_gaming/internal/output"
 	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
 )
@@ -50,8 +51,9 @@ func ParseArgs(args []string) (Options, error) {
 }
 
 // Run is `cg cost`. It returns the exit code.
-func Run(ctx context.Context, env *config.Env, opts Options, out output.Out) int {
+func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, out output.Out) int {
 	region := env.Region()
+	home, _ := os.UserHomeDir()
 	cfg, err := awscfg.New(ctx, region)
 	if err != nil {
 		out.Die("AWS is not set up on this computer: " + err.Error() + " - check the access key: cg creds")
@@ -80,7 +82,7 @@ func Run(ctx context.Context, env *config.Env, opts Options, out output.Out) int
 	}, region)
 
 	in := Inputs{Facts: facts, Rates: rates, Host: env.Host(), Region: region,
-		ConfiguredType: env.Setting("GAME_INSTANCE_TYPE"), Now: time.Now(), CacheEgress: cacheEgress}
+		ConfiguredType: env.Setting("GAME_INSTANCE_TYPE"), Now: time.Now(), CacheEgress: cacheEgress(cacheDir(get, home))}
 	if v, err := strconv.ParseFloat(env.Get("GAME_BITRATE_KBPS"), 64); err == nil {
 		in.BitrateKBPS = v
 	}
@@ -107,17 +109,27 @@ func Run(ctx context.Context, env *config.Env, opts Options, out output.Out) int
 // `cg status` can show the real number for free. Each call costs $0.01 and
 // status must not make one: at 20 runs a day that is more than the S3 bill.
 // Stamped with its age so it is never mistaken for live. Silent on failure -
-// a cache must never break the command.
-func cacheEgress(outGB float64, free *float64) {
-	f := 0.0
-	if free != nil {
-		f = *free
+// a cache must never break the command. It lives in the cache directory, not
+// beside the scripts: an installed copy is read-only.
+func cacheEgress(dir string) costreport.Cache {
+	return func(outGB float64, free *float64) {
+		f := 0.0
+		if free != nil {
+			f = *free
+		}
+		if os.MkdirAll(dir, 0o755) != nil {
+			return
+		}
+		_ = os.WriteFile(filepath.Join(dir, "egress"),
+			[]byte(fmt.Sprintf("%d %.3f %.0f\n", time.Now().Unix(), outGB, f)), 0o644)
 	}
-	if os.MkdirAll(".cg-cache", 0o755) != nil {
-		return
+}
+
+func cacheDir(get config.Lookup, home string) string {
+	if base, ok := get("XDG_CACHE_HOME"); ok && base != "" {
+		return filepath.Join(base, "cg")
 	}
-	_ = os.WriteFile(filepath.Join(".cg-cache", "egress"),
-		[]byte(fmt.Sprintf("%d %.3f %.0f\n", time.Now().Unix(), outGB, f)), 0o644)
+	return filepath.Join(home, ".cache", "cg")
 }
 
 // firstLine is AWS's refusal in one line: the SDK wraps it in layers of
