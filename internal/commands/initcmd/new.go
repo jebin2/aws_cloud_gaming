@@ -5,11 +5,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/budgets"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	awspricing "github.com/aws/aws-sdk-go-v2/service/pricing"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -17,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	cg "github.com/jebin2/aws_cloud_gaming"
+	"github.com/jebin2/aws_cloud_gaming/internal/ask"
 	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/check"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/notify"
@@ -83,6 +87,11 @@ func New(ctx context.Context, get config.Lookup, env *config.Env, out *output.Ou
 		Out: out, Env: env, R: r,
 		EnsureWatchdog: func(ctx context.Context) { watchdog.Ensure(ctx, env, out) },
 		Preflight:      func(ctx context.Context) (check.Result, int) { return check.New(env, false, out).Run(ctx) },
+		ChooseGames: func(ctx context.Context) {
+			avail, reserve := availableGB(ctx, ec, env, cache)
+			Chooser{Lib: library.Library{S3: store, Host: host, Region: region, Account: account, Bucket: env.Get("GAME_S3_BUCKET")}, Env: env, Out: out,
+				Ask: ask.New(out, os.Getenv("CG_YES") == "1"), AvailGB: avail, ReserveGB: reserve}.Choose(ctx)
+		},
 		Lib: func(named string) provision.Library {
 			return provision.Library{S3: s3.NewFromConfig(cfg), IAM: iam.NewFromConfig(cfg), Account: account, Host: host, Region: region, Named: named, TagKey: config.TagKey}
 		},
@@ -114,4 +123,33 @@ func New(ctx context.Context, get config.Lookup, env *config.Env, out *output.Ou
 		},
 		Home: home, Cache: cache, Now: time.Now, Sleep: time.Sleep,
 	}, nil
+}
+
+// availableGB is what the machine being built can hold, less what is kept free:
+// its instance store as AWS reports it for the type (in GiB, a little less than the
+// 10^9 GB figure once formatted), and nil when that could not be read - then nothing
+// is refused here.
+func availableGB(ctx context.Context, c *ec2.Client, env *config.Env, cache string) (avail *float64, reserve float64) {
+	reserve = float64(env.Int("GAME_DISK_RESERVE_GB"))
+	t := env.Setting("GAME_INSTANCE_TYPE")
+	// Measured on a real one once one has run (cg status writes it, cached per type).
+	if b, err := os.ReadFile(filepath.Join(cache, "scratch-"+t)); err == nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && n > 0 {
+			a := float64(n) - reserve
+			if a < 0 {
+				a = 0
+			}
+			return &a, reserve
+		}
+	}
+	o, err := c.DescribeInstanceTypes(ctx, &ec2.DescribeInstanceTypesInput{InstanceTypes: []ec2types.InstanceType{ec2types.InstanceType(t)}})
+	if err != nil || len(o.InstanceTypes) == 0 || o.InstanceTypes[0].InstanceStorageInfo == nil || o.InstanceTypes[0].InstanceStorageInfo.TotalSizeInGB == nil {
+		return nil, reserve
+	}
+	disk := float64(*o.InstanceTypes[0].InstanceStorageInfo.TotalSizeInGB) * 1e9 / 1073741824
+	a := disk - reserve
+	if a < 0 {
+		a = 0
+	}
+	return &a, reserve
 }
