@@ -55,3 +55,37 @@ func Send(ctx context.Context, client *http.Client, env *config.Env, out *output
 	out.Log("sent to " + host + " - check the ntfy app")
 	return 0
 }
+
+// Push sends one notification, if notifications are on. It never fails the
+// command: the build carries on, and says once that it was not sent. The URL is
+// never printed - on ntfy.sh, the topic is all it takes to read and post.
+func Push(ctx context.Context, client *http.Client, env *config.Env, out *output.Out, title, message, priority, tags string) {
+	target := config.NtfyURL(env.Get("GAME_NTFY_URL"))
+	if target == "" {
+		return
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+	if priority == "" {
+		priority = "default"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(message))
+	if err == nil {
+		req.Header.Set("Title", env.Host()+": "+title)
+		req.Header.Set("Priority", priority)
+		req.Header.Set("Tags", tags)
+		var resp *http.Response
+		if resp, err = client.Do(req); err == nil {
+			resp.Body.Close()
+			if resp.StatusCode/100 != 2 {
+				err = fmt.Errorf("HTTP %d", resp.StatusCode)
+			}
+		}
+	}
+	if err != nil {
+		out.Log("notification not sent (ignored)")
+	}
+}

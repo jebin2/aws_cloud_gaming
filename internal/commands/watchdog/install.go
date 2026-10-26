@@ -3,6 +3,8 @@ package watchdog
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
@@ -145,4 +147,47 @@ func Reinstall(ctx context.Context, env *config.Env, out *output.Out) int {
 		return 1
 	}
 	return mutate(ctx, env, r, "install", out)
+}
+
+// Ensure is what `cg init` does before anything launches: the cloud watchdog
+// watches by TAG, so it does not need the instance to exist - and the point of an
+// independent guard is that it is already watching when the box appears. When
+// nothing changed this is one round of read-only calls: no redeploy, and no new
+// check. Never fatal: a missing guard must not stop you building a box.
+func Ensure(ctx context.Context, env *config.Env, out *output.Out) {
+	r, err := NewReader(ctx, env)
+	if err != nil {
+		out.Log("cloud watchdog not installed - the on-host watchdog and the budget still apply")
+		return
+	}
+	adoptNtfy(ctx, env, r, out)
+	r.Settings = func(account string) wd.Settings { return SettingsFor(env, ratesOf(ctx, env), account) }
+	st := r.Current(ctx)
+	if len(st.Drift) == 0 {
+		now := r.Now()
+		if st.LastMS == 0 {
+			out.Log("cloud watchdog: up to date, but it has logged nothing in the last hour - check: cg watchdog status")
+			return
+		}
+		out.Log(fmt.Sprintf("cloud watchdog: up to date - last check %s ago: %s", wd.Age(st.LastMS, now), strings.TrimPrefix(st.LastMsg, "cg-watchdog: ")))
+		if now.Unix()-st.LastMS/1000 > 900 {
+			out.Log(fmt.Sprintf("  ^ nothing for %d min but it runs every 5 - it is not running. Check: cg watchdog status", (now.Unix()-st.LastMS/1000)/60))
+		}
+		if m := st.LastMsg; strings.Contains(m, "CANNOT QUERY AWS") || strings.Contains(m, "DENIED") || strings.Contains(m, "FAILED") {
+			out.Log("  ^ it cannot act on your account - fix this or layer 3 is decoration")
+		}
+		out.Log("game archive: " + wd.ArchiveDecision(ctx, r.Logs, r.Host, env.Int("GAME_ARCHIVE_EXPIRY_DAYS"), now))
+		return
+	}
+	if len(st.Drift) == 1 && st.Drift[0] == "no function" {
+		out.Say("arming the cloud watchdog before anything launches")
+	} else {
+		out.Say("updating the cloud watchdog: " + strings.Join(st.Drift, ", "))
+	}
+	i, err := NewInstaller(ctx, env, r, out)
+	if err != nil || i.Install(ctx) != nil {
+		out.Log("cloud watchdog not installed - the on-host watchdog and the budget still apply")
+		return
+	}
+	i.Report(i.Prove(ctx))
 }

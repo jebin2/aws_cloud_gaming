@@ -32,6 +32,7 @@ var Registry = []Command{
 	{Path: []string{"quota"}, Summary: "the GPU quota: what you have, how to ask for more, and the appeal text", JSON: true},
 	{Path: []string{"sweep"}, Aliases: [][]string{{"regions-sweep"}}, Summary: "every region scored for latency, capacity and quota", JSON: true},
 	{Path: []string{"machines"}, Aliases: [][]string{{"types"}}, Summary: "what GPU shapes a region rents, and what each costs", JSON: true},
+	{Path: []string{"init"}, Summary: "build the box: preflight, launch, join the tailnet, build, pair, ready to play. Starts billing by the hour"},
 	{Path: []string{"open"}, Aliases: [][]string{{"up"}}, Summary: "start the box if it is stopped, and stream from it (--on <name> for a machine of yours)"},
 	{Path: []string{"stop"}, Aliases: [][]string{{"down"}}, Summary: "mirror the game library, then stop the box (--force to stop without a mirror)"},
 	{Path: []string{"clean"}, Summary: "give the box back some root disk; installed games are never touched"},
