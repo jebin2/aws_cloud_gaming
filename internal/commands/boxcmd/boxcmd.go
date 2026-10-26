@@ -105,7 +105,7 @@ func (d Deps) block(title string, lines ...string) {
 	d.Out.Block(title, "\n"+strings.Join(lines, "\n")+"\n\n")
 }
 
-const library = "/usr/local/bin/cg-library"
+const cgLibrary = "/usr/local/bin/cg-library"
 
 // Library is the on-box `cg library` forms, which need the box: status, check,
 // push/sync, pull/restore, and account push/pull. The on-box cg-library script is
@@ -118,19 +118,19 @@ func (d Deps) Library(ctx context.Context, sub string, args []string) int {
 	title := ""
 	switch sub {
 	case "status", "":
-		command, title = remote(library, "status"), "Game library on the box"
+		command, title = remote(cgLibrary, "status"), "Game library on the box"
 	case "push", "sync":
-		command = remote(library, append([]string{"push"}, args...)...)
+		command = remote(cgLibrary, append([]string{"push"}, args...)...)
 	case "pull", "restore":
-		command = remote(library, append([]string{"pull"}, args...)...)
+		command = remote(cgLibrary, append([]string{"pull"}, args...)...)
 	case "check":
-		command = remote(library, "check")
+		command = remote(cgLibrary, "check")
 	case "account":
 		if len(args) == 0 {
 			return d.die("usage: cg library account [status|push|pull|forget]")
 		}
 		w := strings.Replace(args[0], "restore", "pull", 1)
-		command = remote(library, "account", w)
+		command = remote(cgLibrary, "account", w)
 	default:
 		return d.die("usage: cg library [list|status|push|pull [--apps <csv>]|account [status|push|pull|forget]|check|forget <appid> [--from <bucket>]|reset <appid> [--from <bucket>]|keep-for <days>|move <appid> --from <bucket>|elsewhere|clean|--bucket]")
 	}
@@ -173,9 +173,9 @@ func (d Deps) Push(ctx context.Context, extra, unreachable, say string) bool {
 		return false
 	}
 	d.Out.Say(say)
-	command := remote(library, "push")
+	command := remote(cgLibrary, "push")
 	if extra != "" {
-		command = remote(library, "push", extra)
+		command = remote(cgLibrary, "push", extra)
 	}
 	return d.relay(ctx, command) == nil
 }

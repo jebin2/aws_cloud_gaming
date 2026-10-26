@@ -43,7 +43,7 @@ func (f *fakeEC2) DescribeInstances(context.Context, *ec2.DescribeInstancesInput
 	if f.describeErr != nil {
 		return nil, f.describeErr
 	}
-	in := ec2types.Instance{State: &ec2types.InstanceState{Name: ec2types.InstanceStateName(f.state)}, InstanceLifecycle: ec2types.InstanceLifecycleType(f.lifecycle),
+	in := ec2types.Instance{InstanceId: aws.String("i-0abc"), State: &ec2types.InstanceState{Name: ec2types.InstanceStateName(f.state)}, InstanceLifecycle: ec2types.InstanceLifecycleType(f.lifecycle),
 		BlockDeviceMappings: []ec2types.InstanceBlockDeviceMapping{{Ebs: &ec2types.EbsInstanceBlockDevice{VolumeId: aws.String("vol-1")}}}}
 	return &ec2.DescribeInstancesOutput{Reservations: []ec2types.Reservation{{Instances: []ec2types.Instance{in}}}}, nil
 }
@@ -68,6 +68,7 @@ func (f *fakeEC2) StopInstances(context.Context, *ec2.StopInstancesInput, ...fun
 }
 func (f *fakeEC2) TerminateInstances(context.Context, *ec2.TerminateInstancesInput, ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
 	f.calls = append(f.calls, "terminate")
+	f.state = "terminated"
 	return &ec2.TerminateInstancesOutput{}, nil
 }
 func (f *fakeEC2) CancelSpotInstanceRequests(context.Context, *ec2.CancelSpotInstanceRequestsInput, ...func(*ec2.Options)) (*ec2.CancelSpotInstanceRequestsOutput, error) {
@@ -100,6 +101,10 @@ func (f *fakeEC2) DescribeImages(_ context.Context, in *ec2.DescribeImagesInput,
 }
 func (f *fakeEC2) DescribeVolumes(context.Context, *ec2.DescribeVolumesInput, ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
 	return &ec2.DescribeVolumesOutput{Volumes: []ec2types.Volume{{Size: aws.Int32(50)}}}, nil
+}
+func (f *fakeEC2) DeleteVolume(_ context.Context, in *ec2.DeleteVolumeInput, _ ...func(*ec2.Options)) (*ec2.DeleteVolumeOutput, error) {
+	f.calls = append(f.calls, "delete-volume "+aws.ToString(in.VolumeId))
+	return &ec2.DeleteVolumeOutput{}, nil
 }
 func (f *fakeEC2) DeregisterImage(_ context.Context, in *ec2.DeregisterImageInput, _ ...func(*ec2.Options)) (*ec2.DeregisterImageOutput, error) {
 	f.calls = append(f.calls, "deregister "+aws.ToString(in.ImageId))

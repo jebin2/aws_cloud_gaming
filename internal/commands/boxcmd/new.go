@@ -6,12 +6,16 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/ask"
 	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
 	"github.com/jebin2/aws_cloud_gaming/internal/box"
 	"github.com/jebin2/aws_cloud_gaming/internal/config"
+	"github.com/jebin2/aws_cloud_gaming/internal/library"
 	"github.com/jebin2/aws_cloud_gaming/internal/local"
 	"github.com/jebin2/aws_cloud_gaming/internal/output"
 	"github.com/jebin2/aws_cloud_gaming/internal/session"
@@ -69,4 +73,30 @@ func trimSpace(s string) string {
 		s = s[:len(s)-1]
 	}
 	return s
+}
+
+// NewDestroyDeps is what `cg destroy` uses beyond the box, for the account in use.
+func NewDestroyDeps(ctx context.Context, env *config.Env, client *ec2.Client) (DestroyDeps, error) {
+	cfg, err := awscfg.New(ctx, env.Region())
+	if err != nil {
+		return DestroyDeps{}, err
+	}
+	acct := ""
+	if id, err := sts.NewFromConfig(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err == nil {
+		acct = aws.ToString(id.Account)
+	}
+	return DestroyDeps{EC2: client, IAM: iam.NewFromConfig(cfg),
+		Lib: library.Library{S3: &library.AWSStore{Home: env.Region()}, Host: env.Host(), Region: env.Region(), Account: acct, Bucket: env.Get("GAME_S3_BUCKET")}}, nil
+}
+
+// WithDestroy lets a spot box's stop turn into a destroy.
+func (d *Deps) WithDestroy(env *config.Env, client *ec2.Client) {
+	d.Destroy = func(ctx context.Context) int {
+		x, err := NewDestroyDeps(ctx, env, client)
+		if err != nil {
+			d.Out.Die(err.Error())
+			return 1
+		}
+		return d.DestroyBox(ctx, x, nil)
+	}
 }

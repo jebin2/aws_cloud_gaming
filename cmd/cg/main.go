@@ -206,12 +206,27 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 		}
 		return d.Open(ctx)
 	case "stop", "down":
-		d, _, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
+		env := config.Load(get, repoDir(get))
+		d, c, err := boxcmd.New(ctx, get, env, out)
 		if err != nil {
 			out.Die(err.Error())
 			return 1
 		}
+		d.WithDestroy(env, c)
 		return d.Stop(ctx, args)
+	case "destroy":
+		env := config.Load(get, repoDir(get))
+		d, c, err := boxcmd.New(ctx, get, env, out)
+		if err != nil {
+			out.Die(err.Error())
+			return 1
+		}
+		x, err := boxcmd.NewDestroyDeps(ctx, env, c)
+		if err != nil {
+			out.Die(err.Error())
+			return 1
+		}
+		return d.DestroyBox(ctx, x, args)
 	case "clean":
 		d, _, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
 		if err != nil {

@@ -105,3 +105,35 @@ func Release(path string) {
 		_ = os.Remove(path)
 	}
 }
+
+// Ender ends a stream this laptop holds.
+type Ender struct {
+	Path  string
+	Probe Probe
+	// Signal sends a signal to a process; Children signals a process's children.
+	Signal   func(pid int, sig syscall.Signal)
+	Children func(pid int, sig syscall.Signal)
+	Sleep    func(time.Duration)
+}
+
+// End ends the stream this laptop holds, Moonlight first. `cg open` waits on
+// Moonlight, so killing Moonlight lets it finish the way it normally does. TERM to
+// the children, then to `cg open` itself; SIGKILL only if ten seconds of asking
+// politely got nowhere. It reports whether no stream is left.
+func (e Ender) End() bool {
+	l, held := Running(e.Path, e.Probe)
+	if !held {
+		return true
+	}
+	e.Children(l.PID, syscall.SIGTERM) // moonlight, the child that holds it open
+	e.Signal(l.PID, syscall.SIGTERM)
+	for i := 0; i < 20; i++ {
+		if _, held := Running(e.Path, e.Probe); !held {
+			return true
+		}
+		e.Sleep(500 * time.Millisecond)
+	}
+	e.Signal(l.PID, syscall.SIGKILL)
+	_, held = Running(e.Path, e.Probe)
+	return !held
+}

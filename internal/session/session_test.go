@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -95,3 +96,49 @@ func TestClaimAndReleaseOnlyDropTheirOwn(t *testing.T) {
 	}
 	Release(p) // nothing there: nothing happens
 }
+
+func TestEndAsksPolitelyThenInsists(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "s.pid")
+	_ = os.WriteFile(p, []byte("4242 1\n"), 0o644)
+	var sent []string
+	alive := true
+	probe := fake{alive: map[int]bool{}, args: map[int]string{4242: "cg open"}}
+	live := func() fake { probe.alive[4242] = alive; return probe }
+	e := Ender{Path: p, Sleep: func(time.Duration) {},
+		Signal: func(pid int, s syscall.Signal) {
+			sent = append(sent, fmt.Sprint("pid ", s))
+			if s == syscall.SIGTERM {
+				alive = true
+			}
+		},
+		Children: func(pid int, s syscall.Signal) { sent = append(sent, fmt.Sprint("children ", s)) }}
+	// It exits after the polite TERM.
+	n := 0
+	e.Probe = probeFunc(func() fake { n++; alive = n < 3; return live() })
+	if !e.End() || len(sent) != 2 || sent[0] != "children terminated" {
+		t.Errorf("%v", sent)
+	}
+	// It ignores TERM: after ten seconds of asking, KILL.
+	sent, alive = nil, true
+	e.Probe = probeFunc(func() fake { p := live(); return p })
+	e.Signal = func(pid int, s syscall.Signal) {
+		sent = append(sent, fmt.Sprint("pid ", s))
+		if s == syscall.SIGKILL {
+			alive = false
+		}
+	}
+	if !e.End() || sent[len(sent)-1] != "pid killed" {
+		t.Errorf("%v", sent)
+	}
+	// Nothing held: nothing sent.
+	sent = nil
+	_ = os.Remove(p)
+	if !e.End() || len(sent) != 0 {
+		t.Errorf("%v", sent)
+	}
+}
+
+type probeFunc func() fake
+
+func (f probeFunc) Alive(pid int) bool          { return f().Alive(pid) }
+func (f probeFunc) Args(pid int) (string, bool) { return f().Args(pid) }
