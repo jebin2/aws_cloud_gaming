@@ -702,6 +702,31 @@ Deliberate differences from the Bash: `library clean` and `forget` delete a fold
 slash, so an orphan called "Diablo" no longer takes "Diablo IV" with it; `library clean` says when the
 archive could not be read instead of claiming nothing is orphaned; a copy over 5 GiB is made in parts.
 
+### 8.13 Phase 5 progress
+
+Written and tested over fakes: `open`, `stop`, `clean`, `pair`, `snapshot create/--delete`, the on-box
+`library` forms, `games --volume --delete`, the normal `destroy` (`--force`, `--no-push`), and `init` end
+to end (the bucket and role, the budget, the shutdown check, the image, key pair and security group,
+user-data, the launch, the tailnet node, the build, pairing, the summary, and the game chooser). Where a
+piece has a Bash twin whose output is deterministic it is tested against it on the real files: the launch
+error report, the bootstrap assembly, the host bundle's comment strip, the end-of-init summary.
+
+`cg-go init` refuses to run unless `CG_GO_INIT=1`: it launches machines that bill, and the exit gate
+(one real build/open/pair/stop/destroy/rebuild cycle and one library restore) has not been met. `destroy
+--all` is Phase 6 and is not ported.
+
+Differences from the Bash worth knowing:
+
+- `cg clean` no longer deletes the installed games. The Bash ran `find /scratch -mindepth 1 -maxdepth 1
+  -exec rm -rf`, which removes `/scratch/steam`, and the next push then mirrored the deletion to S3. The
+  safer version already in `lib/game` was never the one `cg` ran. **This is a bug on `main` too.**
+- remote words (`cg library push --apps ...`) are quoted one by one, so nothing typed becomes a second
+  command on the box;
+- a `DERP` path warns as relayed (tailscale never prints the word "relay" for it);
+- destroy collects cleanup failures instead of hiding them, and clears the box's own settings only once
+  the instance is really gone;
+- an orphan folder called "Diablo" no longer takes "Diablo IV" with it (the Bash deleted by prefix).
+
 ## 9. Phase 1: skeleton and shared runtime
 
 1. Create `cmd/cg` and the packages in section 7, using the module pinned in the pilot.
