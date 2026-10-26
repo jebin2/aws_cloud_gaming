@@ -3,12 +3,14 @@ package games
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	awspricing "github.com/aws/aws-sdk-go-v2/service/pricing"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
+	"github.com/jebin2/aws_cloud_gaming/internal/ask"
 	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/remote"
 	"github.com/jebin2/aws_cloud_gaming/internal/config"
@@ -66,10 +68,8 @@ func runVolume(ctx context.Context, env *config.Env, args []string, out *output.
 	switch sub {
 	case "show", "":
 	case "--delete", "delete":
-		out.Die("games --volume --delete is not ported to Go yet")
-		return 1
 	default:
-		out.Die("usage: cg games [show|--delete]")
+		out.Die("usage: cg games [--volume [--delete]]")
 		return 1
 	}
 	cfg, err := awscfg.New(ctx, env.Region())
@@ -81,6 +81,9 @@ func runVolume(ctx context.Context, env *config.Env, args []string, out *output.
 	if err != nil {
 		out.Die("could not look for the volume: " + err.Error())
 		return 1
+	}
+	if sub == "--delete" || sub == "delete" {
+		return DeleteVolume(ctx, ec2.NewFromConfig(cfg), v, ask.New(out, os.Getenv("CG_YES") == "1"), out)
 	}
 	us, _ := awscfg.New(ctx, "us-east-1")
 	rates := pricing.Load(ctx, pricing.Options{Getenv: env.Get,

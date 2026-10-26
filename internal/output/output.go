@@ -145,6 +145,16 @@ func (o *Out) Echo(text string) {
 	fmt.Fprintln(o.Stdout, text)
 }
 
+// Block is a boxed note: the lines as they are, or one block event so the app
+// draws it as a card rather than a stream of lines.
+func (o *Out) Block(title, text string) {
+	if o.JSON {
+		o.Event("block", "title", title, "text", strings.TrimRight(text, "\n"))
+		return
+	}
+	io.WriteString(o.Stdout, text)
+}
+
 // Report is a finished report. Plain, it is the text as it is; in events it is
 // one report event, so the app draws it as a block and not as a stream of
 // lines.

@@ -132,8 +132,10 @@ type fakeProc struct {
 
 func (p *fakeProc) Done() <-chan struct{} { return p.done }
 func (p *fakeProc) Kill() {
-	if !p.Killed {
-		p.Killed = true
+	p.Killed = true
+	select {
+	case <-p.done:
+	default:
 		close(p.done)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/awscmd"
+	"github.com/jebin2/aws_cloud_gaming/internal/commands/boxcmd"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/check"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/configcmd"
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/cost"
@@ -161,10 +162,89 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 	case "aws":
 		return awscmd.Run(ctx, config.Load(get, repoDir(get)), args, jsonFlag, out)
 	case "snapshot":
-		return snapshot.Run(ctx, config.Load(get, repoDir(get)), args, jsonFlag, out)
+		sub := "create"
+		if len(args) > 0 {
+			sub = args[0]
+		}
+		switch sub {
+		case "--list", "list":
+			return snapshot.Run(ctx, config.Load(get, repoDir(get)), args, jsonFlag, out)
+		case "create", "":
+			d, _, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
+			if err != nil {
+				out.Die(err.Error())
+				return 1
+			}
+			return d.SnapshotCreate(ctx)
+		case "--delete", "delete":
+			d, c, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
+			if err != nil {
+				out.Die(err.Error())
+				return 1
+			}
+			id := ""
+			if len(args) > 1 {
+				id = args[1]
+			}
+			return d.SnapshotDelete(ctx, id, c)
+		}
+		out.Die("usage: cg snapshot [create|--list|--delete <id>]")
+		return 1
+	case "open", "up":
+		env := config.Load(get, repoDir(get))
+		if len(args) > 0 && args[0] == "--on" {
+			name := ""
+			if len(args) > 1 {
+				name = args[1]
+			}
+			return hostcmd.Run(ctx, hostcmd.New(get, env, out), []string{"open", name}, false, out)
+		}
+		d, _, err := boxcmd.New(ctx, get, env, out)
+		if err != nil {
+			out.Die(err.Error())
+			return 1
+		}
+		return d.Open(ctx)
+	case "stop", "down":
+		d, _, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
+		if err != nil {
+			out.Die(err.Error())
+			return 1
+		}
+		return d.Stop(ctx, args)
+	case "clean":
+		d, _, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
+		if err != nil {
+			out.Die(err.Error())
+			return 1
+		}
+		return d.Clean(ctx)
+	case "pair":
+		d, _, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
+		if err != nil {
+			out.Die(err.Error())
+			return 1
+		}
+		return d.PairMoonlight(ctx)
 	case "host":
 		return hostcmd.Run(ctx, hostcmd.New(get, config.Load(get, repoDir(get)), out), args, jsonFlag, out)
 	case "library", "lib":
+		if sub := firstArg(args, "status"); onBoxLibrary(sub, args) {
+			d, _, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
+			if err != nil {
+				out.Die(err.Error())
+				return 1
+			}
+			rest := []string{}
+			if len(args) > 1 {
+				rest = args[1:]
+			}
+			if sub == "account" || sub == "login" {
+				rest = accountRest(args[1:])
+				sub = "account"
+			}
+			return d.Library(ctx, sub, rest)
+		}
 		return librarycmd.Run(ctx, config.Load(get, repoDir(get)), get, args, jsonFlag, out)
 	case "regions":
 		return regions.Run(ctx, config.Load(get, repoDir(get)), args, jsonFlag, out)
@@ -228,4 +308,37 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 	}
 	out.Die(fmt.Sprintf("'%s' is not ported to Go yet (see: cg help)", cmd))
 	return 1
+}
+
+func firstArg(args []string, def string) string {
+	if len(args) > 0 {
+		return args[0]
+	}
+	return def
+}
+
+// onBoxLibrary: the forms of `cg library` that ask the box.
+func onBoxLibrary(sub string, args []string) bool {
+	switch sub {
+	case "status", "push", "sync", "pull", "restore", "check":
+		return true
+	case "account", "login":
+		for _, a := range accountRest(args[1:]) {
+			switch a {
+			case "push", "pull", "restore":
+				return true
+			}
+			return false
+		}
+	}
+	return false
+}
+
+// accountRest drops the flags that come before the account word: flags are
+// recognised globally but are not removed from the arguments.
+func accountRest(args []string) []string {
+	for len(args) > 0 && len(args[0]) > 0 && args[0][0] == '-' {
+		args = args[1:]
+	}
+	return args
 }
