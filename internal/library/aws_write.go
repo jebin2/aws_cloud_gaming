@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -118,4 +119,19 @@ func (a *AWSStore) DeleteBucket(ctx context.Context, bucket, region string) erro
 	}
 	_, err = c.DeleteBucket(ctx, &s3.DeleteBucketInput{Bucket: aws.String(bucket)})
 	return err
+}
+
+// Presign is a URL that reads one object for a while, so a machine with no
+// credentials yet can fetch it. It is signed for the BUCKET'S region: a URL
+// signed for the wrong region is a 400.
+func (a *AWSStore) Presign(ctx context.Context, bucket, region, key string, valid time.Duration) (string, error) {
+	c, err := a.client(ctx, region)
+	if err != nil {
+		return "", err
+	}
+	r, err := s3.NewPresignClient(c).PresignGetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)}, s3.WithPresignExpires(valid))
+	if err != nil {
+		return "", err
+	}
+	return r.URL, nil
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -91,4 +92,66 @@ func (c Client) DisableExpiry(ctx context.Context, node string) Expiry {
 		}
 	}
 	return Expiry{Lines: []string{fmt.Sprintf("the API accepted it, but '%s' still shows key expiry on", node)}}
+}
+
+// PruneStale deletes OFFLINE tailnet nodes named after this host, before a build.
+//
+// Pruning used to happen only in `cg destroy`. That was fine when destroy was how
+// a session ended - but the box now terminates itself when it goes idle, and
+// nothing on the box can delete its own tailnet entry (that needs an API token,
+// which deliberately never leaves the laptop). So every auto-terminated box leaked
+// a node, the next build found its name taken, and the tailnet crept to gamevps-1,
+// gamevps-2, ... That is not cosmetic: a suffixed name means `.env` and Moonlight
+// disagree about what the box is called, and a stale entry answers DNS for a
+// machine that no longer exists.
+//
+// Only OFFLINE nodes are touched. An online one is a box that exists, which this
+// must never disturb - including the one being rebuilt beside it.
+func (c Client) PruneStale(ctx context.Context, host string) []string {
+	if c.Token == "" {
+		return nil
+	}
+	code, b, err := c.do(ctx, http.MethodGet, "/tailnet/-/devices", nil)
+	switch {
+	case err != nil:
+		return []string{"    could not reach api.tailscale.com (000) - skipping the prune"}
+	case code == 401 || code == 403:
+		// Said out loud: an expired token and a clean tailnet look identical
+		// otherwise, and the cleanup just silently stops happening.
+		return []string{fmt.Sprintf("    tailnet token rejected (%d) - stale nodes will not be pruned", code), "    a new one: https://login.tailscale.com/admin/settings/keys"}
+	case code/100 != 2:
+		return []string{fmt.Sprintf("    could not reach api.tailscale.com (%d) - skipping the prune", code)}
+	}
+	var d struct {
+		Devices []struct {
+			ID                 string `json:"id"`
+			Hostname           string `json:"hostname"`
+			LastSeen           string `json:"lastSeen"`
+			ConnectedToControl *bool  `json:"connectedToControl"`
+		}
+	}
+	if json.Unmarshal(b, &d) != nil {
+		return nil
+	}
+	pat := regexp.MustCompile(`^` + regexp.QuoteMeta(host) + `(-\d+)?$`)
+	var out []string
+	for _, dev := range d.Devices {
+		// connectedToControl, not "online": the v2 devices API has no "online"
+		// field at all (checked live 2026-09-14). A node whose field is absent is
+		// left alone: deleting the tailnet identity of a box that is still up makes
+		// it unreachable.
+		if !pat.MatchString(dev.Hostname) || dev.ConnectedToControl == nil || *dev.ConnectedToControl {
+			continue
+		}
+		seen := dev.LastSeen
+		if len(seen) > 19 {
+			seen = seen[:19]
+		}
+		if code, _, err := c.do(ctx, http.MethodDelete, "/device/"+dev.ID, nil); err == nil && code/100 == 2 {
+			out = append(out, fmt.Sprintf("    pruned stale tailnet node '%s' (last seen %s)", dev.Hostname, seen))
+		} else {
+			out = append(out, fmt.Sprintf("    could not prune '%s' - the token may lack write scope", dev.Hostname))
+		}
+	}
+	return out
 }

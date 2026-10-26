@@ -193,3 +193,30 @@ func TestDisableExpiryTouchesOnlyTheConnectedNodeOfThatName(t *testing.T) {
 		t.Errorf("%+v", e)
 	}
 }
+
+func TestPruneTouchesOnlyOfflineNodesOfThisHost(t *testing.T) {
+	deleted := []string{}
+	c := server(t, map[string]func(http.ResponseWriter, *http.Request){
+		"GET /tailnet/-/devices": reply(200, `{"devices":[
+		 {"id":"1","hostname":"gamevps","connectedToControl":false,"lastSeen":"2026-10-20T10:11:12Z"},
+		 {"id":"2","hostname":"gamevps-1","connectedToControl":true},
+		 {"id":"3","hostname":"gamevps-2"},
+		 {"id":"4","hostname":"gamevpsx","connectedToControl":false},
+		 {"id":"5","hostname":"phone","connectedToControl":false}]}`),
+		"DELETE /device/1": func(w http.ResponseWriter, r *http.Request) {
+			deleted = append(deleted, r.URL.Path)
+			w.WriteHeader(200)
+		},
+	})
+	got := c.PruneStale(context.Background(), "gamevps")
+	if len(got) != 1 || got[0] != "    pruned stale tailnet node 'gamevps' (last seen 2026-10-20T10:11:12)" || len(deleted) != 1 {
+		t.Errorf("an online node, one with no field, another name: all left alone: %v %v", got, deleted)
+	}
+	c.Token = "wrong"
+	if got := c.PruneStale(context.Background(), "gamevps"); got[0] != "    tailnet token rejected (401) - stale nodes will not be pruned" {
+		t.Errorf("%v", got)
+	}
+	if got := (Client{}).PruneStale(context.Background(), "gamevps"); got != nil {
+		t.Error("nothing to do without a token")
+	}
+}

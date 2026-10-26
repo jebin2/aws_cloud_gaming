@@ -15,7 +15,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -130,4 +132,53 @@ func BoxExists(ctx context.Context, c EC2, name string) bool {
 		}
 	}
 	return false
+}
+
+// KeyAdmin is what making a key pair uses.
+type KeyAdmin interface {
+	EC2
+	DeleteKeyPair(context.Context, *ec2.DeleteKeyPairInput, ...func(*ec2.Options)) (*ec2.DeleteKeyPairOutput, error)
+	CreateKeyPair(context.Context, *ec2.CreateKeyPairInput, ...func(*ec2.Options)) (*ec2.CreateKeyPairOutput, error)
+}
+
+// Ensure leaves a key pair this laptop can log in with. Only where no box uses the
+// pair: the check stops a build that would reuse one. A pair this laptop holds the
+// private key of (or cannot compare) is kept; otherwise it is replaced, the old
+// .pem is kept beside it under a new name, and the new private key is written for
+// its owner alone. AWS hands a private key out once, which is why the pair is
+// reused only when the .pem is here.
+func Ensure(ctx context.Context, c KeyAdmin, name, pem, tagKey string, say func(string), now func() time.Time) error {
+	state := Check(ctx, c, name, pem)
+	switch state {
+	case Match, Unknown:
+		return nil
+	case Missing, Mismatch:
+		say(fmt.Sprintf("==> replacing key pair %s - %s is %s", name, pem, Words(state)))
+		if _, err := c.DeleteKeyPair(ctx, &ec2.DeleteKeyPairInput{KeyName: aws.String(name)}); err != nil {
+			return err
+		}
+	}
+	if _, err := os.Stat(pem); err == nil {
+		keep := strings.TrimSuffix(pem, ".pem") + "-replaced-" + now().Format("20060102150405") + ".pem"
+		if os.Rename(pem, keep) == nil {
+			say("    the old file is kept as " + keep)
+		}
+	}
+	say("==> creating key pair -> " + pem)
+	if tagKey == "" {
+		tagKey = "cg:host"
+	}
+	o, err := c.CreateKeyPair(ctx, &ec2.CreateKeyPairInput{KeyName: aws.String(name), TagSpecifications: []types.TagSpecification{
+		{ResourceType: types.ResourceTypeKeyPair, Tags: []types.Tag{{Key: aws.String(tagKey), Value: aws.String(name)}}}}})
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(pem), 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(pem, []byte(aws.ToString(o.KeyMaterial)), 0o600); err != nil {
+		os.Remove(pem)
+		return err
+	}
+	return os.Chmod(pem, 0o600)
 }

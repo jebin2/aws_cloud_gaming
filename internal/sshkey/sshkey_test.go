@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -118,5 +119,66 @@ func TestBoxExists(t *testing.T) {
 	}
 	if Words(Missing) != "not on this laptop" || Words(Mismatch) != "not the key pair's private key" || Words(Match) != "" {
 		t.Error("words")
+	}
+}
+
+type admin struct {
+	*fake
+	deleted, created []string
+	material         string
+}
+
+func (a *admin) DeleteKeyPair(_ context.Context, in *ec2.DeleteKeyPairInput, _ ...func(*ec2.Options)) (*ec2.DeleteKeyPairOutput, error) {
+	a.deleted = append(a.deleted, aws.ToString(in.KeyName))
+	return &ec2.DeleteKeyPairOutput{}, nil
+}
+func (a *admin) CreateKeyPair(_ context.Context, in *ec2.CreateKeyPairInput, _ ...func(*ec2.Options)) (*ec2.CreateKeyPairOutput, error) {
+	a.created = append(a.created, aws.ToString(in.KeyName))
+	return &ec2.CreateKeyPairOutput{KeyMaterial: aws.String(a.material)}, nil
+}
+
+func TestEnsureKeepsAMatchingPairAndReplacesAnUnusableOne(t *testing.T) {
+	ctx := context.Background()
+	now := func() time.Time { return time.Date(2026, 10, 25, 9, 8, 7, 0, time.UTC) }
+	var said []string
+	say := func(s string) { said = append(said, s) }
+	path, _ := writeKey(t, true)
+	b, _ := os.ReadFile(path)
+	fp, _ := Fingerprint(b)
+	// This laptop holds the private key: nothing changes.
+	a := &admin{fake: &fake{fp: fp}}
+	if err := Ensure(ctx, a, "gamevps", path, "cg:host", say, now); err != nil || len(a.deleted) != 0 || len(a.created) != 0 {
+		t.Fatalf("%v %v %v", err, a.deleted, a.created)
+	}
+	// Some other key: the pair is replaced, and the old file is kept under a dated name.
+	other, _ := writeKey(t, false)
+	a = &admin{fake: &fake{fp: fp}, material: "NEW-PRIVATE-KEY"}
+	if err := Ensure(ctx, a, "gamevps", other, "cg:host", say, now); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(other)
+	st, _ := os.Stat(other)
+	kept := strings.TrimSuffix(other, ".pem") + "-replaced-20261025090807.pem"
+	old, err := os.ReadFile(kept)
+	if string(got) != "NEW-PRIVATE-KEY" || st.Mode().Perm() != 0o600 || err != nil || len(old) == 0 || len(a.deleted) != 1 {
+		t.Errorf("%q %v %v %v", got, st.Mode(), err, a.deleted)
+	}
+	joined := strings.Join(said, "\n")
+	if !strings.Contains(joined, "==> replacing key pair gamevps - "+other+" is not the key pair's private key") || !strings.Contains(joined, "the old file is kept as "+kept) {
+		t.Errorf("%s", joined)
+	}
+	// No pair at all: one is made and its private key written, nothing deleted.
+	a = &admin{fake: &fake{err: &smithy.GenericAPIError{Code: "InvalidKeyPair.NotFound"}}, material: "FRESH"}
+	fresh := filepath.Join(t.TempDir(), "ssh", "gamevps.pem")
+	if err := Ensure(ctx, a, "gamevps", fresh, "cg:host", say, now); err != nil || len(a.deleted) != 0 || len(a.created) != 1 {
+		t.Fatalf("%v", err)
+	}
+	if b, _ := os.ReadFile(fresh); string(b) != "FRESH" {
+		t.Errorf("%q", b)
+	}
+	// A pair that cannot be compared (imported, or AWS silent) is used as it is.
+	a = &admin{fake: &fake{fp: "ab:cd"}}
+	if err := Ensure(ctx, a, "gamevps", other, "cg:host", say, now); err != nil || len(a.created) != 0 {
+		t.Errorf("%v", err)
 	}
 }
