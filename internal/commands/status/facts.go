@@ -481,7 +481,10 @@ func (g *Gatherer) budget(ctx context.Context, account string, out *Facts) {
 	if err != nil {
 		var nf *budgetstypes.NotFoundException
 		if errors.As(err, &nf) {
+			// No budget: no alerts either. That is known, not unreadable.
 			out.BudgetExists = ok(false)
+			out.BudgetAlerts = ok(0)
+			return
 		}
 	} else if r.Budget != nil && r.Budget.BudgetLimit != nil {
 		out.BudgetExists = ok(true)

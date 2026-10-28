@@ -78,7 +78,14 @@ func (c Chooser) pick(ctx context.Context, current string) (string, bool) {
 	if loc, err := c.Lib.S3.Location(ctx, bucket); err == nil && loc != "" {
 		region = loc
 	}
-	apps, err := c.Lib.Index(ctx, bucket, region)
+	apps, missing, err := c.Lib.IndexAt(ctx, bucket, region)
+	if missing {
+		if !known {
+			c.say("  no archive found at the derived name - restoring none; cg library pull fetches games later\n")
+			return "none", true
+		}
+		return "all", true
+	}
 	if err != nil {
 		// A missing INDEX in a bucket we were told about means nothing was archived,
 		// and "all" of nothing restores nothing - harmless. A missing BUCKET is a

@@ -58,21 +58,34 @@ func Ours(name, region, account, host string) bool {
 }
 
 // Index reads steam/index.json from a bucket. A bucket we can read that holds no
-// index really is an empty archive; anything else is an error with its reason.
+// index really is an empty archive, and so is a bucket that is not there yet: it is
+// made by the first cg init, and until then nothing can have been archived in it
+// (the AWS CLI could not tell the two apart either - a HEAD answers 404 for both).
+// Anything else is an error with its reason.
 func (l Library) Index(ctx context.Context, b, region string) ([]App, error) {
+	apps, _, err := l.IndexAt(ctx, b, region)
+	return apps, err
+}
+
+// IndexAt is Index that also says when the bucket itself is not there, for a caller
+// that must not take a name it guessed for evidence of an empty archive.
+func (l Library) IndexAt(ctx context.Context, b, region string) (apps []App, bucketMissing bool, err error) {
 	body, err := l.S3.Get(ctx, b, region, "steam/index.json")
 	if err != nil {
-		if r := Reason(err, b); r == "missing" {
-			return []App{}, nil
-		} else {
-			return nil, fmt.Errorf("%s", r)
+		switch r := Reason(err, b); {
+		case r == "missing":
+			return []App{}, false, nil
+		case strings.Contains(r, "does not exist") && strings.Contains(r, "the bucket"):
+			return []App{}, true, nil
+		default:
+			return nil, false, fmt.Errorf("%s", r)
 		}
 	}
 	var ix index
 	if json.Unmarshal(body, &ix) != nil {
-		return []App{}, nil
+		return []App{}, false, nil
 	}
-	return ix.Apps, nil
+	return ix.Apps, false, nil
 }
 
 // Orphan is a folder in the archive that the index does not know.

@@ -179,8 +179,11 @@ func (g *Gatherer) Gather(ctx context.Context) (Facts, error) {
 	f.Credits = g.credits(ctx)
 	f.Month = g.month(ctx)
 	f.Bucket = g.bucketStatus(ctx)
-	if f.Bucket.State == BucketReadable {
+	switch f.Bucket.State {
+	case BucketReadable:
 		f.Archive = g.archive(ctx)
+	case BucketMissing:
+		f.Archive = ok(Archive{}) // no bucket holds nothing, and that is known
 	}
 	return f, nil
 }
@@ -320,6 +323,11 @@ func (g *Gatherer) archive(ctx context.Context) Known[Archive] {
 		r, err := g.S3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 			Bucket: aws.String(g.Bucket), Prefix: aws.String(ArchivePrefix), ContinuationToken: token})
 		if err != nil {
+			// A bucket that is not there holds nothing, and that is known: the first
+			// cg init makes it. Any other failure is unknown, not an empty archive.
+			if code(err) == "NoSuchBucket" {
+				return ok(Archive{})
+			}
 			return Known[Archive]{}
 		}
 		for _, o := range r.Contents {
