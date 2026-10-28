@@ -21,6 +21,7 @@ type server struct {
 	mu          sync.Mutex
 	user, pass  string
 	waiting     bool // moonlight is waiting with a request
+	stale       bool // an interrupted run left a request of its own, listed first
 	pin         string
 	clients     []string
 	acceptPin   bool // the PIN is accepted but no client is saved when false after
@@ -68,6 +69,9 @@ func (s *server) handler(t *testing.T) http.Handler {
 		case "/api/pin":
 			if r.Method == http.MethodGet {
 				var ps []map[string]any
+				if s.stale {
+					ps = append(ps, map[string]any{"id": "pid-stale"})
+				}
 				if s.waiting {
 					ps = append(ps, map[string]any{"id": "pid-1"})
 				}
@@ -242,5 +246,25 @@ func TestPairingFallsBackToAWindowAndGivesUpSaying(t *testing.T) {
 	p.Log = func(x string) { logs = append(logs, x) }
 	if p.Pair(context.Background(), "ip", "admin", "pw") || logs[0] != "moonlight could not be started" {
 		t.Errorf("%v", logs)
+	}
+}
+
+func TestAStaleRequestFromAnInterruptedRunIsSkippedNotTrusted(t *testing.T) {
+	s, c := newServer(t)
+	s.user, s.pass, s.pin, s.waiting, s.stale = "admin", "pw", "1234", true, true
+	var logs []string
+	p := pairer(c, &fx.Runner{Installed: map[string]bool{"moonlight": true}})
+	p.Log = func(x string) { logs = append(logs, x) }
+	if !p.Pair(context.Background(), "ip", "admin", "pw") {
+		t.Fatalf("the PIN goes to every open request, and only ours takes it: %v", logs)
+	}
+	// Only a stale one open: refused, and said.
+	s2, c2 := newServer(t)
+	s2.user, s2.pass, s2.pin, s2.stale = "admin", "pw", "1234", true
+	var logs2 []string
+	p2 := pairer(c2, &fx.Runner{Installed: map[string]bool{"moonlight": true}})
+	p2.Log = func(x string) { logs2 = append(logs2, x) }
+	if p2.Pair(context.Background(), "ip", "admin", "pw") || logs2[len(logs2)-1] != "Sunshine rejected the PIN" {
+		t.Errorf("%v", logs2)
 	}
 }

@@ -10,6 +10,7 @@ package ask
 import (
 	"bufio"
 	"fmt"
+	"golang.org/x/term"
 	"io"
 	"os"
 	"strings"
@@ -33,8 +34,9 @@ type Asker struct {
 
 // New is an Asker on the real standard input.
 func New(out *output.Out, yes bool) *Asker {
-	st, err := os.Stdin.Stat()
-	return &Asker{Out: out, In: bufio.NewReader(os.Stdin), Prompts: os.Stderr, TTY: err == nil && st.Mode()&os.ModeCharDevice != 0, Yes: yes}
+	// A terminal, not merely a character device: /dev/null is one too, and a run
+	// with its input redirected from it has nobody to ask.
+	return &Asker{Out: out, In: bufio.NewReader(os.Stdin), Prompts: os.Stderr, TTY: term.IsTerminal(int(os.Stdin.Fd())), Yes: yes}
 }
 
 // CanAsk: is there anyone to ask? A terminal, or the app. This is NOT the same

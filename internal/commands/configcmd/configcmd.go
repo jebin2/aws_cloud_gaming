@@ -72,7 +72,10 @@ func Show(env *config.Env) string {
 	for _, s := range config.Registry {
 		v := env.Get(s.Key)
 		switch {
-		case s.Kind == "secret":
+		// The ntfy topic is a secret on ntfy.sh - anyone who knows it can read and post
+		// - and this view is the one that ends up pasted into chats and issues. The
+		// app's own JSON still carries it, for its edit field; `cg config get` prints it.
+		case s.Kind == "secret" || s.Kind == "ntfy":
 			v = "not set"
 			if env.Get(s.Key) != "" {
 				v = "set"

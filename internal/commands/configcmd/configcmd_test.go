@@ -171,10 +171,13 @@ func TestTheHumanView(t *testing.T) {
 	_ = Set(env, "TAILSCALE_API_KEY", "tskey-api-abc123", out)
 	text := Show(env)
 	for _, want := range []string{"SETTING", "GAME_DISK_GB", "Cannot be shrunk later", "GAME_BITRATE_KBPS",
-		"  " + padRight("GAME_NTFY_URL", 28) + " " + padRight("https://ntfy.sh/topic-abc", 12)} {
+		"  " + padRight("GAME_NTFY_URL", 28) + " " + padRight("set", 12)} {
 		if !strings.Contains(text, want) {
 			t.Errorf("lacks %q:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "topic-abc") {
+		t.Error("the topic is a secret: the human view says only that it is set")
 	}
 	// The note ENDS there; the registry's other columns are not part of it.
 	if strings.Contains(text, "applies to the next build.|") {

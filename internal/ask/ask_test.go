@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -121,5 +122,20 @@ func TestMaskedReadShowsStarsAndSkipsEscapes(t *testing.T) {
 	}
 	if got, _ := MaskedRead(strings.NewReader("abc"), &w); got != "abc" {
 		t.Error("input that ends without Enter still counts")
+	}
+}
+
+func TestADevNullInputIsNotATerminal(t *testing.T) {
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer f.Close()
+	old := os.Stdin
+	os.Stdin = f
+	defer func() { os.Stdin = old }()
+	var o, e bytes.Buffer
+	if a := New(&output.Out{Stdout: &o, Stderr: &e}, false); a.TTY {
+		t.Error("/dev/null is a character device, not someone to ask: a redirected run would print a prompt to nobody and fall back")
 	}
 }

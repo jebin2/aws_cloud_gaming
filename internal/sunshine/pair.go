@@ -37,21 +37,26 @@ type Pairer struct {
 	Close time.Duration
 }
 
-// pending is the id of the pairing request Moonlight has open, or "". Live shape
-// (Sunshine, 2026-09-14): {"pairings":[{"id":...}]}.
-func (p Pairer) pending(ctx context.Context, ip, user, pass string) string {
+// pending are the ids of the pairing requests open now, newest last. There can be
+// more than one: an interrupted pairing leaves its Moonlight process holding a
+// request of its own, with a PIN this run does not know. Live shape (Sunshine,
+// 2026-09-14): {"pairings":[{"id":...}]}.
+func (p Pairer) pending(ctx context.Context, ip, user, pass string) []string {
 	_, b := p.C.do(ctx, http.MethodGet, ip, "/api/pin", 10*time.Second, user, pass, "")
 	var d struct{ Pairings []struct{ ID any } }
-	if json.Unmarshal(b, &d) != nil || len(d.Pairings) == 0 {
-		return ""
+	if json.Unmarshal(b, &d) != nil {
+		return nil
 	}
-	switch v := d.Pairings[0].ID.(type) {
-	case string:
-		return v
-	case float64:
-		return fmt.Sprint(int64(v))
+	var ids []string
+	for _, x := range d.Pairings {
+		switch v := x.ID.(type) {
+		case string:
+			ids = append(ids, v)
+		case float64:
+			ids = append(ids, fmt.Sprint(int64(v)))
+		}
 	}
-	return ""
+	return ids
 }
 
 // clients are the uuids Sunshine has saved. Live shape:
@@ -70,14 +75,14 @@ func (p Pairer) clients(ctx context.Context, ip, user, pass string) []string {
 	return out
 }
 
-func (p Pairer) wait(ctx context.Context, ip, user, pass string, max int) string {
+func (p Pairer) wait(ctx context.Context, ip, user, pass string, max int) []string {
 	for i := 0; i < max; i++ {
-		if id := p.pending(ctx, ip, user, pass); id != "" {
-			return id
+		if ids := p.pending(ctx, ip, user, pass); len(ids) > 0 {
+			return ids
 		}
 		p.Sleep(2 * time.Second)
 	}
-	return ""
+	return nil
 }
 
 // killStale: an abandoned pairing process makes Sunshine reject the next attempt
@@ -147,17 +152,17 @@ func (p Pairer) Pair(ctx context.Context, ip, user, pass string) bool {
 		p.Log("moonlight could not be started")
 		return false
 	}
-	id := p.wait(ctx, ip, user, pass, tries)
-	if id == "" {
+	ids := p.wait(ctx, ip, user, pass, tries)
+	if len(ids) == 0 {
 		proc.Kill()
 		p.Log("no pairing request seen offscreen - retrying with a window")
 		if proc, err = start(); err != nil {
 			p.Log("moonlight could not be started")
 			return false
 		}
-		id = p.wait(ctx, ip, user, pass, tries)
+		ids = p.wait(ctx, ip, user, pass, tries)
 	}
-	if id == "" {
+	if len(ids) == 0 {
 		proc.Kill()
 		p.Log("moonlight never registered a pairing request")
 		return false
@@ -168,9 +173,15 @@ func (p Pairer) Pair(ctx context.Context, ip, user, pass string) bool {
 	} else if h, err := os.Hostname(); err == nil {
 		host = h
 	}
-	body, _ := json.Marshal(map[string]string{"pairing_id": id, "pin": pin, "name": host})
-	_, resp := p.C.do(ctx, http.MethodPost, ip, "/api/pin", 20*time.Second, user, pass, string(body))
-	if !strings.Contains(string(resp), `"status":true`) {
+	// Every open request is tried with this PIN, newest first: only ours takes it, and
+	// a stale one left by an interrupted run is simply refused.
+	accepted := false
+	for i := len(ids) - 1; i >= 0 && !accepted; i-- {
+		body, _ := json.Marshal(map[string]string{"pairing_id": ids[i], "pin": pin, "name": host})
+		_, resp := p.C.do(ctx, http.MethodPost, ip, "/api/pin", 20*time.Second, user, pass, string(body))
+		accepted = strings.Contains(string(resp), `"status":true`)
+	}
+	if !accepted {
 		proc.Kill()
 		p.Log("Sunshine rejected the PIN")
 		return false

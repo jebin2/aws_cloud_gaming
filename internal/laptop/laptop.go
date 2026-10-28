@@ -10,6 +10,7 @@ package laptop
 
 import (
 	"context"
+	"golang.org/x/term"
 	"os"
 	"strings"
 
@@ -43,8 +44,8 @@ type Laptop struct {
 // New is the real one.
 func New(r local.Runner) Laptop {
 	return Laptop{Runner: r, Getenv: os.Getenv, TTY: func() bool {
-		st, err := os.Stdin.Stat()
-		return err == nil && st.Mode()&os.ModeCharDevice != 0
+		// A terminal, not merely a character device: /dev/null is one too.
+		return term.IsTerminal(int(os.Stdin.Fd()))
 	}}
 }
 
