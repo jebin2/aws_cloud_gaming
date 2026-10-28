@@ -279,7 +279,7 @@ function note(text, tone) {
 
 // The event stream, filtered. Rows carry their kind so a filter can hide them
 // without the app keeping a second copy of the log.
-let logFilter = 'all';
+let logFilter = 'steps';
 let logCount = 0;
 
 function logKind(event) {
@@ -6727,7 +6727,7 @@ $('d-build').onclick = goAws;
 $('d-watch').onclick = goAws;
 $('d-ts-signin').onclick = signInTailscale;
 $('d-library').onclick = () => goView('library');
-applyLogFilter('all');           // the default is shown as chosen, not just in force
+applyLogFilter('steps');         // the default is shown as chosen, not just in force
 restoreBill();                   // the last bill on this laptop, until a new check
 for (const b of document.querySelectorAll('[data-filter]')) {
   b.onclick = () => applyLogFilter(b.dataset.filter);
