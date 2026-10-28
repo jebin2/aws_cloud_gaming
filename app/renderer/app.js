@@ -2919,7 +2919,10 @@ function paintSettingsNav() {
   // Rebuilt only when the cards change: every status read passes through
   // here, and a rebuilt button loses the keyboard's focus.
   const sig = settingsCards().map(c => c.dataset.title).join('\n');
-  if (nav.dataset.sig === sig) return markSettingsNav();
+  // Alerts and auto-stop are AWS's: with only your own machines there is
+  // nothing for them to watch, so the link is not there to follow.
+  const alertsLink = () => { const a = nav.querySelector('.alerts-link'); if (a) a.hidden = !awsAdded(); };
+  if (nav.dataset.sig === sig) { alertsLink(); return markSettingsNav(); }
   nav.dataset.sig = sig;
   nav.textContent = '';
   for (const c of settingsCards()) {
@@ -2934,7 +2937,9 @@ function paintSettingsNav() {
   }
   const alerts = el('button', 'side-item', 'Alerts and auto-stop \u2192');
   alerts.onclick = () => document.querySelector('.nav-item[data-view=guards]').click();
+  alerts.classList.add('alerts-link');
   nav.append(alerts);
+  alertsLink();
   markSettingsNav();
 }
 // The cards, not the list's own buttons, and only those shown.
