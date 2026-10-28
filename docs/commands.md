@@ -1,8 +1,8 @@
 # Commands
 
-`cg` is the only entry point. It dispatches into `lib/setup` and `lib/game`, which keep working on
-their own - the odd-looking lines in those scripts are scars from real failures, so `cg` calls them
-rather than reimplementing them.
+`cg` is the only entry point: one Go program (`cmd/cg`, with the commands under `internal/`). The
+scripts that run on the box and the Lambda watchdog are compiled into it, so a build never depends
+on files beside the binary. Build it with `go build -o cg ./cmd/cg`.
 
 ## Every command
 
@@ -53,7 +53,7 @@ rather than reimplementing them.
 
 ### Where the settings live
 
-`.env` is resolved once, by [lib/env-file.sh](../lib/env-file.sh), first hit winning:
+`.env` is resolved once, by [internal/config](../internal/config/env.go), first hit winning:
 
 | | |
 |---|---|

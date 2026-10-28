@@ -42,7 +42,7 @@ default, adjustable on the Games page.
     git clone https://github.com/jebin2/aws_cloud_gaming.git
     cd aws_cloud_gaming/app && npm install && npm start
 
-The app runs the `cg` scripts in this repository. To use them directly, see [cg.md](cg.md).
+The app runs `cg`, a Go program built from this repository (`npm start` builds it first; Go is needed). To use it directly: `go build -o cg ./cmd/cg`, then `./cg help` - or see [docs/commands.md](docs/commands.md).
 
 ## Documentation
 

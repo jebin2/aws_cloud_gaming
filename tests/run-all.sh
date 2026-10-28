@@ -50,6 +50,16 @@ if [[ -x $real_py && $(command -v python3) != "$real_py" ]]; then
   export PATH="$dir/py:$PATH"
 fi
 
+# cg is a Go program: build it where the suites expect it, and run Go's own
+# tests first - they are where the commands' behaviour is proven.
+if command -v go >/dev/null 2>&1; then
+  CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o cg ./cmd/cg || { echo "go build failed" >&2; exit 1; }
+  go test ./... >"$dir/go-test.out" 2>&1 || { keep=1; echo "go test failed - output kept at $dir/go-test.out" >&2; cat "$dir/go-test.out" >&2; exit 1; }
+  echo "go test ./... passed"
+else
+  echo "go is not installed: cg was not rebuilt and Go's tests did not run" >&2
+fi
+
 suites=()
 for t in tests/*.sh; do [[ $t == tests/run-all.sh ]] || suites+=("$t"); done
 
@@ -60,19 +70,11 @@ run_one() {
   local t=$1 n start; n=$(basename "$t" .sh)
   mkdir -p "$dir/home-$n/run"
   start=$(date +%s%N)
-  # CG_SLEEP_PCT=1: cg's poll loops wait 1% as long (see cg_sleep in
-  # lib/common.sh). Four suites spent most of their minutes asleep in them.
-  # CG_INR_PER_USD=88: the rupee rate is otherwise fetched once a day from an
-  # exchange-rate endpoint (lib/rates.sh). Pinned, the suites are offline and
-  # every rupee they check is the same on every run.
-  # CG_PRICES_FILE: AWS's prices are otherwise read from its Price List API
-  # once a day (lib/prices.py). From tests/prices.env the suites are offline,
-  # and a fake `aws` in a suite never sees a pricing call it did not expect.
   # XDG_RUNTIME_DIR: cg's "a stream is open" marker lives there, not in HOME.
   # Shared, a suite streaming beside destroy-all made its destroy ask "close
   # the stream first?" - which ate the typed DESTROY-ALL, so it aborted.
-  HOME="$dir/home-$n" XDG_RUNTIME_DIR="$dir/home-$n/run" CG_SLEEP_PCT="${CG_SLEEP_PCT:-1}" CG_INR_PER_USD="${CG_INR_PER_USD:-88}" \
-    CG_PRICES_FILE="${CG_PRICES_FILE:-$PWD/tests/prices.env}" timeout "$TIMEOUT" bash "$t" >"$dir/$n.out" 2>&1
+  HOME="$dir/home-$n" XDG_RUNTIME_DIR="$dir/home-$n/run" \
+    timeout "$TIMEOUT" bash "$t" >"$dir/$n.out" 2>&1
   echo $? >"$dir/$n.rc"
   echo $(( ($(date +%s%N) - start) / 1000000 )) >"$dir/$n.ms"
 }

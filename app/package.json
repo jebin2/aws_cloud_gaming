@@ -5,11 +5,12 @@
   "description": "Desktop viewer for cg - the scripts stay the engine",
   "main": "main/index.js",
   "scripts": {
-    "start": "npm run build:css && electron .",
+    "start": "npm run build:cg && npm run build:css && electron .",
     "test": "node --test test/*.test.mjs",
     "build:css": "tailwindcss -i renderer/src.css -o renderer/tailwind.css --minify",
-    "dist": "npm run build:css && electron-builder",
-    "pack": "npm run build:css && electron-builder --dir"
+    "dist": "npm run build:cg && npm run build:css && electron-builder",
+    "pack": "npm run build:cg && npm run build:css && electron-builder --dir",
+    "build:cg": "cd .. && CGO_ENABLED=0 go build -trimpath -ldflags \"-s -w\" -o cg ./cmd/cg"
   },
   "devDependencies": {
     "electron": "^39.2.4",
@@ -38,7 +39,7 @@
       "category": "Game",
       "icon": "build/icon.png",
       "synopsis": "Desktop viewer for cg, the cloud gaming rig",
-      "description": "Runs the cg scripts from your checkout and renders what they say. It holds no AWS logic of its own.",
+      "description": "Runs cg, a single program, and renders what it says. It holds no AWS logic of its own.",
       "maintainer": "jebin2 <noreply@users.noreply.github.com>"
     },
     "mac": {
@@ -59,18 +60,6 @@
       {
         "from": "../cg",
         "to": "cg/cg"
-      },
-      {
-        "from": "../lib",
-        "to": "cg/lib"
-      },
-      {
-        "from": "../host",
-        "to": "cg/host"
-      },
-      {
-        "from": "../lambda",
-        "to": "cg/lambda"
       },
       {
         "from": "../.env.example",

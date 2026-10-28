@@ -101,25 +101,23 @@ fi
 # Destroy stayed visible after they were hidden.
 contains "hidden beats a display class"  "$(cat app/renderer/src.css)" "[hidden] { display: none !important; }"
 
-echo "3c. the package carries everything cg reaches for"
-# The installed app shipped cg, lib and lambda - and not host/, which
-# provision.sh tars and sends to the box. A build from a checkout was fine; a
-# build from the package died at "tar: host: Cannot open" after creating the
-# bucket, the key pair and the security group.
-#
-# Derived from the scripts, not typed here: a directory they `cd` into, source
-# from or tar up is a directory the package needs.
-reach=$(grep -ohE '(-C|cd|source|\. ) +(host|lib|lambda)(/[A-Za-z0-9._-]+)?' cg lib/*.sh lib/setup lib/game \
-        | awk '{print $2}' | cut -d/ -f1 | sort -u)
+echo "3c. the package carries cg, and cg carries what it sends to the box"
+# cg is one Go binary. What it tars up and sends to the box - host/, the
+# bootstrap modules, the Lambda - is compiled into it (embed.go), so the package
+# ships the binary and .env.example and nothing else. A directory of scripts
+# beside it would be a second copy that could disagree with the first.
 packed=$(python3 -I -c '
 import json
 d = json.load(open("app/package.json"))
 print(" ".join(r["from"].removeprefix("../") for r in d["build"]["extraResources"]))')
-check "every directory the scripts reach for is packaged" \
-      "$(for d in $reach; do [[ " $packed " == *" $d "* ]] || echo "MISSING:$d"; done)" ""
-# cg itself, and the file that documents .env, are not directories.
 contains "  cg itself ships"             "$packed" "cg"
 contains "  and .env.example with it"    "$packed" ".env.example"
+for d in lib host lambda; do
+  lacks "  no loose $d/ in the package" " $packed " " $d "
+done
+for d in host lib/bootstrap.d lambda/cloud_watchdog.py; do
+  contains "  cg embeds $d" "$(cat embed.go)" "$d"
+done
 
 echo "4. the promises the app makes about cost and safety"
 contains "cg is run with CG_JSON=1"      "$(cat app/main/runner.js)" "CG_JSON: '1'"
@@ -518,11 +516,7 @@ contains "  priced from cg, in rupees"   "$js" "\$('refresh-cost').textContent =
 contains "rates come from cg"            "$js" "const rate = d.rates || {}"
 contains "  the standby burn too"        "$js" "const standby = d.standby || {}"
 contains "  and each game's monthly cost" "$js" "r(g.usd_month)"
-# Twice: `cg cost --json` and `cg status --json` both carry it, each read from
-# the one variable rates.sh sets.
-check    "cg publishes the table"        "$(grep -c 'ce_call_usd' lib/setup)" "2"
-check    "  status carries the prices"   "$(grep -c 'out\["rates"\] = ' lib/setup)" "1"
-check    "  none of them written down"   "$(grep -cE ':-0\.[0-9]' lib/rates.sh)" "0"
+# `cg cost --json` and `cg status --json` both carry it, from internal/pricing.
 lacks    "the build confirm quotes no rate" "$js" "an hour on spot"
 
 echo "5g. the dashboard and guards screens"
@@ -693,8 +687,8 @@ contains "  and it runs these checks first" "$(cat .github/workflows/desktop-rel
 # The release notes used to say the download needed a checkout. It carries the
 # scripts now, so saying otherwise would send people to clone a repo they do
 # not need - and the notes are the only instructions a downloader ever sees.
-contains "  the release says the scripts are included" \
-         "$(cat .github/workflows/desktop-release.yml)" "The scripts travel with the app"
+contains "  the release says cg is included" \
+         "$(cat .github/workflows/desktop-release.yml)" "travels with the app"
 contains "  and where settings go instead"  \
          "$(cat .github/workflows/desktop-release.yml)" "~/.config/cg/.env"
 lacks    "  not that a checkout is required" \

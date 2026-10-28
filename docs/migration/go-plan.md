@@ -765,8 +765,22 @@ events on stderr, answers on stdin; `--contract` is raw JSON on stdout).
 - `destroy` was dispatched but missing from the registry (and so from help);
   added, and the stale "to come" summaries refreshed.
 
-Not done: the cutover itself (rename the binary to `cg`, delete the Bash tree and
-the shell tests it replaces, ship only the Go binary in the package) and Track W.
+Cutover done in this branch (owner approved after testing the Go package in a VM):
+
+- The Go binary is `cg`, built with `go build -o cg ./cmd/cg` (`/cg` is gitignored;
+  `npm start`, `npm run pack` and `npm run dist` build it first, as does `tests/run-all.sh`).
+- Deleted: the Bash `cg`, every `lib/*.sh|*.py`, `lib/setup`, `lib/game`, and the 61 shell suites
+  that sourced them or drove the Bash CLI. Kept: `lib/bootstrap.d`, `host/`, `lambda/` (embedded
+  into the binary) and the shell suites for them, the DOM suites, and the app suites. The Lambda
+  cases of `cloud-watchdog.sh` moved to `lambda-watchdog.sh`.
+- The package ships `cg` and `.env.example` only; `tests/app.sh` checks that, and that `embed.go`
+  carries what the box needs.
+- Bugs the VM test found and fixed on the way: Go `init` was still switched off; a freshly
+  minted Tailscale auth key lived 1 h while the probe wants 1 h of margin, so every key was
+  "expired" (the same two numbers are in `main`'s Bash); a dead saved key is now asked for, not kept.
+- `main` and its Bash CLI are untouched and remain the rollback. Not merged.
+
+Not done: Track W (native Windows and macOS).
 
 ## 9. Phase 1: skeleton and shared runtime
 

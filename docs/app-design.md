@@ -186,7 +186,7 @@ fonts and icons are vendored, so nothing is fetched at runtime.
 | Settings | `cg status --json` | shows what `.env` decides; secrets as set / not set, never values |
 | Logs | any run | the live event stream |
 
-`tests/app.sh` enforces the rules below, and `app/test/` tests the runner against a fake `cg`.
+`tests/app.sh` enforces the rules below, and `app/test/` tests the runner against a fake `cg`. The behaviour of each command is proven by Go's own tests (`go test ./...`).
 
 ## Safety rules for the app
 

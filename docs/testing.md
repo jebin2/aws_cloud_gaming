@@ -4,15 +4,16 @@ Where things are, and how the test suites prove the risky paths without spending
 
 ## Layout
 
-    cg                 the front door - every command
-    lib/setup, lib/game  what cg dispatches into
-    lib/               provisioning and cloud-init internals
+    cmd/cg, internal/  cg, the one program - every command (go build -o cg ./cmd/cg)
+    embed.go           what is compiled into it: host/, lib/bootstrap.d/, lambda/
+    lib/bootstrap.d/   the box's cloud-init modules, sent to the instance in user-data
     host/              units deployed to the instance (watchdog, disk monitor, S3 mirror)
     lambda/            the cloud watchdog, deployed as a zip to AWS Lambda
-    tests/             offline tests for the fiddly host-side logic
+    tests/             shell tests for the box-side scripts, the Lambda and the app
+    app/               the Electron app, which only runs cg
     docs/              everything linked from the README
 
-`./tests/run-all.sh` runs every suite and **exits non-zero if any fails** - which the obvious
+`./tests/run-all.sh` builds `cg`, runs `go test ./...`, and then every shell suite and **exits non-zero if any fails** - which the obvious
 `for t in tests/*.sh; do ... && echo PASS || echo FAIL; done` does not, because the last command
 in the loop is the `echo`. That returned 0 on a red suite and a `&& git commit` chained after it
 committed anyway.

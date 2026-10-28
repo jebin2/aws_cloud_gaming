@@ -13,6 +13,10 @@
 # committed - a leaked access key is an open door to the whole account.
 *.csv
 
+# The cg program, built from cmd/cg (go build -o cg ./cmd/cg).
+/cg
+/cg.exe
+
 # Personal scratch.
 clauderesumeid.txt
 

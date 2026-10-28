@@ -1,11 +1,11 @@
 # cg desktop app
 
-A viewer for `cg`. It runs the scripts and renders what they say - it holds no AWS logic of its
+A viewer for `cg`. It runs `cg` and renders what it says - it holds no AWS logic of its
 own, and `tests/app.sh` fails if any appears.
 
     cd app
     npm install     # Electron only
-    npm start
+    npm start       # builds ../cg first, so Go is needed
 
 Screens:
 
@@ -30,9 +30,10 @@ it dies with "error loading libfuse.so.2" until `pacman -S fuse2`, which is a po
 impression for something advertised as standalone. `.pacman` and `.deb` are native packages
 for the two families, and `.tar.gz` extracts and runs with no dependency at all.
 
-**The scripts travel with it.** `cg`, `lib/` and `lambda/` are copied into `resources/cg`, so a
-download runs without a checkout. The app still holds no AWS logic: it shells out to those
-scripts, which remain the only thing that decides anything.
+**cg travels with it.** The one `cg` program is copied into `resources/cg` (with `.env.example`),
+so a download runs without a checkout. The box-side scripts and the Lambda are compiled into
+`cg`. The app still holds no AWS logic: it runs `cg`, which remains the only thing that decides
+anything.
 
 It looks for them in this order: `$CG_REPO`, the parent of `app/`, the bundled copy in
 `resources/cg`, then `~/cloud_gaming`. **A checkout beside the app wins over the bundle** - anyone
@@ -64,7 +65,7 @@ listing the archive). The packed binary starts and opens its window.
 Linux, X11 and Wayland. macOS should work and has not been tried.
 
 **Windows is written but untested.** `main/runner.js` shells through `wsl.exe`, because the
-scripts are bash and rewriting them in PowerShell would fork the engine. Stopping a job uses a
+`cg` is Go and a native Windows build is planned (see docs/migration/go-plan.md, Track W). Stopping a job uses a
 POSIX process group (`kill(-pid)`), which will not reach into WSL as it stands - expect Stop not
 to work there until someone fixes it against a real machine.
 

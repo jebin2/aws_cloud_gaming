@@ -150,7 +150,7 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 	}
 	switch cmd {
 	case "help":
-		fmt.Fprintln(stdout, "cg - cloud gaming (Go port, in progress)")
+		fmt.Fprintln(stdout, "cg - cloud gaming")
 		fmt.Fprintln(stdout)
 		for _, c := range contract.Registry {
 			fmt.Fprintf(stdout, "  cg %-10s %s\n", c.Path[0], c.Summary)

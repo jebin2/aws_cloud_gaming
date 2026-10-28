@@ -4,7 +4,7 @@ Every charge this rig can run up, measured where possible, and why spot is the d
 guards keep those charges bounded is in [cost-guards.md](cost-guards.md). The figures below are
 for `ap-south-2`, read from the AWS Pricing API on 2026-09-15, INR at 88 to the dollar - a dated
 snapshot, for the reasoning. cg itself writes no price down: every rate it and the app show is read
-from the Price List API for the region in use, once a day (`lib/prices.py`, `lib/rates.sh`), at
+from the Price List API for the region in use, once a day (`internal/pricing`), at
 today's exchange rate, with the 18% GST AWS India adds. The only two figures in the code are the
 ones no AWS API reports: that GST, and the free 100 GB a month of data out.
 

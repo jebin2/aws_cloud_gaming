@@ -45,12 +45,18 @@ jobs:
           cache: 'npm'
           cache-dependency-path: app/package-lock.json
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
       # The app must never grow AWS logic, and it must never hold a price -
       # both are checked by this suite. A release that fails it is a release
       # that broke the one rule the design has.
       - name: Check The App Still Only Runs cg
         run: |
           (cd app && npm ci)
+          go build -o cg ./cmd/cg
           bash tests/app.sh
         shell: bash
 
@@ -126,10 +132,10 @@ jobs:
 
             ## Self-contained
 
-            The scripts travel with the app - `cg`, `lib/` and the Lambda are inside the
-            download, so it runs without a checkout. It still holds no AWS logic of its own:
-            the app shells out to those scripts, and they remain the only thing that decides
-            anything.
+            `cg` travels with the app - one program, with the box-side scripts and the Lambda
+            built into it, inside the download, so it runs without a checkout. The app still
+            holds no AWS logic of its own: it runs `cg`, and `cg` is the only thing that
+            decides anything.
 
             Settings are written to `~/.config/cg/.env`, not next to the app, because an
             installed copy is read-only. A checkout keeps using its own `.env` as before, and
@@ -161,9 +167,9 @@ jobs:
             ## Linux only
 
             These are the only builds published, because Linux is the only place the app has
-            been run. It is Electron and the scripts are bash, so macOS and Windows (through
-            WSL) are within reach - but an untested download is worse than none, so they are
-            not built until someone has actually used one.
+            been run. `cg` is Go and builds for macOS and Windows too - but
+            an untested download is worse than none, so they are not built until someone has
+            actually used one.
 
             From source on any platform: `cd app && npm install && npm start`.
         env:
