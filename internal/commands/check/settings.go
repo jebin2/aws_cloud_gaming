@@ -77,6 +77,7 @@ func (c *Checker) settings(ctx context.Context) (string, bool) {
 	// The names these are commonly already exported under.
 	authKey := c.first("GAME_TS_AUTHKEY", "TAILSCALE_AUTH_KEY")
 	email := c.first("GAME_ALERT_EMAIL", "EMAIL_ALERTS")
+	staleKey := false
 
 	// An expired key in .env used to be found out at BOOT: the instance is
 	// launched, billing, and never joins the tailnet. With a token it is
@@ -85,6 +86,15 @@ func (c *Checker) settings(ctx context.Context) (string, bool) {
 	// or is revoked, mint one when there is none.
 	if k, ok := c.ensureAuthKey(ctx, authKey, host); ok {
 		authKey = k
+	} else if authKey != "" {
+		// A key that is known to be dead and could not be replaced is not a key:
+		// keeping it only ended the build with "could not be replaced". Ask for a
+		// new one, here, where the person is already looking.
+		switch c.TS(c.Env.Get("TAILSCALE_API_KEY")).State(ctx, authKey) {
+		case "expired", "gone":
+			c.Out.LogAs("warn", "the stored Tailscale auth key is dead and could not be replaced automatically - a new one is needed")
+			authKey, staleKey = "", true
+		}
 	}
 
 	// In the app, a missing setting is NOT a question to ask here. A build is
@@ -92,7 +102,7 @@ func (c *Checker) settings(ctx context.Context) (string, bool) {
 	// the wrong place to answer: these belong on the screens that show them,
 	// before the build starts.
 	if authKey == "" {
-		if out.JSON {
+		if out.JSON && !staleKey {
 			out.Die("no Tailscale auth key for the box.\n       Settings > Tailscale has it, and with an API token set cg makes one itself.")
 			return "", false
 		}

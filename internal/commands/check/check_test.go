@@ -101,8 +101,16 @@ type rig struct {
 func tailscale(t *testing.T) (*httptest.Server, *int) {
 	minted := 0
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer tskey-api-abc123" {
+		// A token that can read keys but not make them: the usual reason a
+		// replacement fails.
+		readonly := r.Header.Get("Authorization") == "Bearer tskey-api-readonly"
+		if r.Header.Get("Authorization") != "Bearer tskey-api-abc123" && !readonly {
 			w.WriteHeader(401)
+			return
+		}
+		if readonly && r.Method == "POST" {
+			w.WriteHeader(403)
+			_, _ = w.Write([]byte(`{"message":"requires scope auth_keys"}`))
 			return
 		}
 		switch {
@@ -254,6 +262,14 @@ func TestADeadStoredKeyIsReplacedAndTheOldOneDeleted(t *testing.T) {
 	res, rc := r.c.Run(context.Background())
 	if rc != 0 || res.AuthKey != "tskey-auth-fresh-secret" || !strings.Contains(r.o.String(), "the stored Tailscale auth key has expired - replacing it") || !strings.Contains(r.o.String(), "the old key was deleted") {
 		t.Errorf("rc %d %+v\n%s", rc, res, r.o)
+	}
+}
+
+func TestADeadKeyThatCannotBeReplacedIsAskedForNotKept(t *testing.T) {
+	r := newRig(t, "TAILSCALE_API_KEY=tskey-api-readonly\nTAILSCALE_AUTH_KEY=tskey-auth-dead-secret\nEMAIL_ALERTS=a@b.c\n", "tskey-auth-live-secret\n", true)
+	res, rc := r.c.Run(context.Background())
+	if rc != 0 || res.AuthKey != "tskey-auth-live-secret" || !strings.Contains(r.e2.String(), "tailscale-auth-key") {
+		t.Fatalf("rc %d %+v\n%s%s", rc, res, r.o, r.e2)
 	}
 }
 
