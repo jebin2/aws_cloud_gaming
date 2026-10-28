@@ -744,6 +744,31 @@ Differences from the Bash:
 - the failed old-volume message names `cg games --volume --delete`, which exists (the Bash named
   `cg games --delete`, which does not).
 
+### 8.15 Phase 7 progress
+
+Started. The app's `runner.js` drives the Go binary unchanged (`CG_JSON=1`,
+events on stderr, answers on stdin; `--contract` is raw JSON on stdout).
+
+- Compared the two engines through the app's own runner on the renderer's read
+  commands: config, watcher, machines, sweep --cached, creds, host list/status,
+  regions, quota, watchdog status, snapshot --list, aws inventory, ping, library
+  list/elsewhere, status, cost. Same, except the deliberate differences:
+  `status --json` carries extra `login` and `tailnet.ip`, `deps --json` lists
+  three tools (ssh, tailscale, moonlight), and `cost --json` leaves
+  `archive.decision` null (the renderer never reads it).
+- Real differences found and fixed: a bucket that does not exist is an empty
+  archive (library list, status budget alerts, cost), not an unknown one.
+- CLI-01: the repo path and every argument are single-quoted on the WSL route,
+  and `wslpath -u` converts the repo path. CLI-03: Stop on Windows runs
+  `taskkill /T`. CLI-06: `cg --contract` now carries `env`, the settings a
+  screen may send; the app falls back to GAME_APPS only if cg cannot be asked.
+  Both engines print it, so the golden file stays shared until cutover.
+- `destroy` was dispatched but missing from the registry (and so from help);
+  added, and the stale "to come" summaries refreshed.
+
+Not done: the cutover itself (rename the binary to `cg`, delete the Bash tree and
+the shell tests it replaces, ship only the Go binary in the package) and Track W.
+
 ## 9. Phase 1: skeleton and shared runtime
 
 1. Create `cmd/cg` and the packages in section 7, using the module pinned in the pilot.
