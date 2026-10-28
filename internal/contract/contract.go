@@ -74,13 +74,18 @@ var Asks = []string{
 	"move-game", "host-sudo", "host-ssh-password", "aws-disconnect",
 }
 
+// Env is the settings a screen may hand a command, by name. Everything else
+// stays in .env, where cg owns it; the app used to keep this list itself.
+var Env = []string{"GAME_APPS"}
+
 type document struct {
 	Events    int        `json:"events"`
 	RunsAlone [][]string `json:"runs_alone"`
 	Asks      []string   `json:"asks"`
+	Env       []string   `json:"env"`
 }
 
 // JSON is what `cg --contract` prints.
 func JSON() ([]byte, error) {
-	return json.MarshalIndent(document{EventsVersion, RunsAlone, Asks}, "", "  ")
+	return json.MarshalIndent(document{EventsVersion, RunsAlone, Asks, Env}, "", "  ")
 }

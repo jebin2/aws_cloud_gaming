@@ -32,8 +32,9 @@ function send(channel, payload) {
 }
 
 // `env` carries the few settings a screen may choose - GAME_APPS for a build.
-// Anything else stays in .env, where cg owns it.
-const ENV_ALLOWED = new Set(['GAME_APPS']);
+// Anything else stays in .env, where cg owns it. cg's contract names them; this
+// is only what to assume when cg cannot be asked.
+const envAllowed = () => new Set(Array.isArray(CONTRACT.env) ? CONTRACT.env : ['GAME_APPS']);
 
 // Reading AWS is independent work: status, the watcher and the archive index do
 // not touch each other, so they run together. Anything that CHANGES something
@@ -92,7 +93,8 @@ function startJob(args, env = {}) {
   if (blocker) return { ok: false, reason: 'busy', args: blocker.args };
 
   const id = nextId++;
-  const safe = Object.fromEntries(Object.entries(env).filter(([k]) => ENV_ALLOWED.has(k)));
+  const allowed = envAllowed();
+  const safe = Object.fromEntries(Object.entries(env).filter(([k]) => allowed.has(k)));
   const child = run({
     repo: REPO,
     args, env: safe,

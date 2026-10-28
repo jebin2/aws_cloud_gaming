@@ -17,5 +17,6 @@
     "alert-email", "session-end", "fix-go-ahead", "steam-login",
     "clean-orphans", "delete-volume", "destroy-all", "forget-game", "forget-login",
     "move-game", "host-sudo", "host-ssh-password", "aws-disconnect"
-  ]
+  ],
+  "env": ["GAME_APPS"]
 }
