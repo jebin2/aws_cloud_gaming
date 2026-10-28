@@ -27,16 +27,20 @@ import (
 
 // fakeEC2 is one instance, and what is done to it.
 type fakeEC2 struct {
-	state        string
-	lifecycle    string
-	spotState    string
-	describeErr  error
-	startErr     error
-	calls        []string
-	images       map[string]string // id -> state
-	snaps        map[string][]string
-	failSnap     map[string]bool
-	imageCreated int
+	state                 string
+	lifecycle             string
+	spotState             string
+	describeErr           error
+	startErr              error
+	calls                 []string
+	images                map[string]string // id -> state
+	snaps                 map[string][]string
+	failSnap              map[string]bool
+	imageCreated          int
+	gamesVol, gamesState  string
+	sg, key               string
+	sgDeleteFails         int
+	keyDeleted, sgDeleted bool
 }
 
 func (f *fakeEC2) DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
@@ -99,7 +103,22 @@ func (f *fakeEC2) DescribeImages(_ context.Context, in *ec2.DescribeImagesInput,
 	}
 	return &ec2.DescribeImagesOutput{Images: out}, nil
 }
-func (f *fakeEC2) DescribeVolumes(context.Context, *ec2.DescribeVolumesInput, ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+func (f *fakeEC2) DescribeVolumes(_ context.Context, in *ec2.DescribeVolumesInput, _ ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+	for _, id := range in.VolumeIds {
+		if id == f.gamesVol {
+			return &ec2.DescribeVolumesOutput{Volumes: []ec2types.Volume{{VolumeId: aws.String(id), Size: aws.Int32(160), State: ec2types.VolumeState(f.gamesState)}}}, nil
+		}
+	}
+	for _, fl := range in.Filters {
+		for _, v := range fl.Values {
+			if strings.HasSuffix(v, "-games") && f.gamesVol != "" {
+				return &ec2.DescribeVolumesOutput{Volumes: []ec2types.Volume{{VolumeId: aws.String(f.gamesVol), Size: aws.Int32(160), State: ec2types.VolumeState(f.gamesState)}}}, nil
+			}
+		}
+	}
+	if len(in.VolumeIds) == 0 {
+		return &ec2.DescribeVolumesOutput{}, nil
+	}
 	return &ec2.DescribeVolumesOutput{Volumes: []ec2types.Volume{{Size: aws.Int32(50)}}}, nil
 }
 func (f *fakeEC2) DeleteVolume(_ context.Context, in *ec2.DeleteVolumeInput, _ ...func(*ec2.Options)) (*ec2.DeleteVolumeOutput, error) {
@@ -602,4 +621,31 @@ func TestSnapshotDeleteTakesTheBackingSnapshotsToo(t *testing.T) {
 	if rc := r.d.SnapshotDelete(context.Background(), "", r.e); rc != 1 || !strings.Contains(r.w.String(), "which image? see: cg snapshot --list") {
 		t.Error(r.w.String())
 	}
+}
+
+func (f *fakeEC2) DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGroupsInput, ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+	if f.sg == "" || f.sgDeleted {
+		return &ec2.DescribeSecurityGroupsOutput{}, nil
+	}
+	return &ec2.DescribeSecurityGroupsOutput{SecurityGroups: []ec2types.SecurityGroup{{GroupId: aws.String(f.sg)}}}, nil
+}
+func (f *fakeEC2) DescribeKeyPairs(context.Context, *ec2.DescribeKeyPairsInput, ...func(*ec2.Options)) (*ec2.DescribeKeyPairsOutput, error) {
+	if f.key == "" || f.keyDeleted {
+		return &ec2.DescribeKeyPairsOutput{}, nil
+	}
+	return &ec2.DescribeKeyPairsOutput{KeyPairs: []ec2types.KeyPairInfo{{KeyName: aws.String(f.key)}}}, nil
+}
+func (f *fakeEC2) DeleteSecurityGroup(context.Context, *ec2.DeleteSecurityGroupInput, ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+	if f.sgDeleteFails > 0 {
+		f.sgDeleteFails--
+		return nil, errors.New("DependencyViolation")
+	}
+	f.sgDeleted = true
+	f.calls = append(f.calls, "delete-sg")
+	return &ec2.DeleteSecurityGroupOutput{}, nil
+}
+func (f *fakeEC2) DeleteKeyPair(context.Context, *ec2.DeleteKeyPairInput, ...func(*ec2.Options)) (*ec2.DeleteKeyPairOutput, error) {
+	f.keyDeleted = true
+	f.calls = append(f.calls, "delete-key")
+	return &ec2.DeleteKeyPairOutput{}, nil
 }

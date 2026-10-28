@@ -727,6 +727,23 @@ Differences from the Bash worth knowing:
   the instance is really gone;
 - an orphan folder called "Diablo" no longer takes "Diablo IV" with it (the Bash deleted by prefix).
 
+### 8.14 Phase 6 progress
+
+Written and tested over fakes: `destroy --all`, `aws forget` and `aws disconnect`. They were NOT compared with
+the Bash on the real account: running a delete command there, even to see it stop at the typed word, was
+declined, and rightly. The exit gate (a disposable account fully cleaned, final inventory empty) is open.
+
+Differences from the Bash:
+
+- `destroy --all --no-push` is refused. The Bash accepted the pair and ignored `--no-push` while it deleted
+  the archive.
+- a game archive that cannot be listed is said to be unreadable, not shown as "0 objects";
+- `destroy --all` and `aws disconnect` carry on past a failure, say everything that failed, and return
+  non-zero; a bucket that will not go stays in `.env`;
+- multipart uploads are aborted by the bucket delete itself, not only by `aws s3 rb --force`;
+- the failed old-volume message names `cg games --volume --delete`, which exists (the Bash named
+  `cg games --delete`, which does not).
+
 ## 9. Phase 1: skeleton and shared runtime
 
 1. Create `cmd/cg` and the packages in section 7, using the module pinned in the pilot.

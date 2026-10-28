@@ -236,7 +236,7 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			out.Die(err.Error())
 			return 1
 		}
-		x, err := boxcmd.NewDestroyDeps(ctx, env, c)
+		x, err := boxcmd.NewDestroyDeps(ctx, env, c, out)
 		if err != nil {
 			out.Die(err.Error())
 			return 1

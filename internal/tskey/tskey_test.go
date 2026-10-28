@@ -220,3 +220,38 @@ func TestPruneTouchesOnlyOfflineNodesOfThisHost(t *testing.T) {
 		t.Error("nothing to do without a token")
 	}
 }
+
+func TestDeleteNodesTakesEveryNodeOfThisHostAndNothingElse(t *testing.T) {
+	deleted := []string{}
+	del := func(w http.ResponseWriter, r *http.Request) {
+		deleted = append(deleted, r.URL.Path)
+		w.WriteHeader(200)
+	}
+	c := server(t, map[string]func(http.ResponseWriter, *http.Request){
+		"GET /tailnet/-/devices": reply(200, `{"devices":[
+		 {"id":"1","nodeId":"nA","hostname":"gamevps","connectedToControl":true},
+		 {"id":"2","nodeId":"nB","hostname":"gamevps-3.tail.ts.net"},
+		 {"id":"3","nodeId":"nC","hostname":"gamevpsx"},
+		 {"id":"4","nodeId":"nD","hostname":"phone"}]}`),
+		"DELETE /device/nA": del, "DELETE /device/nB": del,
+	})
+	got := c.DeleteNodes(context.Background(), "gamevps")
+	if strings.Join(got, "|") != "deleted tailnet node 'gamevps'|deleted tailnet node 'gamevps-3'" || strings.Join(deleted, ",") != "/device/nA,/device/nB" {
+		t.Errorf("online nodes go too; a node of another name never: %v %v", got, deleted)
+	}
+	c = server(t, map[string]func(http.ResponseWriter, *http.Request){"GET /tailnet/-/devices": reply(200, `{"devices":[{"nodeId":"n","hostname":"phone"}]}`)})
+	if got := c.DeleteNodes(context.Background(), "gamevps"); got[0] != "no gamevps nodes on the tailnet - nothing to remove" {
+		t.Errorf("%v", got)
+	}
+	c.Token = "wrong"
+	if got := c.DeleteNodes(context.Background(), "gamevps"); !strings.HasPrefix(got[0], "TAILSCALE_API_KEY rejected (HTTP 401)") {
+		t.Errorf("an expired token is not a clean tailnet: %v", got)
+	}
+	if got := (Client{}).DeleteNodes(context.Background(), "gamevps"); !strings.Contains(strings.Join(got, "\n"), "free name (gamevps-1, -2, ...)") {
+		t.Errorf("%v", got)
+	}
+	c.Token, c.Base = "tskey-api-abc123", "http://127.0.0.1:1"
+	if got := c.DeleteNodes(context.Background(), "gamevps"); got[0] != "could not reach api.tailscale.com - tailnet nodes left in place" {
+		t.Errorf("%v", got)
+	}
+}

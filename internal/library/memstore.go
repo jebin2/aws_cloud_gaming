@@ -106,3 +106,6 @@ func (m *MemStore) DeleteBucket(_ context.Context, b, _ string) error {
 	delete(m.Region, b)
 	return nil
 }
+
+// AbortUploads ends incomplete multipart uploads; the in-memory store has none.
+func (m *MemStore) AbortUploads(context.Context, string, string) error { return nil }

@@ -22,6 +22,8 @@ type Expiry struct {
 
 type device struct {
 	ID                string `json:"id"`
+	NodeID            string `json:"nodeId"`
+	Hostname          string `json:"hostname"`
 	Name              string `json:"name"`
 	Created           string `json:"created"`
 	Connected         bool   `json:"connectedToControl"`
@@ -152,6 +154,67 @@ func (c Client) PruneStale(ctx context.Context, host string) []string {
 		} else {
 			out = append(out, fmt.Sprintf("    could not prune '%s' - the token may lack write scope", dev.Hostname))
 		}
+	}
+	return out
+}
+
+// DeleteNodes removes every tailnet node named after this host - the host and its
+// numeric suffixes, online ones included - and nothing else on the tailnet, which
+// may include machines that matter. A node's identity lives on the disk a destroy
+// just deleted, so the entry left behind can never be reused; it only pushes the
+// next build onto a suffixed name. Deleting devices needs an API access token (NOT
+// the auth key). It returns what to say.
+func (c Client) DeleteNodes(ctx context.Context, host string) []string {
+	if c.Token == "" {
+		return []string{
+			"  Tailnet nodes were left alone - a node's identity lives on the disk",
+			"  just deleted, so it cannot be reused. A rebuild joins under the next",
+			fmt.Sprintf("  free name (%s-1, -2, ...) and everything adapts to that.", host),
+			"",
+			"  To have this cleaned up automatically, put a Tailscale API access",
+			"  token in .env as TAILSCALE_API_KEY (this is NOT the auth key):",
+			"  https://login.tailscale.com/admin/settings/keys",
+			"  Or prune them by hand: https://login.tailscale.com/admin/machines"}
+	}
+	// The status is kept apart from the body. Without this an expired token just
+	// yields empty output and the run reports "no matching tailnet nodes found" - an
+	// expired key and a clean tailnet look identical, so the cleanup silently stops
+	// happening and nothing ever says why.
+	devs, code := c.devices(ctx)
+	switch {
+	case code == 401 || code == 403:
+		return []string{fmt.Sprintf("TAILSCALE_API_KEY rejected (HTTP %d) - it has expired or lacks scope", code),
+			"  Tailscale access tokens expire after 90 days at most.",
+			"  Generate a new one and replace TAILSCALE_API_KEY in .env:",
+			"    https://login.tailscale.com/admin/settings/keys",
+			"  (needs write scope on devices; this is NOT the auth key)",
+			"  Until then, prune by hand: https://login.tailscale.com/admin/machines"}
+	case code == 0:
+		return []string{"could not reach api.tailscale.com - tailnet nodes left in place", "  (the instance is already deleted; only the tailnet entries remain)"}
+	case code/100 != 2:
+		return []string{fmt.Sprintf("tailscale API returned HTTP %d - tailnet nodes left in place", code)}
+	}
+	pat := regexp.MustCompile(`^` + regexp.QuoteMeta(host) + `(-\d+)?$`)
+	var out []string
+	found := false
+	for _, d := range devs {
+		name := strings.SplitN(d.Hostname, ".", 2)[0]
+		if !pat.MatchString(name) {
+			continue
+		}
+		found = true
+		id := d.NodeID
+		if id == "" {
+			id = d.ID
+		}
+		if code, _, err := c.do(ctx, http.MethodDelete, "/device/"+id, nil); err == nil && code/100 == 2 {
+			out = append(out, fmt.Sprintf("deleted tailnet node '%s'", name))
+		} else {
+			out = append(out, fmt.Sprintf("could not delete '%s' - check the token has write scope", name))
+		}
+	}
+	if !found {
+		out = append(out, fmt.Sprintf("no %s nodes on the tailnet - nothing to remove", host))
 	}
 	return out
 }

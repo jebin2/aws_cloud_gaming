@@ -191,3 +191,29 @@ func Ensure(ctx context.Context, env *config.Env, out *output.Out) {
 	}
 	i.Report(i.Prove(ctx))
 }
+
+// RemoveQuietly removes the cloud watchdog in this region without announcing a step:
+// `destroy --all` and `aws disconnect` say their own.
+func RemoveQuietly(ctx context.Context, env *config.Env, out *output.Out) {
+	r, err := NewReader(ctx, env)
+	if err != nil {
+		out.Log(err.Error())
+		return
+	}
+	r.Settings = func(account string) wd.Settings { return SettingsFor(env, ratesOf(ctx, env), account) }
+	i, err := NewInstaller(ctx, env, r, out)
+	if err != nil {
+		out.Log(err.Error())
+		return
+	}
+	i.Remove(ctx)
+}
+
+// Exists says whether the watchdog's function is in this region.
+func Exists(ctx context.Context, env *config.Env) bool {
+	r, err := NewReader(ctx, env)
+	if err != nil {
+		return false
+	}
+	return r.Current(ctx).Installed
+}

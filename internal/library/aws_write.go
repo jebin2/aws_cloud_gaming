@@ -108,8 +108,36 @@ func (a *AWSStore) Copy(ctx context.Context, srcBucket, srcRegion, dstBucket, ds
 	return err
 }
 
-// DeleteBucket removes an empty bucket, emptying it first.
+// AbortUploads ends every incomplete multipart upload in a bucket. They appear in
+// no listing, are not emptied by deleting the objects, and are the usual reason a
+// bucket will not go.
+func (a *AWSStore) AbortUploads(ctx context.Context, bucket, region string) error {
+	c, err := a.client(ctx, region)
+	if err != nil {
+		return err
+	}
+	var key, upload *string
+	for {
+		o, err := c.ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{Bucket: aws.String(bucket), KeyMarker: key, UploadIdMarker: upload})
+		if err != nil {
+			return err
+		}
+		for _, u := range o.Uploads {
+			_, _ = c.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{Bucket: aws.String(bucket), Key: u.Key, UploadId: u.UploadId})
+		}
+		if !aws.ToBool(o.IsTruncated) {
+			return nil
+		}
+		key, upload = o.NextKeyMarker, o.NextUploadIdMarker
+	}
+}
+
+// DeleteBucket removes a bucket: its multipart uploads aborted, its objects
+// deleted, then the bucket.
 func (a *AWSStore) DeleteBucket(ctx context.Context, bucket, region string) error {
+	if err := a.AbortUploads(ctx, bucket, region); err != nil {
+		return err
+	}
 	if err := a.DeletePrefix(ctx, bucket, region, ""); err != nil {
 		return err
 	}

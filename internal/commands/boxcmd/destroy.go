@@ -31,6 +31,8 @@ type DestroyDeps struct {
 	Lib library.Library
 	// Ender closes a stream; nil makes the real one.
 	Ender *session.Ender
+	// All is what --all uses; nil refuses it.
+	All *AllDeps
 }
 
 // archiveLock revokes (ro) or restores (rw) the box's write access to the
@@ -141,9 +143,20 @@ func (d Deps) DestroyBox(ctx context.Context, x DestroyDeps, args []string) int 
 			return d.die(fmt.Sprintf("unknown option '%s' for destroy (--all, --force, --no-push)", a))
 		}
 	}
+	// --no-push with --all would be a promise to leave the archive exactly as it is
+	// while deleting it. The Bash accepted the combination and quietly ignored the
+	// flag; refusing it is the only honest answer.
+	if all && nopush {
+		return d.die("--no-push cannot be combined with --all: --all deletes the game archive itself, so there is no archive to leave untouched")
+	}
 	d.sessionEndFirst(x)
 	if all {
-		return d.die("destroy --all is not ported to Go yet")
+		if x.All == nil {
+			return d.die("destroy --all is not available here")
+		}
+		// --all means the games go too, so mirroring them to S3 first and then
+		// deleting the archive would be absurd. That path skips the push entirely.
+		return d.destroyEverything(ctx, x, *x.All, force)
 	}
 
 	// Destroy takes the instance store with it, and that is where the games are. A

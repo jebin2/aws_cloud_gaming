@@ -36,6 +36,8 @@ type Plan struct {
 	Volumes   []string
 	// Others are images and unattached disks that are not cg's: said, never touched.
 	Others []string
+	// With --all, the free things too: the security group and the key pair.
+	SecurityGroup, KeyPair string
 }
 
 func tagFilter(key, value string) ec2types.Filter {
@@ -121,6 +123,57 @@ func none(l []string) string {
 		return "none"
 	}
 	return strings.Join(l, " ")
+}
+
+// AllEC2 is what --all adds: the security group and the key pair, which a plain
+// destroy keeps because they cost nothing and cg init reuses them.
+type AllEC2 interface {
+	EC2
+	DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGroupsInput, ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
+	DescribeKeyPairs(context.Context, *ec2.DescribeKeyPairsInput, ...func(*ec2.Options)) (*ec2.DescribeKeyPairsOutput, error)
+}
+
+// ReadAll is Read plus the group and the key pair, as far as they exist.
+func ReadAll(ctx context.Context, c AllEC2, host, tagKey string) (Plan, error) {
+	p, err := Read(ctx, c, host, tagKey)
+	if err != nil {
+		return p, err
+	}
+	if o, err := c.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{Filters: []ec2types.Filter{{Name: aws.String("group-name"), Values: []string{host + "-sg"}}}}); err == nil && len(o.SecurityGroups) > 0 {
+		p.SecurityGroup = aws.ToString(o.SecurityGroups[0].GroupId)
+	}
+	if o, err := c.DescribeKeyPairs(ctx, &ec2.DescribeKeyPairsInput{KeyNames: []string{host}}); err == nil && len(o.KeyPairs) > 0 {
+		p.KeyPair = aws.ToString(o.KeyPairs[0].KeyName)
+	}
+	return p, nil
+}
+
+// DescribeAll is the block for --all: the free things go too, and so does the
+// archive, so nothing here says the games are safe. A destroy must not tell you
+// your games are safe while deleting them.
+func DescribeAll(p Plan, host string) string {
+	var b strings.Builder
+	b.WriteString("\nThis permanently deletes the box and everything listed here:\n")
+	fmt.Fprintf(&b, "  instances       %s\n", none(p.Instances))
+	fmt.Fprintf(&b, "  images          %s\n", none(p.Images))
+	fmt.Fprintf(&b, "  volumes         %s\n", none(p.Volumes))
+	fmt.Fprintf(&b, "  security group  %s\n", orNone(p.SecurityGroup))
+	fmt.Fprintf(&b, "  key pair        %s  (and ~/.ssh/%s.pem)\n", orNone(p.KeyPair), host)
+	fmt.Fprintf(&b, "  tailnet nodes   %s, %s-N\n", host, host)
+	fmt.Fprintf(&b, "  budget          %s-monthly\n\n", host)
+	b.WriteString("The desktop, its configuration AND the S3 game archive all go.\nThere is no undo, no image and no versioning behind the archive.\n\n")
+	if len(p.Others) > 0 {
+		sort.Strings(p.Others)
+		fmt.Fprintf(&b, "Left alone - not cg's: %s\n\n", strings.Join(p.Others, " "))
+	}
+	return b.String()
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
 }
 
 // Describe is the block that says what is about to happen. keepDays is how long

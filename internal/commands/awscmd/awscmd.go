@@ -34,17 +34,15 @@ func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out
 	switch sub {
 	case "inventory":
 	case "forget", "disconnect":
-		if sub == "disconnect" && len(args) > 0 && args[0] == "--plan" {
-			break
-		}
-		out.Die("aws " + sub + " is not ported to Go yet")
-		return 1
 	default:
 		out.Die(usage)
 		return 1
 	}
 	for _, a := range args {
 		jsonFlag = jsonFlag || a == "--json"
+	}
+	if sub == "forget" {
+		return runForget(ctx, env, args, out)
 	}
 	// Whether this computer ever played on AWS is a fact about its settings file.
 	if env.FileValue("GAME_REGION") == "" {
@@ -54,16 +52,43 @@ func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out
 		out.Log("AWS is not set up on this laptop - nothing to disconnect")
 		return 0
 	}
-	region := env.Region()
-	cfg, err := awscfg.New(ctx, region)
+	inv, err := newInventory(ctx, env)
 	if err != nil {
 		out.Die(err.Error())
 		return 1
 	}
-	us, err := awscfg.New(ctx, "us-east-1")
+	plan := sub == "inventory" || (len(args) > 0 && args[0] == "--plan")
+	if plan {
+		res := inv.Read(ctx)
+		if jsonFlag {
+			return emitJSON(res, out)
+		}
+		fmt.Fprint(out.Stdout, inventory.Show(res))
+		return 0
+	}
+	d, err := newDisconnector(ctx, env, inv, out)
 	if err != nil {
 		out.Die(err.Error())
 		return 1
+	}
+	return d.Run(ctx)
+}
+
+func emitJSON(v any, out *output.Out) int {
+	b, _ := json.MarshalIndent(v, "", "  ")
+	fmt.Fprintf(out.Stdout, "%s\n", b)
+	return 0
+}
+
+func newInventory(ctx context.Context, env *config.Env) (inventory.Inventory, error) {
+	region := env.Region()
+	cfg, err := awscfg.New(ctx, region)
+	if err != nil {
+		return inventory.Inventory{}, err
+	}
+	us, err := awscfg.New(ctx, "us-east-1")
+	if err != nil {
+		return inventory.Inventory{}, err
 	}
 	products := pricing.SDKProducts{Client: awspricing.NewFromConfig(us)}
 	popts := pricing.Options{Getenv: env.Get, Source: pricing.AWSSource{API: products}}
@@ -73,7 +98,7 @@ func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out
 	if id, err := sts.NewFromConfig(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err == nil {
 		account = aws.ToString(id.Account)
 	}
-	inv := inventory.Inventory{
+	return inventory.Inventory{
 		Cloud: &inventory.AWS{Home: region, Host: host},
 		Lib: library.Library{S3: &library.AWSStore{Home: region}, Host: host, Region: region, Account: account,
 			Bucket: env.Get("GAME_S3_BUCKET"), S3USD: rates.S3GBMonth, INR: rates.INRPerUSD},
@@ -83,13 +108,5 @@ func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out
 			return storage.Scan(ctx, regions, storage.ForHost(ctx, host))
 		},
 		Rates: rates, Here: region, Expiry: env.Int("GAME_ARCHIVE_EXPIRY_DAYS"),
-	}
-	res := inv.Read(ctx)
-	if jsonFlag {
-		b, _ := json.MarshalIndent(res, "", "  ")
-		fmt.Fprintf(out.Stdout, "%s\n", b)
-		return 0
-	}
-	fmt.Fprint(out.Stdout, inventory.Show(res))
-	return 0
+	}, nil
 }

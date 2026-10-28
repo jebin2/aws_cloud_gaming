@@ -137,3 +137,21 @@ func (e *Env) Host() string { return e.Setting("GAME_TS_HOST") }
 
 // OSLookup reads the real environment.
 func OSLookup(k string) (string, bool) { return os.LookupEnv(k) }
+
+// InRegion is these settings seen from another region, for acting there: the same
+// file, the same everything, with GAME_REGION answering differently. Writes still go
+// to the file, so it is for reading.
+func (e *Env) InRegion(region string) *Env {
+	c := &Env{vars: map[string]string{}, File: e.File}
+	for k, v := range e.vars {
+		c.vars[k] = v
+	}
+	c.vars["GAME_REGION"] = region
+	c.getenv = func(k string) (string, bool) {
+		if k == "GAME_REGION" {
+			return region, true
+		}
+		return e.getenv(k)
+	}
+	return c
+}
