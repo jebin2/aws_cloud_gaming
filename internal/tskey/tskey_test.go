@@ -72,7 +72,7 @@ func TestMint(t *testing.T) {
 	}
 	// Not ephemeral (this box goes offline every time the watchdog stops it),
 	// preauthorized (nobody is at the box), and it says whose it is.
-	for _, want := range []string{`"ephemeral":false`, `"preauthorized":true`, `"description":"cg gamevps"`, `"expirySeconds":3600`} {
+	for _, want := range []string{`"ephemeral":false`, `"preauthorized":true`, `"description":"cg gamevps"`, `"expirySeconds":10800`} {
 		if !strings.Contains(sent, want) {
 			t.Errorf("lacks %s in %s", want, sent)
 		}
@@ -105,13 +105,16 @@ func TestProbe(t *testing.T) {
 		"fine":                {200, exp(48 * time.Hour), "ok"},
 		"never expires":       {200, `{}`, "ok"},
 		"dies within an hour": {200, exp(30 * time.Minute), "expired"},
-		"revoked":             {200, `{"revoked":"2026-10-01T00:00:00Z"}`, "expired"},
-		"invalid":             {200, `{"invalid":true}`, "expired"},
-		"gone":                {404, "", "gone"},
-		"token refused":       {403, "", "unknown refused"},
-		"server error":        {502, "", "unknown unreachable 502"},
-		"not json":            {200, "<html>", "unknown unreadable"},
-		"odd date":            {200, `{"expires":"soon"}`, "unknown"},
+		// What Mint asks for: a key made a moment ago must pass the check that
+		// follows it, or every replacement is refused as expired.
+		"just minted":   {200, exp(mintLife - time.Minute), "ok"},
+		"revoked":       {200, `{"revoked":"2026-10-01T00:00:00Z"}`, "expired"},
+		"invalid":       {200, `{"invalid":true}`, "expired"},
+		"gone":          {404, "", "gone"},
+		"token refused": {403, "", "unknown refused"},
+		"server error":  {502, "", "unknown unreachable 502"},
+		"not json":      {200, "<html>", "unknown unreadable"},
+		"odd date":      {200, `{"expires":"soon"}`, "unknown"},
 	} {
 		cl := server(t, map[string]func(http.ResponseWriter, *http.Request){"GET /tailnet/-/keys/kid1": reply(c.code, c.body)})
 		if got := cl.Probe(context.Background(), key); got != c.want {

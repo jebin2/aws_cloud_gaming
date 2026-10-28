@@ -89,6 +89,10 @@ func (c Client) CheckToken(ctx context.Context) (state, detail string) {
 	return "unreachable", fmt.Sprint(code)
 }
 
+// mintLife is how long a key made for the box lives; Probe wants an hour of
+// margin beyond now, so it must be longer than that.
+const mintLife = 3 * time.Hour
+
 // Minted is the outcome of asking for a key.
 type Minted struct {
 	Key  string
@@ -96,7 +100,9 @@ type Minted struct {
 	Err  string // Tailscale's reason, usually that the tailnet's ACLs want a tag
 }
 
-// Mint makes a pre-auth key for the box.
+// Mint makes a pre-auth key for the box. It lives three hours: the check that
+// follows wants an hour of margin, so a key that lived one hour was "expired"
+// the moment it was made.
 //
 //	reusable:false   - the key is single use; cg checks the one it keeps
 //	ephemeral:false  - an ephemeral node is purged when it goes offline, and this
@@ -106,7 +112,7 @@ func (c Client) Mint(ctx context.Context, host string) Minted {
 	if c.Token == "" {
 		return Minted{Err: "no API token"}
 	}
-	body := fmt.Sprintf(`{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":false,"preauthorized":true,"tags":[]}}},"expirySeconds":3600,"description":"cg %s"}`, host)
+	body := fmt.Sprintf(`{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":false,"preauthorized":true,"tags":[]}}},"expirySeconds":%d,"description":"cg %s"}`, int(mintLife/time.Second), host)
 	code, b, err := c.do(ctx, http.MethodPost, "/tailnet/-/keys", strings.NewReader(body))
 	if err != nil {
 		return Minted{}
