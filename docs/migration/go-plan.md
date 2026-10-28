@@ -711,9 +711,8 @@ user-data, the launch, the tailnet node, the build, pairing, the summary, and th
 piece has a Bash twin whose output is deterministic it is tested against it on the real files: the launch
 error report, the bootstrap assembly, the host bundle's comment strip, the end-of-init summary.
 
-`cg-go init` refuses to run unless `CG_GO_INIT=1`: it launches machines that bill, and the exit gate
-(one real build/open/pair/stop/destroy/rebuild cycle and one library restore) has not been met. `destroy
---all` is Phase 6 and is not ported.
+`cg-go init` was behind `CG_GO_INIT=1` until the real-AWS gate passed (see 8.14: init on demand and spot,
+stop/restart/restore, destroy, destroy --all). The switch was removed after that, so the app can build.
 
 Differences from the Bash worth knowing:
 

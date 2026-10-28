@@ -192,12 +192,6 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 		out.Die("usage: cg snapshot [create|--list|--delete <id>]")
 		return 1
 	case "init":
-		// Not on by default: this launches billing machines, and it has not yet been
-		// run against a real account. The Bash cg init is the one to use until it has.
-		if v, _ := get("CG_GO_INIT"); v != "1" {
-			out.Die("cg-go init has not passed its real-AWS test yet, so it is off.\n       It launches a machine that bills by the hour. Use the Bash cg init, or set CG_GO_INIT=1 to try this one on purpose.")
-			return 1
-		}
 		env := config.Load(get, repoDir(get))
 		i, err := initcmd.New(ctx, get, env, out)
 		if err != nil {
