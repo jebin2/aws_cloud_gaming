@@ -32,9 +32,11 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 # The suites read dates, times and rupees the way the person who wrote them
 # does: Indian English, Indian time. Left to the machine they fail on any runner
-# whose locale is en-US ("Oct 10" for "10 Oct"). The DOM suites also pass
-# --lang=en-IN to the browser, which has its own idea of the locale.
-export LC_ALL=en_IN.UTF-8 LANG=en_IN.UTF-8 LANGUAGE=en_IN TZ=Asia/Kolkata
+# whose locale is en-US ("Oct 10" for "10 Oct"). The DOM suites pass --lang=en-IN
+# to the browser, which has its own idea of the locale. LC_ALL and LANG are NOT
+# set: bash prints "setlocale: cannot change locale" on every machine that has not
+# generated en_IN, which is most of them.
+export LANGUAGE=en_IN TZ=Asia/Kolkata
 TIMEOUT="${TEST_TIMEOUT:-180}"
 JOBS="${TEST_JOBS:-8}"
 [[ $JOBS =~ ^[1-9][0-9]*$ ]] || { echo "TEST_JOBS must be a whole number of 1 or more, not '$JOBS'" >&2; exit 2; }
