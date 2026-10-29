@@ -169,7 +169,7 @@ PY
 # it keeps the write end of a pipe open for another 10-25 SECONDS, and
 # sys.stdin.read() waits for EOF. That idle wait, once per page load, was the
 # whole cost of this suite - minutes of it, at 0.5s of actual work per load.
-OUT=$("$BROWSER" --headless --disable-gpu --no-sandbox --virtual-time-budget=9000 \
+OUT=$("$BROWSER" --headless --disable-gpu --no-sandbox --lang=en-IN --virtual-time-budget=9000 \
       --user-data-dir="$T/chrome" --dump-dom "file://$T/r/index.html" > "$T/dom.html" 2>/dev/null
     cat "$T/dom.html" \
       | python3 -I -c '

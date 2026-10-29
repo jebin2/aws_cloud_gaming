@@ -122,7 +122,7 @@ geo() { # geo <width>
   # it keeps the write end of a pipe open for another 10-25 SECONDS, and
   # sys.stdin.read() waits for EOF. That idle wait, once per page load, was the
   # whole cost of this suite - minutes of it, at 0.5s of actual work per load.
-  "$BROWSER" --headless --disable-gpu --no-sandbox --window-size="$1,900" \
+  "$BROWSER" --headless --disable-gpu --no-sandbox --lang=en-IN --window-size="$1,900" \
     --virtual-time-budget=5000 --dump-dom "file://$T/r/index.html" > "$T/dom.html" 2>/dev/null
   cat "$T/dom.html" \
   | python3 -I -c '

@@ -484,7 +484,7 @@ p.write_text(t)
 PY
 
 # Dumped to a file, not piped: see login-dom.sh for the 10-25 seconds a pipe costs.
-"$BROWSER" --headless --disable-gpu --no-sandbox --virtual-time-budget=60000 --window-size=1280,900 \
+"$BROWSER" --headless --disable-gpu --no-sandbox --lang=en-IN --virtual-time-budget=60000 --window-size=1280,900 \
   --user-data-dir="$T/chrome" --dump-dom "file://$T/r/index.html" > "$T/dom.html" 2>/dev/null
 OUT=$(python3 -I -c '
 import re, sys, html

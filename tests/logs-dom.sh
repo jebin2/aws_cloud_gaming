@@ -48,8 +48,12 @@ cat > "$T/r/probe.js" <<'PROBE'
     await sleep();
     logLine({ t: 'raw', stream: 'stdout', text: '{"ok":true}' });
     const last = document.getElementById('log').lastElementChild;
+    // Steps is what is shown at first, so a data line is hidden until All is chosen.
     out.push('DATA | toggle=' + !!document.getElementById('log-details') + ' hidden=' + last.hidden
              + ' kind=' + last.querySelector('.k').textContent);
+    applyLogFilter('all');
+    out.push('DATA_ALL | hidden=' + last.hidden);
+    applyLogFilter('steps');
     out.push('FILTERS | ' + [...document.querySelectorAll('[data-filter]')]
       .map(b => (b.classList.contains('btn-primary') ? '*' : '') + b.textContent.trim()).join(','));
     window.__ran = [];
@@ -100,7 +104,7 @@ PY
 # it keeps the write end of a pipe open for another 10-25 SECONDS, and
 # sys.stdin.read() waits for EOF. That idle wait, once per page load, was the
 # whole cost of this suite - minutes of it, at 0.5s of actual work per load.
-OUT=$("$BROWSER" --headless --disable-gpu --no-sandbox --window-size=1280,900 \
+OUT=$("$BROWSER" --headless --disable-gpu --no-sandbox --lang=en-IN --window-size=1280,900 \
       --virtual-time-budget=5000 --dump-dom "file://$T/r/index.html" > "$T/dom.html" 2>/dev/null
     cat "$T/dom.html" \
   | python3 -I -c '
@@ -111,9 +115,11 @@ print(html.unescape(m.group(1)) if m else "NO PROBE OUTPUT")')
 row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
 echo "1. the event stream's filters"
-check    "three, with All chosen from the start" "$(row FILTERS)" "FILTERS | *All,Steps,Problems"
+check    "three, with Steps chosen from the start" "$(row FILTERS)" "FILTERS | All,*Steps,Problems"
 
-contains "data lines always show, no toggle" "$(row DATA)" "DATA | toggle=false hidden=false kind=Data"
+contains "data lines have no toggle of their own" "$(row DATA)" "DATA | toggle=false"
+contains "  they are hidden under Steps"          "$(row DATA)" "hidden=true kind=Data"
+contains "  and shown under All"                  "$(row DATA_ALL)" "DATA_ALL | hidden=false"
 
 echo "2. Fetch says it is fetching, on itself"
 contains "the button says so"            "$(row FETCHING)" "label=Loading… disabled=true"
