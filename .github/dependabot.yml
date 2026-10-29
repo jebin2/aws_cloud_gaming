@@ -14,6 +14,15 @@ updates:
     directory: /app
     schedule: { interval: monthly }
     open-pull-requests-limit: 2
+    # Minor and patch only. A major bump of the app's build tools is not safe to
+    # merge on a green check: Tailwind 3 -> 4 removed the `tailwindcss` command that
+    # `npm run build:css` calls, and no test builds the CSS, so CI passed on a PR that
+    # would have broken `npm start`, `npm run dist` and the release. Electron and
+    # electron-builder majors need a packaged build and a look at the GPU workaround.
+    # Those are done by hand, on purpose; this stops them arriving as a surprise.
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
     groups:
       app-packages: { patterns: ['*'] }
 
