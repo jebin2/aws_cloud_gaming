@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // steamShutdown closes Steam so cloud saves finish syncing. Save games live
@@ -111,7 +112,9 @@ func (d Deps) down(ctx context.Context) int {
 	if err := d.Box.Stop(ctx); err != nil {
 		return d.die(err.Error())
 	}
-	d.Box.WaitState(ctx, "stopped", 600e9)
+	if !d.Box.WaitState(ctx, "stopped", 600*time.Second) {
+		return d.die("the box was asked to stop but is not confirmed stopped - it may still be billing; check: cg status")
+	}
 	d.Out.Log("billing has ended")
 	return 0
 }

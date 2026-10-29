@@ -202,10 +202,20 @@ func (d Deps) DestroyBox(ctx context.Context, x DestroyDeps, args []string) int 
 	// But only a RUNNING box can be pushed from. Gating on the push regardless of
 	// state made destroying a stopped box impossible without --force, which would
 	// have trained the habit of passing --force to destroy.
-	st, _ := d.Box.State(ctx)
-	if d.Box.ID == "" {
+	st, serr := d.Box.State(ctx)
+	switch {
+	case d.Box.ID == "":
 		st = "none"
-	} else if st == "" {
+	case serr != nil && strings.Contains(serr.Error(), "NotFound"):
+		st = "not found" // a stale id: there is no box to push from
+	case serr != nil:
+		// Throttled, or the network blipped. "Unknown" used to mean "nothing local
+		// to push" and went straight to terminating, past the one safeguard this
+		// command has. Treat a box that cannot be read as running: the push is
+		// tried, and if it fails the --force gate below applies as usual.
+		d.Out.Log(fmt.Sprintf("could not read the box's state (%s) - treating it as running", firstErrorLine(serr.Error())))
+		st = "running"
+	case st == "":
 		st = "unknown"
 	}
 	if st == "running" {

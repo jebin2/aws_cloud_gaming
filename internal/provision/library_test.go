@@ -18,7 +18,9 @@ import (
 
 type s3Fake struct {
 	exists     bool
-	createFail int // creates that fail before one works
+	createFail int   // creates that fail before one works
+	createErr  error // every create fails with this
+	creates    int
 	created    []string
 	region     string
 	calls      []string
@@ -32,6 +34,10 @@ func (s *s3Fake) HeadBucket(context.Context, *s3.HeadBucketInput, ...func(*s3.Op
 	return nil, errors.New("NotFound")
 }
 func (s *s3Fake) CreateBucket(_ context.Context, in *s3.CreateBucketInput, _ ...func(*s3.Options)) (*s3.CreateBucketOutput, error) {
+	s.creates++
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
 	if s.createFail > 0 {
 		s.createFail--
 		return nil, errors.New("OperationAborted: A conflicting conditional operation is currently in progress")
@@ -308,5 +314,31 @@ func TestShutdownMustMeanStopOnDemandAndTerminateOnSpot(t *testing.T) {
 	f = &shutdownFake{behavior: "terminate", modifyErr: errors.New("UnauthorizedOperation")}
 	if err := CheckShutdown(context.Background(), f, "i-1", say); err == nil {
 		t.Error("a watchdog that would delete the disk must stop the build")
+	}
+}
+
+// Only OperationAborted is the delay after a delete. Everything else is answered
+// at once, with what it is: eight attempts and fifteen seconds each for an
+// AccessDenied was a two-minute wait for a message about the wrong thing.
+func TestEnsureRetriesOnlyTheDelayAndAnswersTheRestAtOnce(t *testing.T) {
+	s := &s3Fake{createErr: errors.New("AccessDenied: Access Denied")}
+	l, _, slept := lib(s, &iamFake{})
+	_, err := l.Ensure(context.Background())
+	if err == nil || s.creates != 1 || *slept != 0 || !strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "cg destroy --all") {
+		t.Errorf("err %v creates %d slept %v", err, s.creates, *slept)
+	}
+	s = &s3Fake{createErr: errors.New("BucketAlreadyExists: The requested bucket name is not available")}
+	l, _, _ = lib(s, &iamFake{})
+	if _, err := l.Ensure(context.Background()); err == nil || s.creates != 1 || !strings.Contains(err.Error(), "taken by another AWS account") || !strings.Contains(err.Error(), "GAME_S3_BUCKET") {
+		t.Errorf("err %v creates %d", err, s.creates)
+	}
+	// Already ours, though HeadBucket could not see it: that is success.
+	s = &s3Fake{createErr: errors.New("BucketAlreadyOwnedByYou: Your previous request to create the named bucket succeeded")}
+	l, notes, _ := lib(s, &iamFake{})
+	if _, err := l.Ensure(context.Background()); err != nil || s.creates != 1 {
+		t.Errorf("err %v creates %d", err, s.creates)
+	}
+	if !strings.Contains(strings.Join(*notes, "\n"), "exists") {
+		t.Errorf("%v", *notes)
 	}
 }

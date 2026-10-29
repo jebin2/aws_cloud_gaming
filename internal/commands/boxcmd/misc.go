@@ -137,7 +137,12 @@ func (d Deps) SnapshotDelete(ctx context.Context, id string, c interface {
 		return d.die("which image? see: cg snapshot --list")
 	}
 	var snaps []string
-	if o, err := c.DescribeImages(ctx, &ec2.DescribeImagesInput{ImageIds: []string{id}}); err == nil && len(o.Images) > 0 {
+	o, err := c.DescribeImages(ctx, &ec2.DescribeImagesInput{ImageIds: []string{id}})
+	if err != nil {
+		// Deregistering first would orphan the snapshots, which keep billing.
+		return d.die(fmt.Sprintf("could not read the snapshots of %s (%s) - not deregistering it, because they would be left behind billing; try again", id, firstErrorLine(err.Error())))
+	}
+	if len(o.Images) > 0 {
 		for _, m := range o.Images[0].BlockDeviceMappings {
 			if m.Ebs != nil && aws.ToString(m.Ebs.SnapshotId) != "" {
 				snaps = append(snaps, aws.ToString(m.Ebs.SnapshotId))
@@ -148,12 +153,17 @@ func (d Deps) SnapshotDelete(ctx context.Context, id string, c interface {
 		return d.die(firstErrorLine(err.Error()))
 	}
 	d.Out.Log("deregistered " + id)
+	left := 0
 	for _, s := range snaps {
 		if _, err := c.DeleteSnapshot(ctx, &ec2.DeleteSnapshotInput{SnapshotId: aws.String(s)}); err != nil {
 			d.Out.Log(fmt.Sprintf("could not delete snapshot %s (in use by another image?)", s))
+			left++
 		} else {
 			d.Out.Log("deleted snapshot " + s)
 		}
+	}
+	if left > 0 {
+		return d.die(fmt.Sprintf("%d snapshot(s) could not be deleted and still bill - see above", left))
 	}
 	return 0
 }

@@ -26,6 +26,7 @@ type cloud struct {
 	spot                       map[string]string // instance -> request
 	failTerminate              bool
 	failLookup, failCancel     bool // the spot request cannot be found / cancelled
+	failImageRead              bool // DescribeImages by id fails
 	lookups                    int
 	failDeregister, failSnap   map[string]bool
 	failVolume                 map[string]bool
@@ -93,6 +94,9 @@ func (c *cloud) TerminateInstances(_ context.Context, in *ec2.TerminateInstances
 	return &ec2.TerminateInstancesOutput{}, nil
 }
 func (c *cloud) DescribeImages(_ context.Context, in *ec2.DescribeImagesInput, _ ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
+	if c.failImageRead && len(in.ImageIds) > 0 {
+		return nil, errors.New("RequestLimitExceeded")
+	}
 	var out []ec2types.Image
 	for _, r := range c.images {
 		if len(in.ImageIds) > 0 {
@@ -273,5 +277,22 @@ func TestAnInstanceWhoseSpotRequestCannotBeHandledIsNotTerminated(t *testing.T) 
 		if name == "the lookup fails" && c.lookups != 3 {
 			t.Errorf("a throttled lookup is tried three times, not %d", c.lookups)
 		}
+	}
+}
+
+// Deregistering an image whose snapshots could not be read would leave them
+// unreachable and billing, so it is left registered and reported.
+func TestAnImageWhoseSnapshotsCannotBeReadIsNotDeregistered(t *testing.T) {
+	c := account()
+	c.failImageRead = true
+	p, _ := Read(context.Background(), c, "gamevps", "cg:host")
+	var failed []string
+	rm := Remover{C: c, Say: func(string) {}, Log: func(string) {}, Fail: func(s string) { failed = append(failed, s) }, Wait: func(context.Context, string) bool { return true }}
+	f, _ := rm.Run(context.Background(), p)
+	if strings.Contains(strings.Join(c.calls, ","), "deregister") || strings.Contains(strings.Join(c.calls, ","), "delete-snapshot") {
+		t.Errorf("nothing of the images was touched: %v", c.calls)
+	}
+	if len(f) == 0 || !strings.Contains(f[0], "not deregistering it") {
+		t.Errorf("%v", f)
 	}
 }

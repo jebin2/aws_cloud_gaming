@@ -251,3 +251,37 @@ func TestNoPushKeepsTheArchiveLockedUntilTheBoxIsGone(t *testing.T) {
 		t.Errorf("%s", r.o)
 	}
 }
+
+// A box whose state cannot be read is not "nothing to push": it is treated as
+// running, so the push is tried and the --force gate applies.
+func TestDestroyTreatsAnUnreadableBoxAsRunning(t *testing.T) {
+	r, x, _, _ := destroyRig(t, "")
+	r.e.describeErr = errors.New("RequestLimitExceeded: Request limit exceeded")
+	prev := r.r.Hook
+	r.r.Hook = func(line string) (bool, string, error) {
+		if strings.Contains(line, "cg-library push") {
+			return true, "", &exitCode{1}
+		}
+		return prev(line)
+	}
+	if rc := r.d.DestroyBox(context.Background(), x, nil); rc != 1 || strings.Contains(strings.Join(r.e.calls, ","), "terminate") {
+		t.Fatalf("rc %d %v\n%s%s", rc, r.e.calls, r.o, r.w)
+	}
+	if !strings.Contains(r.o.String(), "treating it as running") || !strings.Contains(r.w.String(), "not mirrored from here") {
+		t.Errorf("%s%s", r.o, r.w)
+	}
+	// A stale id - the instance is not there at all - has nothing to push from.
+	r, x, _, _ = destroyRig(t, "")
+	r.e.describeErr = errors.New("operation error EC2: DescribeInstances, InvalidInstanceID.NotFound")
+	// (The fake fails every instance lookup, so the destroy itself cannot go on to
+	// read its plan; what is checked is the decision before that.)
+	_ = r.d.DestroyBox(context.Background(), x, nil)
+	if !strings.Contains(r.o.String(), "box is not found - nothing local to push") || strings.Contains(r.o.String(), "treating it as running") {
+		t.Errorf("a stale id has nothing to push from, and must not be treated as running:\n%s%s", r.o, r.w)
+	}
+	for _, l := range r.r.Ran {
+		if strings.Contains(l, "cg-library push") {
+			t.Error("pushed from a box that is not there")
+		}
+	}
+}

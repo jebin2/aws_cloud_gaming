@@ -30,6 +30,8 @@ type fakeEC2 struct {
 	state                 string
 	slowTerminate         bool // TerminateInstances leaves it shutting-down
 	terminateErr          error
+	imagesErr             error // DescribeImages fails
+	stopStays             bool  // StopInstances is accepted but the box stays "stopping"
 	lifecycle             string
 	spotState             string
 	describeErr           error
@@ -70,6 +72,9 @@ func (f *fakeEC2) StartInstances(context.Context, *ec2.StartInstancesInput, ...f
 func (f *fakeEC2) StopInstances(context.Context, *ec2.StopInstancesInput, ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error) {
 	f.calls = append(f.calls, "stop")
 	f.state = "stopped"
+	if f.stopStays {
+		f.state = "stopping"
+	}
 	return &ec2.StopInstancesOutput{}, nil
 }
 func (f *fakeEC2) TerminateInstances(context.Context, *ec2.TerminateInstancesInput, ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
@@ -97,6 +102,9 @@ func (f *fakeEC2) CreateImage(_ context.Context, in *ec2.CreateImageInput, _ ...
 	return &ec2.CreateImageOutput{ImageId: aws.String("ami-new")}, nil
 }
 func (f *fakeEC2) DescribeImages(_ context.Context, in *ec2.DescribeImagesInput, _ ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
+	if f.imagesErr != nil {
+		return nil, f.imagesErr
+	}
 	var out []ec2types.Image
 	for _, id := range in.ImageIds {
 		st, ok := f.images[id]
@@ -617,8 +625,9 @@ func TestSnapshotDeleteTakesTheBackingSnapshotsToo(t *testing.T) {
 	r.e.images = map[string]string{"ami-1": "available"}
 	r.e.snaps = map[string][]string{"ami-1": {"snap-a", "snap-b"}}
 	r.e.failSnap = map[string]bool{"snap-b": true}
-	if rc := r.d.SnapshotDelete(context.Background(), "ami-1", r.e); rc != 0 {
-		t.Fatal(r.w)
+	// snap-b stays behind and still bills, so this is a failure, not a quiet 0.
+	if rc := r.d.SnapshotDelete(context.Background(), "ami-1", r.e); rc != 1 || !strings.Contains(r.w.String(), "1 snapshot(s) could not be deleted and still bill") {
+		t.Fatalf("rc %d %s", rc, r.w)
 	}
 	if strings.Join(r.e.calls, ",") != "deregister ami-1,delete-snapshot snap-a" {
 		t.Errorf("%v", r.e.calls)
@@ -698,5 +707,38 @@ func TestInterruptedSnapshotSaysAwsIsStillMakingIt(t *testing.T) {
 	cancel()
 	if rc := r.d.SnapshotCreateWith(ctx, true); rc != 1 || !strings.Contains(r.o.String()+r.w.String(), "stopped waiting - AWS is still making") {
 		t.Errorf("rc=%d\n%s%s", rc, r.o, r.w)
+	}
+}
+
+// An image whose snapshots cannot be read must not be deregistered: they would be
+// unreachable afterwards and bill for ever.
+func TestSnapshotDeleteDoesNotDeregisterWhatItCannotRead(t *testing.T) {
+	r := newRig(t, "")
+	r.e.images = map[string]string{"ami-1": "available"}
+	r.e.snaps = map[string][]string{"ami-1": {"snap-a"}}
+	r.e.imagesErr = errors.New("RequestLimitExceeded: slow down")
+	if rc := r.d.SnapshotDelete(context.Background(), "ami-1", r.e); rc != 1 || strings.Contains(strings.Join(r.e.calls, ","), "deregister") {
+		t.Errorf("rc %d %v", rc, r.e.calls)
+	}
+	if !strings.Contains(r.w.String(), "not deregistering it, because they would be left behind billing") {
+		t.Errorf("%s", r.w)
+	}
+}
+
+// "Billing has ended" is said when it has, not when the request was accepted.
+func TestStopDoesNotClaimBillingEndedForABoxThatIsNotStopped(t *testing.T) {
+	r := newRig(t, "")
+	r.e.stopStays = true
+	r.d.Force = true
+	if rc := r.d.down(context.Background()); rc != 1 {
+		t.Fatalf("rc %d\n%s%s", rc, r.o, r.w)
+	}
+	if strings.Contains(r.o.String(), "billing has ended") || !strings.Contains(r.w.String(), "not confirmed stopped") {
+		t.Errorf("%s%s", r.o, r.w)
+	}
+	r = newRig(t, "")
+	r.d.Force = true
+	if rc := r.d.down(context.Background()); rc != 0 || !strings.Contains(r.o.String(), "billing has ended") {
+		t.Errorf("rc %d\n%s%s", rc, r.o, r.w)
 	}
 }

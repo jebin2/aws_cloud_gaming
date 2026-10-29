@@ -119,16 +119,31 @@ func (l Library) Ensure(ctx context.Context) (string, error) {
 		// after a delete with OperationAborted. It is a propagation delay, not a
 		// failure, so it is waited out here rather than surfaced as an init that
 		// works on the second try and looks flaky on the first.
+	create:
 		for attempt := 1; ; attempt++ {
 			_, err := l.S3.CreateBucket(ctx, in)
 			if err == nil {
 				break
 			}
-			if attempt == 8 {
-				return "", fmt.Errorf("could not create bucket %s after %d attempts.\nIf you just ran 'cg destroy --all', S3 can hold the name for a few\nminutes. Wait and run cg init again; nothing else is wrong. (%s)", b, attempt, firstLine(err))
+			msg := err.Error()
+			switch {
+			case strings.Contains(msg, "BucketAlreadyOwnedByYou"):
+				// HeadBucket could not see it (a redirect, a blip) but it is ours.
+				l.Note(fmt.Sprintf("bucket %s exists", b))
+				break create
+			case strings.Contains(msg, "OperationAborted"):
+				// The one error that IS the delay described above.
+				if attempt == 8 {
+					return "", fmt.Errorf("could not create bucket %s after %d attempts.\nIf you just ran 'cg destroy --all', S3 can hold the name for a few\nminutes. Wait and run cg init again; nothing else is wrong. (%s)", b, attempt, firstLine(err))
+				}
+				l.Note(fmt.Sprintf("S3 has not released the name yet (attempt %d) - waiting 15s", attempt))
+				l.sleep(15 * time.Second)
+			case strings.Contains(msg, "BucketAlreadyExists"):
+				return "", fmt.Errorf("the bucket name %s is taken by another AWS account. Set GAME_S3_BUCKET to a name of your own (%s)", b, firstLine(err))
+			default:
+				// Anything else will not mend itself in two minutes; say what it is.
+				return "", fmt.Errorf("could not create bucket %s: %s", b, firstLine(err))
 			}
-			l.Note(fmt.Sprintf("S3 has not released the name yet (attempt %d) - waiting 15s", attempt))
-			l.sleep(15 * time.Second)
 		}
 	}
 

@@ -281,12 +281,17 @@ func (r Remover) Run(ctx context.Context, p Plan) (failures []string, instancesG
 		// Capture the backing snapshots first; they are unreachable afterwards and
 		// would keep billing silently.
 		var snaps []string
-		if o, err := r.C.DescribeImages(ctx, &ec2.DescribeImagesInput{ImageIds: []string{id}}); err == nil {
-			for _, im := range o.Images {
-				for _, m := range im.BlockDeviceMappings {
-					if m.Ebs != nil && aws.ToString(m.Ebs.SnapshotId) != "" {
-						snaps = append(snaps, aws.ToString(m.Ebs.SnapshotId))
-					}
+		o, err := r.C.DescribeImages(ctx, &ec2.DescribeImagesInput{ImageIds: []string{id}})
+		if err != nil {
+			// Deregistering first would make the snapshots unreachable, and they
+			// bill by the gigabyte-month for ever with nothing left to point at them.
+			fail(fmt.Sprintf("could not read the snapshots of %s (%v) - not deregistering it, because they would be left behind billing; run the destroy again", id, err))
+			continue
+		}
+		for _, im := range o.Images {
+			for _, m := range im.BlockDeviceMappings {
+				if m.Ebs != nil && aws.ToString(m.Ebs.SnapshotId) != "" {
+					snaps = append(snaps, aws.ToString(m.Ebs.SnapshotId))
 				}
 			}
 		}

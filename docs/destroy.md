@@ -44,6 +44,17 @@ irreversible happens while the box may still be running.
 - An instance whose spot request cannot be found (three tries) or cancelled is not terminated: a
   request that relaunches would replace it with a box cg does not know. The failure is reported;
   run the destroy again.
+- A box whose state cannot be read (throttled, a network blip) is treated as running, so the push
+  from the laptop is tried and the `--force` gate applies. It used to count as "nothing to push" and
+  went straight to terminating. A stale id (the instance is not there at all) still has nothing to push.
+- An image whose snapshots cannot be read is not deregistered, in `destroy` or `snapshot --delete`:
+  deregistering first would leave the snapshots unreachable and billing. A snapshot that stays behind
+  makes `snapshot --delete` exit 1 and say so.
+
+`cg stop` says "billing has ended" only when the box is confirmed stopped; otherwise it exits 1 and
+says the box may still be billing. `cg init` retries bucket creation only for `OperationAborted` (the
+delay after a delete); `BucketAlreadyOwnedByYou` counts as success, and any other error is reported
+at once with its own text.
 
 **Only cg's own.** Images, volumes and snapshots are deleted only when they carry cg's tag
 (`cg:host=<host>`), or the exact name cg gave them before that tag existed. Anything else in the region - another project's image or disk - is listed as left
