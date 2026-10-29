@@ -20,7 +20,8 @@
 #
 #     bash tests/run-all.sh > /tmp/t.log || { tail -20 /tmp/t.log; false; }
 #
-# The suites run side by side, TEST_JOBS at a time (default 8). The runner gives
+# The suites run side by side, TEST_JOBS at a time (default: the CPU count, at most 8;
+# the browser suites are CPU-bound, and 8 at once on a 2-CPU runner took 4x as long). The runner gives
 # each one an empty HOME of its own - most also make their own, but that was a
 # habit, not a rule, and side by side two suites writing ~/.config would be two
 # suites failing at random. They write nothing into the repo.
@@ -38,7 +39,8 @@ cd "$(dirname "$0")/.."
 # generated en_IN, which is most of them.
 export LANGUAGE=en_IN TZ=Asia/Kolkata
 TIMEOUT="${TEST_TIMEOUT:-180}"
-JOBS="${TEST_JOBS:-8}"
+cpus=$(nproc 2>/dev/null || echo 4); (( cpus > 8 )) && cpus=8
+JOBS="${TEST_JOBS:-$cpus}"
 [[ $JOBS =~ ^[1-9][0-9]*$ ]] || { echo "TEST_JOBS must be a whole number of 1 or more, not '$JOBS'" >&2; exit 2; }
 [[ $TIMEOUT =~ ^[1-9][0-9]*$ ]] || { echo "TEST_TIMEOUT must be a whole number of seconds, not '$TIMEOUT'" >&2; exit 2; }
 dir=$(mktemp -d)
@@ -88,26 +90,57 @@ run_one() {
 export -f run_one; export TIMEOUT dir
 printf '%s\0' "${suites[@]}" | xargs -0 -P "$JOBS" -I{} bash -c 'run_one "$1"' _ {}
 
-failed=0 ran=0
+# Where the failures go for someone to read afterwards. TEST_LOGS_DIR is a folder
+# the caller keeps (CI uploads it); without it the output lives in the temp dir,
+# which is deleted when the run passes.
+logs="${TEST_LOGS_DIR:-}"
+[[ -n $logs ]] && mkdir -p "$logs"
+gha=${GITHUB_ACTIONS:-}
+summary=${GITHUB_STEP_SUMMARY:-}
+[[ -n $summary ]] && printf '| Suite | Time | Result |\n|---|---:|---|\n' >>"$summary"
+
+failed=0 skipped=0 ran=0
+started=$SECONDS
 for t in "${suites[@]}"; do
   n=$(basename "$t" .sh); ran=$((ran+1))
   rc=$(cat "$dir/$n.rc" 2>/dev/null || echo 1)
   ms=$(cat "$dir/$n.ms" 2>/dev/null || echo 0)
-  printf '%-28s %6.1fs  ' "$t" "$(awk "BEGIN{print $ms/1000}")"
-  if [[ $rc == 0 ]]; then
-    printf 'PASS  (%s assertions)\n' "$(grep -c '^  ok ' "$dir/$n.out" 2>/dev/null || echo '?')"
+  secs=$(awk "BEGIN{printf \"%.1f\", $ms/1000}")
+  printf '%-28s %6.1fs  ' "$t" "$secs"
+  # A browser suite on a machine with no browser says so and exits 0. That is
+  # not a pass: it checked nothing, and a summary that counted it as one hid
+  # fourteen suites from view for weeks.
+  if [[ $rc == 0 ]] && grep -q 'no chromium - skipped' "$dir/$n.out" 2>/dev/null; then
+    skipped=$((skipped+1))
+    printf 'SKIP  (no browser: nothing was checked)\n'
+    [[ -n $summary ]] && printf '| %s | %ss | skipped (no browser) |\n' "$t" "$secs" >>"$summary"
+  elif [[ $rc == 0 ]]; then
+    n_ok=$(grep -c '^  ok ' "$dir/$n.out" 2>/dev/null || echo '?')
+    printf 'PASS  (%s assertions)\n' "$n_ok"
+    [[ -n $summary ]] && printf '| %s | %ss | pass (%s assertions) |\n' "$t" "$secs" "$n_ok" >>"$summary"
   else
     failed=$((failed+1)); keep=1
-    if [[ $rc == 124 ]] && (( ms >= TIMEOUT * 1000 )); then printf 'TIMEOUT after %ss\n' "$TIMEOUT"
-    else printf 'FAIL (exit %d)\n' "$rc"; fi
+    if [[ $rc == 124 ]] && (( ms >= TIMEOUT * 1000 )); then why="TIMEOUT after ${TIMEOUT}s"
+    else why="FAIL (exit $rc)"; fi
+    echo "$why"
     sed 's/^/      /' "$dir/$n.out" | grep -E 'FAIL|error|Traceback' | head -8
     echo "      --- full output: $dir/$n.out   rerun: bash $t"
+    [[ -n $logs ]] && cp "$dir/$n.out" "$logs/$n.out"
+    if [[ -n $gha ]]; then
+      # The whole output in a fold of its own, and a red annotation on the file.
+      echo "::group::$t - full output"; cat "$dir/$n.out"; echo "::endgroup::"
+      echo "::error file=$t::$why - $(grep -m1 -E 'FAIL' "$dir/$n.out" | head -c 200)"
+    fi
+    [[ -n $summary ]] && printf '| %s | %ss | **%s** |\n' "$t" "$secs" "$why" >>"$summary"
   fi
 done
 
 echo
+total=$(( SECONDS - started ))
+(( skipped )) && echo "$skipped of $ran suites SKIPPED for want of a browser - they checked nothing here"
+[[ -n $summary ]] && printf '\n%s suites, %s failed, %s skipped, in %ss\n' "$ran" "$failed" "$skipped" "$total" >>"$summary"
 if (( failed )); then
-  echo "$failed of $ran suites FAILED (logs kept in $dir)"
+  echo "$failed of $ran suites FAILED (logs kept in $dir${logs:+ and $logs})"
   exit 1
 fi
-echo "all $ran suites passed"
+if (( skipped )); then echo "all $ran suites passed ($skipped skipped)"; else echo "all $ran suites passed"; fi

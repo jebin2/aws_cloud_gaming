@@ -61,6 +61,19 @@ jobs:
         shell: bash
 
       # RUN UNPIPED: the script's exit status is the point (see its header).
+      # A failed suite's whole output is folded into this log, listed on the run's
+      # summary page with its time, and kept as a download below.
       - name: Run Every Suite
         run: bash tests/run-all.sh
         shell: bash
+        env:
+          TEST_LOGS_DIR: ${{ runner.temp }}/test-logs
+
+      - name: Keep The Failed Suites' Output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-suites
+          path: ${{ runner.temp }}/test-logs
+          if-no-files-found: ignore
+          retention-days: 14
