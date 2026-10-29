@@ -315,5 +315,5 @@ dialog.dlg[open]::backdrop { animation: dim-in 180ms ease-out both; }
    window, and scrolling inside itself - so the page never scrolls, and the
    heading and the Stop button above it stay where they are. 184px is the top
    bar, the screen's title row and its margin, and the main area's padding -
-   measured, not guessed: tests/startup-gate.sh fails when the page scrolls. */
+   measured, not guessed: tests/startup-gate-*.sh fail when the page scrolls. */
 .fit-view { max-height: calc(100vh - 184px); overflow-y: auto; }

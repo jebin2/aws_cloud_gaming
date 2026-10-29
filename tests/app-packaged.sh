@@ -160,7 +160,7 @@ contains "a throwing painter is reported too" "$js" "Could not show"
 contains "  and names the painter it could not find" "$js" "no painter for"
 # Nothing writes a command name into the window's furniture any more: the
 # header line that did is gone, and the pipeline's pane carries cg's own output
-# instead - see tests/startup-gate.sh.
+# instead - see tests/startup-gate-*.sh.
 check "the header has no command line"   "$(grep -c 'job-line' app/renderer/index.html app/renderer/app.js | grep -vc ':0')" "0"
 
 echo ""
