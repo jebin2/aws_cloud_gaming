@@ -125,8 +125,17 @@ func (d Deps) destroyEverything(ctx context.Context, x DestroyDeps, a AllDeps, f
 	}
 
 	failed := 0
-	if d.removeAll(ctx, x, a) != 0 {
+	rc, boxGone := d.removeAll(ctx, x, a)
+	if rc != 0 {
 		failed = 1
+	}
+	// The archive, the box's role and the watchdog are what guard and feed a box
+	// that is still running. Deleting them under it leaves a GPU instance billing
+	// by the hour with no idle watchdog and no way to reach its library, so none
+	// of it goes until the box is confirmed gone.
+	if !boxGone {
+		d.Out.LogAs("fail", "the box is not confirmed gone, so the game archive, the box's role and the cloud watchdog were NOT deleted - they are what guard it")
+		return d.die("stopped before the irreversible part: find out why the box did not terminate (cg status), then run cg destroy --all again")
 	}
 
 	if haveBucket {
@@ -187,11 +196,11 @@ func (d Deps) destroyEverything(ctx context.Context, x DestroyDeps, a AllDeps, f
 
 // removeAll is the box and the free things that go with it: the group, the key
 // pair, the local key, the budget and the tailnet nodes.
-func (d Deps) removeAll(ctx context.Context, x DestroyDeps, a AllDeps) int {
+func (d Deps) removeAll(ctx context.Context, x DestroyDeps, a AllDeps) (rc int, boxGone bool) {
 	host := d.Box.Host
 	plan, err := destroy.ReadAll(ctx, a.EC2, host, d.tagKey())
 	if err != nil {
-		return d.die("could not tell what to delete - AWS did not answer: " + err.Error())
+		return d.die("could not tell what to delete - AWS did not answer: " + err.Error()), false
 	}
 	d.Out.Block("What this destroy does", destroy.DescribeAll(plan, host))
 	rm := destroy.Remover{C: a.EC2, Say: d.Out.Say, Log: d.Out.Log, Fail: func(s string) { d.Out.LogAs("fail", s) },
@@ -241,7 +250,10 @@ func (d Deps) removeAll(ctx context.Context, x DestroyDeps, a AllDeps) int {
 			d.Out.LogAs("fail", "could not delete the key pair "+plan.KeyPair)
 		}
 	}
-	_ = os.Remove(a.Pem)
+	// The key is how to reach a box that is still there.
+	if gone {
+		_ = os.Remove(a.Pem)
+	}
 	if gone {
 		for _, k := range []string{"GAME_INSTANCE_ID", "GAME_TS_HOST", "GAME_TS_NODE", "SUNSHINE_USER", "SUNSHINE_PASS"} {
 			_ = d.Env.Unset(k)
@@ -262,7 +274,7 @@ func (d Deps) removeAll(ctx context.Context, x DestroyDeps, a AllDeps) int {
 		}
 	}
 	if len(failures) > 0 {
-		return 1
+		return 1, gone
 	}
-	return 0
+	return 0, gone
 }

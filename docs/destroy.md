@@ -29,6 +29,22 @@ either way. `--all` waits in full, because it deletes the security group next an
 while the instance's network interface exists. A `cg init` straight afterwards is fine: it waits for
 AWS to release the spot allowance (see troubleshooting).
 
+**Cases where destroy stops instead of pressing on.** These follow from one rule: nothing
+irreversible happens while the box may still be running.
+
+- `--no-push` makes the archive read-only for the box's role, because the box mirrors its library
+  as it shuts down. If the role cannot be read (refused, throttled) the destroy does not start. Only
+  a role that does not exist counts as "nothing to lock". The archive is made writable again only
+  once the box is confirmed `terminated` (this path waits in full, unlike a plain destroy); if it is
+  not, the archive stays read-only and says so.
+- `--all` deletes the archive, the box's role and the cloud watchdog only after the box is
+  confirmed gone. If the instance would not terminate, it stops before those and says which were
+  left, because a running GPU box with no watchdog and no role bills by the hour and nothing
+  guards it. The local `.pem` stays too: it is how to reach that box.
+- An instance whose spot request cannot be found (three tries) or cancelled is not terminated: a
+  request that relaunches would replace it with a box cg does not know. The failure is reported;
+  run the destroy again.
+
 **Only cg's own.** Images, volumes and snapshots are deleted only when they carry cg's tag
 (`cg:host=<host>`), or the exact name cg gave them before that tag existed. Anything else in the region - another project's image or disk - is listed as left
 alone and never touched.

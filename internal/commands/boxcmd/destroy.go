@@ -2,9 +2,12 @@ package boxcmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"os"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -45,6 +48,11 @@ type DestroyDeps struct {
 // unavailable exactly when it is most wanted, because a box too busy to answer
 // ssh is the usual reason for wanting --no-push at all. IAM works from here
 // regardless of the box's state.
+func isNoSuchEntity(err error) bool {
+	var ne *iamtypes.NoSuchEntityException
+	return errors.As(err, &ne) || strings.Contains(err.Error(), "NoSuchEntity")
+}
+
 func (d Deps) archiveLock(ctx context.Context, x DestroyDeps, mode string) bool {
 	role := d.Box.Host + "-box"
 	b, ok := x.Lib.BucketName()
@@ -52,7 +60,14 @@ func (d Deps) archiveLock(ctx context.Context, x DestroyDeps, mode string) bool 
 		return true
 	}
 	if _, err := x.IAM.GetRole(ctx, &iam.GetRoleInput{RoleName: aws.String(role)}); err != nil {
-		return true
+		// Only a role that does not exist has nothing to lock. A refusal or a
+		// throttle says nothing about whether the box can write, and answering
+		// "locked" would let --no-push start with the archive still open.
+		if isNoSuchEntity(err) {
+			return true
+		}
+		d.Out.Log(fmt.Sprintf("could not read the role %s (%s) - cannot tell whether the archive is %s", role, firstErrorLine(err.Error()), map[string]string{"ro": "locked", "rw": "writable again"}[mode]))
+		return false
 	}
 	write := ""
 	if mode == "rw" {
@@ -168,7 +183,14 @@ func (d Deps) DestroyBox(ctx context.Context, x DestroyDeps, args []string) int 
 		if !d.archiveLock(ctx, x, "ro") {
 			return d.die("could not revoke the box's write access, so its shutdown mirror could still\n       overwrite the archive. Either grant iam:PutRolePolicy, or wait for the box\n       to finish what it is doing and destroy normally.")
 		}
-		rc := d.remove(ctx, x)
+		// Waited for in full, unlike a plain destroy: the box's own shutdown mirror
+		// runs while it is shutting down, and the archive may be made writable again
+		// only once that has finished - which is when the box is "terminated".
+		rc := d.remove(ctx, x, true)
+		if rc != 0 {
+			d.Out.Log("archive left read-only - the box is not confirmed gone, and its shutdown mirror could still write. cg init restores it once a box is built")
+			return rc
+		}
 		// The instance is gone, so restore normal access. If this is interrupted the
 		// policy stays read-only, and `cg init` rewrites it on the next build.
 		if !d.archiveLock(ctx, x, "rw") {
@@ -211,12 +233,12 @@ func (d Deps) DestroyBox(ctx context.Context, x DestroyDeps, args []string) int 
 			d.Out.Log("the archive is EMPTY - if you expected games in it, stop here")
 		}
 	}
-	return d.remove(ctx, x)
+	return d.remove(ctx, x, false)
 }
 
 // remove is the destroy itself: the instance, cg's images and their snapshots,
 // the box's leftover volumes.
-func (d Deps) remove(ctx context.Context, x DestroyDeps) int {
+func (d Deps) remove(ctx context.Context, x DestroyDeps, waitForTerminated bool) int {
 	plan, err := destroy.Read(ctx, x.EC2, d.Box.Host, d.tagKey())
 	if err != nil {
 		return d.die("could not tell what to delete - AWS did not answer: " + err.Error())
@@ -226,6 +248,9 @@ func (d Deps) remove(ctx context.Context, x DestroyDeps) int {
 		Wait: func(ctx context.Context, id string) bool {
 			b := d.Box
 			b.ID = id
+			if waitForTerminated {
+				return b.WaitState(ctx, "terminated", 600*time.Second)
+			}
 			// A spot box takes 6-7 minutes to reach "terminated", and billing
 			// for it ended when it began shutting down. Nothing after this needs
 			// it gone (--all, which deletes the security group, waits in full).

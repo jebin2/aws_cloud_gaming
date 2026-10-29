@@ -18,11 +18,15 @@ import (
 
 type iamFake struct {
 	hasRole bool
+	getErr  error // GetRole fails with this instead of answering
 	fail    bool
 	puts    []string
 }
 
 func (i *iamFake) GetRole(context.Context, *iam.GetRoleInput, ...func(*iam.Options)) (*iam.GetRoleOutput, error) {
+	if i.getErr != nil {
+		return nil, i.getErr
+	}
 	if !i.hasRole {
 		return nil, errors.New("NoSuchEntity")
 	}
@@ -216,5 +220,34 @@ func TestDestroyDoesNotWaitForTheLastMinutesOfATermination(t *testing.T) {
 	}
 	if r.d.Env.Get("GAME_INSTANCE_ID") != "" {
 		t.Error("a machine that is shutting down is gone as far as cg is concerned")
+	}
+}
+
+// "Locked" has to mean locked. A role that cannot be read - refused, throttled -
+// says nothing about whether the box can write, so --no-push must not start.
+func TestNoPushRefusesWhenTheRoleCannotBeRead(t *testing.T) {
+	r, x, i, _ := destroyRig(t, "")
+	i.getErr = errors.New("AccessDenied: not authorized to perform iam:GetRole")
+	if rc := r.d.DestroyBox(context.Background(), x, []string{"--no-push"}); rc != 1 || strings.Contains(strings.Join(r.e.calls, ","), "terminate") || len(i.puts) != 0 {
+		t.Errorf("rc %d calls %v puts %d\n%s%s", rc, r.e.calls, len(i.puts), r.o, r.w)
+	}
+	if !strings.Contains(r.o.String()+r.w.String(), "could not read the role gamevps-box") {
+		t.Errorf("it must say why:\n%s%s", r.o, r.w)
+	}
+}
+
+// The box's own shutdown mirror runs while the box shuts down. The archive is made
+// writable again only once the box is confirmed gone; until then it stays locked.
+func TestNoPushKeepsTheArchiveLockedUntilTheBoxIsGone(t *testing.T) {
+	r, x, i, _ := destroyRig(t, "")
+	r.e.slowTerminate = true // stays shutting-down: never confirmed gone
+	if rc := r.d.DestroyBox(context.Background(), x, []string{"--no-push"}); rc != 1 {
+		t.Fatalf("rc %d\n%s%s", rc, r.o, r.w)
+	}
+	if len(i.puts) != 1 || strings.Contains(i.puts[0], "s3:PutObject") {
+		t.Errorf("read-only once, and never made writable while the box may still be mirroring: %v", i.puts)
+	}
+	if !strings.Contains(r.o.String(), "archive left read-only - the box is not confirmed gone") {
+		t.Errorf("%s", r.o)
 	}
 }

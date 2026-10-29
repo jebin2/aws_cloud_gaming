@@ -25,6 +25,8 @@ type cloud struct {
 	instances, images, volumes []res
 	spot                       map[string]string // instance -> request
 	failTerminate              bool
+	failLookup, failCancel     bool // the spot request cannot be found / cancelled
+	lookups                    int
 	failDeregister, failSnap   map[string]bool
 	failVolume                 map[string]bool
 	calls                      []string
@@ -66,6 +68,10 @@ func (c *cloud) DescribeInstances(_ context.Context, in *ec2.DescribeInstancesIn
 	return &ec2.DescribeInstancesOutput{Reservations: []ec2types.Reservation{{Instances: out}}}, nil
 }
 func (c *cloud) DescribeSpotInstanceRequests(_ context.Context, in *ec2.DescribeSpotInstanceRequestsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSpotInstanceRequestsOutput, error) {
+	c.lookups++
+	if c.failLookup {
+		return nil, errors.New("RequestLimitExceeded")
+	}
 	id := in.Filters[0].Values[0]
 	if r, ok := c.spot[id]; ok {
 		return &ec2.DescribeSpotInstanceRequestsOutput{SpotInstanceRequests: []ec2types.SpotInstanceRequest{{SpotInstanceRequestId: aws.String(r)}}}, nil
@@ -73,6 +79,9 @@ func (c *cloud) DescribeSpotInstanceRequests(_ context.Context, in *ec2.Describe
 	return &ec2.DescribeSpotInstanceRequestsOutput{}, nil
 }
 func (c *cloud) CancelSpotInstanceRequests(_ context.Context, in *ec2.CancelSpotInstanceRequestsInput, _ ...func(*ec2.Options)) (*ec2.CancelSpotInstanceRequestsOutput, error) {
+	if c.failCancel {
+		return nil, errors.New("UnauthorizedOperation")
+	}
 	c.calls = append(c.calls, "cancel "+strings.Join(in.SpotInstanceRequestIds, ","))
 	return &ec2.CancelSpotInstanceRequestsOutput{}, nil
 }
@@ -238,5 +247,31 @@ func TestDescribeSaysWhenTheArchiveGoes(t *testing.T) {
 	}
 	if forever := Describe(Plan{}, "gamevps", 0, now); !strings.Contains(forever, "GAME_ARCHIVE_EXPIRY_DAYS=0 keeps it forever.") || strings.Contains(forever, "Left alone") {
 		t.Errorf("%s", forever)
+	}
+}
+
+// An instance whose spot request cannot be found or cancelled is left running:
+// terminating it could trade a box we know for a replacement we do not.
+func TestAnInstanceWhoseSpotRequestCannotBeHandledIsNotTerminated(t *testing.T) {
+	for name, set := range map[string]func(*cloud){
+		"the lookup fails": func(c *cloud) { c.failLookup = true },
+		"the cancel fails": func(c *cloud) { c.failCancel = true },
+	} {
+		c := account()
+		set(c)
+		p, _ := Read(context.Background(), c, "gamevps", "cg:host")
+		var failed []string
+		rm := Remover{C: c, Say: func(string) {}, Log: func(string) {}, Fail: func(s string) { failed = append(failed, s) }, Sleep: func(time.Duration) {},
+			Wait: func(context.Context, string) bool { return true }}
+		f, gone := rm.Run(context.Background(), p)
+		if gone || len(f) == 0 || strings.Contains(strings.Join(c.calls, ","), "terminate") {
+			t.Errorf("%s: gone=%v failures=%v calls=%v", name, gone, f, c.calls)
+		}
+		if len(failed) == 0 || !strings.Contains(failed[0], "not terminating it") {
+			t.Errorf("%s: the failure must say why it stopped: %v", name, failed)
+		}
+		if name == "the lookup fails" && c.lookups != 3 {
+			t.Errorf("a throttled lookup is tried three times, not %d", c.lookups)
+		}
 	}
 }

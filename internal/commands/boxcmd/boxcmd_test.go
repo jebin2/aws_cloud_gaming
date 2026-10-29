@@ -29,6 +29,7 @@ import (
 type fakeEC2 struct {
 	state                 string
 	slowTerminate         bool // TerminateInstances leaves it shutting-down
+	terminateErr          error
 	lifecycle             string
 	spotState             string
 	describeErr           error
@@ -73,6 +74,9 @@ func (f *fakeEC2) StopInstances(context.Context, *ec2.StopInstancesInput, ...fun
 }
 func (f *fakeEC2) TerminateInstances(context.Context, *ec2.TerminateInstancesInput, ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
 	f.calls = append(f.calls, "terminate")
+	if f.terminateErr != nil {
+		return nil, f.terminateErr
+	}
 	f.state = "terminated"
 	if f.slowTerminate {
 		f.state = "shutting-down" // a spot box stays here for 6-7 minutes

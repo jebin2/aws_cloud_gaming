@@ -226,10 +226,27 @@ func (r Remover) Run(ctx context.Context, p Plan) (failures []string, instancesG
 		failures = append(failures, s)
 		r.Fail(s)
 	}
-	// A persistent spot request relaunches the moment its instance dies.
+	// A persistent spot request relaunches the moment its instance dies, so an
+	// instance whose request cannot be found or cancelled is NOT terminated: that
+	// would trade a box we know about for a replacement we do not. It is reported,
+	// and a second run (or a person) deals with it.
+	var terminate []string
 	for _, id := range p.Instances {
-		o, err := r.C.DescribeSpotInstanceRequests(ctx, &ec2.DescribeSpotInstanceRequestsInput{Filters: []ec2types.Filter{{Name: aws.String("instance-id"), Values: []string{id}}}})
+		var o *ec2.DescribeSpotInstanceRequestsOutput
+		var err error
+		// A throttled call is the usual cause and the next one works.
+		for try := 1; try <= 3; try++ {
+			o, err = r.C.DescribeSpotInstanceRequests(ctx, &ec2.DescribeSpotInstanceRequestsInput{Filters: []ec2types.Filter{{Name: aws.String("instance-id"), Values: []string{id}}}})
+			if err == nil {
+				break
+			}
+			if r.Sleep != nil && try < 3 {
+				r.Sleep(2 * time.Second)
+			}
+		}
 		if err != nil {
+			fail(fmt.Sprintf("could not look up the spot request for %s (%v) - not terminating it, because a request that relaunches would replace it; run the destroy again", id, err))
+			gone = false
 			continue
 		}
 		var reqs []string
@@ -238,17 +255,20 @@ func (r Remover) Run(ctx context.Context, p Plan) (failures []string, instancesG
 		}
 		if len(reqs) > 0 {
 			if _, err := r.C.CancelSpotInstanceRequests(ctx, &ec2.CancelSpotInstanceRequestsInput{SpotInstanceRequestIds: reqs}); err != nil {
-				fail(fmt.Sprintf("could not cancel the spot request for %s - it would launch a replacement: %v", id, err))
+				fail(fmt.Sprintf("could not cancel the spot request for %s (%v) - not terminating it, because the request would launch a replacement; run the destroy again", id, err))
+				gone = false
+				continue
 			}
 		}
+		terminate = append(terminate, id)
 	}
-	if len(p.Instances) > 0 {
-		r.Say("terminating " + strings.Join(p.Instances, " "))
-		if _, err := r.C.TerminateInstances(ctx, &ec2.TerminateInstancesInput{InstanceIds: p.Instances}); err != nil {
-			fail("could not terminate " + strings.Join(p.Instances, " ") + ": " + err.Error())
+	if len(terminate) > 0 {
+		r.Say("terminating " + strings.Join(terminate, " "))
+		if _, err := r.C.TerminateInstances(ctx, &ec2.TerminateInstancesInput{InstanceIds: terminate}); err != nil {
+			fail("could not terminate " + strings.Join(terminate, " ") + ": " + err.Error())
 			return failures, false
 		}
-		for _, id := range p.Instances {
+		for _, id := range terminate {
 			if r.Wait != nil && !r.Wait(ctx, id) {
 				fail(id + " did not reach terminated")
 				gone = false

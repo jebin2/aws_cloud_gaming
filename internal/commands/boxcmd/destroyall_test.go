@@ -221,3 +221,27 @@ func TestAllSaysWhatItCouldNotFindAndWhatStaysBilling(t *testing.T) {
 		t.Errorf("rc %d\n%s", rc, a.o)
 	}
 }
+
+// Nothing irreversible happens while the box may still be running: its archive, its
+// role and the watchdog that guards it stay until it is confirmed gone.
+func TestAllStopsBeforeTheIrreversibleWhenTheBoxWillNotTerminate(t *testing.T) {
+	a := newAll(t, "DESTROY-ALL\n")
+	a.e.terminateErr = errors.New("UnauthorizedOperation")
+	if rc := a.d.DestroyBox(context.Background(), a.x, []string{"--all"}); rc != 1 {
+		t.Fatalf("rc %d\n%s%s", rc, a.o, a.w)
+	}
+	if len(a.store.Objs) == 0 || a.watchdogRemoved != 0 {
+		t.Errorf("archive objects %d, watchdog removed %d: a running box lost what guards it", len(a.store.Objs), a.watchdogRemoved)
+	}
+	for _, c := range *a.calls {
+		if strings.HasPrefix(c, "iam ") {
+			t.Errorf("the box's role was touched: %v", *a.calls)
+		}
+	}
+	if _, err := os.Stat(a.pem); err != nil {
+		t.Error("the key is how to reach a box that is still there")
+	}
+	if !strings.Contains(a.o.String()+a.w.String(), "NOT deleted - they are what guard it") {
+		t.Errorf("%s%s", a.o, a.w)
+	}
+}
