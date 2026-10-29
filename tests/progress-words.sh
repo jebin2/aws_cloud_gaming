@@ -1,30 +1,9 @@
 #!/usr/bin/env bash
-# A progress line from the box must not read as a failure.
-#
-# cg classifies each line by its words - "cannot", "failed", "error" and the
-# rest mark a failure (lib/common.sh, _CG_RE_FAIL). The box's own progress
-# message "disabling nvidia DRM KMS (NvFBC cannot capture with it on)" said
-# "cannot", so a healthy build showed its driver step as failed, in red, while
-# it carried on installing Steam. Every progress line is checked here.
+# Every progress line from the box has a chip in the app's build step.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 pass=0; fail=0
-export HOME=$(mktemp -d); trap 'rm -rf "$HOME"' EXIT
-# shellcheck source=lib/common.sh
-source lib/common.sh 2>/dev/null
-
-n=0
-while IFS= read -r msg; do
-  n=$((n+1))
-  kind=$(_cg_kind "$msg")
-  if [[ $kind == fail ]]; then
-    echo "  FAIL reads as a failure: $msg"; fail=$((fail+1))
-  else
-    pass=$((pass+1))
-  fi
-done < <(grep -hoE '^\s*progress "[^"$]+"' lib/bootstrap.d/*.sh | sed -E 's/^\s*progress "//; s/"$//')
-echo "  ok   $pass of $n progress lines read as progress"
-(( n > 10 )) || { echo "  FAIL found only $n progress lines - did the pattern stop matching?"; fail=$((fail+1)); }
+# Whether a line reads as a failure is a Go test now: internal/output/progress_test.go.
 
 # Every progress line is also a chip in the app's "Installing the software"
 # step - or the step says it is installing something it never lists. The two

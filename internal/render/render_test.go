@@ -1,9 +1,6 @@
 package render
 
 import (
-	"os"
-	"os/exec"
-	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -35,53 +32,5 @@ func TestAMissingPlaceholderWritesNothing(t *testing.T) {
 	}
 	if _, err := Bootstrap(fstest.MapFS{}, nil); err == nil {
 		t.Error("no modules")
-	}
-}
-
-// The Bash assembly is the oracle: the same modules and values must give the same bytes.
-func TestMatchesTheBashAssemblyByteForByte(t *testing.T) {
-	if _, err := exec.LookPath("bash"); err != nil {
-		t.Skip("no bash")
-	}
-	if _, err := exec.LookPath("python3"); err != nil {
-		t.Skip("no python3")
-	}
-	root := os.DirFS("../..")
-	if _, err := os.Stat("../../lib/render.sh"); err != nil {
-		t.Skip("the Bash tree is gone")
-	}
-	vars := map[string]string{"TS_AUTHKEY": "tskey-auth-xyz", "TS_HOST": "my-pc", "HOST_TGZ_URL": "", "S3_BUCKET": "", "CG_APPS": "", "CG_LOGIN": "",
-		"CG_RESERVE_GB": "", "CG_TARGET": "host", "CG_USER": "me", "CG_FAMILY": "arch"}
-	for _, aws := range []bool{false, true} {
-		v := map[string]string{}
-		for k, x := range vars {
-			v[k] = x
-		}
-		if aws {
-			v["HOST_TGZ_URL"] = "https://bucket.s3.amazonaws.com/h.tgz?X-Amz-Signature=ab&X-Amz-Expires=3600"
-			v["S3_BUCKET"], v["CG_APPS"], v["CG_LOGIN"], v["CG_RESERVE_GB"], v["CG_TARGET"] = "cg-bucket", "1091500,2", "a-login", "20", "aws"
-		}
-		cmd := exec.Command("bash", "-c", "source lib/render.sh; render_bootstrap")
-		cmd.Dir = "../.."
-		env := os.Environ()
-		for k, x := range v {
-			env = append(env, k+"="+x)
-		}
-		cmd.Env = env
-		want, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("bash: %v", err)
-		}
-		got, err := Bootstrap(root, v)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got != string(want) {
-			i := 0
-			for i < len(got) && i < len(want) && got[i] == want[i] {
-				i++
-			}
-			t.Fatalf("aws=%v: differs at byte %d: go %q / bash %q", aws, i, got[max(0, i-30):min(len(got), i+30)], strings.TrimSpace(string(want[max(0, i-30):min(len(want), i+30)])))
-		}
 	}
 }

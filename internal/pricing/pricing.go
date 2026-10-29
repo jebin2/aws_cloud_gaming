@@ -1,7 +1,7 @@
 // Package pricing is where every rate cg prints comes from: AWS's Price List
 // (free), kept for a day, with a stale answer standing in when AWS cannot be
 // asked and "unknown" when there has never been one. No price is written down
-// here. It is the Go form of lib/rates.sh and lib/prices.py.
+// here. It replaces the old Bash rates and prices scripts.
 //
 // Precedence, per price: the environment; then a file of KEY=value lines named
 // by CG_PRICES_FILE (how tests run offline); then the cache; then AWS.

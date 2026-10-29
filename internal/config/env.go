@@ -1,6 +1,6 @@
 // Package config is where cg's settings live and the one loader that reads
-// them. It is the Go form of lib/env-file.sh and, as they are ported, the
-// registry in lib/config.sh.
+// them. It replaces the old Bash env-file loader and, with it, the
+// settings registry.
 package config
 
 import (
