@@ -53,6 +53,17 @@ jobs:
         working-directory: ./app
         run: npm ci
 
+      # The app's stylesheet is generated, and nothing in the suites below builds it,
+      # so a dependency update that breaks the build passed every check: Tailwind 4
+      # removed the command this runs, and its pull request was green. `npm start`,
+      # `npm run dist` and the release all run it first.
+      - name: Build The App's CSS
+        working-directory: ./app
+        run: |
+          npm run build:css
+          test -s renderer/tailwind.css
+        shell: bash
+
       # Formatting and vet first: they take seconds and say what is wrong in
       # plain words, where a failing suite says it in a log.
       - name: Format And Vet
