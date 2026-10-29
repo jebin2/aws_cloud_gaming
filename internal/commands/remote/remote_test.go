@@ -27,7 +27,7 @@ func newBox(answers map[string]string) (Box, *fx.Runner) {
 	for k, v := range answers {
 		r.Contains[k] = v
 	}
-	return Box{Runner: r, Host: "gamevps", Node: "gamevps", Home: "/h"}, r
+	return Box{Runner: r, Host: "gamevps", Node: "gamevps", Home: "/h", KeyExists: func(string) bool { return true }}, r
 }
 
 func outs() (*output.Out, *bytes.Buffer, *bytes.Buffer) {
@@ -146,5 +146,19 @@ func TestSSH(t *testing.T) {
 	r.Failing = map[string]bool{"ssh": true}
 	if rc := b.SSH(context.Background(), []string{"false"}, out); rc != 255 {
 		t.Errorf("rc %d", rc)
+	}
+}
+
+func TestSSHWithoutTheBoxKeyNamesTheMissingKeyNotSSHsWarning(t *testing.T) {
+	b, r := newBox(nil)
+	b.KeyExists = func(string) bool { return false }
+	out, o, e := outs()
+	if rc := b.SSH(context.Background(), []string{"true"}, out); rc != 1 || !strings.Contains(o.String()+e.String(), "no key for the box (/h/.ssh/gamevps.pem is missing)") {
+		t.Errorf("rc %d: %s%s", rc, o, e)
+	}
+	for _, c := range r.Ran {
+		if strings.HasPrefix(c, "ssh") {
+			t.Errorf("ran ssh without a key: %s", c)
+		}
 	}
 }

@@ -30,7 +30,7 @@ func Run(ctx context.Context, env *config.Env, args []string, out *output.Out) i
 		return 1
 	}
 	box := remote.New(env)
-	ip, err := box.IP(ctx)
+	ip, err := box.SSHIP(ctx)
 	if err != nil {
 		out.Die(err.Error())
 		return 1

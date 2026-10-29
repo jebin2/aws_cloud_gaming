@@ -330,7 +330,7 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 		}
 		return cost.Run(ctx, config.Load(get, repoDir(get)), get, opts, out)
 	}
-	out.Die(fmt.Sprintf("'%s' is not ported to Go yet (see: cg help)", cmd))
+	out.Die(fmt.Sprintf("unknown command '%s' (see: cg help)", cmd))
 	return 1
 }
 

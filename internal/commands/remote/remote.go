@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -21,6 +22,8 @@ type Box struct {
 	Host   string // names the key: ~/.ssh/<host>.pem
 	Node   string // its name on the tailnet
 	Home   string
+	// KeyExists says whether the box's private key is here; nil asks the disk.
+	KeyExists func(path string) bool
 }
 
 // IP is the node's tailnet address. It fails the way the Bash did: a node that
@@ -34,6 +37,25 @@ func (b Box) IP(ctx context.Context) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("'%s' is not on the tailnet. Is the box running? Try: cg status", b.Node)
+}
+
+// SSHIP is the node's address for a command that needs ssh: it also needs the
+// box's key. A key that is not there means there is no box built from this
+// computer, and ssh's own warning about an identity file says that badly.
+func (b Box) SSHIP(ctx context.Context) (string, error) {
+	ip, err := b.IP(ctx)
+	if err != nil {
+		return "", err
+	}
+	pem := b.Home + "/.ssh/" + b.Host + ".pem"
+	exists := b.KeyExists
+	if exists == nil {
+		exists = func(p string) bool { _, e := os.Stat(p); return e == nil }
+	}
+	if !exists(pem) {
+		return "", fmt.Errorf("no key for the box (%s is missing), so this computer has no box to reach. cg init builds one", pem)
+	}
+	return ip, nil
 }
 
 // sshArgs is ssh to the box: no prompt, a ten second connect timeout.
@@ -65,7 +87,7 @@ func (b Box) Log(ctx context.Context, what string, watch bool, w io.Writer, out 
 	if watch {
 		command = c[1]
 	}
-	ip, err := b.IP(ctx)
+	ip, err := b.SSHIP(ctx)
 	if err != nil {
 		out.Die(err.Error())
 		return 1
@@ -79,7 +101,7 @@ func (b Box) Log(ctx context.Context, what string, watch bool, w io.Writer, out 
 // SSH is `cg ssh [command...]`: a shell on the box, or one command, with the
 // remote's exit status. OpenSSH joins the arguments with spaces, as before.
 func (b Box) SSH(ctx context.Context, args []string, out *output.Out) int {
-	ip, err := b.IP(ctx)
+	ip, err := b.SSHIP(ctx)
 	if err != nil {
 		out.Die(err.Error())
 		return 1
