@@ -8,7 +8,7 @@ on files beside the binary. Build it with `go build -o cg ./cmd/cg`.
 
 | Command | What it does |
 |---|---|
-| `cg init` | Build everything; reuses an existing box. **Costs money** |
+| `cg init` | Build everything; reuses an existing box. Straight after a destroy it waits (up to 6 minutes) for AWS to release the spot allowance. **Costs money** |
 | `cg open` | Start, stream, and on exit offer to end the box. **Costs money** |
 | `cg stop` | Mirror the games to S3, then end the box - destroy on spot (a spot box cannot be stopped), stop on demand |
 | `cg status` | Instance, disks, guards, tailnet, game library, local tools |
@@ -243,7 +243,7 @@ Everything is safe to run again. The ones worth knowing:
 | `cg open` | Refuses while a stream from this laptop is still open, and names the pid. Two Moonlight windows on one box share its GPU and spend egress twice |
 | `cg stop` | On spot, offers destroy again; on demand, says "already stopped" |
 | `cg clean` | Frees less each time; needs the box running |
-| `cg destroy` | No-op. The first run keeps nothing and asks nothing |
+| `cg destroy` | No-op. The first run keeps nothing and asks nothing. It returns after 45 seconds even if AWS is still finishing the termination |
 | `cg cost` | Each run makes one Cost Explorer call ($0.01) - `--daily` included |
 
 **The two that cost money unprompted** are `cg init` and `cg open` - both start a stopped

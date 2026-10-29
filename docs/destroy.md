@@ -22,6 +22,13 @@ region, plus cg's leftover disks, images and snapshots in **every** region.
 | **Cloud watchdog: function, schedule, role, logs** | **kept** | gone |
 | Old EBS game volume, if you still have one | **kept** | gone |
 
+**Destroy does not wait for the last minutes.** A spot box takes 6-7 minutes to go from
+`shutting-down` to `terminated`, and stops billing when it starts shutting down. A plain destroy
+waits 45 seconds, then says AWS is still finishing and returns; the box's `.env` lines are cleared
+either way. `--all` waits in full, because it deletes the security group next and AWS refuses that
+while the instance's network interface exists. A `cg init` straight afterwards is fine: it waits for
+AWS to release the spot allowance (see troubleshooting).
+
 **Only cg's own.** Images, volumes and snapshots are deleted only when they carry cg's tag
 (`cg:host=<host>`), or the exact name cg gave them before that tag existed. Anything else in the region - another project's image or disk - is listed as left
 alone and never touched.

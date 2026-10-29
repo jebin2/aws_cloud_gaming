@@ -2,8 +2,10 @@
 
 Revision: 7 (no legacy fallback: the port completes and the Bash CLI is deleted in this branch)
 
-Status: approved 2026-10-25; the pilot slice is in progress on the `go-migration-plan` branch, which is not merged to `main`. The current Bash
-CLI remains the source of truth until a phase gate passes.
+Status: complete. Approved 2026-10-25; merged into `main` on 2026-10-30 (fast-forward) after the owner tested
+the Go package in a VM and a full lifecycle ran on real AWS (section 8.16). The `go-migration-plan` branch is
+deleted. The last Bash `main` is the tag `bash-final`, and is the rollback. The text below is the plan as it was
+written, so its tenses and its mentions of the Bash CLI as an oracle are historical.
 
 Scope: replace the `cg` CLI and its command surface with one Go binary. The Electron app,
 `lib/bootstrap.d/`, `host/`, and the Python Lambda stay in place for the first migration. They may
@@ -778,9 +780,49 @@ Cutover done in this branch (owner approved after testing the Go package in a VM
 - Bugs the VM test found and fixed on the way: Go `init` was still switched off; a freshly
   minted Tailscale auth key lived 1 h while the probe wants 1 h of margin, so every key was
   "expired" (the same two numbers are in `main`'s Bash); a dead saved key is now asked for, not kept.
-- `main` and its Bash CLI are untouched and remain the rollback. Not merged.
+- `main` and its Bash CLI were untouched at this point and remained the rollback. Merged on 2026-10-30 (section 8.16); the rollback is now the `bash-final` tag.
 
 Not done: Track W (native Windows and macOS).
+
+### 8.16 Merged: the real-AWS lifecycle and what it found
+
+Run on 2026-10-30 against the owner's account, ap-south-1, a spot g4dn.xlarge, about INR 30 of box time
+(two builds of about 20 minutes each, then a destroy). The account was empty before and is empty after:
+`cg aws inventory`, and the AWS CLI in both regions, show no instances, volumes, snapshots, images, buckets,
+roles, functions or budgets.
+
+| Step | Result |
+| --- | --- |
+| `init` (twice) | passed, about 20 minutes each |
+| `status`, `games`, `log`, `cost`, `ssh`, `ping` on a live box | passed |
+| `stop` | passed. On spot it is a destroy by design: a one-time spot instance cannot be stopped |
+| `clean` | passed; `/scratch` untouched |
+| `library push`, `list`, `pull`, `forget` | passed; the file came back with the same checksum |
+| `snapshot create`, `--list`, `--delete` | passed; the image never finished within ten minutes |
+| `open` | passed up to the stream; the server had only a stub Moonlight |
+| `destroy`, `destroy --all` | passed |
+| `pair`, a real stream | not run: needs Moonlight on a laptop |
+
+Found, and fixed on `main`:
+
+- `cg open` kept looping through its 60 tries after Ctrl-C or SIGTERM, and the first `tailscale ping`
+  to a box that had just joined timed out at 2 seconds. The waits take the context now, and the ping
+  waits 5 seconds. `WaitState` and `WaitImage` stop on interrupt too.
+- `library pull` printed s5cmd "no object found" errors for games with no Proton prefix or shader
+  cache. Those two prefixes are filtered; the game's own files still report.
+- A rebuild straight after a destroy was refused with `MaxSpotInstanceCountExceeded`, because AWS
+  frees the spot allowance a couple of minutes after the old box terminates. `init` waits (up to 6
+  minutes, saying so) when nothing live holds the allowance.
+- `destroy` sat through the 6-7 minutes a spot box takes to reach `terminated`, although billing
+  stops when it starts shutting down. It waits 45 seconds and then says AWS is still finishing.
+  `destroy --all` still waits in full, because it deletes the security group next.
+- `snapshot --no-wait` starts the image and returns; an interrupted wait says AWS is still making it.
+- Before that, from the owner's VM test: init was still gated behind `CG_GO_INIT`; a stored but expired
+  Tailscale auth key was not asked for again; and `tskey.Mint` made 1-hour keys while the check
+  demands more than an hour of margin, so every minted key looked expired (it mints 3 hours now).
+
+Not done: native Windows and macOS builds (the Windows route and `taskkill` fixes have not run on a
+real machine), and `pair` and streaming from a laptop.
 
 ## 9. Phase 1: skeleton and shared runtime
 
@@ -1508,8 +1550,8 @@ Use these as starting points; line numbers will move as the plan is implemented.
 
 ## 20. Open decisions
 
-All fourteen were approved by the owner on 2026-10-25 as recommended. This migration lives on the
-`go-migration-plan` branch and is not merged to `main`.
+All fourteen were approved by the owner on 2026-10-25 as recommended. The migration was merged into `main`
+on 2026-10-30.
 
 | # | Decision | Recommendation | Why | Status |
 | --- | --- | --- | --- | --- |

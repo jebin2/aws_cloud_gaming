@@ -68,7 +68,10 @@ provisioning step now asserts its effect rather than its execution.
    `aws freetier get-account-plan-state`; it needs a Paid Plan.
 3. **Spot quota** - `All G and VT Spot Instance Requests` (`L-3819A6DF`) is a *separate* quota
    that defaults to 0. Having on-demand approved tells you nothing; the launch fails with
-   `MaxSpotInstanceCountExceeded`.
+   `MaxSpotInstanceCountExceeded`. The same error also appears for a few minutes after a spot box
+   terminates, with a quota that is large enough: AWS frees the allowance late. `cg init` waits
+   that out (up to 6 minutes, with a line saying so) when nothing live holds the allowance; a
+   machine that is still running holds it for good and fails at once.
 
 ### `--dry-run` catches none of them
 
@@ -1547,3 +1550,15 @@ and there it duplicated the Lambda on half the traffic, from the same metrics. I
 was the Lambda failing during a session with the on-host watchdog also dead. It was removed, with
 the arming around every session, its rows in `cg status`, `cg cost` and `cg watcher`, and
 `tests/alarm-arming.sh`.
+
+### `cg open` looked hung at "waiting for tailscale"
+
+Found in the real-AWS lifecycle run (go-plan section 8.16). The box had joined the tailnet, but
+the first `tailscale ping` to a new node takes a few seconds while the path is negotiated, and
+`cg open` gave each try 2 seconds, so it kept failing on the first tries. It also ignored Ctrl-C
+and SIGTERM until the 60 tries ended, so `timeout` could not stop it either. The ping now waits 5
+seconds and every wait loop (`open`, `destroy`, `snapshot`) stops when interrupted.
+
+Related, and by design: `cg stop` on a spot box is a destroy. A one-time spot instance cannot be
+stopped, so `stop` offers destroy and takes it by default. A test that kills `cg stop` partway
+leaves the box shutting down; run `cg destroy` to finish.
