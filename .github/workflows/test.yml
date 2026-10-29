@@ -1,0 +1,66 @@
+# Every push to main and every pull request runs the whole suite, so a break is
+# found by a red check and not by the person who next tries to use cg.
+#
+# It is the same command a person runs: `bash tests/run-all.sh` builds cg, runs
+# `go test ./...`, then the shell and DOM suites. Nothing here touches AWS - the
+# suites use fakes and stubs - so it costs nothing but runner minutes, which are
+# free on a public repository.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Go and shell suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install App Dependencies
+        working-directory: ./app
+        run: npm ci
+
+      # Formatting and vet first: they take seconds and say what is wrong in
+      # plain words, where a failing suite says it in a log.
+      - name: Format And Vet
+        run: |
+          unformatted=$(gofmt -l cmd internal)
+          if [[ -n $unformatted ]]; then
+            echo "gofmt would change:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+          go vet ./...
+        shell: bash
+
+      # RUN UNPIPED: the script's exit status is the point (see its header).
+      - name: Run Every Suite
+        run: bash tests/run-all.sh
+        shell: bash
