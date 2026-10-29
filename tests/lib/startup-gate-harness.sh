@@ -248,7 +248,6 @@ EMPTY_SWEEP='{"cached": false, "regions": [], "too_far": [], "unreachable": []}'
 FULL_SWEEP='{"cached": true, "age_seconds": 90, "too_far": [], "unreachable": [],
              "regions": [{"region": "ap-south-2", "city": "Asia Pacific (Hyderabad)",
                           "rtt_ms": 19, "enabled": true, "machines": []}]}'
-OUT=$(probe "{$READY, \"sweep --cached --json\": $EMPTY_SWEEP}")
 
 # A status answer, for the files that draw the dashboard and the Build page.
 RATES='"rates": {"s3_gb_month": 0.025, "ebs_gb_month": 0.0912, "snapshot_gb_month": 0.05,

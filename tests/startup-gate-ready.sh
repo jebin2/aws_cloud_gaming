@@ -22,6 +22,7 @@ contains "  location says it is checking" "$(row STAGES)" "where=checking"
 contains "the pipeline is still up" "$(row ONB)" "ONB | shown"
 
 echo "4b. a laptop that has never scanned scans itself, once"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $EMPTY_SWEEP}")
 contains "the remembered scan is read first" "$(row RAN)" "sweep --cached --json"
 contains "  and a real scan follows it"      "$(row RAN)" "sweep --json"
 
