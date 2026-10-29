@@ -13,9 +13,9 @@
     "build:cg": "cd .. && CGO_ENABLED=0 go build -trimpath -ldflags \"-s -w\" -o cg ./cmd/cg"
   },
   "devDependencies": {
-    "electron": "^39.2.4",
-    "tailwindcss": "^3.4.19",
-    "electron-builder": "^25.1.8"
+    "electron": "^45.0.0",
+    "tailwindcss": "^4.3.3",
+    "electron-builder": "^26.18.0"
   },
   "build": {
     "appId": "dev.cg.desktop",
