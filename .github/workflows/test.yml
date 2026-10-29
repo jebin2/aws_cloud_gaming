@@ -12,6 +12,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # The release workflow calls this one, so a tag cannot build a package that
+  # `main` would not have passed.
+  workflow_call:
+    secrets:
+      GUARD_EXTRA:
+        required: false
 
 permissions:
   contents: read
@@ -68,6 +74,10 @@ jobs:
         shell: bash
         env:
           TEST_LOGS_DIR: ${{ runner.temp }}/test-logs
+          # The owner's own identifiers, as a regex, for tests/secrets-guard.sh.
+          # A repository secret, never a file: written into the repo it would be
+          # the leak it looks for. Unset, only the generic key shapes are checked.
+          GUARD_EXTRA: ${{ secrets.GUARD_EXTRA }}
 
       - name: Keep The Failed Suites' Output
         if: failure()

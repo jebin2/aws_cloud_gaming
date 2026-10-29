@@ -1,0 +1,25 @@
+# One pull request a month per ecosystem, grouped, so updates arrive as a batch to
+# read and not as a stream. Nothing merges by itself: the Tests workflow runs on
+# each pull request, and a person decides.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    groups:
+      go-modules: { patterns: ['*'] }
+
+  - package-ecosystem: npm
+    directory: /app
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    groups:
+      app-packages: { patterns: ['*'] }
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    groups:
+      actions: { patterns: ['*'] }

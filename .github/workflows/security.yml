@@ -1,0 +1,61 @@
+# Known vulnerabilities in what cg is built from, checked on every push to main and
+# once a week - a new advisory lands without any commit of ours, which is why it is
+# not part of the Tests workflow: a CVE published on a Tuesday should not turn an
+# unrelated change red.
+#
+# Nothing here touches AWS or any account; it reads public advisory databases.
+name: Security
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 3 * * 1'   # Mondays, 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go modules and standard library
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # Pinned: v1.1.x cannot read current Go syntax and crashes on it.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  app:
+    name: App packages that ship
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # What goes into the package. A high or critical advisory here fails the run.
+      - name: npm audit (shipped packages)
+        working-directory: ./app
+        run: npm audit --omit=dev --audit-level=high
+
+  app-build-tools:
+    name: App build tools (report only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # electron-builder and its tree are build tooling: they never reach the package,
+    # and several advisories in them have no fix available. Shown, not failing.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: npm audit (everything)
+        working-directory: ./app
+        run: npm audit --audit-level=high
