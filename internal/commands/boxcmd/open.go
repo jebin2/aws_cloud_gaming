@@ -15,9 +15,14 @@ import (
 )
 
 // waitFor waits for something to come up, a dot per try.
-func (d Deps) waitFor(desc string, tries int, ok func() bool) bool {
+func (d Deps) waitFor(ctx context.Context, desc string, tries int, ok func() bool) bool {
 	fmt.Fprint(d.Out.Stdout, desc)
 	for i := 0; i < tries; i++ {
+		// Ctrl-C and SIGTERM cancel ctx; without this the loop ran to its end.
+		if ctx.Err() != nil {
+			fmt.Fprint(d.Out.Stdout, " interrupted\n")
+			return false
+		}
 		if ok() {
 			fmt.Fprint(d.Out.Stdout, " ok\n")
 			return true
@@ -149,8 +154,8 @@ func (d Deps) Open(ctx context.Context) int {
 	}
 
 	node := d.Box.Node
-	d.waitFor("waiting for tailscale", 60, func() bool {
-		_, err := d.R.Run(ctx, local.Cmd{Name: "tailscale", Args: []string{"ping", "-c", "1", "--timeout", "2s", node}})
+	d.waitFor(ctx, "waiting for tailscale", 60, func() bool {
+		_, err := d.R.Run(ctx, local.Cmd{Name: "tailscale", Args: []string{"ping", "-c", "1", "--timeout", "5s", node}})
 		return err == nil
 	})
 
@@ -164,7 +169,7 @@ func (d Deps) Open(ctx context.Context) int {
 	}
 
 	ip, _ := d.Box.IP(ctx)
-	if !d.waitFor("waiting for sunshine", 60, func() bool {
+	if !d.waitFor(ctx, "waiting for sunshine", 60, func() bool {
 		addr := net.JoinHostPort(ip, "47989")
 		if d.Dial != nil {
 			return d.Dial(addr, 2*time.Second) == nil

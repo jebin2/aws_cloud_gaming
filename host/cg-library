@@ -346,8 +346,12 @@ for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.ge
       src="$S3/steamapps/$pair/*"; dst="$LIB/steamapps/$pair/"
       mkdir -p "$dst"
       # stderr is kept: an s5cmd error in the journal is the only clue to why.
+      # A game with no Proton prefix or shader cache has nothing under those two
+      # prefixes, and s5cmd says so as an ERROR; that is not a clue to anything.
+      # For the game's own files it still is.
+      local quiet='^$'; [[ $pair == common/* ]] || quiet='^$|no object found'
       if ! "$S5" --numworkers "$WORKERS" sync --size-only "${TUNE[@]}" "$src" "$dst" 2>&1 \
-           | grep -vE '^$' | tail -5 | sed 's/^/    s5cmd: /'; then :; fi
+           | grep -vE "$quiet" | tail -5 | sed 's/^/    s5cmd: /'; then :; fi
       # PIPESTATUS[0], not $?, which is the sed at the end of that pipeline.
       (( ${PIPESTATUS[0]:-0} == 0 )) || { rc=1; log "  FAILED syncing $pair"; }
     done

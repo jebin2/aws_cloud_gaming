@@ -649,3 +649,25 @@ func (f *fakeEC2) DeleteKeyPair(context.Context, *ec2.DeleteKeyPairInput, ...fun
 	f.calls = append(f.calls, "delete-key")
 	return &ec2.DeleteKeyPairOutput{}, nil
 }
+
+// A waiting loop has to notice Ctrl-C and SIGTERM: it used to run its whole
+// 60 tries (minutes) after the context was cancelled, and `timeout` could not
+// stop `cg open`.
+func TestWaitForStopsWhenInterrupted(t *testing.T) {
+	rg := newRig(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	tries := 0
+	ok := rg.d.waitFor(ctx, "waiting", 60, func() bool {
+		tries++
+		if tries == 2 {
+			cancel()
+		}
+		return false
+	})
+	if ok || tries != 2 {
+		t.Fatalf("ok=%v tries=%d, want it to stop right after the cancel", ok, tries)
+	}
+	if !strings.Contains(rg.o.String(), "interrupted") {
+		t.Fatalf("output %q does not say it was interrupted", rg.o.String())
+	}
+}
