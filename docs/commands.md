@@ -19,7 +19,7 @@ on files beside the binary. Build it with `go build -o cg ./cmd/cg`.
 | `cg library pull` | Restore the games from S3 now |
 | `cg games` | What Steam has: installed, downloading (with progress), running, archived |
 | `cg games --volume` | The **old** EBS volume, if you still have one, and its monthly cost |
-| `cg snapshot` | Save an AMI of the box. **Bills monthly** |
+| `cg snapshot` | Save an AMI of the box, waiting for AWS to finish (ten minutes or more). `--no-wait` starts it and returns. **Bills monthly** |
 | `cg snapshot --list` | What images exist and what they cost |
 | `cg snapshot --delete <id>` | Delete an image **and its backing snapshots** |
 | `cg clean` | Free space: apt caches, logs, `/scratch/tmp`. Games are not touched |

@@ -226,7 +226,17 @@ func (d Deps) remove(ctx context.Context, x DestroyDeps) int {
 		Wait: func(ctx context.Context, id string) bool {
 			b := d.Box
 			b.ID = id
-			return b.WaitState(ctx, "terminated", 600*time.Second)
+			// A spot box takes 6-7 minutes to reach "terminated", and billing
+			// for it ended when it began shutting down. Nothing after this needs
+			// it gone (--all, which deletes the security group, waits in full).
+			if b.WaitState(ctx, "terminated", 45*time.Second) {
+				return true
+			}
+			if s, _ := b.State(ctx); s == "shutting-down" {
+				d.Out.Log("AWS is still tearing the machine down (a few more minutes) - it is no longer billing")
+				return true
+			}
+			return false
 		}}
 	failures, gone := rm.Run(ctx, plan)
 	// Sunshine credentials and the tailnet node belong to the box being deleted;

@@ -170,13 +170,19 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 		switch sub {
 		case "--list", "list":
 			return snapshot.Run(ctx, config.Load(get, repoDir(get)), args, jsonFlag, out)
-		case "create", "":
+		case "create", "", "--no-wait":
 			d, _, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
 			if err != nil {
 				out.Die(err.Error())
 				return 1
 			}
-			return d.SnapshotCreate(ctx)
+			wait := true
+			for _, a := range args {
+				if a == "--no-wait" {
+					wait = false
+				}
+			}
+			return d.SnapshotCreateWith(ctx, wait)
 		case "--delete", "delete":
 			d, c, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
 			if err != nil {

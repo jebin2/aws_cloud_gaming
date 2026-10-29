@@ -198,3 +198,23 @@ type probeOnce struct{ ended *bool }
 
 func (p probeOnce) Alive(int) bool          { return !*p.ended }
 func (p probeOnce) Args(int) (string, bool) { return "cg open", true }
+
+// A spot box takes 6-7 minutes to reach "terminated" and stopped billing when it
+// began shutting down. Destroy used to sit through all of it, and a person
+// watching could not tell that from a hang.
+func TestDestroyDoesNotWaitForTheLastMinutesOfATermination(t *testing.T) {
+	r, x, _, _ := destroyRig(t, "")
+	r.e.state = "running"
+	r.e.slowTerminate = true
+	r.e.images = map[string]string{}
+	if rc := r.d.DestroyBox(context.Background(), x, nil); rc != 0 {
+		t.Fatalf("rc %d\n%s%s", rc, r.o, r.w)
+	}
+	got := r.o.String()
+	if !strings.Contains(got, "AWS is still tearing the machine down (a few more minutes) - it is no longer billing") || !strings.Contains(got, "box deleted") {
+		t.Errorf("%s", got)
+	}
+	if r.d.Env.Get("GAME_INSTANCE_ID") != "" {
+		t.Error("a machine that is shutting down is gone as far as cg is concerned")
+	}
+}

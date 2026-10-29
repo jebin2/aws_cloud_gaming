@@ -87,6 +87,13 @@ func (d Deps) PairMoonlight(ctx context.Context) int {
 
 // SnapshotCreate is `cg snapshot` / `cg snapshot create`.
 func (d Deps) SnapshotCreate(ctx context.Context) int {
+	return d.SnapshotCreateWith(ctx, true)
+}
+
+// SnapshotCreateWith is it with the wait optional. AWS takes ten minutes or more
+// to finish a 50 GB image, and the image is made whether or not anyone waits:
+// --no-wait starts it and leaves the rest to `cg snapshot --list`.
+func (d Deps) SnapshotCreateWith(ctx context.Context, wait bool) int {
 	if d.Box.ID == "" {
 		return d.die("no instance in .env - nothing to snapshot")
 	}
@@ -104,7 +111,14 @@ func (d Deps) SnapshotCreate(ctx context.Context) int {
 		return d.die("could not create the image: " + err.Error())
 	}
 	d.Out.Log(ami)
+	if !wait {
+		d.Out.Log("AWS is making it in the background (ten minutes or more) - it shows as pending in: cg snapshot --list")
+		return 0
+	}
 	if !d.Box.WaitImage(ctx, ami, 1800*time.Second) {
+		if ctx.Err() != nil {
+			d.Out.Log("stopped waiting - AWS is still making " + ami + "; see: cg snapshot --list")
+		}
 		return 1
 	}
 	d.Out.Log("ready - cg init will restore from it instead of rebuilding")

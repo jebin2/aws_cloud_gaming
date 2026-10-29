@@ -333,3 +333,32 @@ func TestACrossRegionBucketIsSaidAndPresignedForItsOwnRegion(t *testing.T) {
 		t.Errorf("%v runs=%d", err, c.runs)
 	}
 }
+
+// A rebuild straight after a destroy is refused because AWS frees the spot
+// allowance a couple of minutes after the old box terminates. That fixes itself,
+// so init waits instead of making the person run it again.
+func TestInitWaitsOutTheSpotAllowanceOfTheBoxThatJustDied(t *testing.T) {
+	p, c, _, out, a := rig(t)
+	a.Spot = true
+	quota := &smithy.GenericAPIError{Code: "MaxSpotInstanceCountExceeded", Message: "Max spot instance count exceeded"}
+	c.holders = []ec2types.Instance{{InstanceId: aws.String("i-old"), InstanceType: "g4dn.xlarge", State: &ec2types.InstanceState{Name: "shutting-down"}}}
+	c.launchErrs = []error{quota, quota, quota}
+	res, err := p.Run(context.Background(), a)
+	if err != nil || res.InstanceID != "i-new" || c.runs != 4 {
+		t.Fatalf("err=%v runs=%d", err, c.runs)
+	}
+	if !strings.Contains(strings.Join(*out, "\n"), "AWS has not released the spot allowance of the last box yet - waiting") {
+		t.Error(*out)
+	}
+	// It does not wait for ever: nothing holds the allowance, so it may never come.
+	p, c, _, _, a = rig(t)
+	a.Spot = true
+	c.launchErrs = make([]error, 100)
+	for i := range c.launchErrs {
+		c.launchErrs[i] = quota
+	}
+	var le *LaunchError
+	if _, err = p.Run(context.Background(), a); !errors.As(err, &le) || c.runs < 10 || c.runs > 25 {
+		t.Errorf("err=%v runs=%d", err, c.runs)
+	}
+}

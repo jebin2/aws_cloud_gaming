@@ -28,6 +28,7 @@ import (
 // fakeEC2 is one instance, and what is done to it.
 type fakeEC2 struct {
 	state                 string
+	slowTerminate         bool // TerminateInstances leaves it shutting-down
 	lifecycle             string
 	spotState             string
 	describeErr           error
@@ -73,6 +74,9 @@ func (f *fakeEC2) StopInstances(context.Context, *ec2.StopInstancesInput, ...fun
 func (f *fakeEC2) TerminateInstances(context.Context, *ec2.TerminateInstancesInput, ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
 	f.calls = append(f.calls, "terminate")
 	f.state = "terminated"
+	if f.slowTerminate {
+		f.state = "shutting-down" // a spot box stays here for 6-7 minutes
+	}
 	return &ec2.TerminateInstancesOutput{}, nil
 }
 func (f *fakeEC2) CancelSpotInstanceRequests(context.Context, *ec2.CancelSpotInstanceRequestsInput, ...func(*ec2.Options)) (*ec2.CancelSpotInstanceRequestsOutput, error) {
@@ -669,5 +673,26 @@ func TestWaitForStopsWhenInterrupted(t *testing.T) {
 	}
 	if !strings.Contains(rg.o.String(), "interrupted") {
 		t.Fatalf("output %q does not say it was interrupted", rg.o.String())
+	}
+}
+
+func TestSnapshotNoWaitStartsTheImageAndReturns(t *testing.T) {
+	r := newRig(t, "")
+	if rc := r.d.SnapshotCreateWith(context.Background(), false); rc != 0 {
+		t.Fatalf("%s%s", r.o, r.w)
+	}
+	got := r.o.String()
+	if !strings.Contains(got, "ami-new") || !strings.Contains(got, "cg snapshot --list") || strings.Contains(got, "available after") || strings.Contains(got, "ready - cg init") {
+		t.Errorf("--no-wait must start the image and not wait for it:\n%s", got)
+	}
+}
+
+func TestInterruptedSnapshotSaysAwsIsStillMakingIt(t *testing.T) {
+	r := newRig(t, "")
+	r.e.images = map[string]string{"ami-new": "pending"}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if rc := r.d.SnapshotCreateWith(ctx, true); rc != 1 || !strings.Contains(r.o.String()+r.w.String(), "stopped waiting - AWS is still making") {
+		t.Errorf("rc=%d\n%s%s", rc, r.o, r.w)
 	}
 }

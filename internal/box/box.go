@@ -109,6 +109,10 @@ func (b Box) Stop(ctx context.Context) error {
 func (b Box) WaitState(ctx context.Context, want string, timeout time.Duration) bool {
 	last, beat := "", time.Duration(0)
 	for waited := time.Duration(0); waited < timeout; waited += 3 * time.Second {
+		if ctx.Err() != nil {
+			b.Log("interrupted")
+			return false
+		}
 		now, err := b.State(ctx)
 		if err != nil {
 			now = "?"
@@ -170,6 +174,10 @@ func (b Box) CreateImage(ctx context.Context, name string) (string, error) {
 func (b Box) WaitImage(ctx context.Context, ami string, timeout time.Duration) bool {
 	last, beat := "", time.Duration(0)
 	for waited := time.Duration(0); waited < timeout; waited += 5 * time.Second {
+		if ctx.Err() != nil {
+			b.Log("interrupted")
+			return false
+		}
 		now := "?"
 		if o, err := b.EC2.DescribeImages(ctx, &ec2.DescribeImagesInput{ImageIds: []string{ami}}); err == nil && len(o.Images) > 0 {
 			now = string(o.Images[0].State)

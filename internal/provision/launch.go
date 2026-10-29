@@ -86,6 +86,11 @@ func (p Provisioner) now() time.Time {
 	return time.Now()
 }
 
+// spotQuotaWait is how long init waits for AWS to release the spot allowance of
+// a box that was just terminated. Terminating took 7 minutes here, and the
+// allowance followed within a couple.
+const spotQuotaWait = 6 * time.Minute
+
 func (p Provisioner) sleep(d time.Duration) {
 	if p.Sleep != nil {
 		p.Sleep(d)
@@ -286,6 +291,7 @@ func (p Provisioner) launch(ctx context.Context, a Params) (id string, restored 
 	// which is the kind of thing that gets diagnosed as flakiness instead of
 	// propagation.
 	var lastErr error
+	var quotaWaited time.Duration
 	for attempt := 1; attempt <= 6; attempt++ {
 		o, err := p.EC2.RunInstances(ctx, in)
 		if err == nil && len(o.Instances) > 0 {
@@ -298,6 +304,26 @@ func (p Provisioner) launch(ctx context.Context, a Params) (id string, restored 
 			out(fmt.Sprintf("    instance profile %s not visible yet (attempt %d) - waiting", a.Host+"-box", attempt))
 			p.sleep(5 * time.Second)
 			continue
+		}
+		// AWS frees the spot vCPU quota a minute or two AFTER an instance
+		// terminates, so a rebuild straight after a destroy is refused for a
+		// reason that fixes itself. Wait it out when nothing live holds the
+		// allowance; a running machine that does will not let go, so that fails now.
+		if err != nil && quotaWaited < spotQuotaWait && errorCode(err) == "MaxSpotInstanceCountExceeded" {
+			hs, ok := SpotHolders(ctx, p.EC2)
+			live := false
+			for _, h := range hs {
+				if h.State != "shutting-down" {
+					live = true
+				}
+			}
+			if ok && !live && ctx.Err() == nil {
+				out(fmt.Sprintf("    AWS has not released the spot allowance of the last box yet - waiting (%ds so far)", int(quotaWaited/time.Second)))
+				p.sleep(20 * time.Second)
+				quotaWaited += 20 * time.Second
+				attempt--
+				continue
+			}
 		}
 		break
 	}
@@ -386,4 +412,9 @@ func (p Provisioner) repairProfile(ctx context.Context, a Params, id string) {
 	if _, err := p.EC2.AssociateIamInstanceProfile(ctx, &ec2.AssociateIamInstanceProfileInput{InstanceId: aws.String(id), IamInstanceProfile: &ec2types.IamInstanceProfileSpecification{Name: aws.String(prof)}}); err != nil {
 		p.Out("    could not attach it - the box will not reach S3 (needs iam:PassRole)")
 	}
+}
+
+func errorCode(err error) string {
+	c, _ := ErrorParts(err)
+	return c
 }
