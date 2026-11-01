@@ -195,6 +195,19 @@ func (b *budgetsok) UpdateBudget(context.Context, *budgets.UpdateBudgetInput, ..
 	return &budgets.UpdateBudgetOutput{}, nil
 }
 
+func (b *budgetsok) DescribeNotificationsForBudget(context.Context, *budgets.DescribeNotificationsForBudgetInput, ...func(*budgets.Options)) (*budgets.DescribeNotificationsForBudgetOutput, error) {
+	return &budgets.DescribeNotificationsForBudgetOutput{}, nil
+}
+func (b *budgetsok) DescribeSubscribersForNotification(context.Context, *budgets.DescribeSubscribersForNotificationInput, ...func(*budgets.Options)) (*budgets.DescribeSubscribersForNotificationOutput, error) {
+	return &budgets.DescribeSubscribersForNotificationOutput{}, nil
+}
+func (b *budgetsok) CreateSubscriber(context.Context, *budgets.CreateSubscriberInput, ...func(*budgets.Options)) (*budgets.CreateSubscriberOutput, error) {
+	return &budgets.CreateSubscriberOutput{}, nil
+}
+func (b *budgetsok) DeleteSubscriber(context.Context, *budgets.DeleteSubscriberInput, ...func(*budgets.Options)) (*budgets.DeleteSubscriberOutput, error) {
+	return &budgets.DeleteSubscriberOutput{}, nil
+}
+
 type ssmok struct{}
 
 func (ssmok) GetParameter(context.Context, *ssm.GetParameterInput, ...func(*ssm.Options)) (*ssm.GetParameterOutput, error) {

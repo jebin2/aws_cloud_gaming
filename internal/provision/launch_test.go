@@ -380,3 +380,11 @@ func TestAnExistingGroupWithoutTheTailscalePortGetsIt(t *testing.T) {
 		t.Errorf("%v %v", err, c.calls)
 	}
 }
+
+func TestTheUploadErrorIsShown(t *testing.T) {
+	p, _, up, _, a := rig(t)
+	up.err = errors.New("AccessDenied: no s3:PutObject\nrequest id")
+	if _, err := p.Run(context.Background(), a); err == nil || !strings.Contains(err.Error(), "boot/host.tgz: AccessDenied: no s3:PutObject") {
+		t.Errorf("%v", err)
+	}
+}

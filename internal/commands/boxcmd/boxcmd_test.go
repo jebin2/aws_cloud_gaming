@@ -742,3 +742,17 @@ func TestStopDoesNotClaimBillingEndedForABoxThatIsNotStopped(t *testing.T) {
 		t.Errorf("rc %d\n%s%s", rc, r.o, r.w)
 	}
 }
+
+func TestOpenStopsWhenTheBoxNeverAnswersOverTailscale(t *testing.T) {
+	r := newRig(t, "")
+	prev := r.r.Hook
+	r.r.Hook = func(line string) (bool, string, error) {
+		if strings.HasPrefix(line, "tailscale ping -c 1 --timeout") {
+			return true, "", errors.New("no reply")
+		}
+		return prev(line)
+	}
+	if rc := r.d.Open(context.Background()); rc != 1 || !strings.Contains(r.w.String(), "gamevps never answered over Tailscale") || strings.Contains(r.o.String(), "waiting for sunshine") {
+		t.Errorf("%s%s", r.o, r.w)
+	}
+}

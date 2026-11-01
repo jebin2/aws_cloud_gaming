@@ -55,6 +55,11 @@ type AllDeps struct {
 // flag is exactly what must not reach here.
 func (d Deps) destroyEverything(ctx context.Context, x DestroyDeps, a AllDeps, force bool) int {
 	host := d.Box.Host
+	// The budget is the account's, and it is found by account id. Not knowing the
+	// account is better said now than after the box is gone and the budget stays.
+	if a.Account == "" {
+		return d.die("could not read which AWS account this is (STS), so the budget could not be removed - nothing was deleted; try again")
+	}
 	// The bucket in use: .env's, else the one cg derives for this account.
 	b, haveBucket := x.Lib.BucketName()
 	region := x.Lib.Region
@@ -158,7 +163,9 @@ func (d Deps) destroyEverything(ctx context.Context, x DestroyDeps, a AllDeps, f
 
 	// The role and instance profile cost nothing, but "--all" that leaves IAM
 	// objects behind is not --all.
-	a.Teardown.RemoveRole(ctx, host)
+	if !a.Teardown.RemoveRole(ctx, host) {
+		failed = 1
+	}
 	// The cloud watchdog costs nothing, but --all leaves nothing. It is removed
 	// schedule first, so nothing invokes a half-deleted function.
 	d.Out.Say(fmt.Sprintf("removing the cloud watchdog %s-cloud-watchdog", host))

@@ -208,7 +208,10 @@ func (l Library) Ensure(ctx context.Context) (string, error) {
 		has = aws.ToString(p.InstanceProfile.Roles[0].RoleName) == role
 	}
 	if !has {
-		_, _ = l.IAM.AddRoleToInstanceProfile(ctx, &iam.AddRoleToInstanceProfileInput{InstanceProfileName: aws.String(role), RoleName: aws.String(role)})
+		// Without the role in the profile the box starts and cannot reach S3.
+		if _, err := l.IAM.AddRoleToInstanceProfile(ctx, &iam.AddRoleToInstanceProfileInput{InstanceProfileName: aws.String(role), RoleName: aws.String(role)}); err != nil && !strings.Contains(err.Error(), "LimitExceeded") {
+			return "", fmt.Errorf("could not put the role %s in its instance profile: %s", role, firstLine(err))
+		}
 	}
 	return b, nil
 }

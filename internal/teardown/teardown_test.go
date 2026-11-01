@@ -193,3 +193,19 @@ func TestTheRoleGoesInTheOrderIAMAllows(t *testing.T) {
 		t.Error(*said)
 	}
 }
+
+// "Already gone" is only said for a role that is gone. An IAM error of any other
+// kind was swallowed into the same sentence, and --all went on to say it was done.
+type iamDenied struct{ iamFake }
+
+func (i *iamDenied) DeleteRole(context.Context, *iam.DeleteRoleInput, ...func(*iam.Options)) (*iam.DeleteRoleOutput, error) {
+	return nil, errors.New("AccessDenied: not allowed to iam:DeleteRole\nrequest id")
+}
+
+func TestARoleThatCannotBeDeletedIsNotCalledGone(t *testing.T) {
+	td, _, said, failed, _ := rig()
+	td.IAM = &iamDenied{}
+	if td.RemoveRole(context.Background(), "gamevps") || len(*failed) != 1 || !strings.Contains((*failed)[0], "could not delete the role for gamevps-box: AccessDenied") || strings.Contains(strings.Join(*said, "|"), "already gone") {
+		t.Errorf("failed %v said %v", *failed, *said)
+	}
+}

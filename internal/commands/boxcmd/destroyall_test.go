@@ -245,3 +245,11 @@ func TestAllStopsBeforeTheIrreversibleWhenTheBoxWillNotTerminate(t *testing.T) {
 		t.Errorf("%s%s", a.o, a.w)
 	}
 }
+
+func TestAllStopsBeforeDeletingAnythingWhenTheAccountIsUnknown(t *testing.T) {
+	a := newAll(t, "DESTROY-ALL\n")
+	a.x.All.Account = ""
+	if rc := a.d.DestroyBox(context.Background(), a.x, []string{"--all"}); rc != 1 || len(a.store.Objs) == 0 || !strings.Contains(a.w.String(), "could not read which AWS account this is") {
+		t.Errorf("rc %d\n%s%s", rc, a.o, a.w)
+	}
+}

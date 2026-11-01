@@ -154,10 +154,15 @@ func (d Deps) Open(ctx context.Context) int {
 	}
 
 	node := d.Box.Node
-	d.waitFor(ctx, "waiting for tailscale", 60, func() bool {
+	if !d.waitFor(ctx, "waiting for tailscale", 60, func() bool {
 		_, err := d.R.Run(ctx, local.Cmd{Name: "tailscale", Args: []string{"ping", "-c", "1", "--timeout", "5s", node}})
 		return err == nil
-	})
+	}) {
+		if ctx.Err() != nil {
+			return 1
+		}
+		return d.die(fmt.Sprintf("%s never answered over Tailscale - is Tailscale up on this laptop? (tailscale status)", node))
+	}
 
 	// Confirm the path is direct. A relayed path adds tens of ms.
 	out, _ := d.R.Run(ctx, local.Cmd{Name: "tailscale", Args: []string{"ping", "-c", "1", node}})

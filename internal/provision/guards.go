@@ -18,6 +18,10 @@ type BudgetsAPI interface {
 	DescribeBudget(context.Context, *budgets.DescribeBudgetInput, ...func(*budgets.Options)) (*budgets.DescribeBudgetOutput, error)
 	CreateBudget(context.Context, *budgets.CreateBudgetInput, ...func(*budgets.Options)) (*budgets.CreateBudgetOutput, error)
 	UpdateBudget(context.Context, *budgets.UpdateBudgetInput, ...func(*budgets.Options)) (*budgets.UpdateBudgetOutput, error)
+	DescribeNotificationsForBudget(context.Context, *budgets.DescribeNotificationsForBudgetInput, ...func(*budgets.Options)) (*budgets.DescribeNotificationsForBudgetOutput, error)
+	DescribeSubscribersForNotification(context.Context, *budgets.DescribeSubscribersForNotificationInput, ...func(*budgets.Options)) (*budgets.DescribeSubscribersForNotificationOutput, error)
+	CreateSubscriber(context.Context, *budgets.CreateSubscriberInput, ...func(*budgets.Options)) (*budgets.CreateSubscriberOutput, error)
+	DeleteSubscriber(context.Context, *budgets.DeleteSubscriberInput, ...func(*budgets.Options)) (*budgets.DeleteSubscriberOutput, error)
 }
 
 // Budget arms the monthly budget. It is not a layer: it stops nothing, it tells
@@ -75,6 +79,7 @@ func (b Budget) Arm(ctx context.Context) error {
 			return err
 		}
 		b.Out("    updated existing budget")
+		b.syncSubscribers(ctx, name, subs)
 	} else {
 		// 80% of actual spend, and a forecast that the month will blow the limit -
 		// the forecast is the one that gives useful warning rather than a post-mortem.
@@ -87,6 +92,51 @@ func (b Budget) Arm(ctx context.Context) error {
 	}
 	b.Out(fmt.Sprintf("done. budget at $%s (~INR %.0f); warns at 80%% actual and 100%% forecast", usd, b.INR))
 	return nil
+}
+
+// syncSubscribers makes every alert of an existing budget go to exactly the
+// addresses given. Without it the limit followed the settings but the emails did
+// not: "alerts to X" was printed for an address the budget never mailed. A failure
+// is said and does not stop the build - the budget itself is already armed.
+func (b Budget) syncSubscribers(ctx context.Context, name string, want []budgetstypes.Subscriber) {
+	ns, err := b.C.DescribeNotificationsForBudget(ctx, &budgets.DescribeNotificationsForBudgetInput{AccountId: aws.String(b.Account), BudgetName: aws.String(name)})
+	if err != nil {
+		b.Out("    could not read the budget's alerts, so who they go to is unchanged: " + firstLine(err))
+		return
+	}
+	wanted := map[string]bool{}
+	for _, s := range want {
+		wanted[aws.ToString(s.Address)] = true
+	}
+	for _, n := range ns.Notifications {
+		n := n
+		cur, err := b.C.DescribeSubscribersForNotification(ctx, &budgets.DescribeSubscribersForNotificationInput{AccountId: aws.String(b.Account), BudgetName: aws.String(name), Notification: &n})
+		if err != nil {
+			b.Out("    could not read who an alert goes to: " + firstLine(err))
+			continue
+		}
+		have := map[string]bool{}
+		for _, s := range cur.Subscribers {
+			have[aws.ToString(s.Address)] = true
+		}
+		// Added first: an alert must never be left with nobody to tell.
+		for _, s := range want {
+			if have[aws.ToString(s.Address)] {
+				continue
+			}
+			if _, err := b.C.CreateSubscriber(ctx, &budgets.CreateSubscriberInput{AccountId: aws.String(b.Account), BudgetName: aws.String(name), Notification: &n, Subscriber: &budgetstypes.Subscriber{SubscriptionType: s.SubscriptionType, Address: s.Address}}); err != nil {
+				b.Out("    could not add " + aws.ToString(s.Address) + " to an alert: " + firstLine(err))
+			}
+		}
+		for _, s := range cur.Subscribers {
+			if wanted[aws.ToString(s.Address)] {
+				continue
+			}
+			if _, err := b.C.DeleteSubscriber(ctx, &budgets.DeleteSubscriberInput{AccountId: aws.String(b.Account), BudgetName: aws.String(name), Notification: &n, Subscriber: &budgetstypes.Subscriber{SubscriptionType: s.SubscriptionType, Address: s.Address}}); err != nil {
+				b.Out("    could not remove " + aws.ToString(s.Address) + " from an alert: " + firstLine(err))
+			}
+		}
+	}
 }
 
 // ShutdownAPI is what checking the shutdown behaviour uses.

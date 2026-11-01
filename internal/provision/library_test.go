@@ -9,6 +9,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/budgets"
+	budgetstypes "github.com/aws/aws-sdk-go-v2/service/budgets/types"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -207,6 +208,9 @@ func TestEnsureWaitsOutTheNameBeingHeldAfterADeleteAndGivesUpSaying(t *testing.T
 
 type budgetsFake struct {
 	exists  bool
+	subs    []string // who the existing budget's alerts go to
+	added   []string
+	removed []string
 	created *budgets.CreateBudgetInput
 	updated *budgets.UpdateBudgetInput
 }
@@ -224,6 +228,25 @@ func (b *budgetsFake) CreateBudget(_ context.Context, in *budgets.CreateBudgetIn
 func (b *budgetsFake) UpdateBudget(_ context.Context, in *budgets.UpdateBudgetInput, _ ...func(*budgets.Options)) (*budgets.UpdateBudgetOutput, error) {
 	b.updated = in
 	return &budgets.UpdateBudgetOutput{}, nil
+}
+
+func (b *budgetsFake) DescribeNotificationsForBudget(context.Context, *budgets.DescribeNotificationsForBudgetInput, ...func(*budgets.Options)) (*budgets.DescribeNotificationsForBudgetOutput, error) {
+	return &budgets.DescribeNotificationsForBudgetOutput{Notifications: []budgetstypes.Notification{{Threshold: 80}}}, nil
+}
+func (b *budgetsFake) DescribeSubscribersForNotification(context.Context, *budgets.DescribeSubscribersForNotificationInput, ...func(*budgets.Options)) (*budgets.DescribeSubscribersForNotificationOutput, error) {
+	var o budgets.DescribeSubscribersForNotificationOutput
+	for _, a := range b.subs {
+		o.Subscribers = append(o.Subscribers, budgetstypes.Subscriber{SubscriptionType: budgetstypes.SubscriptionTypeEmail, Address: aws.String(a)})
+	}
+	return &o, nil
+}
+func (b *budgetsFake) CreateSubscriber(_ context.Context, in *budgets.CreateSubscriberInput, _ ...func(*budgets.Options)) (*budgets.CreateSubscriberOutput, error) {
+	b.added = append(b.added, aws.ToString(in.Subscriber.Address))
+	return &budgets.CreateSubscriberOutput{}, nil
+}
+func (b *budgetsFake) DeleteSubscriber(_ context.Context, in *budgets.DeleteSubscriberInput, _ ...func(*budgets.Options)) (*budgets.DeleteSubscriberOutput, error) {
+	b.removed = append(b.removed, aws.ToString(in.Subscriber.Address))
+	return &budgets.DeleteSubscriberOutput{}, nil
 }
 
 func TestBudgetIsInRupeesAtTodaysRateAndAlertsEveryone(t *testing.T) {
@@ -246,12 +269,15 @@ func TestBudgetIsInRupeesAtTodaysRateAndAlertsEveryone(t *testing.T) {
 	if strings.Join(out, "|") != strings.Join(want, "|") {
 		t.Errorf("%q", out)
 	}
-	// An existing budget has its limit updated and its subscribers left alone.
-	c = &budgetsFake{exists: true}
+	// An existing budget has its limit updated and its alerts follow the addresses given.
+	c = &budgetsFake{exists: true, subs: []string{"a@b.c", "old@x.y"}}
 	b.C, out = c, nil
 	_ = b.Arm(context.Background())
 	if c.updated == nil || c.created != nil || out[len(out)-2] != "    updated existing budget" {
 		t.Errorf("%v", out)
+	}
+	if strings.Join(c.added, ",") != "d@e.f" || strings.Join(c.removed, ",") != "old@x.y" {
+		t.Errorf("a new address must be told, a dropped one must not be: added %v removed %v", c.added, c.removed)
 	}
 	// No exchange rate, or no address: left as it is, and said.
 	b.FX, out, c = nil, nil, &budgetsFake{}
@@ -354,5 +380,21 @@ func TestEnsureRetriesOnlyTheDelayAndAnswersTheRestAtOnce(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(*notes, "\n"), "exists") {
 		t.Errorf("%v", *notes)
+	}
+}
+
+type iamNoWrap struct{ iamFake }
+
+func (i *iamNoWrap) AddRoleToInstanceProfile(context.Context, *iam.AddRoleToInstanceProfileInput, ...func(*iam.Options)) (*iam.AddRoleToInstanceProfileOutput, error) {
+	return nil, errors.New("AccessDenied: iam:AddRoleToInstanceProfile")
+}
+
+// A profile with no role in it boots a box that cannot reach S3; that is said at
+// the start, not found out when the first push fails.
+func TestEnsureFailsWhenTheRoleCannotGoInTheProfile(t *testing.T) {
+	l, _, _ := lib(&s3Fake{}, &iamFake{})
+	l.IAM = &iamNoWrap{}
+	if _, err := l.Ensure(context.Background()); err == nil || !strings.Contains(err.Error(), "could not put the role gamevps-box in its instance profile: AccessDenied") {
+		t.Errorf("%v", err)
 	}
 }

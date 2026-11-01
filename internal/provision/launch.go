@@ -366,10 +366,13 @@ func (p Provisioner) userData(ctx context.Context, a Params) (UserData, error) {
 		region = a.Region
 	}
 	if err := p.Up.Put(ctx, a.Bucket, region, "boot/host.tgz", bundle); err != nil {
-		return UserData{}, fmt.Errorf("could not upload host/ to s3://%s/boot/host.tgz", a.Bucket)
+		return UserData{}, fmt.Errorf("could not upload host/ to s3://%s/boot/host.tgz: %s", a.Bucket, firstLine(err))
 	}
 	url, err := p.Up.Presign(ctx, a.Bucket, region, "boot/host.tgz", 2*time.Hour)
-	if err != nil || !strings.HasPrefix(url, "https://") {
+	if err != nil {
+		return UserData{}, fmt.Errorf("could not presign the host bundle: %s", firstLine(err))
+	}
+	if !strings.HasPrefix(url, "https://") {
 		return UserData{}, fmt.Errorf("could not presign the host bundle")
 	}
 	if region != a.Region {

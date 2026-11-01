@@ -157,15 +157,31 @@ func (t Teardown) DeleteSettings(ctx context.Context, byRegion map[string][]stri
 // cannot be deleted while it is in an instance profile or has an inline policy
 // attached. The cost is nothing, but "--all" that leaves IAM objects behind is not
 // --all.
-func (t Teardown) RemoveRole(ctx context.Context, host string) {
+func (t Teardown) RemoveRole(ctx context.Context, host string) bool {
 	prof := host + "-box"
 	t.Say("removing the instance role " + prof)
-	_, _ = t.IAM.RemoveRoleFromInstanceProfile(ctx, &iam.RemoveRoleFromInstanceProfileInput{InstanceProfileName: aws.String(prof), RoleName: aws.String(prof)})
-	_, _ = t.IAM.DeleteInstanceProfile(ctx, &iam.DeleteInstanceProfileInput{InstanceProfileName: aws.String(prof)})
-	_, _ = t.IAM.DeleteRolePolicy(ctx, &iam.DeleteRolePolicyInput{RoleName: aws.String(prof), PolicyName: aws.String("library-rw")})
-	if _, err := t.IAM.DeleteRole(ctx, &iam.DeleteRoleInput{RoleName: aws.String(prof)}); err == nil {
-		t.Log("deleted role and instance profile " + prof)
-	} else {
-		t.Log("role " + prof + " was already gone")
+	// NoSuchEntity is the thing already gone; any other answer is a failure to say.
+	failed := false
+	step := func(what string, err error) {
+		if err != nil && !strings.Contains(err.Error(), "NoSuchEntity") {
+			t.Fail(fmt.Sprintf("could not %s for %s: %s", what, prof, strings.SplitN(strings.TrimSpace(err.Error()), "\n", 2)[0]))
+			failed = true
+		}
 	}
+	_, err := t.IAM.RemoveRoleFromInstanceProfile(ctx, &iam.RemoveRoleFromInstanceProfileInput{InstanceProfileName: aws.String(prof), RoleName: aws.String(prof)})
+	step("take the role out of its instance profile", err)
+	_, err = t.IAM.DeleteInstanceProfile(ctx, &iam.DeleteInstanceProfileInput{InstanceProfileName: aws.String(prof)})
+	step("delete the instance profile", err)
+	_, err = t.IAM.DeleteRolePolicy(ctx, &iam.DeleteRolePolicyInput{RoleName: aws.String(prof), PolicyName: aws.String("library-rw")})
+	step("delete the role's policy", err)
+	_, err = t.IAM.DeleteRole(ctx, &iam.DeleteRoleInput{RoleName: aws.String(prof)})
+	switch {
+	case err == nil:
+		t.Log("deleted role and instance profile " + prof)
+	case strings.Contains(err.Error(), "NoSuchEntity"):
+		t.Log("role " + prof + " was already gone")
+	default:
+		step("delete the role", err)
+	}
+	return !failed
 }
