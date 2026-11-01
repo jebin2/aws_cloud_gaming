@@ -86,11 +86,7 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string,
 		MaxMS: maxMS, Samples: envInt(get, "CG_SWEEP_SAMPLES", 5), Parallel: envInt(get, "CG_SWEEP_PAR", 10), INRPerUSD: rates.INRPerUSD}
 	opts.From, _ = get("CG_SWEEP_FROM")
 	be := &AWS{Home: region, Get: get, Products: products}
-	res := store.Save(Scan(ctx, be, opts))
-	if res.Error != "" {
-		// An error answer is not remembered as a scan.
-		res.ScannedAt, res.Cached, res.AgeSeconds = nil, nil, nil
-	}
+	res := store.Save(Scan(ctx, be, opts)) // an error answer is not remembered as a scan
 	if jsonFlag {
 		return printJSON(res, out)
 	}

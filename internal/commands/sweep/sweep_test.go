@@ -318,3 +318,26 @@ func TestStoreRemembersAndReports(t *testing.T) {
 		t.Errorf("%v", c)
 	}
 }
+
+// A scan that failed (no credentials, AWS not answering) was written to the cache,
+// and every --cached read after it returned the failure as if it were an answer.
+func TestAFailedScanIsNotRemembered(t *testing.T) {
+	dir := t.TempDir()
+	s := Store{Dir: dir, Name: "sweep.json"}
+	failed := s.Save(Result{Error: "AWS did not say which machines it offers"})
+	if failed.ScannedAt != nil || failed.Cached != nil || failed.Error == "" {
+		t.Errorf("%+v", failed)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sweep.json")); err == nil {
+		t.Error("the failure was written to the cache")
+	}
+	if c := s.Cached(); c["cached"] != false || c["error"] != nil {
+		t.Errorf("%v", c)
+	}
+	// And a good scan before it is not replaced by a bad one after.
+	s.Save(scan(t, world(), nil))
+	s.Save(Result{Error: "AWS did not say which machines it offers"})
+	if c := s.Cached(); c["cached"] != true || c["error"] != nil {
+		t.Errorf("a good remembered scan was overwritten: %v", c)
+	}
+}

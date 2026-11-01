@@ -30,6 +30,11 @@ func (s Store) now() time.Time {
 // Save stamps and remembers a fresh sweep. A fresh answer and a remembered one
 // are the same shape - the app renders one function, not two. Silent on failure.
 func (s Store) Save(r Result) Result {
+	// An error is not a scan: remembering it served "AWS did not say which machines
+	// it offers" to every later --cached read, for as long as it lasted.
+	if r.Error != "" {
+		return r
+	}
 	at := s.now().UTC().Format("2006-01-02T15:04:05Z")
 	yes, zero := true, int64(0)
 	r.ScannedAt, r.Cached, r.AgeSeconds = &at, &yes, &zero
