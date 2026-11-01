@@ -2,6 +2,7 @@ package tailnet
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -63,5 +64,24 @@ func TestNamesAndOffline(t *testing.T) {
 	}
 	if !Offline(context.Background(), r, "gamevps") || Offline(context.Background(), r, "phone") {
 		t.Error("offline is read from the status line")
+	}
+}
+
+func TestWaitBeatReportsEachPollAndStopsOnInterrupt(t *testing.T) {
+	var beats []string
+	beat := func(id, state, text string, secs, of int) {
+		beats = append(beats, fmt.Sprintf("%s %s %d/%d", id, state, secs, of))
+	}
+	_, ok := WaitBeat(context.Background(), runner(`{"Peer":{}}`), map[string]bool{}, "gamevps", 30*time.Second, func(time.Duration) {}, func(string) {}, beat)
+	if ok || strings.Join(beats, "|") != "init.tailnet waiting 0/30|init.tailnet waiting 10/30|init.tailnet waiting 20/30|init.tailnet timeout 30/30" {
+		t.Errorf("%v", beats)
+	}
+	// Ctrl-C ends it at once; it used to wait out the half hour.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	beats = nil
+	slept := time.Duration(0)
+	if _, ok := WaitBeat(ctx, runner(`{"Peer":{}}`), map[string]bool{}, "gamevps", 30*time.Minute, func(d time.Duration) { slept += d }, func(string) {}, beat); ok || slept != 0 || strings.Join(beats, "|") != "init.tailnet interrupted 0/1800" {
+		t.Errorf("%v %v", slept, beats)
 	}
 }

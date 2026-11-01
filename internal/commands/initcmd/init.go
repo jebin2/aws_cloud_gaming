@@ -125,7 +125,7 @@ func (i *Init) Run(ctx context.Context) int {
 
 	// The budget first: it is account-level, costs nothing, and needs no instance.
 	// If the build dies - or the laptop does - the bill is still being watched.
-	i.Out.Say("arming the budget before anything launches")
+	i.Out.SayID("init.budget", "arming the budget before anything launches")
 	inr := float64(i.Env.Int("GAME_BUDGET_INR"))
 	if inr == 0 {
 		inr = 5000
@@ -143,7 +143,7 @@ func (i *Init) Run(ctx context.Context) int {
 		i.Out.Log("GAME_NTFY_URL is not a valid ntfy topic or URL - notifications are off (test with: cg notify)")
 	}
 
-	i.Out.Say("provisioning instance")
+	i.Out.SayID("init.launch", "provisioning instance")
 	res, ok := i.provision(ctx, pre, ntfy)
 	if !ok {
 		return 1
@@ -157,16 +157,16 @@ func (i *Init) Run(ctx context.Context) int {
 	// Confirm this BEFORE the build, not after. The watchdog arms on the box within
 	// a minute and its only action is `shutdown -h`; whether that stops the instance
 	// or TERMINATES it - deleting the root volume - is decided at launch.
-	i.Out.Say("confirming what shutdown does to this instance")
+	i.Out.SayID("init.launch", "confirming what shutdown does to this instance")
 	if err := provision.CheckShutdown(ctx, i.Shutdown, id, func(l string) { i.cont("    ", l) }); err != nil {
 		return i.die("the shutdown behaviour is not what the watchdog needs - see above; nothing will be built on it")
 	}
 
-	bx := box.Box{EC2: i.EC2, ID: id, Host: host, Node: host, R: i.R, Sleep: i.Sleep, Log: i.Out.Log, Key: filepath.Join(i.Home, ".ssh", host+".pem"), TagKey: config.TagKey}
+	bx := box.Box{EC2: i.EC2, ID: id, Host: host, Node: host, R: i.R, Sleep: i.Sleep, Log: i.Out.Log, Beat: i.Out.Wait, Key: filepath.Join(i.Home, ".ssh", host+".pem"), TagKey: config.TagKey}
 	// A reused instance may be stopped, in which case nothing will ever join the
 	// tailnet until it is started.
 	if st, err := bx.State(ctx); err == nil && st == "stopped" {
-		i.Out.Say("starting the existing instance")
+		i.Out.SayID("init.launch", "starting the existing instance")
 		_ = bx.Start(ctx)
 		bx.WaitState(ctx, "running", 600*time.Second)
 	}
@@ -194,7 +194,7 @@ func (i *Init) Run(ctx context.Context) int {
 	// Key expiry used to be a manual step after every build. The API token that
 	// prunes stale nodes can turn it off, so it is done here, as soon as the node
 	// exists - and shown as a step only when it could not be.
-	i.Out.Say(fmt.Sprintf("turning off Tailscale key expiry for '%s'", node))
+	i.Out.SayID("init.tailnet", fmt.Sprintf("turning off Tailscale key expiry for '%s'", node))
 	exp := i.TS(i.Env.Get("TAILSCALE_API_KEY")).DisableExpiry(ctx, node)
 	for _, l := range exp.Lines {
 		i.cont("", "    "+l)
@@ -245,6 +245,7 @@ func (i *Init) provision(ctx context.Context, pre check.Result, ntfy string) (pr
 	}
 	p := i.Provisioner
 	p.Out = func(l string) { i.cont("", l) }
+	p.Beat = i.Out.Wait
 	home := i.Home
 	apps := i.Env.Get("GAME_APPS")
 	if apps == "" {
@@ -326,7 +327,7 @@ func (i *Init) findNode(ctx context.Context, bx box.Box, before map[string]bool,
 	}
 	switch {
 	case reusedNode != "":
-		i.Out.Say(fmt.Sprintf("reusing the existing box, already on the tailnet as '%s'", reusedNode))
+		i.Out.SayID("init.launch", fmt.Sprintf("reusing the existing box, already on the tailnet as '%s'", reusedNode))
 		// Nice to have, not a gate: give the path a realistic budget and carry on
 		// either way, since ssh will establish it soon enough regardless.
 		if i.ping(ctx, reusedNode, 3, "5s") {
@@ -337,15 +338,15 @@ func (i *Init) findNode(ctx context.Context, bx box.Box, before map[string]bool,
 		return reusedNode, 0
 	case i.Env.Get("GAME_TS_NODE") != "" && i.ping(ctx, i.Env.Get("GAME_TS_NODE"), 3, "5s"):
 		n := i.Env.Get("GAME_TS_NODE")
-		i.Out.Say(fmt.Sprintf("box already on the tailnet as '%s'", n))
+		i.Out.SayID("init.tailnet", fmt.Sprintf("box already on the tailnet as '%s'", n))
 		return n, 0
 	}
-	i.Out.Say("waiting for the box to join the tailnet")
+	i.Out.SayID("init.tailnet", "waiting for the box to join the tailnet")
 	timeout := i.NodeTimeout
 	if timeout == 0 {
 		timeout = 1800 * time.Second
 	}
-	n, ok := tailnet.Wait(ctx, i.R, before, host, timeout, i.Sleep, i.Out.Log)
+	n, ok := tailnet.WaitBeat(ctx, i.R, before, host, timeout, i.Sleep, i.Out.Log, i.Out.Wait)
 	if !ok {
 		return "", i.die(fmt.Sprintf("no new node joined after 30 min.\n       The box may have failed before installing tailscale. Check its console:\n       aws ec2 get-console-output --region %s --instance-id %s --output text | tail -40", region, orID(bx.ID)))
 	}
@@ -385,15 +386,15 @@ func (i *Init) finish(ctx context.Context, bx box.Box, pre check.Result, id, nod
 	}
 	remote := remoteBox{bx}
 	f := &build.Finisher{
-		Follow: build.Follower{R: remote, Log: i.Out.Log, Sleep: i.Sleep, Target: "ubuntu@" + node, Key: bx.Key},
+		Follow: build.Follower{R: remote, Log: i.Out.Log, Beat: i.Out.Wait, Sleep: i.Sleep, Target: "ubuntu@" + node, Key: bx.Key},
 		Sun:    i.Sun, Pair: i.Pair, Run: i.R, Login: login, Save: save, Name: "the box", Takes: i.takes(),
-		IP: ip, Say: i.Out.Say, Log: i.Out.Log, Sleep: i.Sleep, HasMoonlight: i.Moonlight,
+		IP: ip, Say: i.Out.Say, SayID: i.Out.SayID, Log: i.Out.Log, Sleep: i.Sleep, HasMoonlight: i.Moonlight,
 	}
 	// The build already installed the watchdog (15-watchdog.sh), so the box has been
 	// guarded since minute one. This pass refreshes it from the local host/ - which
 	// matters on a REUSED instance built from older code, and costs nothing here.
 	f.AfterStream = func(ctx context.Context) (string, error) {
-		i.Out.Say("refreshing the on-host watchdog")
+		i.Out.SayID("init.host-watchdog", "refreshing the on-host watchdog")
 		i.Out.Log("copying host/ ...")
 		bundle, err := provision.HostBundle(cg.Files, ntfy)
 		if err == nil {

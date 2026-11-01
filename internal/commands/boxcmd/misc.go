@@ -77,7 +77,7 @@ func (d Deps) PairMoonlight(ctx context.Context) int {
 		d.Out.Log(fmt.Sprintf("already paired with %s (%s)", d.Box.Node, ip))
 		return 0
 	}
-	d.Out.Say(fmt.Sprintf("pairing with %s (%s)", d.Box.Node, ip))
+	d.Out.SayID("pair", fmt.Sprintf("pairing with %s (%s)", d.Box.Node, ip))
 	if d.Pair.Pair(ctx, ip, user, pass) {
 		d.Out.Log("paired - cg open should stream now")
 		return 0

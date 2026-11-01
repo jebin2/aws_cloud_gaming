@@ -93,7 +93,7 @@ func New(ctx context.Context, get config.Lookup, env *config.Env, out *output.Ou
 				Ask: ask.New(out, os.Getenv("CG_YES") == "1"), AvailGB: avail, ReserveGB: reserve}.Choose(ctx)
 		},
 		Lib: func(named string) provision.Library {
-			return provision.Library{S3: s3.NewFromConfig(cfg), IAM: iam.NewFromConfig(cfg), Account: account, Host: host, Region: region, Named: named, TagKey: config.TagKey}
+			return provision.Library{S3: s3.NewFromConfig(cfg), IAM: iam.NewFromConfig(cfg), Account: account, Host: host, Region: region, Named: named, TagKey: config.TagKey, Beat: out.Wait}
 		},
 		BucketRegion: func(ctx context.Context, b string) (string, error) { return store.Location(ctx, b) },
 		Prices: func(ctx context.Context, r string) (*float64, *float64) {

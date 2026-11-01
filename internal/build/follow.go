@@ -59,12 +59,20 @@ var (
 
 // Follower reads the build's log as it grows.
 type Follower struct {
-	R     Remote
-	Log   func(string)
+	R   Remote
+	Log func(string)
+	// Beat reports the wait as data (Out.Wait); nil when nobody reads it.
+	Beat  func(id, state, text string, secs, of int)
 	Sleep func(time.Duration)
 	// Target and Key are only for the lines that tell a person how to look.
 	Target, Key string
 	Timeout     time.Duration // 40 minutes by default
+}
+
+func (f Follower) beat(id, state, text string, waited, of time.Duration) {
+	if f.Beat != nil {
+		f.Beat(id, state, text, int(waited/time.Second), int(of/time.Second))
+	}
 }
 
 func (f Follower) stoppedLines(ctx context.Context, last string) {
@@ -98,7 +106,7 @@ func (f Follower) Stream(ctx context.Context) error {
 	if timeout == 0 {
 		timeout = 2400 * time.Second
 	}
-	seen, rebooted, failedSeen, last := 0, false, false, ""
+	seen, rebooted, failedSeen, last, stage := 0, false, false, "", "starting"
 	for waited := time.Duration(0); waited < timeout; waited += 10 * time.Second {
 		out, err := f.R.SSH(ctx, fmt.Sprintf("tail -n +%d /var/log/cloud-gaming-bootstrap.log 2>/dev/null", seen+1))
 		switch {
@@ -122,7 +130,8 @@ func (f Follower) Stream(ctx context.Context) error {
 					case strings.HasPrefix(line, ">>> ok: "):
 						f.Log("  ok  " + strings.TrimPrefix(line, ">>> ok: "))
 					case strings.HasPrefix(line, ">>> "):
-						f.Log(strings.TrimPrefix(line, ">>> "))
+						stage = strings.TrimPrefix(line, ">>> ")
+						f.Log(stage)
 					default:
 						f.Log("! " + line)
 					}
@@ -130,6 +139,7 @@ func (f Follower) Stream(ctx context.Context) error {
 			}
 			if _, err := f.R.SSH(ctx, "test -f /var/lib/cloud-gaming-ready"); err == nil {
 				f.Log(fmt.Sprintf("build complete after %dm", int(waited/time.Minute)))
+				f.beat("build.box", "done", stage, waited, timeout)
 				return nil
 			}
 			// Asked at once when a FAILED has been seen, and once a minute
@@ -163,8 +173,12 @@ func (f Follower) Stream(ctx context.Context) error {
 			f.Log("host rebooting - reconnecting")
 			rebooted = true
 		}
+		// Every poll, so a long quiet step (the driver install is minutes with no
+		// marker) still shows the build is being watched, and which step it is in.
+		f.beat("build.box", "waiting", stage, waited, timeout)
 		f.Sleep(10 * time.Second)
 	}
+	f.beat("build.box", "timeout", stage, timeout, timeout)
 	f.Log(fmt.Sprintf("TIMEOUT after %dm. Check on the box:", int(timeout/time.Minute)))
 	f.Log("  ssh " + f.ssh())
 	f.Log("  sudo tail -50 /var/log/cloud-gaming-bootstrap.log")
@@ -180,6 +194,7 @@ func (f Follower) WaitSteam(ctx context.Context, timeout time.Duration) bool {
 	for waited := time.Duration(0); waited < timeout; waited += 15 * time.Second {
 		if _, err := f.R.SSH(ctx, "test -f ~/.steam-prewarmed"); err == nil {
 			f.Log(fmt.Sprintf("steam ready after %dm", int(waited/time.Minute)))
+			f.beat("build.steam", "done", "ready", waited, timeout)
 			return true
 		}
 		// Report the phase, not just the size: after the download the client stops
@@ -209,8 +224,10 @@ func (f Follower) WaitSteam(ctx context.Context, timeout time.Duration) bool {
 			f.Log(fmt.Sprintf("%s (%ds)", phase, int(waited/time.Second)))
 			beat = waited
 		}
+		f.beat("build.steam", "waiting", cur, waited, timeout)
 		f.Sleep(15 * time.Second)
 	}
+	f.beat("build.steam", "timeout", last, timeout, timeout)
 	f.Log(fmt.Sprintf("steam did not finish within %dm - check ~/steam-prewarm.log on the box", int(timeout/time.Minute)))
 	return false
 }

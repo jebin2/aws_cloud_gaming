@@ -180,9 +180,9 @@ func Ensure(ctx context.Context, env *config.Env, out *output.Out) {
 		return
 	}
 	if len(st.Drift) == 1 && st.Drift[0] == "no function" {
-		out.Say("arming the cloud watchdog before anything launches")
+		out.SayID("init.watchdog", "arming the cloud watchdog before anything launches")
 	} else {
-		out.Say("updating the cloud watchdog: " + strings.Join(st.Drift, ", "))
+		out.SayID("init.watchdog", "updating the cloud watchdog: "+strings.Join(st.Drift, ", "))
 	}
 	i, err := NewInstaller(ctx, env, r, out)
 	if err != nil || i.Install(ctx) != nil {

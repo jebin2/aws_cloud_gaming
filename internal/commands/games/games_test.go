@@ -2,6 +2,7 @@ package games
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -120,5 +121,33 @@ func TestTheLegacyVolume(t *testing.T) {
 	}
 	if text := ShowVolume(v, nil, nil); !strings.Contains(text, "cost     ? - the disk price could not be read from AWS") {
 		t.Errorf("an unknown price is a question mark:\n%s", text)
+	}
+}
+
+func TestJSONHasTheSameGamesAndTheNumbersTheWordsAreMadeFrom(t *testing.T) {
+	b := Box{Apps: []App{{ID: "1", Name: "Diablo IV", Flags: 1024, Size: 0, Done: 10 << 30, Stage: 40 << 30, Want: 40 << 30}, {ID: "2", Name: "Half", Flags: 4, Size: 100 << 30, Done: 10 << 30}},
+		Rate: 10_000_000, HasDisk: true, Used: 5 << 30, Avail: 95 << 30}
+	raw, err := JSON(b, []library.App{{AppID: "3", Name: "Archived", Bytes: 7 << 30}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d struct {
+		Games []struct {
+			AppID, Name, State string
+			Bytes              int64
+			MinutesLeft        *float64 `json:"minutes_left"`
+			Incomplete         bool
+		}
+		Disk map[string]int64
+	}
+	if err := json.Unmarshal(raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Games) != 3 || d.Games[0].State != "downloading" || d.Games[0].MinutesLeft == nil || !d.Games[1].Incomplete || d.Games[2].State != "in S3 only" || d.Games[2].Bytes != 7<<30 || d.Disk["free_bytes"] != 95<<30 {
+		t.Errorf("%s", raw)
+	}
+	// The table and the JSON are made from the same rows.
+	if !strings.Contains(Render(b, nil), "downloading") {
+		t.Error("table")
 	}
 }

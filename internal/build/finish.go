@@ -31,6 +31,7 @@ type Finisher struct {
 	SteamReport func(msg *string)
 
 	Say          func(string)
+	SayID        func(id, text string) // Say for a step with a stable id; nil falls back to Say
 	Log          func(string)
 	Sleep        func(time.Duration)
 	SteamWait    time.Duration // 25 minutes by default
@@ -47,7 +48,7 @@ type Finisher struct {
 // ErrStopped when the build itself did not finish - what to say about a machine
 // left running is the target's business.
 func (f *Finisher) Finish(ctx context.Context) error {
-	f.Say(fmt.Sprintf("building %s - live progress below (%s)", f.Name, f.Takes))
+	f.say("init.build", fmt.Sprintf("building %s - live progress below (%s)", f.Name, f.Takes))
 	if err := f.Follow.Stream(ctx); err != nil {
 		return err
 	}
@@ -62,7 +63,7 @@ func (f *Finisher) Finish(ctx context.Context) error {
 	// Neutral heading: this block may create an account or find one already
 	// there, and announcing "creating" before knowing which is how a rerun came to
 	// look like it was regenerating credentials every time.
-	f.Say("Sunshine account")
+	f.say("init.sunshine-account", "Sunshine account")
 	tries := f.WelcomeTries
 	if tries == 0 {
 		tries = 40
@@ -79,7 +80,7 @@ func (f *Finisher) Finish(ctx context.Context) error {
 		e.Run(ctx, first)
 	}
 
-	f.Say("moonlight pairing")
+	f.say("init.pair", "moonlight pairing")
 	f.Paired = false
 	switch {
 	case f.HasMoonlight && f.listsPaired(ctx):
@@ -103,7 +104,7 @@ func (f *Finisher) Finish(ctx context.Context) error {
 		f.Log("skipped (moonlight or credentials missing) - pair by hand, see below")
 	}
 
-	f.Say("waiting for Steam to finish installing")
+	f.say("init.steam", "waiting for Steam to finish installing")
 	f.SteamOK, f.SteamMsg = false, "still installing - check ~/steam-prewarm.log on the box."
 	wait := f.SteamWait
 	if wait == 0 {
@@ -131,4 +132,12 @@ func trim(b []byte) string {
 		s = s[:len(s)-1]
 	}
 	return s
+}
+
+func (f *Finisher) say(id, text string) {
+	if f.SayID != nil {
+		f.SayID(id, text)
+		return
+	}
+	f.Say(text)
 }

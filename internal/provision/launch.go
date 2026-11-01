@@ -54,11 +54,13 @@ type Params struct {
 
 // Provisioner makes the box.
 type Provisioner struct {
-	EC2   EC2
-	SSM   SSM
-	Up    Uploader
-	Src   fs.FS // the repo's embedded files: lib/bootstrap.d and host
-	Out   func(string)
+	EC2 EC2
+	SSM SSM
+	Up  Uploader
+	Src fs.FS // the repo's embedded files: lib/bootstrap.d and host
+	Out func(string)
+	// Beat reports a wait as data (Out.Wait); nil when nobody reads it.
+	Beat  func(id, state, text string, secs, of int)
 	Now   func() time.Time
 	Sleep func(time.Duration)
 	// WaitRunning waits for an instance to be running; nil does not wait.
@@ -90,6 +92,12 @@ func (p Provisioner) now() time.Time {
 // a box that was just terminated. Terminating took 7 minutes here, and the
 // allowance followed within a couple.
 const spotQuotaWait = 6 * time.Minute
+
+func (p Provisioner) beat(id, state, text string, secs, of int) {
+	if p.Beat != nil {
+		p.Beat(id, state, text, secs, of)
+	}
+}
 
 func (p Provisioner) sleep(d time.Duration) {
 	if p.Sleep != nil {
@@ -313,6 +321,7 @@ func (p Provisioner) launch(ctx context.Context, a Params) (id string, restored 
 		lastErr = err
 		if err != nil && strings.Contains(err.Error(), "Invalid IAM Instance Profile") {
 			out(fmt.Sprintf("    instance profile %s not visible yet (attempt %d) - waiting", a.Host+"-box", attempt))
+			p.beat("init.instance-profile", "waiting", "waiting for the instance profile to be visible", attempt*5, 30)
 			p.sleep(5 * time.Second)
 			continue
 		}
@@ -330,6 +339,7 @@ func (p Provisioner) launch(ctx context.Context, a Params) (id string, restored 
 			}
 			if ok && !live && ctx.Err() == nil {
 				out(fmt.Sprintf("    AWS has not released the spot allowance of the last box yet - waiting (%ds so far)", int(quotaWaited/time.Second)))
+				p.beat("init.spot-allowance", "waiting", "waiting for AWS to release the spot allowance of the last box", int(quotaWaited/time.Second), int(spotQuotaWait/time.Second))
 				p.sleep(20 * time.Second)
 				quotaWaited += 20 * time.Second
 				attempt--

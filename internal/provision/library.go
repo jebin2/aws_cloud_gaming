@@ -64,7 +64,9 @@ type Library struct {
 	Named  string
 	TagKey string
 	Note   func(string)
-	Sleep  func(time.Duration)
+	// Beat reports a wait as data (Out.Wait); nil when nobody reads it.
+	Beat  func(id, state, text string, secs, of int)
+	Sleep func(time.Duration)
 }
 
 func (l Library) sleep(d time.Duration) {
@@ -137,6 +139,9 @@ func (l Library) Ensure(ctx context.Context) (string, error) {
 					return "", fmt.Errorf("could not create bucket %s after %d attempts.\nIf you just ran 'cg destroy --all', S3 can hold the name for a few\nminutes. Wait and run cg init again; nothing else is wrong. (%s)", b, attempt, firstLine(err))
 				}
 				l.Note(fmt.Sprintf("S3 has not released the name yet (attempt %d) - waiting 15s", attempt))
+				if l.Beat != nil {
+					l.Beat("init.bucket-name", "waiting", "waiting for S3 to release the bucket name", (attempt-1)*15, 8*15)
+				}
 				l.sleep(15 * time.Second)
 			case strings.Contains(msg, "BucketAlreadyExists"):
 				return "", fmt.Errorf("the bucket name %s is taken by another AWS account. Set GAME_S3_BUCKET to a name of your own (%s)", b, firstLine(err))

@@ -24,9 +24,13 @@ func Run(ctx context.Context, env *config.Env, args []string, out *output.Out) i
 	if len(args) > 0 && (args[0] == "--volume" || args[0] == "volume") {
 		return runVolume(ctx, env, args[1:], out)
 	}
+	asJSON := false
+	if len(args) == 1 && args[0] == "--json" {
+		asJSON, args = true, nil
+	}
 	if len(args) > 0 {
 		// `cg games --delete` has never existed: the volume's is --volume --delete.
-		out.Die("usage: cg games [--volume [--delete]]")
+		out.Die("usage: cg games [--json] [--volume [--delete]]")
 		return 1
 	}
 	box := remote.New(env)
@@ -55,6 +59,15 @@ func Run(ctx context.Context, env *config.Env, args []string, out *output.Out) i
 			}
 			archived, _ = l.Index(ctx, b, region)
 		}
+	}
+	if asJSON {
+		b, err := JSON(ParseBox(string(raw)), archived)
+		if err != nil {
+			out.Die(err.Error())
+			return 1
+		}
+		fmt.Fprintf(out.Stdout, "%s\n", b)
+		return 0
 	}
 	out.Report("Games", Render(ParseBox(string(raw)), archived))
 	return 0

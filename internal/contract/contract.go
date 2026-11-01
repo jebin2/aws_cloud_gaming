@@ -6,7 +6,12 @@ package contract
 import "encoding/json"
 
 // EventsVersion is the version of the NDJSON event stream on stderr.
-const EventsVersion = 1
+//
+// Version 2 adds, without changing anything in 1: an optional "id" on step events
+// (a stable name for the stage, so a screen follows it by id and not by the words),
+// and the wait event ({"t":"wait","id","state","text","secs","of"}), sent for every
+// wait while it goes on and once when it ends.
+const EventsVersion = 2
 
 // Command is one entry in the registry: a path such as ["library", "push"]
 // and what the app needs to know about running it.
@@ -23,7 +28,7 @@ type Command struct {
 // not reachable. The pilot has only cost; the rest is added as it is ported.
 var Registry = []Command{
 	{Path: []string{"notify"}, Summary: "send a test notification to GAME_NTFY_URL"},
-	{Path: []string{"games"}, Summary: "what Steam has on the box: installed, downloading, running, archived"},
+	{Path: []string{"games"}, Summary: "what Steam has on the box: installed, downloading, running, archived", JSON: true},
 	{Path: []string{"aws", "inventory"}, Summary: "everything of cg's in this AWS account, and what it bills", JSON: true},
 	{Path: []string{"snapshot"}, Summary: "saved images: --list, create, delete", JSON: true},
 	{Path: []string{"host"}, Summary: "your own machines: list, add, status, setup, open, remove", JSON: true},

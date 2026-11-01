@@ -105,7 +105,7 @@ func (d Deps) archiveReport(ctx context.Context, x DestroyDeps) bool {
 	for _, o := range objs {
 		size += o.Size
 	}
-	fmt.Fprintf(d.Out.Stdout, "      archive s3://%s/steam holds %d objects, %s\n", b, len(objs), format.IEC(size))
+	d.Out.Echo(fmt.Sprintf("      archive s3://%s/steam holds %d objects, %s", b, len(objs), format.IEC(size)))
 	return len(objs) > 0
 }
 

@@ -4,6 +4,7 @@ package games
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -86,10 +87,17 @@ type row struct {
 	name, state string
 	gb          float64
 	extra       string
+	// For the JSON form: the whole name, the id, and the numbers the words in extra
+	// are made from. pct is -1 when nothing is downloading.
+	full, id   string
+	bytes      int64
+	pct, eta   float64
+	incomplete bool
 }
 
-// Render is the table. archived is the index: games saved in S3.
-func Render(b Box, archived []library.App) string {
+// rowsOf is what the table and the JSON are both made from: one row per game, on
+// the box or only in S3. The words and the numbers cannot disagree.
+func rowsOf(b Box, archived []library.App) []row {
 	arch := map[string]library.App{}
 	var order []string
 	for _, a := range archived {
@@ -109,6 +117,7 @@ func Render(b Box, archived []library.App) string {
 	for _, a := range b.Apps {
 		st := State(a.Flags, a.Running)
 		extra := ""
+		pctN, etaN, incomplete := -1.0, 0.0, false
 		var shown float64
 		if st == "downloading" && a.Stage > 0 {
 			// Steam's own BytesDownloaded lags badly - it read 0.6 GB with 67 GB on
@@ -122,8 +131,10 @@ func Render(b Box, archived []library.App) string {
 			pct := min(100.0, 100.0*onDisk/float64(a.Stage))
 			left := max(0.0, float64(a.Stage)-onDisk)
 			extra = fmt.Sprintf("%.0f%% of %.0f GB", pct, float64(a.Stage)/gib)
+			pctN = pct
 			if b.Rate > 1_000_000 {
 				extra += fmt.Sprintf(", ~%.0f min left", left/float64(b.Rate)/60)
+				etaN = left / float64(b.Rate) / 60
 			}
 			shown = onDisk
 		} else {
@@ -138,9 +149,11 @@ func Render(b Box, archived []library.App) string {
 			if a.Size != 0 && a.Done != 0 && float64(a.Done) < float64(a.Size)*0.95 {
 				shown = float64(a.Done)
 				extra = fmt.Sprintf("INCOMPLETE - %.0f GB of %.0f GB on disk", float64(a.Done)/gib, float64(a.Size)/gib)
+				incomplete = true
 			}
 		}
-		rows = append(rows, row{clip(a.Name, 28), st, shown / gib, extra})
+		rows = append(rows, row{name: clip(a.Name, 28), state: st, gb: shown / gib, extra: extra,
+			full: a.Name, id: a.ID, bytes: int64(shown), pct: pctN, eta: etaN, incomplete: incomplete})
 		delete(arch, a.ID)
 	}
 	for _, id := range order {
@@ -149,10 +162,17 @@ func Render(b Box, archived []library.App) string {
 			if name == "" {
 				name = "?"
 			}
-			rows = append(rows, row{clip(name, 28), "in S3 only", float64(a.Bytes) / gib, "cg init offers it"})
+			rows = append(rows, row{name: clip(name, 28), state: "in S3 only", gb: float64(a.Bytes) / gib, extra: "cg init offers it",
+				full: name, id: id, bytes: a.Bytes, pct: -1})
 			delete(arch, id)
 		}
 	}
+	return rows
+}
+
+// Render is the table. archived is the index: games saved in S3.
+func Render(b Box, archived []library.App) string {
+	rows := rowsOf(b, archived)
 	var w strings.Builder
 	if len(rows) == 0 {
 		w.WriteString("  no games installed, and nothing archived\n")
@@ -169,6 +189,42 @@ func Render(b Box, archived []library.App) string {
 		}
 	}
 	return w.String()
+}
+
+// JSON is the same report as data: cg games --json.
+func JSON(b Box, archived []library.App) ([]byte, error) {
+	type game struct {
+		AppID       string   `json:"appid"`
+		Name        string   `json:"name"`
+		State       string   `json:"state"` // installed, downloading, RUNNING, in S3 only ...
+		Bytes       int64    `json:"bytes"`
+		Percent     *float64 `json:"percent,omitempty"`      // a download in progress
+		MinutesLeft *float64 `json:"minutes_left,omitempty"` // when the link rate is known
+		Incomplete  bool     `json:"incomplete,omitempty"`
+		Note        string   `json:"note,omitempty"`
+	}
+	games := []game{}
+	for _, r := range rowsOf(b, archived) {
+		g := game{AppID: r.id, Name: r.full, State: r.state, Bytes: r.bytes, Incomplete: r.incomplete, Note: r.extra}
+		if r.pct >= 0 {
+			p := r.pct
+			g.Percent = &p
+		}
+		if r.eta > 0 {
+			e := r.eta
+			g.MinutesLeft = &e
+		}
+		games = append(games, g)
+	}
+	doc := struct {
+		Games   []game `json:"games"`
+		Disk    any    `json:"disk"`
+		RateBps int64  `json:"inbound_bytes_per_sec"`
+	}{Games: games, RateBps: b.Rate}
+	if b.HasDisk {
+		doc.Disk = map[string]int64{"used_bytes": b.Used, "free_bytes": b.Avail}
+	}
+	return json.Marshal(doc)
 }
 
 func clip(s string, n int) string {

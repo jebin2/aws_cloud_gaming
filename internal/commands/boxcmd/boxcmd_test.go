@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -674,7 +676,7 @@ func TestWaitForStopsWhenInterrupted(t *testing.T) {
 	rg := newRig(t, "")
 	ctx, cancel := context.WithCancel(context.Background())
 	tries := 0
-	ok := rg.d.waitFor(ctx, "waiting", 60, func() bool {
+	ok := rg.d.waitFor(ctx, "t.wait", "waiting", 60, func() bool {
 		tries++
 		if tries == 2 {
 			cancel()
@@ -754,5 +756,64 @@ func TestOpenStopsWhenTheBoxNeverAnswersOverTailscale(t *testing.T) {
 	}
 	if rc := r.d.Open(context.Background()); rc != 1 || !strings.Contains(r.w.String(), "gamevps never answered over Tailscale") || strings.Contains(r.o.String(), "waiting for sunshine") {
 		t.Errorf("%s%s", r.o, r.w)
+	}
+}
+
+// Under the app a wait is events, not dots: raw dots on stdout are not an event, and
+// the screen saw nothing until the wait was over.
+func TestAWaitIsEventsInTheAppAndDotsOnATerminal(t *testing.T) {
+	rg := newRig(t, "")
+	rg.d.Out.JSON = true
+	tries := 0
+	if !rg.d.waitFor(context.Background(), "open.sunshine", "waiting for sunshine", 60, func() bool { tries++; return tries == 3 }) {
+		t.Fatal("it came up on the third try")
+	}
+	if strings.Contains(rg.o.String(), ".") || strings.Contains(rg.o.String(), "waiting for sunshine") {
+		t.Errorf("nothing but events in app mode, stdout: %q", rg.o.String())
+	}
+	var states []string
+	for _, l := range strings.Split(strings.TrimSpace(rg.w.String()), "\n") {
+		var e struct {
+			T, ID, State string
+			Secs, Of     int
+		}
+		if err := json.Unmarshal([]byte(l), &e); err != nil || e.T != "wait" || e.ID != "open.sunshine" {
+			t.Fatalf("not a wait event: %q", l)
+		}
+		states = append(states, e.State)
+		if e.Of != 120 {
+			t.Errorf("the limit is 60 tries of 2s: %q", l)
+		}
+	}
+	if strings.Join(states, ",") != "waiting,waiting,done" {
+		t.Errorf("%v", states)
+	}
+	// On a terminal it is the dots, and no event.
+	rg = newRig(t, "")
+	tries = 0
+	rg.d.waitFor(context.Background(), "open.sunshine", "waiting for sunshine", 60, func() bool { tries++; return tries == 3 })
+	if rg.o.String() != "waiting for sunshine.. ok\n" || rg.w.String() != "" {
+		t.Errorf("%q %q", rg.o.String(), rg.w.String())
+	}
+}
+
+// A wait on the box's state reports itself as data every poll and once at the end.
+func TestWaitStateReportsEveryPollAndHowItEnded(t *testing.T) {
+	rg := newRig(t, "")
+	var got []string
+	rg.d.Box.Beat = func(id, state, text string, secs, of int) {
+		got = append(got, fmt.Sprintf("%s %s %s %d/%d", id, state, text, secs, of))
+	}
+	rg.e.state = "pending"
+	if rg.d.Box.WaitState(context.Background(), "running", 6*time.Second) {
+		t.Fatal("it never got there")
+	}
+	if strings.Join(got, "|") != "box.running waiting pending 0/6|box.running waiting pending 3/6|box.running timeout pending 6/6" {
+		t.Errorf("%v", got)
+	}
+	got = nil
+	rg.e.state = "running"
+	if !rg.d.Box.WaitState(context.Background(), "running", 60*time.Second) || strings.Join(got, "|") != "box.running done running 0/60" {
+		t.Errorf("%v", got)
 	}
 }

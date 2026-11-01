@@ -233,21 +233,36 @@ func (d Deps) removeAll(ctx context.Context, x DestroyDeps, a AllDeps) (rc int, 
 	// rather than sitting silent.
 	if plan.SecurityGroup != "" {
 		d.Out.Say("deleting security group " + plan.SecurityGroup)
-		fmt.Fprint(d.Out.Stdout, "    waiting for the network interface to be released")
+		// Raw dots on a terminal; as events, a wait every try.
+		dots := !d.Out.JSON
+		const what = "waiting for the network interface to be released"
+		if dots {
+			fmt.Fprint(d.Out.Stdout, "    "+what)
+		}
 		deleted := false
 		for i := 1; i <= 12; i++ {
 			if _, err := a.EC2.DeleteSecurityGroup(ctx, &ec2.DeleteSecurityGroupInput{GroupId: aws.String(plan.SecurityGroup)}); err == nil {
-				fmt.Fprintf(d.Out.Stdout, " deleted (%ds)\n", (i-1)*5)
+				if dots {
+					fmt.Fprintf(d.Out.Stdout, " deleted (%ds)\n", (i-1)*5)
+				}
+				d.Out.Wait("destroy.security-group", "done", what, (i-1)*5, 60)
 				deleted = true
 				break
 			}
-			fmt.Fprint(d.Out.Stdout, ".")
+			if dots {
+				fmt.Fprint(d.Out.Stdout, ".")
+			}
+			d.Out.Wait("destroy.security-group", "waiting", what, (i-1)*5, 60)
 			if i < 12 {
 				d.sleep(5 * time.Second)
 			}
 		}
 		if !deleted {
-			fmt.Fprintf(d.Out.Stdout, "\n    still in use - delete it manually later: %s\n", plan.SecurityGroup)
+			d.Out.Wait("destroy.security-group", "timeout", what, 60, 60)
+			if dots {
+				fmt.Fprint(d.Out.Stdout, "\n")
+			}
+			d.Out.Echo("    still in use - delete it manually later: " + plan.SecurityGroup)
 		}
 	}
 	if plan.KeyPair != "" {

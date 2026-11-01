@@ -146,3 +146,34 @@ func TestKind(t *testing.T) {
 		}
 	}
 }
+
+// Stage and Wait are for the app only: plain output is not to change by a word.
+func TestStageAndWaitAreEventsOnly(t *testing.T) {
+	var o, e bytes.Buffer
+	plain := &Out{Stdout: &o, Stderr: &e, Now: func() time.Time { return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC) }}
+	plain.Stage("open.start", "starting")
+	plain.Wait("open.sunshine", "waiting", "waiting for sunshine", 4, 120)
+	plain.SayID("init.budget", "arming")
+	if e.Len() != 0 || o.String() != "\n2026-01-02T03:04:05+00:00  ==> arming\n" {
+		t.Errorf("plain: %q %q", o.String(), e.String())
+	}
+	o.Reset()
+	e.Reset()
+	app := &Out{Stdout: &o, Stderr: &e, JSON: true, Now: plain.Now}
+	app.Stage("open.start", "starting the machine")
+	app.Wait("open.sunshine", "waiting", "waiting for sunshine", 4, 120)
+	app.SayID("init.budget", "arming")
+	var ev []map[string]any
+	for _, l := range strings.Split(strings.TrimSpace(e.String()), "\n") {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(l), &m); err != nil {
+			t.Fatalf("%q", l)
+		}
+		ev = append(ev, m)
+	}
+	if o.Len() != 0 || len(ev) != 4 || ev[0]["t"] != "step" || ev[0]["id"] != "open.start" ||
+		ev[1]["t"] != "wait" || ev[1]["id"] != "open.sunshine" || ev[1]["state"] != "waiting" || ev[1]["secs"] != 4.0 || ev[1]["of"] != 120.0 ||
+		ev[2]["t"] != "step_end" || ev[3]["t"] != "step" || ev[3]["id"] != "init.budget" {
+		t.Errorf("%v", ev)
+	}
+}

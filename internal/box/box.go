@@ -41,7 +41,15 @@ type Box struct {
 	R          local.Runner
 	Sleep      func(time.Duration)
 	Log        func(string)
-	TagKey     string
+	// Beat reports a wait as data, for the app: Out.Wait. Nil when nobody reads it.
+	Beat   func(id, state, text string, secs, of int)
+	TagKey string
+}
+
+func (b Box) beat(id, state, text string, secs, of int) {
+	if b.Beat != nil {
+		b.Beat(id, state, text, secs, of)
+	}
 }
 
 func (b Box) sleep(d time.Duration) {
@@ -111,6 +119,7 @@ func (b Box) WaitState(ctx context.Context, want string, timeout time.Duration) 
 	for waited := time.Duration(0); waited < timeout; waited += 3 * time.Second {
 		if ctx.Err() != nil {
 			b.Log("interrupted")
+			b.beat("box."+want, "interrupted", last, int(waited/time.Second), int(timeout/time.Second))
 			return false
 		}
 		now, err := b.State(ctx)
@@ -127,11 +136,14 @@ func (b Box) WaitState(ctx context.Context, want string, timeout time.Duration) 
 		}
 		if now == want {
 			b.Log(fmt.Sprintf("%s after %ds", now, int(waited/time.Second)))
+			b.beat("box."+want, "done", now, int(waited/time.Second), int(timeout/time.Second))
 			return true
 		}
+		b.beat("box."+want, "waiting", now, int(waited/time.Second), int(timeout/time.Second))
 		b.sleep(3 * time.Second)
 	}
 	b.Log(fmt.Sprintf("TIMEOUT after %ds, last state: %s", int(timeout/time.Second), last))
+	b.beat("box."+want, "timeout", last, int(timeout/time.Second), int(timeout/time.Second))
 	return false
 }
 
@@ -176,6 +188,7 @@ func (b Box) WaitImage(ctx context.Context, ami string, timeout time.Duration) b
 	for waited := time.Duration(0); waited < timeout; waited += 5 * time.Second {
 		if ctx.Err() != nil {
 			b.Log("interrupted")
+			b.beat("image.available", "interrupted", last, int(waited/time.Second), int(timeout/time.Second))
 			return false
 		}
 		now := "?"
@@ -192,15 +205,19 @@ func (b Box) WaitImage(ctx context.Context, ami string, timeout time.Duration) b
 		}
 		if now == "available" {
 			b.Log(fmt.Sprintf("available after %ds", int(waited/time.Second)))
+			b.beat("image.available", "done", now, int(waited/time.Second), int(timeout/time.Second))
 			return true
 		}
 		if now == "failed" {
 			b.Log("image creation FAILED")
+			b.beat("image.available", "failed", now, int(waited/time.Second), int(timeout/time.Second))
 			return false
 		}
+		b.beat("image.available", "waiting", now, int(waited/time.Second), int(timeout/time.Second))
 		b.sleep(5 * time.Second)
 	}
 	b.Log(fmt.Sprintf("TIMEOUT after %ds, last state: %s", int(timeout/time.Second), last))
+	b.beat("image.available", "timeout", last, int(timeout/time.Second), int(timeout/time.Second))
 	return false
 }
 

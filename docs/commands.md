@@ -18,6 +18,7 @@ on files beside the binary. Build it with `go build -o cg ./cmd/cg`.
 | `cg library push` | Mirror the games to S3 now (`--verify` for a full comparison) |
 | `cg library pull` | Restore the games from S3 now |
 | `cg games` | What Steam has: installed, downloading (with progress), running, archived |
+| `cg games --json` | The same as data: `games[]` (appid, name, state, bytes, percent, minutes_left, incomplete), `disk`, `inbound_bytes_per_sec` |
 | `cg games --volume` | The **old** EBS volume, if you still have one, and its monthly cost |
 | `cg snapshot` | Save an AMI of the box, waiting for AWS to finish (ten minutes or more). `--no-wait` starts it and returns. **Bills monthly** |
 | `cg snapshot --list` | What images exist and what they cost |
@@ -205,12 +206,37 @@ each have one job:
 
 | Event | When | Fields |
 |---|---|---|
-| `step` | a step begins | `text` |
+| `step` | a step begins | `text`, and `id` when the screen should follow it by name (see below) |
 | `line` | a detail line | `kind` (`ok`, `fail`, `warn`, `wait`, `kept`, `skip`, `info`, `cont`), `text`, `source` (`box` when it came from the instance) |
 | `step_end` | the step closes, including on exit or Ctrl+C | `rc`, `secs` |
+| `wait` | a wait is going on, or has ended | `id`, `state` (`waiting`, then once `done`, `timeout`, `interrupted` or `failed`), `text`, `secs` (so far), `of` (the limit; 0 for none) |
 | `report` / `block` | a whole report or notice | `title`, `text` (newline-escaped) |
 | `ask` | a question. Answer with one line on stdin | `id`, `prompt`, `default`, `choices`, `secret` |
 | `error` | `die` - the command then exits 1 | `text` |
+
+**Version 2** (`cg --version` prints `events 2`) only adds: the optional `id` on `step`, and `wait`.
+Nothing in version 1 changed. A screen should follow stages and waits **by id**, not by the words
+in `text`, which are for people and may be reworded.
+
+| Stage ids | |
+|---|---|
+| `preflight`, `init.watchdog`, `init.budget`, `init.launch`, `init.tailnet`, `init.build`, `init.host-watchdog`, `init.sunshine-account`, `init.pair`, `init.steam` | `cg init` |
+| `open.start`, `open.tailscale`, `open.sunshine`, `open.play` | `cg open` (steps only in events; the plain output is as it was) |
+| `pair` | `cg pair` |
+
+| Wait ids | Waiting for | Sent |
+|---|---|---|
+| `box.running`, `box.stopped`, `box.terminated` | the instance to reach that state | every 3 s |
+| `image.available` | a saved image to finish | every 5 s |
+| `init.tailnet` | the new box to join the tailnet | every 10 s |
+| `build.box`, `build.steam` | the build on the box (text is its current step), and Steam | every 10 s / 15 s |
+| `init.spot-allowance`, `init.instance-profile`, `init.bucket-name` | AWS to release something a moment after a delete | each retry |
+| `open.tailscale`, `open.sunshine` | the box to answer | every 2 s |
+| `destroy.security-group` | the network interface to be released | every 5 s |
+
+A wait always ends with one of `done`, `timeout`, `interrupted` or `failed`, so a screen never
+has to guess that it stopped. Off a terminal the dots that used to be printed for a wait are no
+longer printed at all - they were raw text among the events.
 
 Rules worth knowing:
 

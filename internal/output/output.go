@@ -41,7 +41,7 @@ func (o *Out) ts() string { return o.now().Format("2006-01-02T15:04:05-07:00") }
 
 var ansi = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
-var numeric = map[string]bool{"rc": true, "secs": true, "secret": true}
+var numeric = map[string]bool{"rc": true, "secs": true, "of": true, "secret": true}
 
 // Event writes one event line to stderr: {"t":..., "at":..., k:v...}. kv is
 // alternating keys and values; a number field with no value is 0.
@@ -94,6 +94,40 @@ func (o *Out) Say(text string) {
 		return
 	}
 	fmt.Fprintf(o.Stdout, "\n%s  ==> %s\n", o.ts(), text)
+}
+
+// SayID is Say for a step the app follows by id; plain, it is exactly Say.
+func (o *Out) SayID(id, text string) {
+	if o.JSON {
+		o.End(0)
+		o.Event("step", "id", id, "text", text)
+		o.open, o.began = true, o.now()
+		return
+	}
+	o.Say(text)
+}
+
+// Stage starts a step the app can name: in events a step with a stable id, so a
+// screen follows it by id and not by the words. Plain, it prints nothing - the
+// commands that use it already say each stage in their own lines, and their
+// plain output is not to change.
+func (o *Out) Stage(id, text string) {
+	if o.JSON {
+		o.End(0)
+		o.Event("step", "id", id, "text", text)
+		o.open, o.began = true, o.now()
+	}
+}
+
+// Wait states for a wait that is in progress: how long so far (secs) and, when
+// there is a limit, of how long (of; 0 for none). state is waiting while it
+// goes on, then done, timeout or interrupted once. It is sent in events only: the
+// plain output of each wait is its own and stays as it was. Sent often enough
+// that a screen can show it is alive, and by id so it can say which wait.
+func (o *Out) Wait(id, state, text string, secs, of int) {
+	if o.JSON {
+		o.Event("wait", "id", id, "state", state, "text", text, "secs", fmt.Sprint(secs), "of", fmt.Sprint(of))
+	}
 }
 
 // End closes the step in progress, if any, with the exit status it ended in.

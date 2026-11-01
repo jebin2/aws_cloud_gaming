@@ -91,7 +91,7 @@ func (c *Checker) die(text string) (Result, int) {
 
 // Run is the whole preflight. It returns what it settled and an exit status.
 func (c *Checker) Run(ctx context.Context) (Result, int) {
-	c.Out.Say("preflight")
+	c.Out.SayID("preflight", "preflight")
 	region, typ, host := c.Env.Region(), c.Env.Setting("GAME_INSTANCE_TYPE"), c.Env.Host()
 
 	// --- local tools: checked by name, all at once ---

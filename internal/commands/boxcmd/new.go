@@ -52,7 +52,7 @@ func New(ctx context.Context, get config.Lookup, env *config.Env, out *output.Ou
 	sun := sunshine.Client{}
 	d := Deps{
 		Box: box.Box{EC2: client, ID: env.Get("GAME_INSTANCE_ID"), Host: host, Node: node, Key: filepath.Join(home, ".ssh", host+".pem"), R: r,
-			Log: out.Log, TagKey: config.TagKey},
+			Log: out.Log, Beat: out.Wait, TagKey: config.TagKey},
 		Out: out, Ask: a, Env: env, R: r, Sun: sun,
 		Pair:        sunshine.Pairer{C: sun, R: r, Sleep: time.Sleep, Log: out.Log},
 		Player:      stream.Player{R: r, Get: env.Get, CacheDir: cache, Echo: out.Echo, Log: out.Log, Warn: func(t string) { out.LogAs("warn", t) }},
@@ -120,7 +120,7 @@ func NewDestroyDeps(ctx context.Context, env *config.Env, client *ec2.Client, ou
 		SSM: func(r string) teardown.SSMAPI { return ssm.NewFromConfig(regionCfg(r)) },
 		IAM: iamc, Say: out.Say, Log: out.Log, Fail: func(s string) { out.LogAs("fail", s) },
 		Wait: func(ctx context.Context, r, id string) bool {
-			return box.Box{EC2: ec2.NewFromConfig(regionCfg(r)), ID: id, Log: out.Log}.WaitState(ctx, "terminated", 600*time.Second)
+			return box.Box{EC2: ec2.NewFromConfig(regionCfg(r)), ID: id, Log: out.Log, Beat: out.Wait}.WaitState(ctx, "terminated", 600*time.Second)
 		},
 	}
 	all := &AllDeps{EC2: client, Budgets: budgets.NewFromConfig(us), Account: acct, W: store, Teardown: td,

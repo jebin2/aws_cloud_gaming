@@ -15,22 +15,40 @@ import (
 )
 
 // waitFor waits for something to come up, a dot per try.
-func (d Deps) waitFor(ctx context.Context, desc string, tries int, ok func() bool) bool {
-	fmt.Fprint(d.Out.Stdout, desc)
+func (d Deps) waitFor(ctx context.Context, id, desc string, tries int, ok func() bool) bool {
+	// Off a terminal the dots would be raw text among the events; the wait is
+	// reported as events instead, one every poll.
+	dots := !d.Out.JSON
+	if dots {
+		fmt.Fprint(d.Out.Stdout, desc)
+	}
+	limit := tries * 2
 	for i := 0; i < tries; i++ {
 		// Ctrl-C and SIGTERM cancel ctx; without this the loop ran to its end.
 		if ctx.Err() != nil {
-			fmt.Fprint(d.Out.Stdout, " interrupted\n")
+			if dots {
+				fmt.Fprint(d.Out.Stdout, " interrupted\n")
+			}
+			d.Out.Wait(id, "interrupted", desc, i*2, limit)
 			return false
 		}
 		if ok() {
-			fmt.Fprint(d.Out.Stdout, " ok\n")
+			if dots {
+				fmt.Fprint(d.Out.Stdout, " ok\n")
+			}
+			d.Out.Wait(id, "done", desc, i*2, limit)
 			return true
 		}
-		fmt.Fprint(d.Out.Stdout, ".")
+		if dots {
+			fmt.Fprint(d.Out.Stdout, ".")
+		}
+		d.Out.Wait(id, "waiting", desc, i*2, limit)
 		d.sleep(2 * time.Second)
 	}
-	fmt.Fprint(d.Out.Stdout, " TIMEOUT\n")
+	if dots {
+		fmt.Fprint(d.Out.Stdout, " TIMEOUT\n")
+	}
+	d.Out.Wait(id, "timeout", desc, limit, limit)
 	return false
 }
 
@@ -106,6 +124,7 @@ func (d Deps) Open(ctx context.Context) int {
 	// auto-stop once it sat idle, by AWS taking a spot one back - used to be
 	// "started" anyway: AWS refused, its words went to stderr, and the session
 	// ended with nothing said at all.
+	d.Out.Stage("open.start", "starting the machine")
 	st, err := d.Box.State(ctx)
 	if err != nil {
 		e := err.Error()
@@ -154,7 +173,8 @@ func (d Deps) Open(ctx context.Context) int {
 	}
 
 	node := d.Box.Node
-	if !d.waitFor(ctx, "waiting for tailscale", 60, func() bool {
+	d.Out.Stage("open.tailscale", "connecting over Tailscale")
+	if !d.waitFor(ctx, "open.tailscale", "waiting for tailscale", 60, func() bool {
 		_, err := d.R.Run(ctx, local.Cmd{Name: "tailscale", Args: []string{"ping", "-c", "1", "--timeout", "5s", node}})
 		return err == nil
 	}) {
@@ -174,7 +194,8 @@ func (d Deps) Open(ctx context.Context) int {
 	}
 
 	ip, _ := d.Box.IP(ctx)
-	if !d.waitFor(ctx, "waiting for sunshine", 60, func() bool {
+	d.Out.Stage("open.sunshine", "starting the game stream")
+	if !d.waitFor(ctx, "open.sunshine", "waiting for sunshine", 60, func() bool {
 		addr := net.JoinHostPort(ip, "47989")
 		if d.Dial != nil {
 			return d.Dial(addr, 2*time.Second) == nil
@@ -198,6 +219,7 @@ func (d Deps) Open(ctx context.Context) int {
 	// The stream itself is every machine's; starting the AWS box, above, is this
 	// file's.
 	app := d.Env.Get("GAME_APP")
+	d.Out.Stage("open.play", "playing")
 	d.Player.Play(ctx, ip, app)
 
 	// Closing Moonlight ends the session and nothing else. The machine is kept for

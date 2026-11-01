@@ -113,19 +113,38 @@ func Keys(ns []Node) map[string]bool {
 
 // Wait waits for a new node to join. It reports the name and how long it took.
 func Wait(ctx context.Context, r local.Runner, before map[string]bool, host string, timeout time.Duration, sleep func(time.Duration), log func(string)) (string, bool) {
-	var beat time.Duration
+	return WaitBeat(ctx, r, before, host, timeout, sleep, log, nil)
+}
+
+// WaitBeat is Wait that also reports each poll as data (Out.Wait), and stops
+// when the run is interrupted instead of waiting out the rest of the half hour.
+func WaitBeat(ctx context.Context, r local.Runner, before map[string]bool, host string, timeout time.Duration, sleep func(time.Duration), log func(string), beat func(id, state, text string, secs, of int)) (string, bool) {
+	if beat == nil {
+		beat = func(string, string, string, int, int) {}
+	}
+	const id, what = "init.tailnet", "waiting for the box to join the tailnet"
+	of := int(timeout / time.Second)
+	var last time.Duration
 	for waited := time.Duration(0); waited < timeout; waited += 10 * time.Second {
+		if ctx.Err() != nil {
+			log("interrupted")
+			beat(id, "interrupted", what, int(waited/time.Second), of)
+			return "", false
+		}
 		if found := New(Nodes(ctx, r), before, host); found != "" {
 			log("joined as '" + found + "' after " + itoa(int(waited/time.Second)) + "s")
+			beat(id, "done", what, int(waited/time.Second), of)
 			return found, true
 		}
-		if waited-beat >= 60*time.Second {
+		if waited-last >= 60*time.Second {
 			log("still waiting for the box to join (" + itoa(int(waited/time.Second)) + "s)")
-			beat = waited
+			last = waited
 		}
+		beat(id, "waiting", what, int(waited/time.Second), of)
 		sleep(10 * time.Second)
 	}
 	log("TIMEOUT after " + itoa(int(timeout/time.Minute)) + "m - no new node joined the tailnet")
+	beat(id, "timeout", what, of, of)
 	return "", false
 }
 
