@@ -117,10 +117,16 @@ var ErrShutdown = errors.New("shutdown behaviour is wrong")
 // call is therefore safe, but only if the attribute really is what it should be,
 // so check rather than assume.
 func CheckShutdown(ctx context.Context, c ShutdownAPI, id string, out func(string)) error {
-	life := ""
-	if o, err := c.DescribeInstances(ctx, &ec2.DescribeInstancesInput{InstanceIds: []string{id}}); err == nil && len(o.Reservations) > 0 && len(o.Reservations[0].Instances) > 0 {
-		life = string(o.Reservations[0].Instances[0].InstanceLifecycle)
+	o, err := c.DescribeInstances(ctx, &ec2.DescribeInstancesInput{InstanceIds: []string{id}})
+	if err == nil && (len(o.Reservations) == 0 || len(o.Reservations[0].Instances) == 0) {
+		err = errors.New("the instance is not listed")
 	}
+	if err != nil {
+		// Guessing "on demand" would try to change a spot box, which AWS refuses,
+		// and blame the wrong thing.
+		return fmt.Errorf("could not tell whether %s is spot or on demand: %s", id, firstLine(err))
+	}
+	life := string(o.Reservations[0].Instances[0].InstanceLifecycle)
 	want := "stop"
 	if life == "spot" {
 		want = "terminate"

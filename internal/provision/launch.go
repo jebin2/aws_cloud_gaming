@@ -173,8 +173,14 @@ func (p Provisioner) image(ctx context.Context, host string) string {
 func (p Provisioner) securityGroup(ctx context.Context, a Params) (string, error) {
 	name := a.Host + "-sg"
 	var sg string
+	hasRule := false
 	if o, err := p.EC2.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{GroupNames: []string{name}}); err == nil && len(o.SecurityGroups) > 0 {
 		sg = aws.ToString(o.SecurityGroups[0].GroupId)
+		for _, r := range o.SecurityGroups[0].IpPermissions {
+			if aws.ToString(r.IpProtocol) == "udp" && aws.ToInt32(r.FromPort) == 41641 {
+				hasRule = true
+			}
+		}
 	}
 	if sg == "" {
 		// The only inbound rule is Tailscale's UDP port. Without it, Tailscale
@@ -190,9 +196,14 @@ func (p Provisioner) securityGroup(ctx context.Context, a Params) (string, error
 			return "", fmt.Errorf("could not create the security group: %s", firstLine(err))
 		}
 		sg = aws.ToString(o.GroupId)
+	}
+	// A group left by an earlier run that died between creating it and opening the
+	// port has no rule, and Tailscale would quietly fall back to a relay. So the rule
+	// is checked on a group that already exists, not only on a new one.
+	if !hasRule {
 		if _, err := p.EC2.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{GroupId: aws.String(sg), IpPermissions: []ec2types.IpPermission{{
 			IpProtocol: aws.String("udp"), FromPort: aws.Int32(41641), ToPort: aws.Int32(41641),
-			IpRanges: []ec2types.IpRange{{CidrIp: aws.String("0.0.0.0/0"), Description: aws.String("tailscale direct path")}}}}}); err != nil {
+			IpRanges: []ec2types.IpRange{{CidrIp: aws.String("0.0.0.0/0"), Description: aws.String("tailscale direct path")}}}}}); err != nil && !strings.Contains(err.Error(), "InvalidPermission.Duplicate") {
 			return "", fmt.Errorf("could not open the tailscale port: %s", firstLine(err))
 		}
 	}

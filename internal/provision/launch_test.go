@@ -26,6 +26,7 @@ type cloud struct {
 	existing    string
 	images      []ec2types.Image
 	sg          string
+	sgRules     []ec2types.IpPermission // what the existing group already allows
 	keyExists   bool
 	volume      string
 	assoc       bool
@@ -69,7 +70,7 @@ func (c *cloud) DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGro
 	if c.sg == "" {
 		return nil, errors.New("InvalidGroup.NotFound")
 	}
-	return &ec2.DescribeSecurityGroupsOutput{SecurityGroups: []ec2types.SecurityGroup{{GroupId: aws.String(c.sg)}}}, nil
+	return &ec2.DescribeSecurityGroupsOutput{SecurityGroups: []ec2types.SecurityGroup{{GroupId: aws.String(c.sg), IpPermissions: c.sgRules}}}, nil
 }
 func (c *cloud) CreateSecurityGroup(context.Context, *ec2.CreateSecurityGroupInput, ...func(*ec2.Options)) (*ec2.CreateSecurityGroupOutput, error) {
 	c.calls = append(c.calls, "create-sg")
@@ -360,5 +361,22 @@ func TestInitWaitsOutTheSpotAllowanceOfTheBoxThatJustDied(t *testing.T) {
 	var le *LaunchError
 	if _, err = p.Run(context.Background(), a); !errors.As(err, &le) || c.runs < 10 || c.runs > 25 {
 		t.Errorf("err=%v runs=%d", err, c.runs)
+	}
+}
+
+// A run that died between creating the group and opening the port leaves a group
+// with no rule; the next run used to reuse it as it was, and Tailscale ran on a relay.
+func TestAnExistingGroupWithoutTheTailscalePortGetsIt(t *testing.T) {
+	p, c, _, _, a := rig(t)
+	c.sg = "sg-old"
+	if _, err := p.Run(context.Background(), a); err != nil || !strings.Contains(strings.Join(c.calls, ","), "ingress udp 41641 0.0.0.0/0") || strings.Contains(strings.Join(c.calls, ","), "create-sg") {
+		t.Errorf("%v %v", err, c.calls)
+	}
+	// One that has it is left alone.
+	p, c, _, _, a = rig(t)
+	c.sg = "sg-old"
+	c.sgRules = []ec2types.IpPermission{{IpProtocol: aws.String("udp"), FromPort: aws.Int32(41641), ToPort: aws.Int32(41641)}}
+	if _, err := p.Run(context.Background(), a); err != nil || strings.Contains(strings.Join(c.calls, ","), "ingress") {
+		t.Errorf("%v %v", err, c.calls)
 	}
 }

@@ -271,9 +271,13 @@ type shutdownFake struct {
 	life, behavior string
 	modified       string
 	modifyErr      error
+	describeErr    error
 }
 
 func (s *shutdownFake) DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+	if s.describeErr != nil {
+		return nil, s.describeErr
+	}
 	return &ec2.DescribeInstancesOutput{Reservations: []ec2types.Reservation{{Instances: []ec2types.Instance{{InstanceLifecycle: ec2types.InstanceLifecycleType(s.life)}}}}}, nil
 }
 func (s *shutdownFake) ModifyInstanceAttribute(_ context.Context, in *ec2.ModifyInstanceAttributeInput, _ ...func(*ec2.Options)) (*ec2.ModifyInstanceAttributeOutput, error) {
@@ -314,6 +318,16 @@ func TestShutdownMustMeanStopOnDemandAndTerminateOnSpot(t *testing.T) {
 	f = &shutdownFake{behavior: "terminate", modifyErr: errors.New("UnauthorizedOperation")}
 	if err := CheckShutdown(context.Background(), f, "i-1", say); err == nil {
 		t.Error("a watchdog that would delete the disk must stop the build")
+	}
+}
+
+// When AWS cannot say what kind of box it is, guessing on demand would try to
+// change a spot box and report the wrong failure. It says it could not tell.
+func TestShutdownCheckDoesNotGuessWhenTheInstanceCannotBeRead(t *testing.T) {
+	f := &shutdownFake{life: "spot", behavior: "terminate", describeErr: errors.New("RequestLimitExceeded: slow down")}
+	err := CheckShutdown(context.Background(), f, "i-1", func(string) {})
+	if err == nil || !strings.Contains(err.Error(), "could not tell whether i-1 is spot or on demand") || f.modified != "" {
+		t.Errorf("%v modified=%q", err, f.modified)
 	}
 }
 
