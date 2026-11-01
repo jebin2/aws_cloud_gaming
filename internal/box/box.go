@@ -4,6 +4,7 @@
 package box
 
 import (
+	"runtime"
 	"context"
 	"fmt"
 	"io"
@@ -249,6 +250,16 @@ func (b Box) Stream(ctx context.Context, w io.Writer, command string) error {
 	if !ok {
 		return fmt.Errorf("'%s' is not on the tailnet", b.Node)
 	}
-	args := append([]string{"-c", `exec "$@" 2>&1`, "sh", "ssh"}, b.sshArgs(ip, "10", command)...)
-	return b.R.Stream(ctx, w, "sh", args...)
+	name, args := streamCommand(runtime.GOOS, b.sshArgs(ip, "10", command))
+	return b.R.Stream(ctx, w, name, args...)
+}
+
+// streamCommand is ssh with its standard error folded into the stream. A shell does
+// the folding where there is one; Windows has none, so ssh runs on its own and its
+// error text goes to cg's own standard error - where the app reads it anyway.
+func streamCommand(goos string, ssh []string) (string, []string) {
+	if goos == "windows" {
+		return "ssh", ssh
+	}
+	return "sh", append([]string{"-c", `exec "$@" 2>&1`, "sh", "ssh"}, ssh...)
 }
