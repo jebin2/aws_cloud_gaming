@@ -120,6 +120,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('WENT | ' + (document.querySelector('.nav-item.on') || {}).dataset?.view);
     const age = () => document.getElementById('refresh-age').textContent + ' stale=' + document.getElementById('refresh-age').classList.contains('out-of-date');
     paintCost(COST({}));
+    { const n = new Date(); out.push('MONTHEND | ' + new Date(n.getFullYear(), n.getMonth() + 1, 0).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })); }
     out.push('AGE | ' + age());
     costNowAt = new Date(Date.now() - 2 * 86400000);
     paintRefreshAge();
@@ -173,7 +174,11 @@ cat > "$T/r/probe.js" <<'PROBE'
     // A restart: nothing in this window, the last bill on this laptop.
     const kept = JSON.parse(localStorage.getItem('cg.lastCost'));
     kept.at = new Date(Date.now() - 2 * 86400000).toISOString();
-    if (new Date(kept.at).getMonth() !== new Date().getMonth()) kept.at = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 0, 1).toISOString();
+    if (new Date(kept.at).getMonth() !== new Date().getMonth()) {
+      // The 1st: the bill is kept from this month's first minute, and what happened since belongs to a month that has gone.
+      kept.at = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 0, 1).toISOString();
+      localStorage.removeItem('cg.billChanges');
+    }
     localStorage.setItem('cg.lastCost', JSON.stringify(kept));
     costNow = null; costNowAt = null;
     document.getElementById('c-month-card').textContent = '';
@@ -226,7 +231,7 @@ row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
 echo "1. the month, in rupees at cg's one rate"
 contains "the total in rupees"           "$(row 'REAL c-month')" "₹167"
-contains "  hours played and the pace"   "$(row 'REAL c-month-sub')" "so far on the whole AWS account · 2.4 h runtime · projected ₹553 by 31 Oct"
+contains "  hours played and the pace"   "$(row 'REAL c-month-sub')" "so far on the whole AWS account · 2.4 h runtime · projected ₹553 by $(sed 's/^MONTHEND | //' <<<"$(row MONTHEND)")"
 contains "the budget is yours, as set"   "$(row 'REAL c-cap-note')" "Budget ₹5,000/month. Alert by email only; nothing is stopped."
 lacks    "  not AWS's dollars turned back" "$(row 'REAL c-cap-note')" "5,412"
 contains "  and the bar's verdict"       "$(row 'REAL CHIP')" "under budget"
