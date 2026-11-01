@@ -89,15 +89,12 @@ test('cg is always run with CG_JSON=1', async () => {
   assert.equal(events.find(e => e.t === 'line').text, 'json=1');
 });
 
-test('Windows goes through WSL, since the scripts are bash', () => {
-  const { file, argv } = spawnArgs('/home/me/cloud_gaming', ['library', 'list']);
-  if (process.platform === 'win32') {
-    assert.equal(file, 'wsl.exe');
-    assert.match(argv.at(-1), /CG_JSON=1 \.\/cg 'library' 'list'/);
-  } else {
-    assert.equal(file, './cg');
-    assert.deepEqual(argv, ['library', 'list']);
-  }
+test('cg runs natively everywhere: ./cg, or cg.exe on Windows', () => {
+  const { file, argv, opts } = spawnArgs('/home/me/cloud_gaming', ['library', 'list']);
+  assert.deepEqual(argv, ['library', 'list']);
+  assert.equal(opts.cwd, '/home/me/cloud_gaming');
+  if (process.platform === 'win32') assert.match(file, /cg\.exe$/);
+  else assert.equal(file, './cg');
 });
 
 test('Stop signals everything cg started, not just cg', async () => {

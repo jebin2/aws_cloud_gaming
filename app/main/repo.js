@@ -13,6 +13,9 @@
 const path = require('node:path');
 const fs = require('node:fs');
 
+// What the engine is called on this system.
+const CG = process.platform === 'win32' ? 'cg.exe' : 'cg';
+
 // findRepo({ env, dirname, resourcesPath, homedir }) -> directory holding `cg`
 //
 // Order matters: a checkout beside the app wins over the bundled copy, because
@@ -31,7 +34,7 @@ function findRepo({ env = process.env, dirname = __dirname,
 
   // `cg` must be a FILE. This is the whole bug.
   for (const dir of candidates) {
-    try { if (fs.statSync(path.join(dir, 'cg')).isFile()) return dir; } catch { /* next */ }
+    try { if (fs.statSync(path.join(dir, CG)).isFile()) return dir; } catch { /* next */ }
   }
   // Nothing matched. Return the checkout guess so the failure names a sensible
   // path, and let the spawn report it - which it now can, because a spawn error
@@ -39,4 +42,4 @@ function findRepo({ env = process.env, dirname = __dirname,
   return candidates.find(c => c !== env.CG_REPO) || candidates[0];
 }
 
-module.exports = { findRepo };
+module.exports = { findRepo, CG };

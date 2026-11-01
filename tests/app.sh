@@ -109,7 +109,10 @@ echo "3c. the package carries cg, and cg carries what it sends to the box"
 packed=$(python3 -I -c '
 import json
 d = json.load(open("app/package.json"))
-print(" ".join(r["from"].removeprefix("../") for r in d["build"]["extraResources"]))')
+res = list(d["build"]["extraResources"])
+for k in ("linux", "mac", "win"):
+    res += d["build"][k].get("extraResources", [])
+print(" ".join(r["from"].removeprefix("../") for r in res))')
 contains "  cg itself ships"             "$packed" "cg"
 contains "  and .env.example with it"    "$packed" ".env.example"
 for d in lib host lambda; do
@@ -693,11 +696,22 @@ contains "  and where settings go instead"  \
          "$(cat .github/workflows/desktop-release.yml)" "~/.config/cg/.env"
 lacks    "  not that a checkout is required" \
          "$(cat .github/workflows/desktop-release.yml)" "This app needs the repo"
-# Only Linux is published, because only Linux has been run. The day someone
-# tries macOS or Windows, the matrix is one line.
-check    "  it publishes Linux only"     "$(grep -c 'windows-latest, macos-latest: untested' .github/workflows/desktop-release.yml)" "1"
-check    "  and builds no untested installer" "$(grep -cE '\*\.exe|\*\.dmg' .github/workflows/desktop-release.yml)" "0"
-contains "  the release says why"        "$(cat .github/workflows/desktop-release.yml)" "an untested download is worse than none"
+# Three platforms, each with its own cg: the program is named for the system it is
+# built for, and the packager takes the right one.
+wf="$(cat .github/workflows/desktop-release.yml)"
+contains "it builds for macOS"                "$wf" "runs-on: macos-latest"
+contains "  and for Windows"                  "$wf" "runs-on: windows-latest"
+contains "  the DMG for Intel and for Apple Silicon" "$wf" "--mac --x64"
+contains "  (cg built for each)"              "$wf" "CG_GOARCH: arm64"
+contains "  a portable Windows exe"           "$wf" "artifacts/**/*-portable.exe"
+contains "  and the dmgs go in the release"   "$wf" "artifacts/**/*.dmg"
+contains "  only a tag publishes"             "$wf" "if: startsWith(github.ref, 'refs/tags/v')"
+contains "  and says they are unsigned and new" "$wf" "Not signed."
+contains "  and what has been tried"          "$wf" "built but not yet used by a person"
+check    "mac builds a dmg"                  "$(node -e 'console.log(require("./app/package.json").build.mac.target.join(","))')" "dmg"
+check    "  windows builds portable"          "$(node -e 'console.log(require("./app/package.json").build.win.target.join(","))')" "portable"
+check    "  each carries its own cg"          "$(node -e 'const b=require("./app/package.json").build;console.log([b.linux,b.mac,b.win].map(p=>p.extraResources[0].to).join(","))')" "cg/cg,cg/cg,cg/cg.exe"
+check    "  built by one script that knows the name" "$(node -e 'console.log(require("fs").readFileSync("app/scripts/build-cg.js","utf8").includes("cg.exe") ? "yes" : "no")')" "yes"
 check    "the deb can be built"          "$(node -e 'const b=require("./app/package.json");console.log(b.homepage && b.build.linux.maintainer ? "yes" : "no")')" "yes"
 
 echo "6. the actions that spend money ask first"

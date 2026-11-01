@@ -7,19 +7,14 @@
 // back: events on stderr, the command's own data on stdout, answers on stdin.
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
+const path = require('node:path');
 
-// Windows has no bash. The realistic path is WSL, where the same scripts run
-// unchanged - rewriting them in PowerShell would fork the source of truth.
-// Every word is single-quoted for bash, the repo path included: a path with a
-// space or a quote in it (C:\Users\Jo Smith) was split into several words.
-const sh = a => `'${String(a).replace(/'/g, "'\\''")}'`;
-
+// cg is one static program, so the same file runs everywhere: ./cg on Linux and
+// macOS, cg.exe on Windows. (The app used to go through WSL there, back when the
+// engine was a pile of bash scripts.)
 function spawnArgs(repo, args) {
   if (process.platform === 'win32') {
-    // wslpath turns C:\... into /mnt/c/..., and takes the path as an argument so
-    // it needs no quoting of its own.
-    const line = `cd "$(wslpath -u ${sh(repo)})" && CG_JSON=1 ./cg ${args.map(sh).join(' ')}`;
-    return { file: 'wsl.exe', argv: ['--', 'bash', '-lc', line], opts: {} };
+    return { file: path.join(repo, 'cg.exe'), argv: args, opts: { cwd: repo, windowsHide: true } };
   }
   return { file: './cg', argv: args, opts: { cwd: repo } };
 }
@@ -85,8 +80,9 @@ function answer(child, text) {
 // Ctrl+C, to the whole group. cg traps it, closes its step and exits 130.
 function interrupt(child) {
   if (!child || child.killed) return false;
-  // Windows has no process groups: wsl.exe would die and leave cg running in
-  // WSL. taskkill /T walks the tree; inside WSL the signal then reaches cg.
+  // Windows has no process groups or SIGINT to send: taskkill /T walks the tree
+  // (cg, and the ssh and aws it started) and ends it. cg cannot close its step
+  // first there, so a Stop on Windows is abrupt.
   if (process.platform === 'win32') {
     try { spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); return true; }
     catch { return false; }

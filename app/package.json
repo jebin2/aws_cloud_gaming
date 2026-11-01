@@ -10,7 +10,7 @@
     "build:css": "tailwindcss -i renderer/src.css -o renderer/tailwind.css --minify",
     "dist": "npm run build:cg && npm run build:css && electron-builder",
     "pack": "npm run build:cg && npm run build:css && electron-builder --dir",
-    "build:cg": "cd .. && CGO_ENABLED=0 go build -trimpath -ldflags \"-s -w\" -o cg ./cmd/cg"
+    "build:cg": "node scripts/build-cg.js"
   },
   "devDependencies": {
     "electron": "^39.2.4",
@@ -40,27 +40,44 @@
       "icon": "build/icon.png",
       "synopsis": "Desktop viewer for cg, the cloud gaming rig",
       "description": "Runs cg, a single program, and renders what it says. It holds no AWS logic of its own.",
-      "maintainer": "jebin2 <noreply@users.noreply.github.com>"
+      "maintainer": "jebin2 <noreply@users.noreply.github.com>",
+      "extraResources": [
+        {
+          "from": "../cg",
+          "to": "cg/cg"
+        }
+      ]
     },
     "mac": {
       "target": [
         "dmg"
       ],
       "category": "public.app-category.games",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "cg-${version}-mac-${arch}.${ext}",
+      "identity": null,
+      "extraResources": [
+        {
+          "from": "../cg",
+          "to": "cg/cg"
+        }
+      ]
     },
     "win": {
       "target": [
-        "nsis"
+        "portable"
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "cg-${version}-win-portable.${ext}",
+      "extraResources": [
+        {
+          "from": "../cg.exe",
+          "to": "cg/cg.exe"
+        }
+      ]
     },
     "executableName": "cg",
     "extraResources": [
-      {
-        "from": "../cg",
-        "to": "cg/cg"
-      },
       {
         "from": "../.env.example",
         "to": "cg/.env.example"

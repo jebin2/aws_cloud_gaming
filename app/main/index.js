@@ -7,7 +7,7 @@
 const path = require('node:path');
 const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require('electron');
 const { run, answer, interrupt } = require('./runner');
-const { findRepo } = require('./repo');
+const { findRepo, CG } = require('./repo');
 const { intelOnly } = require('./gpu');
 
 // Off the NVIDIA GPU of a laptop that has an Intel one too - see main/gpu.js.
@@ -50,7 +50,7 @@ let CONTRACT = DEFAULT_CONTRACT;
 function loadContract() {
   try {
     const out = require('node:child_process')
-      .execFileSync('./cg', ['--contract'], { cwd: REPO, timeout: 10000, encoding: 'utf8' });
+      .execFileSync(path.join(REPO, CG), ['--contract'], { cwd: REPO, timeout: 10000, encoding: 'utf8', windowsHide: true });
     const c = JSON.parse(out);
     if (!Array.isArray(c.runs_alone)) throw new Error('no runs_alone');
     CONTRACT = c;
@@ -136,7 +136,7 @@ ipcMain.handle('cg:asks', () => CONTRACT.asks || []);
 // Re-reads the contract when there is a cg but no contract, so that a window
 // started before cg was installed can be told to try again. Local, and free.
 function engineFacts() {
-  const cg = path.join(REPO, 'cg');
+  const cg = path.join(REPO, CG);
   let found = false;
   try { found = require('node:fs').statSync(cg).isFile(); } catch { /* not there */ }
   if (found && !CONTRACT.runs_alone) loadContract();

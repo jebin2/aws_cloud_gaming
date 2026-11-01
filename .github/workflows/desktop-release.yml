@@ -6,12 +6,14 @@
 # build can say which one it is. The release is a DRAFT - look at it, write
 # what changed, then publish.
 #
-# LINUX ONLY, deliberately. electron-builder will happily produce a .exe and a
-# .dmg, and both would be untested downloads: macOS has never been tried, and
-# on Windows the app shells through WSL while Stop kills a POSIX process group
-# that cannot reach inside it. Shipping them would be shipping a guess. The
-# matrix below is one line away from all three - add them back when someone has
-# actually run the thing on that machine.
+# Three platforms: Linux (AppImage, deb, pacman, tar.gz), macOS (a .dmg for Intel and one
+# for Apple Silicon) and Windows (one portable .exe). cg itself - the program the
+# app runs - has been run through a full build, play and delete on a real Mac and a
+# real Windows PC; the desktop app on those two has been BUILT here but not yet used by
+# a person, and the release notes say so. The macOS and Windows files are not signed.
+#
+# Run it by hand (Actions > Desktop Release > Run workflow) to get the builds as
+# downloads of the run, without a release: only a v* tag publishes a draft.
 #
 # Free: GitHub Actions costs nothing on a public repository.
 name: Desktop Release
@@ -34,14 +36,10 @@ jobs:
     uses: ./.github/workflows/test.yml
     secrets: inherit
 
-  build:
-    name: Build ${{ matrix.os }}
+  build-linux:
+    name: Build Linux
     needs: test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]   # windows-latest, macos-latest: untested, see the header
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
@@ -107,9 +105,114 @@ jobs:
             app/dist/*.tar.gz
           if-no-files-found: error
 
+  build-macos:
+    name: Build macOS
+    needs: test
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Stamp Version From Tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: ./app
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+        shell: bash
+
+      - name: Install Dependencies
+        working-directory: ./app
+        run: npm ci
+
+      # One runner makes both apps: the Apple Silicon one natively, the Intel one
+      # cross-built (cg is Go, Electron ships both). Each gets the cg for its own
+      # architecture, so the DMG for an Intel iMac carries an Intel cg.
+      - name: Build (macOS, Apple Silicon)
+        working-directory: ./app
+        env:
+          CG_GOARCH: arm64
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist -- --mac --arm64 --publish never
+
+      - name: Build (macOS, Intel)
+        working-directory: ./app
+        env:
+          CG_GOARCH: amd64
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist -- --mac --x64 --publish never
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-artifacts
+          path: app/dist/*.dmg
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows
+    needs: test
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Stamp Version From Tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: ./app
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+        shell: bash
+
+      - name: Install Dependencies
+        working-directory: ./app
+        run: npm ci
+
+      # cg.exe goes in beside the app (see app/scripts/build-cg.js), and the
+      # portable build is the one file you can run from anywhere, no installer.
+      - name: Build (Windows, portable)
+        working-directory: ./app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist -- --win --publish never
+        shell: bash
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-artifacts
+          path: app/dist/*-portable.exe
+          if-no-files-found: error
+
   release:
     name: Create Release
-    needs: build
+    needs: [build-linux, build-macos, build-windows]
+    # Only a tag publishes. A run started by hand leaves the builds as downloads of
+    # the run and nothing else.
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Download All Artifacts
@@ -130,6 +233,8 @@ jobs:
             artifacts/**/*.deb
             artifacts/**/*.pacman
             artifacts/**/*.tar.gz
+            artifacts/**/*.dmg
+            artifacts/**/*-portable.exe
           # Said on every release: what the download actually is, and what it
           # still needs from you before it can build anything on AWS.
           body: |
@@ -159,6 +264,8 @@ jobs:
             | `.deb` | Debian, Ubuntu, Mint - `sudo dpkg -i <file>` |
             | `.tar.gz` | anything else - extract it and run `cg` inside |
             | `.AppImage` | one file, but it needs FUSE 2 on the machine |
+            | `-mac-x64.dmg` / `-mac-arm64.dmg` | macOS - Intel, or Apple Silicon (M1 and later) |
+            | `-win-portable.exe` | Windows - one file, no installer, run it from anywhere |
 
             The AppImage is listed last on purpose. AppImage type-2 needs `libfuse.so.2`, which
             distributions have largely moved past - on Arch that means `pacman -S fuse2` first,
@@ -173,12 +280,21 @@ jobs:
 
                 ./cg check --fix
 
-            ## Linux only
+            ## macOS and Windows: what has been tried
 
-            These are the only builds published, because Linux is the only place the app has
-            been run. `cg` is Go and builds for macOS and Windows too - but
-            an untested download is worse than none, so they are not built until someone has
-            actually used one.
+            `cg` itself has been run through a whole cycle on a real Mac (Intel) and a real
+            Windows PC: build the machine, check it, save the library, play, delete it, delete
+            everything, and nothing left billing. These two downloads are the desktop app
+            around it, and the app on those systems has been built but not yet used by a person
+            on them - treat them as a first try, and say what breaks.
+
+            - **Not signed.** macOS will say the app is from an unidentified developer: open it
+              with right-click > Open, or run `xattr -cr /Applications/cg.app` once.
+              Windows SmartScreen will say the same: More info > Run anyway.
+            - **Moonlight is not bundled.** Install it (the stream itself); the app finds it in
+              its usual place. `cg check --fix` can install it with `brew` or `winget`.
+            - **Stop is abrupt on Windows.** There is no Ctrl+C to send, so Stop ends `cg` where
+              it stands; run the same command again to carry on.
 
             From source on any platform: `cd app && npm install && npm start`.
         env:
