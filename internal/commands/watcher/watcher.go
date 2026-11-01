@@ -86,7 +86,7 @@ func HostIdleLimit(script []byte) int {
 
 func (w *Watcher) sshTo(ctx context.Context, ip, command string) (string, error) {
 	out, err := w.Runner.Output(ctx, "ssh", "-i", w.Home+"/.ssh/"+w.Host+".pem",
-		"-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10", "-o", "BatchMode=yes", "ubuntu@"+ip, command)
+		"-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "ubuntu@"+ip, command)
 	return string(out), err
 }
 

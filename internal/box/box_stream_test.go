@@ -16,3 +16,16 @@ func TestStreamingNeedsNoShellOnWindows(t *testing.T) {
 		t.Errorf("%s %v", name, args)
 	}
 }
+
+// A command streamed from a box that disappears mid-run (spot reclaim, a destroy from
+// another window) waited on a dead TCP connection for hours: ConnectTimeout only
+// covers connecting. Every ssh to the box now notices a silent connection within a
+// minute (15 s x 4).
+func TestEverySSHToTheBoxNoticesADeadConnection(t *testing.T) {
+	args := strings.Join(Box{Key: "k"}.sshArgs("1.2.3.4", "10", "echo hi"), " ")
+	for _, want := range []string{"ServerAliveInterval=15", "ServerAliveCountMax=4", "BatchMode=yes", "ConnectTimeout=10"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("lacks %s: %s", want, args)
+		}
+	}
+}

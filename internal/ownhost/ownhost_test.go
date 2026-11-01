@@ -82,7 +82,7 @@ func TestFactsAreReadWithOneReadOnlySSH(t *testing.T) {
 	c, r := conn(t)
 	r.Contains["sh -s"] = "os=Linux\nid=arch\nuser=me\nmachine_id=m1\n"
 	f := c.ReadFacts(context.Background(), "me@pc")
-	if f["id"] != "arch" || len(r.Ran) != 1 || !strings.HasPrefix(r.Ran[0], "ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes me@pc sh -s") {
+	if f["id"] != "arch" || len(r.Ran) != 1 || !strings.HasPrefix(r.Ran[0], "ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 me@pc sh -s") {
 		t.Errorf("%v\n%v", f, r.Ran)
 	}
 	// What is sent is the build's own release function followed by the questions.

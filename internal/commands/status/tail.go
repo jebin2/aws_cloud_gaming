@@ -55,7 +55,7 @@ func (g *Gatherer) nodeIP(ctx context.Context) string {
 func (g *Gatherer) ssh(ctx context.Context, ip string, timeout int, command string) ([]byte, error) {
 	return g.Runner.Output(ctx, "ssh", "-i", filepath.Join(g.Home, ".ssh", g.Host+".pem"),
 		"-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout="+strconv.Itoa(timeout),
-		"-o", "BatchMode=yes", "ubuntu@"+ip, command)
+		"-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "ubuntu@"+ip, command)
 }
 
 func (g *Gatherer) instanceState(ctx context.Context, id string) string {

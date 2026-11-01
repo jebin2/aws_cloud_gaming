@@ -64,7 +64,7 @@ func (b Box) SSHArgs(ip string, command ...string) []string { return b.sshArgs(i
 
 func (b Box) sshArgs(ip string, command ...string) []string {
 	a := []string{"-i", b.Home + "/.ssh/" + b.Host + ".pem", "-o", "StrictHostKeyChecking=accept-new",
-		"-o", "ConnectTimeout=10", "-o", "BatchMode=yes", "ubuntu@" + ip}
+		"-o", "ConnectTimeout=10", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "ubuntu@" + ip}
 	return append(a, command...)
 }
 
@@ -109,7 +109,7 @@ func (b Box) SSH(ctx context.Context, args []string, out *output.Out) int {
 	if len(args) > 0 {
 		return b.Runner.Passthrough(ctx, "ssh", b.sshArgs(ip, args...)...)
 	}
-	return b.Runner.Passthrough(ctx, "ssh", "-i", b.Home+"/.ssh/"+b.Host+".pem", "-o", "StrictHostKeyChecking=accept-new", "ubuntu@"+ip)
+	return b.Runner.Passthrough(ctx, "ssh", "-i", b.Home+"/.ssh/"+b.Host+".pem", "-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "ubuntu@"+ip)
 }
 
 var (

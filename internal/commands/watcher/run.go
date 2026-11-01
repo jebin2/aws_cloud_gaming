@@ -75,7 +75,7 @@ func Run(ctx context.Context, env *config.Env, opts Options, out *output.Out) in
 			return 1
 		}
 		err := w.Runner.Stream(ctx, out.Stdout, "ssh", "-i", home+"/.ssh/"+host+".pem", "-o", "StrictHostKeyChecking=accept-new",
-			"-o", "ConnectTimeout=10", "-o", "BatchMode=yes", "ubuntu@"+ip, "journalctl -t idle-watchdog -f")
+			"-o", "ConnectTimeout=10", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "ubuntu@"+ip, "journalctl -t idle-watchdog -f")
 		if err != nil && ctx.Err() == nil {
 			return 1
 		}

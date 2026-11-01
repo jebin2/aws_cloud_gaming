@@ -139,7 +139,7 @@ func TestSSH(t *testing.T) {
 		t.Errorf("%v", r.Ran)
 	}
 	b.SSH(context.Background(), nil, out)
-	if got := r.Ran[len(r.Ran)-1]; got != "ssh -i /h/.ssh/gamevps.pem -o StrictHostKeyChecking=accept-new ubuntu@100.64.0.9" {
+	if got := r.Ran[len(r.Ran)-1]; got != "ssh -i /h/.ssh/gamevps.pem -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o ServerAliveCountMax=4 ubuntu@100.64.0.9" {
 		t.Errorf("a shell: %q", got)
 	}
 	// The remote's exit status is cg's.

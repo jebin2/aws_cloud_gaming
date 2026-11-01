@@ -230,7 +230,7 @@ func (b Box) IP(ctx context.Context) (string, bool) {
 }
 
 func (b Box) sshArgs(ip string, timeout string, command string) []string {
-	return []string{"-i", b.Key, "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=" + timeout, "-o", "BatchMode=yes", "ubuntu@" + ip, command}
+	return []string{"-i", b.Key, "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=" + timeout, "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "ubuntu@" + ip, command}
 }
 
 // SSH runs a command on the box and returns what it printed. Standard input only

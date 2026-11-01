@@ -134,7 +134,7 @@ func (c Conn) EnsureKey(ctx context.Context) error {
 }
 
 func (c Conn) opts(connect string) []string {
-	o := []string{"-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=" + connect, "-o", "BatchMode=yes"}
+	o := []string{"-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=" + connect, "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"}
 	if _, err := os.Stat(c.Key); err == nil {
 		o = append([]string{"-i", c.Key}, o...)
 	}
