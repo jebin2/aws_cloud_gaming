@@ -30,7 +30,7 @@ func TestVersionAndUnknowns(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) != 2 || !strings.HasPrefix(lines[0], "cg ") || lines[1] != "events 2" {
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "cg ") || lines[1] != "events 3" {
 		t.Errorf("--version printed %q", out)
 	}
 	c := exec.Command(bin, "--nope")

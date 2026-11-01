@@ -4341,6 +4341,10 @@ function paintElapsed() { paintRun(); }
 // Kept out of the log on purpose: the log holds 200 lines and auto-scrolls, so by
 // the time a run ends the line that said why is usually gone.
 let buildFailures = [];
+// The `problem` event of this failure, if cg sent one: the words and the kind to pick
+// buttons by. Without one (an older cg, or a failure with no event yet) the panel
+// falls back to reading cg's lines, as it always did.
+let buildProblem = null;
 // cg marks only the HEADLINE of a failure report as `fail`; the AWS message and
 // the remedy underneath it are ordinary continuation lines. A relayed script
 // exits straight after printing one, so once a failure starts, everything until
@@ -4373,6 +4377,24 @@ const FAIL_ACTS = {
   AuthFailure: () => [['Connect AWS again', () => openAwsKey()]],
   UnauthorizedOperation: () => [['Connect AWS again', () => openAwsKey()]],
 };
+// The same buttons by the problem's kind, which is what cg promises to keep
+// stable (docs/commands.md). A kind with no entry has nothing to offer beyond
+// Try again, which is already beside the step.
+FAIL_ACTS.no_capacity = FAIL_ACTS.InsufficientInstanceCapacity;
+FAIL_ACTS.limit = FAIL_ACTS.VcpuLimitExceeded;
+FAIL_ACTS.key_missing = FAIL_ACTS['InvalidKeyPair.NotFound'];
+FAIL_ACTS.not_allowed = FAIL_ACTS.UnauthorizedOperation;
+FAIL_ACTS.sign_in_refused = FAIL_ACTS.AuthFailure;
+FAIL_ACTS.not_enabled = FAIL_ACTS.OptInRequired;
+
+// What the panel says under the headline for a problem: whether money is still
+// being spent first, then what to do.
+function problemWhy(p) {
+  const money = p.charging === 'other'
+    ? 'Nothing was started by this build, but a game PC from before is still charging.'
+    : 'Nothing was started. No charge.';
+  return [money, p.text].filter(Boolean).join('  ');
+}
 
 // cg's own words, read back: the marked line is the headline, and the two
 // lines under it are the facts worth keeping above the fold.
@@ -4429,6 +4451,15 @@ function buildFail(text) {
   // three things worth doing as buttons - because "cg config set GAME_SPOT 0"
   // is a command to type at someone who is looking at a window.
   const { head, code, said, safe, other } = failSummary(whole);
+  if (buildProblem) {
+    $('b-fail-head').textContent = buildProblem.title;
+    $('b-fail-why').textContent = problemWhy(buildProblem);
+    buildFailActions(buildProblem.kind);
+    $('b-fail').classList.remove('hidden');
+    $('b-bar-track').hidden = true;
+    paintRun();
+    return;
+  }
   $('b-fail-head').textContent = head || 'the build stopped';
   $('b-fail-why').textContent = [safe ? 'Nothing was launched. No charges.' : '',
                                  other ? 'Nothing was launched by this build, but that machine is still billing.' : '',
@@ -4444,6 +4475,7 @@ function buildFail(text) {
 
 function buildFailClear() {
   buildFailures = [];
+  buildProblem = null;
   buildFailing = false;
   $('b-fail').classList.add('hidden');
   $('b-fail-head').textContent = '';
@@ -4488,6 +4520,7 @@ window.cg.onEvent(({ id, event }) => {
     if (event.kind === 'fail') { buildFailing = true; buildFail(event.text); }
     else if (buildFailing && event.t === 'line') buildFail(event.text);
     if (event.t === 'step') buildFailing = false;
+    if (event.t === 'problem') buildProblem = event;
     if (event.t === 'error') buildFail(event.text);
     if (event.t === 'exit') {
       buildProgressDone(event.rc);

@@ -104,6 +104,21 @@ cat > "$T/r/probe.js" <<'PROBE'
                      '    AWS said: Max spot instance count exceeded',
                      '    error code: MaxSpotInstanceCountExceeded']) buildFail(l);
     read('HELD');
+
+    // cg's `problem` event: the words come from it, the buttons from its kind, and
+    // the raw AWS report stays behind in the details.
+    buildFailClear();
+    buildProblem = { t: 'problem', kind: 'no_capacity', title: 'AWS has no cheap game PCs free here right now',
+                     text: 'Try again in a few minutes.', charging: 'no', code: 'InsufficientInstanceCapacity', said: 'Insufficient capacity.' };
+    for (const l of CAPACITY) buildFail(l);
+    read('PLAIN');
+    buildFailClear();
+    buildProblem = { t: 'problem', kind: 'spot_slot_held', title: 'A game PC you started earlier is still there',
+                     text: 'Delete it, then build again.', charging: 'other', code: 'MaxSpotInstanceCountExceeded', said: '' };
+    for (const l of ['a spot machine in ap-south-1 is still there: i-0abc (running)']) buildFail(l);
+    read('PLAINHELD');
+    buildFailClear();
+    out.push('PLAINCLEARED | ' + (buildProblem === null));
   } catch (e) { out.push('THREW | ' + e.message); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -168,6 +183,18 @@ check    "  and no invented buttons"     "$(row 'UNKNOWN ACTS')" "UNKNOWN ACTS |
 contains "spot allowance held: names the machine" "$(row 'HELD HEAD')" "holds your spot allowance: i-0abc (running)"
 contains "  and says it is billing"      "$(row 'HELD WHY')"  "Nothing was launched by this build, but that machine is still billing."
 lacks    "  never 'no charges'"          "$(row 'HELD WHY')"  "No charges"
+
+echo "4b. cg's own words for a launch problem (the problem event)"
+contains "the title is the headline"      "$(row 'PLAIN HEAD')" "AWS has no cheap game PCs free here right now"
+contains "  money first"                   "$(row 'PLAIN WHY')"  "Nothing was started. No charge."
+contains "  then what to do"               "$(row 'PLAIN WHY')"  "Try again in a few minutes."
+lacks    "  no AWS code or ids on the face" "$(row 'PLAIN WHY')"  "InsufficientInstanceCapacity"
+lacks    "  nor the setting to type"       "$(row 'PLAIN WHY')"  "GAME_SPOT"
+contains "buttons follow the kind"         "$(row 'PLAIN ACTS')" "Pick another machine"
+contains "the details keep the full report" "$(row 'PLAIN KEPT')" "true"
+contains "an earlier game PC still charging says so" "$(row 'PLAINHELD WHY')" "a game PC from before is still charging"
+lacks    "  never 'no charge'"              "$(row 'PLAINHELD WHY')" "No charge"
+contains "clearing forgets the problem"    "$(row PLAINCLEARED)" "true"
 
 echo "5. clearing it clears all of it"
 contains "the panel hides again"         "$(row CLEARED)" "hidden"

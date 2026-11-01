@@ -265,6 +265,7 @@ func (i *Init) provision(ctx context.Context, pre check.Result, ntfy string) (pr
 	if err != nil {
 		var le *provision.LaunchError
 		if errors.As(err, &le) {
+			i.Out.Problem(le.Problem.Kind, le.Problem.Title, le.Problem.Text, le.Problem.Charging, le.Code, le.Said, le.Region)
 			for _, l := range le.Report {
 				i.cont("", l)
 			}

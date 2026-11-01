@@ -130,6 +130,17 @@ func (o *Out) Wait(id, state, text string, secs, of int) {
 	}
 }
 
+// Problem states a failure for a screen: kind (stable), title and text (words for
+// a person), charging ("no", or "other" when an earlier game PC is still billing),
+// and the code and sentence AWS gave, for the details. Events only: the plain
+// output has its own report and is not to change.
+func (o *Out) Problem(kind, title, text, charging, code, said, region string) {
+	if o.JSON {
+		o.Event("problem", "kind", kind, "title", title, "text", text, "charging", charging,
+			"code", code, "said", said, "region", region)
+	}
+}
+
 // End closes the step in progress, if any, with the exit status it ended in.
 // It is what makes every step end - on success, on failure and on interrupt.
 func (o *Out) End(rc int) {

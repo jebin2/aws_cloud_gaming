@@ -11,7 +11,11 @@ import "encoding/json"
 // (a stable name for the stage, so a screen follows it by id and not by the words),
 // and the wait event ({"t":"wait","id","state","text","secs","of"}), sent for every
 // wait while it goes on and once when it ends.
-const EventsVersion = 2
+//
+// Version 3 adds the problem event ({"t":"problem","kind","title","text","charging",
+// "code","said","region"}): a failure in words for a person, with a stable kind to
+// pick buttons by. Only a launch refused by AWS sends it so far.
+const EventsVersion = 3
 
 // Command is one entry in the registry: a path such as ["library", "push"]
 // and what the app needs to know about running it.

@@ -177,3 +177,19 @@ func TestStageAndWaitAreEventsOnly(t *testing.T) {
 		t.Errorf("%v", ev)
 	}
 }
+
+func TestProblemIsAnEventAndNothingInPlainOutput(t *testing.T) {
+	var o, e bytes.Buffer
+	out := &Out{Stdout: &o, Stderr: &e}
+	out.Problem("no_capacity", "Title", "Text", "no", "InsufficientInstanceCapacity", "none left", "ap-south-1")
+	if e.Len() != 0 || o.Len() != 0 {
+		t.Errorf("plain output has its own report: %q %q", o.String(), e.String())
+	}
+	out = &Out{Stdout: &o, Stderr: &e, JSON: true}
+	out.Problem("no_capacity", "Title", "Text", "no", "InsufficientInstanceCapacity", "none left", "ap-south-1")
+	for _, want := range []string{`"t":"problem"`, `"kind":"no_capacity"`, `"title":"Title"`, `"charging":"no"`, `"code":"InsufficientInstanceCapacity"`, `"said":"none left"`, `"region":"ap-south-1"`} {
+		if !strings.Contains(e.String(), want) {
+			t.Errorf("lacks %s: %s", want, e.String())
+		}
+	}
+}

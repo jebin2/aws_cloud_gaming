@@ -75,7 +75,12 @@ type Result struct {
 }
 
 // LaunchError carries what to say when run-instances refused.
-type LaunchError struct{ Report []string }
+type LaunchError struct {
+	Report  []string
+	Problem Problem
+	// Code and Said are what AWS answered, for the details.
+	Code, Said, Region string
+}
 
 func (e *LaunchError) Error() string {
 	return "could not launch the instance - see the launch error above"
@@ -355,7 +360,7 @@ func (p Provisioner) launch(ctx context.Context, a Params) (id string, restored 
 	if f.Code == "MaxSpotInstanceCountExceeded" {
 		f.Holders, f.HoldersKnown = SpotHolders(ctx, p.EC2)
 	}
-	return "", false, &LaunchError{Report: f.Report()}
+	return "", false, &LaunchError{Report: f.Report(), Problem: f.Plain(), Code: f.Code, Said: f.Message, Region: f.Region}
 }
 
 // userData uploads the host bundle and renders the build around its address.
