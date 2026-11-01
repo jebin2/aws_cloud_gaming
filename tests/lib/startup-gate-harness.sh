@@ -93,7 +93,32 @@ window.cg = {
   engine: () => Promise.resolve(window.__engine === undefined
     ? { repo: '/home/u/cloud_gaming', cg: '/home/u/cloud_gaming/cg', found: true, contract: true }
     : window.__engine),
-  onEvent(cb) { window.__emit = (id, event) => cb({ id, event }); return () => {}; },
+  // The fake sends what the real cg sends: the id of each stage and the part of
+  // the machine a progress line starts. The suites write the words; this is cg's
+  // mapping (internal/build PartOf, and the ids on the Say calls in internal/commands).
+  onEvent(cb) {
+    const STAGES = [[/^preflight/, 'preflight'], [/cloud watchdog/, 'init.watchdog'], [/budget/, 'init.budget'],
+      [/reusing the existing|starting the existing/, 'init.launch.reused'],
+      [/^provisioning|^launching|^confirming what shutdown/, 'init.launch'],
+      [/join the tailnet|on the tailnet|key expiry/, 'init.tailnet'], [/^building the box/, 'init.build'],
+      [/on-host watchdog/, 'init.host-watchdog'], [/sunshine account/i, 'init.sunshine-account'],
+      [/pairing/, 'init.pair'], [/^waiting for steam/i, 'init.steam'],
+      [/^checking .* is ready to stream/, 'host.check'], [/^streaming from/, 'host.play']];
+    const PARTS = [[/^installing base packages/, 'base'], [/^setting up local nvme/i, 'disk'], [/^installing the idle watchdog/, 'idle-watchdog'],
+      [/^installing tailscale/, 'tailscale'], [/^installing the s3 game library/, 'library'], [/^installing desktop/, 'desktop'],
+      [/nvidia driver|nvidia-driver|nvidia drm/i, 'nvidia'], [/^configuring headless x/i, 'display'], [/^configuring autologin/, 'autologin'],
+      [/^installing steam/, 'steam'], [/^installing firefox/, 'firefox'], [/^installing audio/, 'audio'], [/^installing sunshine/, 'sunshine'],
+      [/^finishing up/, 'finishing']];
+    const first = (table, text) => (table.find(([re]) => re.test(text)) || [])[1];
+    window.__emit = (id, event) => {
+      if (event.t === 'step' && !event.id) event = { ...event, id: first(STAGES, event.text) };
+      cb({ id, event });
+      // A progress marker also names its piece, as the follower does.
+      const part = (event.t === 'step' || event.t === 'line') && first(PARTS, event.text || '');
+      if (part) cb({ id, event: { t: 'part', id: part } });
+    };
+    return () => {};
+  },
 };
 STUB
 

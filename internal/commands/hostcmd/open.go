@@ -38,14 +38,14 @@ func (d Deps) Open(ctx context.Context, args []string, out *output.Out) int {
 	}
 	// Two steps, which the app shows as the AWS machine's session is shown: the
 	// machine answering, then the stream.
-	out.Say("checking " + name + " is ready to stream")
+	out.SayID("host.check", "checking "+name+" is ready to stream")
 	if !d.Sun.Answers(ctx, ip) {
 		out.Die(fmt.Sprintf("Sunshine is not answering on %s (%s) - is it on, and a desktop signed in?", name, ip))
 		return 1
 	}
 	session.Claim(d.SessionFile, d.Now())
 	defer session.Release(d.SessionFile)
-	out.Say("streaming from " + name)
+	out.SayID("host.play", "streaming from "+name)
 	app := d.Env.Get("GAME_APP")
 	d.Player.Play(ctx, ip, app)
 	return 0

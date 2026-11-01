@@ -166,7 +166,7 @@ func (i *Init) Run(ctx context.Context) int {
 	// A reused instance may be stopped, in which case nothing will ever join the
 	// tailnet until it is started.
 	if st, err := bx.State(ctx); err == nil && st == "stopped" {
-		i.Out.SayID("init.launch", "starting the existing instance")
+		i.Out.SayID("init.launch.reused", "starting the existing instance")
 		_ = bx.Start(ctx)
 		bx.WaitState(ctx, "running", 600*time.Second)
 	}
@@ -327,7 +327,7 @@ func (i *Init) findNode(ctx context.Context, bx box.Box, before map[string]bool,
 	}
 	switch {
 	case reusedNode != "":
-		i.Out.SayID("init.launch", fmt.Sprintf("reusing the existing box, already on the tailnet as '%s'", reusedNode))
+		i.Out.SayID("init.launch.reused", fmt.Sprintf("reusing the existing box, already on the tailnet as '%s'", reusedNode))
 		// Nice to have, not a gate: give the path a realistic budget and carry on
 		// either way, since ssh will establish it soon enough regardless.
 		if i.ping(ctx, reusedNode, 3, "5s") {
@@ -386,7 +386,7 @@ func (i *Init) finish(ctx context.Context, bx box.Box, pre check.Result, id, nod
 	}
 	remote := remoteBox{bx}
 	f := &build.Finisher{
-		Follow: build.Follower{R: remote, Log: i.Out.Log, Beat: i.Out.Wait, Sleep: i.Sleep, Target: "ubuntu@" + node, Key: bx.Key},
+		Follow: build.Follower{R: remote, Log: i.Out.Log, Beat: i.Out.Wait, Part: func(id string) { i.Out.Event("part", "id", id) }, Sleep: i.Sleep, Target: "ubuntu@" + node, Key: bx.Key},
 		Sun:    i.Sun, Pair: i.Pair, Run: i.R, Login: login, Save: save, Name: "the box", Takes: i.takes(),
 		IP: ip, Say: i.Out.Say, SayID: i.Out.SayID, Log: i.Out.Log, Sleep: i.Sleep, HasMoonlight: i.Moonlight,
 	}

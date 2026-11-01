@@ -294,7 +294,15 @@ const LOG_WORD = { step: 'Step', error: 'Problem', fail: 'Problem', warn: 'Note'
 function logShown(row) {
   return logFilter === 'all' || row.dataset.group === logFilter;
 }
+// A wait is an event every few seconds; the log keeps the first and the last of
+// each, and the live line shows the rest.
+let lastWaitLogged = '';
 function logLine(event) {
+  if (event.t === 'part') return;
+  if (event.t === 'wait') {
+    if (event.state === 'waiting' && lastWaitLogged === event.id) return;
+    lastWaitLogged = event.state === 'waiting' ? event.id : '';
+  }
   const kind = event.kind || event.t;
   const row = document.createElement('div');
   row.dataset.group = logKind(event);
@@ -307,7 +315,8 @@ function logLine(event) {
     : LOG_WORD[event.t === 'line' ? event.kind : event.t] || '';
   row.querySelector('.k').className = 'k ' + (event.t === 'exit' ? (event.rc === 0 ? 'ok' : 'fail') : kind);
   row.querySelector('.t').textContent =
-    event.text || event.prompt || (event.t === 'exit' ? (event.rc === 0 ? 'Finished' : 'Did not finish') : '');
+    (event.t === 'wait' ? `${event.text}${event.state === 'waiting' ? '' : ' - ' + event.state} (${event.secs} s)` : event.text)
+    || event.prompt || (event.t === 'exit' ? (event.rc === 0 ? 'Finished' : 'Did not finish') : '');
   const log = $('log');
   log.append(row);
   // A long build is thousands of lines; the window keeps the last 2000.
@@ -3743,35 +3752,29 @@ let buildSteps = 0;
 // and shows as its current line. A delete or a session has no such list: each
 // of cg's steps is its own row.
 const BUILD_STEPS = [
-  { doing: 'Checking your setup', done: 'Checked your setup', match: /cloud watchdog|preflight/i },
-  { doing: 'Setting the budget alert', done: 'Budget alert set', match: /budget/i },
-  { doing: 'Launching the machine', done: 'Machine launched', bills: true,
-    match: /provisioning|launching|confirming what shutdown|starting the existing|reusing the existing/i },
-  { doing: 'Connecting to Tailscale', done: 'Connected to Tailscale',
-    match: /join the tailnet|on the tailnet|key expiry/i },
-  { doing: 'Installing the software', done: 'Software installed', parts: true,
-    match: /building the box|^installing|^installed |^configuring|^setting up|^disabling|nvidia/i },
-  { doing: 'Restoring games', done: 'Games restored', games: true, match: /finishing up|restor/i },
-  { doing: 'Connecting Moonlight', done: 'Moonlight connected', match: /on-host watchdog|sunshine account|pairing/i },
-  { doing: 'Starting Steam', done: 'Steam started', match: /waiting for steam/i },
+  { doing: 'Checking your setup', done: 'Checked your setup', ids: ['preflight', 'init.watchdog'] },
+  { doing: 'Setting the budget alert', done: 'Budget alert set', ids: ['init.budget'] },
+  { doing: 'Launching the machine', done: 'Machine launched', bills: true, ids: ['init.launch'] },
+  { doing: 'Connecting to Tailscale', done: 'Connected to Tailscale', ids: ['init.tailnet'] },
+  { doing: 'Installing the software', done: 'Software installed', parts: true, ids: ['init.build'] },
+  { doing: 'Restoring games', done: 'Games restored', games: true, part: 'finishing' },
+  { doing: 'Connecting Moonlight', done: 'Moonlight connected', ids: ['init.host-watchdog', 'init.sunshine-account', 'init.pair'] },
+  { doing: 'Starting Steam', done: 'Steam started', ids: ['init.steam'] },
 ];
-// A session, as steps. `cg open` announces none - it prints lines, and under
-// the app its waits print only once they are over ("waiting for sunshine ok") -
-// so each step is closed by the line that says it is done.
+// A session, as steps. cg announces each by id (open.start ... open.play), and
+// open.ended once Moonlight has closed.
 const OPEN_STEPS = [
-  { doing: 'Starting the machine', done: 'Machine started',
-    end: /instance already running|^running after|waiting for tailscale|^\s*pong|\bvia\b/i },
-  { doing: 'Connecting over Tailscale', done: 'Connected over Tailscale',
-    end: /waiting for tailscale ok|tailscale is up|^\s*pong|\bvia\b/i },
-  { doing: 'Starting the game stream', done: 'Game stream ready', end: /waiting for sunshine ok|sunshine is up|^disk:/i },
-  { doing: 'Playing', done: 'Played', end: /session ended/i, stream: true,
+  { doing: 'Starting the machine', done: 'Machine started', id: 'open.start' },
+  { doing: 'Connecting over Tailscale', done: 'Connected over Tailscale', id: 'open.tailscale' },
+  { doing: 'Starting the game stream', done: 'Game stream ready', id: 'open.sunshine' },
+  { doing: 'Playing', done: 'Played', id: 'open.play', stream: true,
     note: 'Close Moonlight to end the session. The machine keeps running until auto-stop or Delete.' },
 ];
 // A session on a machine of yours: nothing to start and nothing billed, so two
 // steps - cg host open announces each - where the AWS machine has four.
 const HOST_OPEN_STEPS = [
-  { doing: 'Checking the machine', done: 'Machine ready', end: /^streaming from/i },
-  { doing: 'Playing', done: 'Played', end: /session ended/i, stream: true,
+  { doing: 'Checking the machine', done: 'Machine ready', id: 'host.check' },
+  { doing: 'Playing', done: 'Played', id: 'host.play', stream: true,
     note: 'Close Moonlight to end the session.' },
 ];
 const openSteps = r => (r && r.host ? HOST_OPEN_STEPS : OPEN_STEPS);
@@ -3780,28 +3783,29 @@ const openSteps = r => (r && r.host ? HOST_OPEN_STEPS : OPEN_STEPS);
 // Shown as chips inside "Installing the software", ticked as the box moves on:
 // the step installs far more than a driver, and said so in three words.
 const BUILD_PARTS = [
-  ['Base system', /^installing base packages/i],
-  ['Game disk', /^setting up local nvme/i],
-  ['Auto-stop', /^installing the idle watchdog/i],
-  ['Tailscale', /^installing tailscale/i],
-  ['Game library', /^installing the s3 game library/i],
-  ['Desktop', /^installing desktop/i],
-  ['NVIDIA driver', /nvidia driver|nvidia-driver|nvidia drm/i],
-  ['Display', /^configuring headless x/i],
-  ['Autologin', /^configuring autologin/i],
-  ['Steam', /^installing steam/i],
-  ['Firefox', /^installing firefox/i],
-  ['Audio', /^installing audio/i],
-  ['Sunshine', /^installing sunshine/i],
+  ['Base system', 'base'],
+  ['Game disk', 'disk'],
+  ['Auto-stop', 'idle-watchdog'],
+  ['Tailscale', 'tailscale'],
+  ['Game library', 'library'],
+  ['Desktop', 'desktop'],
+  ['NVIDIA driver', 'nvidia'],
+  ['Display', 'display'],
+  ['Autologin', 'autologin'],
+  ['Steam', 'steam'],
+  ['Firefox', 'firefox'],
+  ['Audio', 'audio'],
+  ['Sunshine', 'sunshine'],
 ];
 // Each part: not started, started (the latest one to start is in progress), or
-// done - because a later one has started, or the whole step has finished.
-function partStates(lines, stepDone) {
-  const firstAt = BUILD_PARTS.map(([, re]) => lines.findIndex(l => re.test(l)));
-  const started = firstAt.map(i => i >= 0);
-  const latest = firstAt.reduce((best, i, k) => (i > (best < 0 ? -1 : firstAt[best]) ? k : best), -1);
+// done - because a later one has started, or the whole step has finished. cg
+// names each piece as the box starts it (a "part" event); `seen` is those ids in
+// the order they came.
+function partStates(seen, stepDone) {
+  const at = BUILD_PARTS.map(([, id]) => seen.indexOf(id));
+  const latest = at.reduce((best, i, k) => (i > (best < 0 ? -1 : at[best]) ? k : best), -1);
   return BUILD_PARTS.map(([name], k) => [name,
-    stepDone ? 'done' : !started[k] ? 'waiting' : k === latest ? 'running' : 'done']);
+    stepDone ? 'done' : at[k] < 0 ? 'waiting' : k === latest ? 'running' : 'done']);
 }
 
 // The run on screen: which kind, when it began, its steps and their lines, and
@@ -3815,7 +3819,7 @@ let lastBuild = null, lastBuildLog = '';   // whether "How it was built" is unfo
 const runRow = text => ({ name: text, start: Date.now(), end: null, lines: [], failed: false });
 function runBegin(kind, opts = {}) {
   run = { kind, start: Date.now(), billFrom: null, state: 'running', idx: -1, steps: [],
-          games: opts.games || 0, gamesGb: opts.gamesGb || 0, apps: opts.apps || 'none',
+          games: opts.games || 0, gamesGb: opts.gamesGb || 0, apps: opts.apps || 'none', parts: [], wait: null,
           rate: kind === 'init' ? buildRate() : null };
   if (kind === 'init') run.steps = BUILD_STEPS.map(() => null);
   if (kind === 'open') {
@@ -3832,41 +3836,45 @@ function runBegin(kind, opts = {}) {
     }
   }
 }
-// A session's line: move past every step it says is over.
-function openLine(text) {
-  const steps = openSteps(run);
-  const last = steps.reduce((k, d, i) => (d.end.test(text) ? i : k), -1);
-  if (last < run.idx) return;
+// Moving to a step: the ones before it are over, it is the one in progress. Only
+// ever forwards - a stage cg names twice (init.launch, then init.launch.reused)
+// does not move the run back.
+function runEnter(defs, at) {
+  if (at <= run.idx) return false;
   const now = Date.now();
-  for (let i = 0; i <= last; i++) {
+  for (let i = 0; i < at; i++) {
     if (!run.steps[i]) run.steps[i] = { ...runRow(''), start: now };
     if (!run.steps[i].end) run.steps[i].end = now;
   }
-  if (last === steps.length - 1) { run.streamEnded = true; return; }
-  run.steps[last + 1] = runRow('');
-  run.idx = last + 1;
+  run.steps[at] = runRow('');
+  run.idx = at;
+  run.wait = null;
+  return true;
 }
+// cg names a stage by id; a screen follows the id and never the words.
+const idIs = (got, want) => got === want || (got || '').startsWith(want + '.');
 // A step cg announced: move to the step it belongs to, closing the ones before.
-function runStep(text) {
+function runStep(text, id) {
   if (!run) return;
   const now = Date.now();
-  if (run.kind === 'open') { runLine(text); return; }
+  if (run.kind === 'open') {
+    // The stream is over once Moonlight has closed: the session itself is not.
+    if (id === 'open.ended') { run.streamEnded = true; return; }
+    const at = openSteps(run).findIndex(d => d.id === id);
+    if (at < 0 || !runEnter(openSteps(run), at)) runLine(text);
+    return;
+  }
   // A machine that was there before this build: not its to delete on failure.
-  if (run.kind === 'init' && /reusing the existing|starting the existing/i.test(text)) run.reused = true;
+  if (run.kind === 'init' && idIs(id, 'init.launch.reused')) run.reused = true;
   if (run.kind !== 'init') {
     if (run.idx >= 0) run.steps[run.idx].end = now;
     run.steps.push(runRow(text));
     run.idx = run.steps.length - 1;
     return;
   }
-  const at = BUILD_STEPS.findIndex((d, i) => i >= Math.max(run.idx, 0) && d.match.test(text));
+  const at = BUILD_STEPS.findIndex(d => (d.ids || []).some(x => idIs(id, x)));
   if (at > run.idx) {
-    for (let i = 0; i < at; i++) {
-      if (!run.steps[i]) run.steps[i] = { ...runRow(''), start: now };
-      if (!run.steps[i].end) run.steps[i].end = now;
-    }
-    run.steps[at] = runRow('');
-    run.idx = at;
+    runEnter(BUILD_STEPS, at);
     // A step that was passed did not fail; whatever it said that sounded like
     // failure is not the headline of a later one.
     if (buildFailures.length) buildFailClear();
@@ -3877,13 +3885,27 @@ function runStep(text) {
   }
   if (run.idx >= 0) run.steps[run.idx].lines.push(text);
 }
+// The box started a piece of the machine (cg names it). The last piece, finishing
+// up, is the games step of its own.
+function runPart(id) {
+  if (!run || run.kind !== 'init' || !id) return;
+  if (!run.parts.includes(id)) run.parts.push(id);
+  const games = BUILD_STEPS.findIndex(d => d.part === id);
+  if (games >= 0 && runEnter(BUILD_STEPS, games)) {
+    const rent = BUILD_STEPS.findIndex(d => d.bills);
+    if (!run.billFrom && run.steps[rent]) run.billFrom = run.steps[rent].start;
+  }
+}
+// A wait that is going on, or how it ended. Only the latest is kept: the screen
+// shows one live line, and the log gets the first and the last of each wait.
+function runWait(e) {
+  if (!run) return;
+  run.wait = e.state === 'waiting' ? { id: e.id, text: e.text, secs: e.secs, of: e.of, at: Date.now() } : null;
+}
+const waitSecs = n => (n < 60 ? `${n} s` : `${Math.floor(n / 60)} min ${n % 60 ? (n % 60) + ' s' : ''}`.trim());
+const waitWords = w => `${w.text} · ${waitSecs(w.secs)}${w.of > 0 && w.of <= 600 ? ` of ${waitSecs(w.of)}` : ''}`;
 function runLine(text) {
   if (!run || run.idx < 0 || !text) return;
-  // The box reports its own progress as lines, not steps. Its last one, the
-  // reboot that waits for the game download, is a step of its own here.
-  if (run.kind === 'init' && /^finishing up/i.test(text)
-      && run.idx < BUILD_STEPS.findIndex(d => d.games)) { runStep(text); return; }
-  if (run.kind === 'open' && !run.streamEnded) openLine(text);
   const lines = run.steps[run.idx].lines;
   lines.push(text);
   if (lines.length > 400) lines.splice(0, lines.length - 400);
@@ -4163,7 +4185,7 @@ function paintRun() {
       const chips = document.createElement('div');
       chips.className = 'flex flex-wrap gap-space-xs mt-space-sm';
       chips.id = 'b-parts';
-      for (const [part, ps] of partStates(st.lines, false)) {
+      for (const [part, ps] of partStates(r.parts || [], false)) {
         chips.append(Object.assign(document.createElement('span'), {
           className: 'pill ' + (ps === 'done' ? 'pill-ok' : ps === 'running' ? 'pill-warn' : ''),
           textContent: ({ done: '\u2713 ', running: '\u25cf ', waiting: '\u2026 ' })[ps] + part }));
@@ -4174,12 +4196,21 @@ function paintRun() {
     }
     // Playing is not a wait: no progress sweep, and no echo of cg's last line.
     if (state === 'running' && !(def && def.stream)) {
-      const last = [...st.lines].reverse().find(Boolean);
+      // A wait cg is reporting says how long it has gone, and against what limit;
+      // otherwise the step's last line.
+      const w = r.wait;
+      const last = w ? waitWords(w) : [...st.lines].reverse().find(Boolean);
       if (last) body.append(Object.assign(document.createElement('p'),
         { className: 'font-code-sm text-code-sm text-on-surface-variant truncate mt-0.5', textContent: last }));
       const sweep = document.createElement('div');
       sweep.className = 'onb-progress mt-space-xs';
       sweep.append(document.createElement('i'));
+      // A short limit is a real measure (the wait gives up there); a long one is
+      // only a ceiling, and a bar filling towards it would promise too much.
+      if (w && w.of > 0 && w.of <= 600) {
+        sweep.classList.add('determinate');
+        sweep.firstChild.style.width = `${Math.min(100, (w.secs / w.of) * 100).toFixed(0)}%`;
+      }
       body.append(sweep);
     }
     if (state === 'failed') body.append(fail);
@@ -4246,7 +4277,7 @@ function paintRun() {
 
 // The live line and step heading for runs, now that the strip has no line of
 // its own: kept as functions because the event handler calls them.
-function buildStep(text) {
+function buildStep(text, id) {
   const log = $('b-log');
   if (log.dataset.fresh !== 'no') { log.textContent = ''; log.dataset.fresh = 'no'; buildStarted = Date.now(); }
   buildSteps += 1;
@@ -4260,7 +4291,7 @@ function buildStep(text) {
   head.append(label, meta);
   log.append(head);
   $('b-prog-step').textContent = text;
-  runStep(text);
+  runStep(text, id);
   paintRun();
   if ($('b-follow').checked) log.scrollTop = log.scrollHeight;
 }
@@ -4449,7 +4480,9 @@ window.cg.onEvent(({ id, event }) => {
   // but it is a session, and reads as one.
   const ownSession = job.cmd[0] === 'host' && job.cmd[1] === 'open';
   if ((job.write && job.cmd[0] !== 'library' && !job.aside) || ownSession) {
-    if (event.t === 'step') buildStep(event.text);
+    if (event.t === 'step') buildStep(event.text, event.id);
+    if (event.t === 'part') { runPart(event.id); paintRun(); }
+    if (event.t === 'wait') { runWait(event); paintRun(); }
     if (event.t === 'step_end') buildStepEnd(event);
     if (event.t === 'line' || (event.t === 'raw' && event.stream === 'stdout')) buildLine(event);
     if (event.kind === 'fail') { buildFailing = true; buildFail(event.text); }

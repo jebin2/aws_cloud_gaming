@@ -210,18 +210,21 @@ each have one job:
 | `line` | a detail line | `kind` (`ok`, `fail`, `warn`, `wait`, `kept`, `skip`, `info`, `cont`), `text`, `source` (`box` when it came from the instance) |
 | `step_end` | the step closes, including on exit or Ctrl+C | `rc`, `secs` |
 | `wait` | a wait is going on, or has ended | `id`, `state` (`waiting`, then once `done`, `timeout`, `interrupted` or `failed`), `text`, `secs` (so far), `of` (the limit; 0 for none) |
+| `part` | during a build, the box started a piece of the machine | `id` (`base`, `disk`, `idle-watchdog`, `tailscale`, `library`, `desktop`, `nvidia`, `display`, `autologin`, `steam`, `firefox`, `audio`, `sunshine`, `finishing`) |
 | `report` / `block` | a whole report or notice | `title`, `text` (newline-escaped) |
 | `ask` | a question. Answer with one line on stdin | `id`, `prompt`, `default`, `choices`, `secret` |
 | `error` | `die` - the command then exits 1 | `text` |
 
-**Version 2** (`cg --version` prints `events 2`) only adds: the optional `id` on `step`, and `wait`.
+**Version 2** (`cg --version` prints `events 2`) only adds: the optional `id` on `step`, and `wait` and `part`.
 Nothing in version 1 changed. A screen should follow stages and waits **by id**, not by the words
 in `text`, which are for people and may be reworded.
 
 | Stage ids | |
 |---|---|
 | `preflight`, `init.watchdog`, `init.budget`, `init.launch`, `init.tailnet`, `init.build`, `init.host-watchdog`, `init.sunshine-account`, `init.pair`, `init.steam` | `cg init` |
-| `open.start`, `open.tailscale`, `open.sunshine`, `open.play` | `cg open` (steps only in events; the plain output is as it was) |
+| `open.start`, `open.tailscale`, `open.sunshine`, `open.play`, `open.ended` | `cg open` (steps only in events; the plain output is as it was) |
+| `init.launch.reused` | `cg init` found a box already there (`init.launch` is the stage; the longer id says it was not made by this build) |
+| `host.check`, `host.play` | `cg host open` |
 | `pair` | `cg pair` |
 
 | Wait ids | Waiting for | Sent |

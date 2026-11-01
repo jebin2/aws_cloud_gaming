@@ -241,6 +241,8 @@ select option { background: theme(colors.surface-container-high); color: theme(c
                     animation: cg-sweep 1.4s ease-in-out infinite; }
 
 @keyframes cg-dot { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } }
+/* A wait cg reports with a real limit: the bar is how far through it, not a sweep. */
+.onb-progress.determinate > i { animation: none; transition: width .6s ease; }
 .onb-dots { display: flex; gap: 6px; }
 .onb-dots > span { width: 6px; height: 6px; border-radius: 50%; background: theme(colors.primary);
                    animation: cg-dot 1.2s infinite both; }

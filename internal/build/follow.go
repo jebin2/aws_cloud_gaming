@@ -57,12 +57,48 @@ var (
 	noise       = regexp.MustCompile(`Setting up|Unpacking|Preparing to unpack|Selecting previously|^Get:|^info:|^ls: |usbmux|/nonexistent|NetworkManager`)
 )
 
+// parts is the box's own progress markers, named: the piece of the machine each
+// one starts. The marker words are written in this repo (lib/bootstrap.d), so
+// the mapping lives with them, and a screen follows the ids and never the words.
+var parts = []struct {
+	id string
+	re *regexp.Regexp
+}{
+	{"base", regexp.MustCompile(`(?i)^installing base packages`)},
+	{"disk", regexp.MustCompile(`(?i)^setting up local nvme`)},
+	{"idle-watchdog", regexp.MustCompile(`(?i)^installing the idle watchdog`)},
+	{"tailscale", regexp.MustCompile(`(?i)^installing tailscale`)},
+	{"library", regexp.MustCompile(`(?i)^installing the s3 game library`)},
+	{"desktop", regexp.MustCompile(`(?i)^installing desktop`)},
+	{"nvidia", regexp.MustCompile(`(?i)nvidia driver|nvidia-driver|nvidia drm`)},
+	{"display", regexp.MustCompile(`(?i)^configuring headless x`)},
+	{"autologin", regexp.MustCompile(`(?i)^configuring autologin`)},
+	{"steam", regexp.MustCompile(`(?i)^installing steam`)},
+	{"firefox", regexp.MustCompile(`(?i)^installing firefox`)},
+	{"audio", regexp.MustCompile(`(?i)^installing audio`)},
+	{"sunshine", regexp.MustCompile(`(?i)^installing sunshine`)},
+	{"finishing", regexp.MustCompile(`(?i)^finishing up`)},
+}
+
+// PartOf is the id of the piece a progress marker starts, "" for any other line.
+func PartOf(marker string) string {
+	for _, p := range parts {
+		if p.re.MatchString(marker) {
+			return p.id
+		}
+	}
+	return ""
+}
+
 // Follower reads the build's log as it grows.
 type Follower struct {
 	R   Remote
 	Log func(string)
 	// Beat reports the wait as data (Out.Wait); nil when nobody reads it.
-	Beat  func(id, state, text string, secs, of int)
+	Beat func(id, state, text string, secs, of int)
+	// Part is told which piece of the machine a marker started (PartOf); nil when
+	// nobody reads it.
+	Part  func(id string)
 	Sleep func(time.Duration)
 	// Target and Key are only for the lines that tell a person how to look.
 	Target, Key string
@@ -132,6 +168,9 @@ func (f Follower) Stream(ctx context.Context) error {
 					case strings.HasPrefix(line, ">>> "):
 						stage = strings.TrimPrefix(line, ">>> ")
 						f.Log(stage)
+						if id := PartOf(stage); id != "" && f.Part != nil {
+							f.Part(id)
+						}
 					default:
 						f.Log("! " + line)
 					}

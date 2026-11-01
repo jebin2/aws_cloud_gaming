@@ -225,6 +225,7 @@ func (d Deps) Open(ctx context.Context) int {
 	// Closing Moonlight ends the session and nothing else. The machine is kept for
 	// the next session; auto-stop ends it once it sits idle, and it can be deleted
 	// now from the app or with cg destroy.
+	d.Out.Stage("open.ended", "session ended")
 	d.Out.Echo("session ended - the machine is still running and billing until auto-stop ends it when idle, or delete it now: cg destroy")
 	return 0
 }

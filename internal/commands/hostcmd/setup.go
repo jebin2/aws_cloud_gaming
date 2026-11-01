@@ -209,7 +209,7 @@ func (d Deps) setup(ctx context.Context, args []string, out *output.Out) error {
 	}
 	var after error
 	fin := &build.Finisher{
-		Follow: build.Follower{R: remote{d.Conn, t}, Log: out.Log, Beat: out.Wait, Sleep: d.Sleep, Target: t, Key: keyFile},
+		Follow: build.Follower{R: remote{d.Conn, t}, Log: out.Log, Beat: out.Wait, Part: func(id string) { out.Event("part", "id", id) }, Sleep: d.Sleep, Target: t, Key: keyFile},
 		Sun:    d.Sun, Pair: d.Pair, Run: d.Runner, Login: login, Save: save, Name: name, Takes: d.takes(),
 		Say: out.Say, SayID: out.SayID, Log: out.Log, Sleep: d.Sleep, HasMoonlight: d.Moonlight,
 	}

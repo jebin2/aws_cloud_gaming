@@ -287,13 +287,18 @@ B6="window.__after = async () => {
   let id = await play();
   const line = t => window.__emit(id, { t: 'line', text: t });
   const starting = card() + ' ' + st();
+  const stage = (t, sid) => window.__emit(id, { t: 'step', text: t, id: sid });
   line('instance already running');
+  stage('connecting over Tailscale', 'open.tailscale');
   line('  pong from game (100.64.0.2) via 1.2.3.4:41641 in 23ms');
+  stage('starting the game stream', 'open.sunshine');
   line('waiting for sunshine ok');
   line('disk:');
+  stage('playing', 'open.play');
   await wait();
   const playing = card() + ' ' + st() + ' | ' + document.getElementById('b-steps').innerText.replace(/\\s+/g, ' ')
     + ' | ' + document.getElementById('b-strip-meta').textContent;
+  stage('session ended', 'open.ended');
   line('session ended after 5m');
   window.__emit(id, { t: 'exit', rc: 0 });
   await wait();
@@ -422,6 +427,7 @@ B8="window.__after = async () => {
   document.getElementById('b-open').click();
   await wait();
   const id = window.__lastId;
+  for (const [t, sid] of [['connecting over Tailscale', 'open.tailscale'], ['starting the game stream', 'open.sunshine'], ['playing', 'open.play']]) window.__emit(id, { t: 'step', text: t, id: sid });
   for (const l of ['instance already running', 'waiting for sunshine ok', 'disk:']) window.__emit(id, { t: 'line', text: l });
   await wait();
   const playing = card();
@@ -693,6 +699,45 @@ contains "  Firefox and audio still to come" "$(row AFTER)" "Firefox:waiting,Aud
 # Under the panels now, so the page may scroll too; the card stays bounded.
 contains "a long build scrolls in its card" "$(row AFTER)" "stripScrolls=true"
 contains "it finishes as how it was built" "$(row AFTER)" "end=How it was built done,done,done,done,done,done,done,done"
+ENGINE=""
+
+echo "7d. a wait cg reports: how long, against what, and only the first and last in the log"
+# cg sends a wait event every few seconds. The step shows the latest as its live
+# line, a short limit as a real bar, and the Log keeps the start and the end -
+# not one row per poll.
+B7="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  document.querySelector('.nav-item[data-view=build]').click();
+  window.askConfirm = async () => true;
+  document.getElementById('b-build').click();
+  await new Promise(r => setTimeout(r, 30));
+  const id = window.__lastId;
+  const wait = (state, secs, of, text) => window.__emit(id, { t: 'wait', id: 'init.tailnet', state, text: text || 'waiting for the box to join the tailnet', secs, of });
+  for (const t of ['preflight', 'provisioning instance', 'waiting for the box to join the tailnet']) window.__emit(id, { t: 'step', text: t });
+  wait('waiting', 0, 1800); wait('waiting', 10, 1800); wait('waiting', 20, 1800);
+  await new Promise(r => setTimeout(r, 30));
+  const live = () => (document.querySelector('#b-steps [data-state=running] p') || {}).textContent;
+  const bar = () => (document.querySelector('#b-steps [data-state=running] .onb-progress') || { classList: { contains: () => false } }).classList.contains('determinate');
+  const long = 'long=' + live() + ' bar=' + bar();
+  // A short limit is a measure, so the bar fills.
+  window.__emit(id, { t: 'wait', id: 'open.sunshine', state: 'waiting', text: 'waiting for sunshine', secs: 30, of: 120 });
+  await new Promise(r => setTimeout(r, 30));
+  const short = 'short=' + live() + ' bar=' + bar()
+    + ' width=' + ((document.querySelector('#b-steps [data-state=running] .onb-progress i') || {}).style || {}).width;
+  // Its end clears the line; the next step does too.
+  window.__emit(id, { t: 'wait', id: 'open.sunshine', state: 'done', text: 'waiting for sunshine', secs: 40, of: 120 });
+  await new Promise(r => setTimeout(r, 30));
+  const done = 'done=' + live();
+  const rows = [...document.querySelectorAll('#log .log-row')].map(r => r.textContent).filter(t => /tailnet \\(/.test(t));
+  return long + ' | ' + short + ' | ' + done + ' | logrows=' + rows.length;
+};"
+ENGINE="$B7"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "a long wait says how long it has gone" "$(row AFTER)" "long=waiting for the box to join the tailnet · 20 s bar=false"
+contains "a short limit is a bar"                 "$(row AFTER)" "short=waiting for sunshine · 30 s of 2 min bar=true width=25%"
+contains "its end puts the step's last line back"            "$(row AFTER)" "done=waiting for the box to join the tailnet"
+contains "the Log keeps one row for the wait"     "$(row AFTER)" "logrows=1"
 ENGINE=""
 
 echo "5. nothing threw"

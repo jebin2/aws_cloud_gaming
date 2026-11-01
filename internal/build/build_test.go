@@ -5,6 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -250,5 +253,62 @@ func TestFinishRunsTheSecondHalfInOrder(t *testing.T) {
 	fin2 := &Finisher{Follow: fo2, Say: func(s string) { steps = append(steps, s) }, Log: func(string) {}}
 	if err := fin2.Finish(context.Background()); !errors.Is(err, ErrStopped) || len(steps) != 1 {
 		t.Errorf("%v %q", err, steps)
+	}
+}
+
+func TestAMarkerNamesThePieceItStarts(t *testing.T) {
+	for marker, want := range map[string]string{
+		"installing base packages":                    "base",
+		"setting up local NVMe at /scratch":           "disk",
+		"installing nvidia driver (the slowest step)": "nvidia",
+		"installing nvidia-driver-615-open":           "nvidia",
+		"disabling nvidia DRM KMS (NvFBC needs it)":   "nvidia",
+		"configuring headless X":                      "display",
+		"installing sunshine":                         "sunshine",
+		"finishing up":                                "finishing",
+		"host rebooting - reconnecting":               "",
+	} {
+		if got := PartOf(marker); got != want {
+			t.Errorf("%q: %q, want %q", marker, got, want)
+		}
+	}
+}
+
+func TestTheFollowerTellsWhichPieceStartedAndHowLongItHasWaited(t *testing.T) {
+	r := &remote{log: []string{">>> installing base packages", ">>> installing desktop (several minutes)", ">>> some other thing"}, ready: true}
+	f, _, _ := follower(r)
+	var parts, beats []string
+	f.Part = func(id string) { parts = append(parts, id) }
+	f.Beat = func(id, state, text string, secs, of int) { beats = append(beats, id+" "+state+" "+text) }
+	if err := f.Stream(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(parts, ",") != "base,desktop" || strings.Join(beats, "|") != "build.box done some other thing" {
+		t.Errorf("%v %v", parts, beats)
+	}
+}
+
+// Every progress line the box prints names a piece of the machine, or the screen
+// has no chip for it: "Installing the software" would say it is installing
+// something it never lists. The few that are not pieces are named here.
+func TestEveryProgressLineOfTheBoxNamesAPiece(t *testing.T) {
+	files, _ := filepath.Glob("../../lib/bootstrap.d/*.sh")
+	if len(files) == 0 {
+		t.Fatal("no bootstrap modules found")
+	}
+	line := regexp.MustCompile(`(?m)^\s*progress "([^"]+)"`)
+	skip := regexp.MustCompile(`^installing \$NEWEST|^enabled the multilib repository|^the NVIDIA driver loads at the next boot`)
+	n := 0
+	for _, f := range files {
+		b, _ := os.ReadFile(f)
+		for _, m := range line.FindAllStringSubmatch(string(b), -1) {
+			n++
+			if !skip.MatchString(m[1]) && PartOf(m[1]) == "" {
+				t.Errorf("%s: %q names no piece (add it to parts in follow.go)", filepath.Base(f), m[1])
+			}
+		}
+	}
+	if n < 10 {
+		t.Errorf("only %d progress lines found - the pattern no longer matches the modules", n)
 	}
 }
