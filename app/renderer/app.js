@@ -4390,10 +4390,10 @@ FAIL_ACTS.not_enabled = FAIL_ACTS.OptInRequired;
 // What the panel says under the headline for a problem: whether money is still
 // being spent first, then what to do.
 function problemWhy(p) {
-  const money = p.charging === 'other'
+  const charge = p.charging === 'other'
     ? 'Nothing was started by this build, but a game PC from before is still charging.'
     : 'Nothing was started. No charge.';
-  return [money, p.text].filter(Boolean).join('  ');
+  return [charge, p.text].filter(Boolean).join('  ');
 }
 
 // cg's own words, read back: the marked line is the headline, and the two
