@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ func TestResolveOrder(t *testing.T) {
 	if got, want := Resolve(lookup(map[string]string{"CG_ENV_FILE": "/x/e", "CG_HOME": "/y", "XDG_CONFIG_HOME": xdg}), repo), "/x/e"; got != want {
 		t.Errorf("CG_ENV_FILE: %s", got)
 	}
-	if got, want := Resolve(lookup(map[string]string{"CG_HOME": "/y"}), repo), "/y/.env"; got != want {
+	if got, want := filepath.ToSlash(Resolve(lookup(map[string]string{"CG_HOME": "/y"}), repo)), "/y/.env"; got != want {
 		t.Errorf("CG_HOME: %s", got)
 	}
 	if got, want := Resolve(lookup(base), repo), filepath.Join(repo, ".env"); got != want {
@@ -114,7 +115,8 @@ func TestSetKeepsOtherLinesAndTheMode(t *testing.T) {
 	if string(b) != "B=two words\nA=3\n" {
 		t.Errorf("file %q", b)
 	}
-	if st, _ := os.Stat(f); st.Mode().Perm() != 0o600 {
+	// Windows has no Unix modes; the file inherits its folder's access list.
+	if st, _ := os.Stat(f); runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Errorf("mode %v: the file holds keys", st.Mode().Perm())
 	}
 	if e.Get("A") != "3" || !e.Has("B") {

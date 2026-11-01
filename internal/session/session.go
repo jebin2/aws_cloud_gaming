@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -50,7 +51,10 @@ func File(get func(string) (string, bool), uid int) string {
 		dir, _ = get("TMPDIR")
 	}
 	if dir == "" {
-		dir = os.TempDir()
+		dir = "/tmp"
+		if runtime.GOOS == "windows" {
+			dir = os.TempDir()
+		}
 	}
 	return filepath.Join(dir, fmt.Sprintf("cg-session-%d.pid", uid))
 }

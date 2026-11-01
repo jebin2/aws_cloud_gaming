@@ -13,6 +13,9 @@ import (
 // when PATH has nothing.
 func installed(goos, name string, getenv func(string) string) []string {
 	switch goos + ":" + name {
+	// ssh sessions and the app start with a bare PATH, which has no Homebrew.
+	case "darwin:brew":
+		return []string{"/opt/homebrew/bin/brew", "/usr/local/bin/brew"}
 	case "darwin:moonlight":
 		return []string{"/Applications/Moonlight.app/Contents/MacOS/Moonlight"}
 	case "darwin:tailscale":

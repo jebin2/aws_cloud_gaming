@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/laptop"
@@ -48,7 +49,12 @@ func nz(s string) *string {
 func Read(ctx context.Context, l laptop.Laptop) Status {
 	pm := l.PackageManager()
 	missing := l.Missing()
-	root, why := l.Root()
+	// brew and winget are run as the person; root is a question for the Linux
+	// package managers only, and "polkit is not installed" means nothing on a Mac.
+	root, why := "", ""
+	if runtime.GOOS == "linux" {
+		root, why = l.Root()
+	}
 	s := Status{PackageManager: nz(pm), Root: nz(root), RootBlocked: nz(why), Tools: []Tool{}}
 	for _, t := range laptop.Tools {
 		plan := ""

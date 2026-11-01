@@ -93,7 +93,10 @@ func lock(path string) (func(), error) {
 			f.Close()
 			return func() { os.Remove(path) }, nil
 		}
-		if !errors.Is(err, os.ErrExist) {
+		// On Windows a lock file that another writer has just deleted is "access
+		// denied" until the delete lands, not "exists": it is the same busy lock.
+		denied := errors.Is(err, os.ErrPermission)
+		if !errors.Is(err, os.ErrExist) && !denied {
 			return nil, err
 		}
 		if st, err := os.Stat(path); err == nil && time.Since(st.ModTime()) > 30*time.Second {
@@ -101,6 +104,9 @@ func lock(path string) (func(), error) {
 			continue
 		}
 		if time.Now().After(deadline) {
+			if denied {
+				return nil, err
+			}
 			return nil, errors.New("hosts.json is locked by another cg")
 		}
 		time.Sleep(20 * time.Millisecond)

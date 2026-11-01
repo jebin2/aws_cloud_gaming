@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 )
@@ -21,7 +22,7 @@ func TestSetAndForget(t *testing.T) {
 		t.Errorf("a second write keeps the first: %v", r)
 	}
 	st, _ := os.Stat(s.Path)
-	if st.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Errorf("it holds a Sunshine login: %v", st.Mode())
 	}
 	if _, err := os.Stat(s.Path + ".lock"); err == nil {

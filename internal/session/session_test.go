@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -70,7 +71,7 @@ func TestFileLocation(t *testing.T) {
 		{map[string]string{"TMPDIR": "/t"}, "/t/cg-session-1000.pid"},
 		{map[string]string{}, "/tmp/cg-session-1000.pid"},
 	} {
-		if got := File(get(c.env), 1000); got != c.want {
+		if got := File(get(c.env), 1000); filepath.ToSlash(got) != c.want && !(runtime.GOOS == "windows" && c.want == "/tmp/cg-session-1000.pid") {
 			t.Errorf("got %s want %s", got, c.want)
 		}
 	}

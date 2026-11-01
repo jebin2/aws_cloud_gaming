@@ -29,3 +29,11 @@ func TestFindPrefersPathThenWhereTheInstallerPutsIt(t *testing.T) {
 		t.Errorf("%q", got)
 	}
 }
+
+func TestHomebrewIsFoundOnAMacWithABarePath(t *testing.T) {
+	none := func(string) (string, error) { return "", errors.New("not found") }
+	got := find("darwin", "brew", func(string) string { return "" }, none, func(p string) bool { return p == "/usr/local/bin/brew" })
+	if got != "/usr/local/bin/brew" {
+		t.Errorf("%q", got)
+	}
+}

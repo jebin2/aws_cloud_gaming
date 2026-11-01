@@ -129,10 +129,16 @@ func Manual(tool string) string {
 		return "https://tailscale.com/download"
 	// cg runs `moonlight`, which a Flatpak does not put on PATH.
 	case "moonlight":
+		if runtime.GOOS != "linux" {
+			return "https://github.com/moonlight-stream/moonlight-qt/releases (install the app; cg finds it)"
+		}
 		return "https://github.com/moonlight-stream/moonlight-qt/releases (cg needs a moonlight command on PATH)"
 	case "ssh":
-		if runtime.GOOS == "windows" {
+		switch runtime.GOOS {
+		case "windows":
 			return "Settings > Apps > Optional features > OpenSSH Client"
+		case "darwin":
+			return "it is part of macOS (/usr/bin/ssh)"
 		}
 		return "your distro's OpenSSH client package"
 	}
