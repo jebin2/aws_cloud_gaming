@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/jebin2/aws_cloud_gaming/internal/local"
 )
 
 // Lock is a held session.
@@ -34,27 +36,21 @@ type Probe interface {
 	Args(pid int) (string, bool)
 }
 
-// Proc is the real one, on /proc.
+// Proc is the real one: the system's own process table, on Linux, macOS and Windows.
 type Proc struct{}
 
-func (Proc) Alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
+func (Proc) Alive(pid int) bool          { return local.Alive(pid) }
+func (Proc) Args(pid int) (string, bool) { return local.Args(pid) }
 
-func (Proc) Args(pid int) (string, bool) {
-	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-	if err != nil {
-		return "", false
-	}
-	return strings.TrimSpace(strings.ReplaceAll(string(b), "\x00", " ")), true
-}
-
-// File is where the lock lives: the runtime directory, else TMPDIR, else /tmp.
+// File is where the lock lives: the runtime directory, else TMPDIR, else the
+// system's temp directory.
 func File(get func(string) (string, bool), uid int) string {
 	dir, _ := get("XDG_RUNTIME_DIR")
 	if dir == "" {
 		dir, _ = get("TMPDIR")
 	}
 	if dir == "" {
-		dir = "/tmp"
+		dir = os.TempDir()
 	}
 	return filepath.Join(dir, fmt.Sprintf("cg-session-%d.pid", uid))
 }

@@ -148,6 +148,23 @@ Change it with `cg config set GAME_INSTANCE_TYPE <type>`, or from the dropdown o
 Build screen - which writes the same setting. It applies to the next `cg init`; a running box
 is untouched.
 
+## macOS and Windows
+
+`cg` is one static program with no cgo, and builds for `darwin/amd64`, `darwin/arm64` and
+`windows/amd64` (CI builds and vets all three on every push). It needs `ssh`, Tailscale and Moonlight
+on that computer, as on Linux:
+
+| | macOS | Windows |
+|---|---|---|
+| `ssh` | built in | OpenSSH Client (Settings > Apps > Optional features) |
+| Tailscale, Moonlight | `cg deps install` uses `brew install --cask` | `cg deps install` uses `winget` |
+| found when not on PATH | `/Applications/Moonlight.app`, `/opt/homebrew/bin`, `/usr/local/bin` | `Program Files\Moonlight Game Streaming`, `Program Files\Tailscale` |
+| a running stream | `ps` reads the command line | PowerShell reads it; `taskkill` ends it |
+
+A stale Moonlight pairing process is found and ended before `cg pair` tries again, on all three.
+**Nothing here has been run on a real Mac or Windows PC yet** - it builds, vets and passes the unit
+tests, which is not the same thing.
+
 ## Terminal output
 
 On a terminal, progress is drawn as boxed steps with an emoji, a symbol per line and a live

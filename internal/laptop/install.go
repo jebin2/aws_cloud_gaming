@@ -54,6 +54,14 @@ func (i *Installer) Install(ctx context.Context, pm, tool string) bool {
 }
 
 func (i *Installer) pkg(ctx context.Context, pm, pkg string) bool {
+	// Homebrew refuses to run as root and winget asks for its own elevation, so
+	// neither goes through sudo.
+	switch pm {
+	case "brew":
+		return i.run(ctx, "brew", "install", "--cask", pkg)
+	case "winget":
+		return i.run(ctx, "winget", "install", "--id", pkg, "-e", "--accept-package-agreements", "--accept-source-agreements")
+	}
 	as, why := i.L.Root()
 	if as == "" {
 		i.Say("log", "cannot install from here: "+why)
@@ -92,6 +100,14 @@ func (i *Installer) pkg(ctx context.Context, pm, pkg string) bool {
 		return run("--non-interactive", "install", pkg)
 	}
 	return false
+}
+
+// run is a command as the person themselves, its output said line by line.
+func (i *Installer) run(ctx context.Context, name string, args ...string) bool {
+	w := &lineWriter{say: i.Say}
+	err := i.L.Runner.Stream(ctx, w, name, args...)
+	w.flush()
+	return err == nil
 }
 
 // tailscaleScript runs Tailscale's own installer, which asks for sudo itself.

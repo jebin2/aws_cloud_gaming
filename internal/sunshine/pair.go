@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/local"
@@ -90,19 +90,23 @@ func (p Pairer) wait(ctx context.Context, ip, user, pass string, max int) []stri
 // the actual moonlight binary and inspects its argv - matching the command line
 // text also hits any shell whose command line merely contains it.
 func killStale(ctx context.Context, r local.Runner) {
-	out, err := r.Run(ctx, local.Cmd{Name: "pgrep", Args: []string{"-x", "moonlight"}})
-	if err != nil {
-		return
-	}
-	for _, pid := range strings.Fields(string(out)) {
-		b, err := os.ReadFile("/proc/" + pid + "/cmdline")
-		if err != nil || !strings.Contains(strings.ReplaceAll(string(b), "\x00", " "), " pair ") {
-			continue
+	var pids []int
+	if runtime.GOOS == "windows" {
+		pids = local.PidsByName("moonlight")
+	} else {
+		out, err := r.Run(ctx, local.Cmd{Name: "pgrep", Args: []string{"-x", "moonlight"}})
+		if err != nil {
+			return
 		}
-		if n, err := strconv.Atoi(pid); err == nil {
-			if proc, err := os.FindProcess(n); err == nil {
-				_ = proc.Signal(syscall.SIGTERM)
+		for _, f := range strings.Fields(string(out)) {
+			if n, err := strconv.Atoi(f); err == nil {
+				pids = append(pids, n)
 			}
+		}
+	}
+	for _, pid := range pids {
+		if args, ok := local.Args(pid); ok && strings.Contains(args, " pair ") {
+			local.Stop(pid, false)
 		}
 	}
 }

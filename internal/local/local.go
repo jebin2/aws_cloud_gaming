@@ -81,11 +81,11 @@ func ExitCode(err error) int {
 type Exec struct{}
 
 func (Exec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).Output()
+	return exec.CommandContext(ctx, Find(name), args...).Output()
 }
 
 func (Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
+	cmd := exec.CommandContext(ctx, Find(c.Name), c.Args...)
 	cmd.Env = append(os.Environ(), c.Env...)
 	cmd.Stdin = c.Stdin
 	if c.Combined != nil {
@@ -96,7 +96,7 @@ func (Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
 }
 
 func (Exec) Start(ctx context.Context, c Cmd) (Proc, error) {
-	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
+	cmd := exec.CommandContext(ctx, Find(c.Name), c.Args...)
 	cmd.Env = append(os.Environ(), c.Env...)
 	cmd.Stdin = c.Stdin
 	if err := cmd.Start(); err != nil {
@@ -108,18 +108,17 @@ func (Exec) Start(ctx context.Context, c Cmd) (Proc, error) {
 }
 
 func (Exec) Has(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
+	return Find(name) != name || func() bool { _, err := exec.LookPath(name); return err == nil }()
 }
 
 func (Exec) Stream(ctx context.Context, w io.Writer, name string, args ...string) error {
-	c := exec.CommandContext(ctx, name, args...)
+	c := exec.CommandContext(ctx, Find(name), args...)
 	c.Stdout, c.Stderr = w, os.Stderr
 	return c.Run()
 }
 
 func (Exec) Passthrough(ctx context.Context, name string, args ...string) int {
-	c := exec.CommandContext(ctx, name, args...)
+	c := exec.CommandContext(ctx, Find(name), args...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	err := c.Run()
 	if err == nil {

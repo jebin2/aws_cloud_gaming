@@ -5,6 +5,7 @@ package config
 
 import (
 	"bufio"
+	"github.com/jebin2/aws_cloud_gaming/internal/local"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -61,11 +62,7 @@ func Resolve(get Lookup, repo string) string {
 			return filepath.Join(repo, ".env")
 		}
 	}
-	base, ok := get("XDG_CONFIG_HOME")
-	if !ok || base == "" {
-		home, _ := get("HOME")
-		base = filepath.Join(home, ".config")
-	}
+	base := local.ConfigBase(get)
 	return filepath.Join(base, "cg", ".env")
 }
 

@@ -6,6 +6,7 @@ package hosts
 
 import (
 	"encoding/json"
+	"github.com/jebin2/aws_cloud_gaming/internal/local"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,11 +17,7 @@ type Store struct{ Path string }
 
 // PathFor is where it lives: $XDG_CONFIG_HOME/cg/hosts.json, else ~/.config.
 func PathFor(get func(string) (string, bool)) string {
-	base, ok := get("XDG_CONFIG_HOME")
-	if !ok || base == "" {
-		home, _ := get("HOME")
-		base = filepath.Join(home, ".config")
-	}
+	base := local.ConfigBase(get)
 	return filepath.Join(base, "cg", "hosts.json")
 }
 

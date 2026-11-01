@@ -77,11 +77,7 @@ echo "sunlogin=$(base64 -w0 ~/.config/cg/sunshine-login 2>/dev/null)"
 // time a machine is added, put on each machine by InstallKey. Its own, so that
 // removing a machine takes off exactly the line cg added and nothing of yours.
 func KeyPath(get func(string) (string, bool)) string {
-	base, ok := get("XDG_CONFIG_HOME")
-	if !ok || base == "" {
-		home, _ := get("HOME")
-		base = filepath.Join(home, ".config")
-	}
+	base := local.ConfigBase(get)
 	return filepath.Join(base, "cg", "ssh", "id_ed25519")
 }
 

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
-	"os"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -125,14 +123,8 @@ func (d Deps) sessionEndFirst(x DestroyDeps) {
 	e := x.Ender
 	if e == nil {
 		e = &session.Ender{Path: d.SessionFile, Probe: d.Probe, Sleep: time.Sleep,
-			Signal: func(pid int, s syscall.Signal) {
-				if p, err := os.FindProcess(pid); err == nil {
-					_ = p.Signal(s)
-				}
-			},
-			Children: func(pid int, s syscall.Signal) {
-				_, _ = d.R.Run(context.Background(), local.Cmd{Name: "pkill", Args: []string{"-" + strconv.Itoa(int(s)), "-P", strconv.Itoa(pid)}})
-			}}
+			Signal:   func(pid int, s syscall.Signal) { local.Stop(pid, s == syscall.SIGKILL) },
+			Children: func(pid int, s syscall.Signal) { local.StopChildren(pid, s == syscall.SIGKILL) }}
 	}
 	if e.End() {
 		d.Out.LogAs("ok", "stream closed")

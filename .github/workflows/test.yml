@@ -77,6 +77,17 @@ jobs:
           go vet ./...
         shell: bash
 
+      # cg runs on a Mac and a Windows PC as well: it must at least build there,
+      # or a Unix-only call slips in unseen (it did, once: syscall.Kill).
+      - name: Build For macOS And Windows
+        run: |
+          for target in darwin/amd64 darwin/arm64 windows/amd64; do
+            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/cg
+            GOOS=${target%/*} GOARCH=${target#*/} go vet ./...
+            echo "ok  $target"
+          done
+        shell: bash
+
       # RUN UNPIPED: the script's exit status is the point (see its header).
       # A failed suite's whole output is folded into this log, listed on the run's
       # summary page with its time, and kept as a download below.

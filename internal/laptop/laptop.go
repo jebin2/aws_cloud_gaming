@@ -12,6 +12,7 @@ import (
 	"context"
 	"golang.org/x/term"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/local"
@@ -67,9 +68,10 @@ func (l Laptop) Missing() []string {
 	return out
 }
 
-// PackageManager is the first of pacman, apt-get, dnf, zypper that is here.
+// PackageManager is the first of pacman, apt-get, dnf, zypper - and brew on macOS,
+// winget on Windows - that is here.
 func (l Laptop) PackageManager() string {
-	for _, pm := range []string{"pacman", "apt-get", "dnf", "zypper"} {
+	for _, pm := range []string{"pacman", "apt-get", "dnf", "zypper", "brew", "winget"} {
 		if l.Runner.Has(pm) {
 			return pm
 		}
@@ -98,6 +100,21 @@ func Package(pm, tool string) string {
 		return "openssh-clients"
 	case "pacman:tailscale":
 		return "tailscale"
+	// macOS and Windows install applications, not packages: the names are casks
+	// and winget ids. Both ship an OpenSSH client already.
+	case "brew:tailscale":
+		return "tailscale"
+	case "brew:moonlight":
+		return "moonlight"
+	case "winget:tailscale":
+		return "Tailscale.Tailscale"
+	case "winget:moonlight":
+		return "MoonlightGameStreamingProject.Moonlight"
+	case "brew:ssh", "winget:ssh":
+		return ""
+	}
+	if pm == "brew" || pm == "winget" {
+		return ""
 	}
 	if tool == "moonlight" {
 		return "moonlight-qt"
@@ -114,6 +131,9 @@ func Manual(tool string) string {
 	case "moonlight":
 		return "https://github.com/moonlight-stream/moonlight-qt/releases (cg needs a moonlight command on PATH)"
 	case "ssh":
+		if runtime.GOOS == "windows" {
+			return "Settings > Apps > Optional features > OpenSSH Client"
+		}
 		return "your distro's OpenSSH client package"
 	}
 	return "your distro's " + tool + " package"
@@ -131,9 +151,13 @@ func Plan(pm, tool string) string {
 			return "sudo dnf install " + pkg
 		case "zypper":
 			return "sudo zypper install " + pkg
+		case "brew":
+			return "brew install --cask " + pkg
+		case "winget":
+			return "winget install --id " + pkg + " -e"
 		}
 	}
-	if tool == "tailscale" {
+	if tool == "tailscale" && pm != "brew" && pm != "winget" {
 		return "Tailscale's install script, https://tailscale.com/install.sh (uses sudo)"
 	}
 	return ""
