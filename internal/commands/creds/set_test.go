@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -66,7 +67,7 @@ func TestAWSKeyIsCheckedBeforeItIsWritten(t *testing.T) {
 		t.Errorf("config:\n%s", cfg)
 	}
 	st, _ := os.Stat(filepath.Join(r.dir, ".aws", "credentials"))
-	if st.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Errorf("mode %v", st.Mode())
 	}
 	if !strings.Contains(r.said.String(), "credentials work (account 123456789012)") || strings.Contains(r.said.String(), "secretvalue") {

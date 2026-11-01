@@ -77,7 +77,7 @@ func TestEnvAndFingerprint(t *testing.T) {
 	// The same text the shell hashed: runtime|handler|role|timeout|memory|env, newline.
 	out, err := exec.Command("bash", "-c", `printf '%s|%s|%s|300|128|%s\n' python3.13 cloud_watchdog.handler "$1" "$2" | sha256sum | cut -c1-12`,
 		"_", "arn:aws:iam::1:role/r", s.Env()).Output()
-	if err == nil && strings.TrimSpace(string(out)) != s.Fingerprint("arn:aws:iam::1:role/r") {
+	if _, nosum := exec.LookPath("sha256sum"); nosum == nil && err == nil && strings.TrimSpace(string(out)) != s.Fingerprint("arn:aws:iam::1:role/r") {
 		t.Errorf("fingerprint differs from the shell's: %s", out)
 	}
 }

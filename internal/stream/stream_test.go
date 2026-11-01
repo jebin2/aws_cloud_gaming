@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +50,9 @@ func laptop(t *testing.T, intel bool, files ...string) string {
 }
 
 func TestAHybridLaptopStreamsOnTheIntelGPU(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the GPU choice is Linux's: Mesa and Vulkan driver files under /usr/share")
+	}
 	root := laptop(t, true, "dev/nvidiactl", "usr/share/glvnd/egl_vendor.d/50_mesa.json", "usr/share/vulkan/icd.d/intel_icd.x86_64.json", "usr/lib/dri/iHD_drv_video.so")
 	env, label := GPU(root, none, "x86_64")
 	got := strings.Join(env, "\n")

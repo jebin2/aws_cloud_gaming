@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -56,7 +57,8 @@ func TestJSONShape(t *testing.T) {
 		t.Errorf("%v", m)
 	}
 	// No terminal and no polkit: the app is told an Install button can do nothing.
-	if m["root"] != nil || !strings.Contains(m["root_blocked"].(string), "polkit (pkexec) is not installed") {
+	// (Off Linux root is not asked about at all: brew and winget run as the person.)
+	if runtime.GOOS == "linux" && (m["root"] != nil || !strings.Contains(m["root_blocked"].(string), "polkit (pkexec) is not installed")) {
 		t.Errorf("root %v blocked %v", m["root"], m["root_blocked"])
 	}
 }
@@ -111,7 +113,7 @@ func TestReportAfterFixSendsYouToDoItByHand(t *testing.T) {
 	if Report(context.Background(), l, out, true) {
 		t.Error("not ready")
 	}
-	for _, want := range []string{"missing: OpenSSH (ssh, scp)", "install it yourself: your distro's OpenSSH client package",
+	for _, want := range []string{"missing: OpenSSH (ssh, scp)", "install it yourself: " + laptop.Manual("ssh"),
 		"missing: Moonlight", "install it yourself: https://github.com/moonlight-stream/moonlight-qt/releases"} {
 		if !strings.Contains(o.String(), want) {
 			t.Errorf("lacks %q:\n%s", want, o.String())

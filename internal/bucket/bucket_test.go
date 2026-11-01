@@ -10,6 +10,9 @@ import (
 // the first 12 hex digits. A different formula would watch a bucket that does
 // not exist and never see the real one.
 func TestNameMatchesTheBashFormula(t *testing.T) {
+	if _, err := exec.LookPath("sha256sum"); err != nil {
+		t.Skip("no sha256sum (macOS has shasum): the shell's formula cannot be run here")
+	}
 	out, err := exec.Command("bash", "-c", `printf '%s' "123456789012-gamevps-ap-south-2" | sha256sum | cut -c1-12`).Output()
 	if err != nil {
 		t.Skip("no bash")

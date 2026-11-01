@@ -2,6 +2,7 @@ package main
 
 import (
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -9,7 +10,13 @@ import (
 // The built binary, run as the app runs it.
 func build(t *testing.T) string {
 	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go toolchain here to build with")
+	}
 	bin := t.TempDir() + "/cg"
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}

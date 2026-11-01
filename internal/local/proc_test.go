@@ -14,7 +14,7 @@ func TestOwnProcessIsAliveAndHasACommandLine(t *testing.T) {
 		t.Error("no such process")
 	}
 	args, ok := Args(os.Getpid())
-	if !ok || !strings.Contains(strings.ToLower(args), "local") {
+	if !ok || !strings.Contains(strings.ToLower(args), "test") {
 		t.Errorf("%q %v", args, ok)
 	}
 	if home := Home(func(k string) (string, bool) { return map[string]string{"HOME": "/h"}[k], k == "HOME" }); home != "/h" {

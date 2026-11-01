@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -160,7 +161,7 @@ func TestEnsureKeepsAMatchingPairAndReplacesAnUnusableOne(t *testing.T) {
 	st, _ := os.Stat(other)
 	kept := strings.TrimSuffix(other, ".pem") + "-replaced-20261025090807.pem"
 	old, err := os.ReadFile(kept)
-	if string(got) != "NEW-PRIVATE-KEY" || st.Mode().Perm() != 0o600 || err != nil || len(old) == 0 || len(a.deleted) != 1 {
+	if string(got) != "NEW-PRIVATE-KEY" || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) || err != nil || len(old) == 0 || len(a.deleted) != 1 {
 		t.Errorf("%q %v %v %v", got, st.Mode(), err, a.deleted)
 	}
 	joined := strings.Join(said, "\n")
