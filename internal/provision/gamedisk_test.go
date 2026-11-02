@@ -33,3 +33,11 @@ func TestTheGamesDiskIsASecondDiskDeletedWithTheBox(t *testing.T) {
 		t.Errorf("with a games disk: %+v", two)
 	}
 }
+
+func TestADiskAskedForIsRoundedUpToTheStep(t *testing.T) {
+	for in, want := range map[int]int{-5: 0, 0: 0, 1: 10, 10: 10, 95: 100, 100: 100, 101: 110} {
+		if got := RoundExtraDiskGB(in); got != want {
+			t.Errorf("%d: %d, want %d", in, got, want)
+		}
+	}
+}

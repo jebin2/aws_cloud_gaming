@@ -45,6 +45,7 @@ var Registry = []Command{
 	{Path: []string{"open"}, Aliases: [][]string{{"up"}}, Summary: "start the box if it is stopped, and stream from it (--on <name> for a machine of yours)"},
 	{Path: []string{"stop"}, Aliases: [][]string{{"down"}}, Summary: "mirror the game library, then stop the box (--force to stop without a mirror)"},
 	{Path: []string{"clean"}, Summary: "give the box back some root disk; installed games are never touched"},
+	{Path: []string{"disk"}, Summary: "the games' disk: how full it is; add <GB> gives the games more room on a running box", JSON: true},
 	{Path: []string{"pair"}, Summary: "pair Moonlight with the box again, without rebuilding it"},
 	{Path: []string{"destroy"}, Summary: "delete the box and what it left; --all also removes everything of cg's from the AWS account", RunsAlone: true},
 	{Path: []string{"check"}, Summary: "the preflight: tools, AWS, region, quota, keys, settings. --fix installs and asks. Creates nothing, but can save settings and mint a Tailscale key"},
@@ -68,6 +69,7 @@ var RunsAlone = [][]string{
 	{"library", "push"}, {"library", "pull"}, {"library", "forget"},
 	{"library", "clean"}, {"library", "account"}, {"library", "move"},
 	{"library", "reset"}, {"library", "keep-for"},
+	{"disk", "add"},
 	{"creds", "set"},
 	{"creds", "tailscale", "signin"},
 	{"creds", "tailscale", "authkey"},
@@ -86,7 +88,7 @@ var Asks = []string{
 
 // Env is the settings a screen may hand a command, by name. Everything else
 // stays in .env, where cg owns it; the app used to keep this list itself.
-var Env = []string{"GAME_APPS"}
+var Env = []string{"GAME_APPS", "GAME_EXTRA_DISK_GB"}
 
 type document struct {
 	Events    int        `json:"events"`

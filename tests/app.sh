@@ -724,7 +724,7 @@ contains "a build confirms, with its rate" "$js" 'Billed ${rate != null ? `${rat
 contains "  and passes the chosen games" "$js" "GAME_APPS: apps"
 contains "a delete confirms"             "$js" "Delete the machine?"
 contains "only GAME_APPS may cross"      "$(cat app/main/index.js)" "['GAME_APPS']"
-contains "cg's contract names what may cross" "$(cat internal/contract/contract.go)" 'var Env = []string{"GAME_APPS"}'
+contains "cg's contract names what may cross" "$(cat internal/contract/contract.go)" 'var Env = []string{"GAME_APPS", "GAME_EXTRA_DISK_GB"}'
 check    "no secret is rendered"         "$(grep -cE 'TAILSCALE_AUTH_KEY|SUNSHINE_PASS|GAME_NTFY_URL *=' app/renderer/app.js)" "0"
 # Settings are read from the registry and written back through it: the app
 # never touches .env, and a secret can be replaced but not read.

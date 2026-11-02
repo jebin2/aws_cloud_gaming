@@ -106,9 +106,18 @@ games chosen for a build (plus the `GAME_DISK_RESERVE_GB` kept free) take more t
 drive holds, `cg init` adds a gp3 disk for them at launch: sized to the games, rounded up to 10 GB,
 at most 1000 GB, deleted with the box. The box mounts it at `/scratch` in place of the NVMe, so the
 library, the restore and the push work unchanged (`lib/bootstrap.d/12-scratch.sh`,
-`provision.ExtraDiskGB`). Nobody sets its size; the Build page shows it and its price before the build.
+`provision.ExtraDiskGB`). The Build page shows its size and price before the build, and a larger disk can
+be asked for there (`GAME_EXTRA_DISK_GB`, the larger of that and what the games need is made).
 It survives a stop, and costs $0.0912/GB-month while the box exists. Details:
 [game-library.md](game-library.md).
+
+**Adding space to a running box** (`cg disk add <GB>`, the Add disk button on the Machine page). A box
+with a games disk has it made bigger: `ModifyVolume`, then `resize2fs` on the mounted disk, so the game,
+Steam and the archive carry on unaware. AWS allows one change per disk every 6 hours. A box whose games sit
+on its own NVMe, which cannot grow, gets a new disk at `/dev/sdf`: Steam is closed, the library is copied onto
+it, and `/scratch` is remounted from it with `DATA_GB` rewritten in `mount-scratch.sh` so every later boot
+mounts it too. `cg disk --json` says which of the two will happen (`move`), the room left and the most that can
+be added.
 
 ## Flow 1 - `cg init`: build a box
 

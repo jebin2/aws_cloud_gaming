@@ -323,6 +323,13 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('SMALL | build | ' + (document.getElementById('b-build').disabled ? 'OFF' : 'on'));
   boxes[0].closest('tr').click();
   out.push('SMALL | unticked | extra hidden=' + document.getElementById('b-extra').hidden);
+  // A disk can be asked for with nothing ticked, and the choice is said as one.
+  const pick = document.getElementById('b-extra-pick');
+  pick.value = '200'; pick.dispatchEvent(new Event('change'));
+  out.push('PICK | extra | ' + document.getElementById('b-extra').textContent.trim() + ' | hidden=' + document.getElementById('b-extra').hidden);
+  out.push('PICK | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
+  pick.value = '0'; pick.dispatchEvent(new Event('change'));
+  out.push('PICK | cleared | extra hidden=' + document.getElementById('b-extra').hidden);
   const huge = { ...small, games: [{ appid: '7', name: 'Huge game', bytes: 990 * 1073741824, usd_month: 9, pushed: '2026-10-01T00:00:00Z' }],
                  total_bytes: 990 * 1073741824 };
   paintLibrary(huge);
@@ -446,6 +453,9 @@ contains "  with what it is, before the build" "$OUT" "SMALL | extra | Extra spa
 lacks    "  not hidden"                    "$OUT" "SMALL | extra | hidden=true"
 contains "  Build stays allowed"            "$OUT" "SMALL | build | on"
 contains "  and the note goes when the game does" "$OUT" "SMALL | unticked | extra hidden=true"
+contains "a disk can be asked for with no game ticked" "$OUT" "PICK | extra | Extra space for your games: 200 GB (your choice)"
+contains "  and the meter says it will be added" "$OUT" "PICK | pct | 0.0 GB · a 200 GB disk will be added"
+contains "  and choosing none takes it away" "$OUT" "PICK | cleared | extra hidden=true"
 contains "a game too big for any added disk is not offered" "$OUT" "HUGE | box | off"
 contains "  and says why"                  "$OUT" "More than a game PC here can hold (1000 GB)."
 # The same numbers as provision's ExtraDiskGB test: one rule, two places.

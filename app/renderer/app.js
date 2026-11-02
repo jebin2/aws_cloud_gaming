@@ -38,6 +38,7 @@ const RUN_NAME = {
   'library clean': 'the games change', 'library forget': 'the games change',
   'library move': 'the games change', 'library reset': 'the games change',
   'library keep-for': 'the games change', 'library account': 'the login change',
+  'disk add': 'adding space',
 };
 const runName = cmd => byCommand(RUN_NAME, cmd) || cmd[0];
 
@@ -77,6 +78,7 @@ const CG_WORDS = {
   'library reset':           { name: 'keeping a game' },
   'library keep-for':        { name: 'changing how long games are kept' },
   'library account':         { name: 'changing the Steam login' },
+  'disk add':                { name: 'adding space for your games' },
   'creds set':               { name: 'saving your AWS key' },
   // Longer than 'creds set', which is the AWS key: without this, saving a
   // Tailscale token was announced as saving an AWS one.
@@ -733,6 +735,7 @@ function mountMachineCard(box, p) {
     btn('change', 'btn', null, null, 'Change machine').onclick = () => openMachines();
     const q = btn('quality', 'btn', null, null, 'Stream quality');
     q.onclick = () => goSetting(settingEl('GAME_RES'));
+    btn('adddisk', 'btn', null, null, 'Add disk').onclick = () => openAddDisk();
   }
   // Home never shows it - Details does, as a machine of yours's tile does - but
   // its handler is the one every delete button calls.
@@ -765,7 +768,7 @@ function paintMachineCards() {
       card.textContent = '';
       const t = el('p', 'font-headline-lg text-headline-lg', 'AWS needs you'); t.dataset.f = 'title';
       card.append(t, el('p', 'font-body-md text-body-md text-on-surface-variant mt-space-xs', stuck.problem.title));
-      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change'] : [])]) $(`${p}-${b}`).hidden = true;
+      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk'] : [])]) $(`${p}-${b}`).hidden = true;
       $(`${p}-busy`).hidden = true;
       continue;
     }
@@ -778,7 +781,7 @@ function paintMachineCards() {
         card.append(el('p', 'font-body-sm text-body-sm font-medium text-on-surface-variant', 'AWS'),
                     el('span', 'skel mt-space-xs h-9 w-48'), el('span', 'skel mt-space-sm h-4 w-72'));
       }
-      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change'] : [])]) $(`${p}-${b}`).hidden = true;
+      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk'] : [])]) $(`${p}-${b}`).hidden = true;
       $(`${p}-busy`).hidden = false;
       continue;
     }
@@ -793,6 +796,9 @@ function paintMachineCards() {
     $(`${p}-destroy`).hidden = !box || building || p === 'd';
     if (p === 'b') {
       $('b-change').hidden = !!box || building;
+      // Always there while the machine is up: more room is wanted mid-game as
+      // often as before the build.
+      $('b-adddisk').hidden = !running || building;
       $('b-quality').disabled = !settingEl('GAME_RES');
       // Disconnecting deletes the machine too, but not from under a build.
       $('b-aws-remove').disabled = building;
@@ -1027,6 +1033,7 @@ const BILL_CHANGE = {
   init: 'you built a machine', destroy: 'you deleted the machine', open: 'you played',
   'library move': 'you moved a game', 'library forget': 'you deleted a game',
   'library clean': 'you cleaned up leftover files',
+  'disk add': 'you added disk space',
 };
 function billChanges() {
   try { return JSON.parse(localStorage.getItem('cg.billChanges') || '[]'); } catch { return []; }
@@ -1564,7 +1571,7 @@ function libraryLeft(err) {
   if (/saved, but/.test(err)) return 'The setting was saved, but auto-stop still counts the old days.';
   return 'Nothing was changed.';
 }
-async function libraryRun(args, doing, askId, word) {
+async function libraryRun(args, doing, askId, word, left = libraryLeft) {
   typedPending = askId ? { askId, word } : null;
   const dlg = $('refdlg');
   $('refdlg-title').textContent = doing;
@@ -1595,13 +1602,13 @@ async function libraryRun(args, doing, askId, word) {
     step(said);
   };
   if (!dlg.open) dlg.showModal();
-  const { rc, err } = await runCg(args, { wantRc: true, onStep });
+  const { rc, err } = await runCg(args, { wantRc: true, onStep, aside: args[0] !== 'library' });
   typedPending = null;
-  if (rc === 0) return;
+  if (rc === 0) return true;
   const why = (err || '').trim().split('\n').filter(Boolean).slice(-2).join(' ')
     || `cg ${args.join(' ')} stopped (exit ${rc})`;
   $('refdlg-title').textContent = `${doing} - not done`;
-  $('refdlg-sub').textContent = libraryLeft(err || '');
+  $('refdlg-sub').textContent = left(err || '');
   list.textContent = '';
   const bad = document.createElement('div');
   bad.className = 'flex items-start gap-space-sm font-body-md text-body-md';
@@ -1612,6 +1619,7 @@ async function libraryRun(args, doing, askId, word) {
   $('refdlg-menu').hidden = false;
   if (!dlg.open) dlg.showModal();
   $('refdlg-close').focus();
+  return false;
 }
 
 // The archived Steam login. Three states, and the third is the one that matters:
@@ -3271,13 +3279,17 @@ function selectedGb() {
     .reduce((n, g) => n + g.bytes, 0) / 1073741824;
 }
 
+// The size of disk a person asked for on the Build page; 0 is "only if the games
+// need one". The disk made is the larger of this and what the games need.
+let extraPick = 0;
 function paintFit() {
   // The disk a box offers is cg's arithmetic, read with the archive. Until it
   // has been read the meter says so, and nothing is refused on a guess: the box
   // enforces the real limit at boot, which is where it must be enforced.
   const gb = selectedGb(), cap = archive.selectable_gb;
   const reserve = archive.reserve_gb ?? 20;
-  const extra = extraDiskGb(gb, reserve, cap == null ? null : cap + reserve);
+  const auto = extraDiskGb(gb, reserve, cap == null ? null : cap + reserve);
+  const extra = Math.max(auto, extraPick);
   const over = extra > MAX_EXTRA_DISK_GB;
   // Whose disk: the machine the next build makes, as cg read it.
   $('b-fit').textContent = archive.disk_type ? `Disk space (${archive.disk_type})` : 'Disk space';
@@ -3298,7 +3310,7 @@ function paintFit() {
   const add = extra && per != null ? extra * per : null;
   const base = statusNow ? machineFacts().price : null;
   note.textContent = !extra || over ? '' : [
-    `Extra space for your games: ${extra} GB`,
+    `Extra space for your games: ${extra} GB${extra > auto ? ' (your choice)' : ''}`,
     add != null ? `+${rsh(add)} an hour` : '',
     add != null && base != null ? `about ${rsh(base + add)} an hour in all while it runs` : '',
   ].filter(Boolean).join(' · ');
@@ -6997,6 +7009,85 @@ $('b-login-choice').onchange = async ev => {
   ev.target.disabled = false;
 };
 
+// The disk asked for on the Build page: said in the line under the games.
+$('b-extra-pick').onchange = ev => { extraPick = Number(ev.target.value) || 0; paintFit(); };
+
+// Add disk, on the running machine. cg says what it will do (disk.move) and how
+// much room there is to add (max_add_gb); this only asks how much, says the
+// price, and runs it.
+const DISK_SIZES_GB = [50, 100, 200, 500];
+async function openAddDisk() {
+  const dlg = $('diskdlg'), yes = $('diskdlg-yes');
+  const sizes = $('diskdlg-sizes');
+  sizes.textContent = '';
+  yes.disabled = true;
+  yes.onclick = null;
+  $('diskdlg-price').textContent = '';
+  $('diskdlg-warn').textContent = '';
+  $('diskdlg-now').textContent = 'Looking at your game PC…';
+  if (!dlg.open) dlg.showModal();
+  let st = null;
+  try { st = JSON.parse(await runCg(['disk', '--json'], { capture: true })); } catch { /* said below */ }
+  if (!st || !st.running) {
+    $('diskdlg-now').textContent = st ? 'Your game PC is not running, so its disk cannot be changed.'
+      : 'Could not look at your game PC. Check that it is running and try again.';
+    return;
+  }
+  const left = Math.round(st.free_gb), total = Math.round(st.total_gb);
+  $('diskdlg-now').textContent = st.total_gb
+    ? `Game space: ${Math.round(st.used_gb)} of ${total} GB used, ${left} GB free.` : 'Game space on your game PC.';
+  if (st.max_add_gb < st.step_gb) {
+    $('diskdlg-warn').textContent = 'Your game PC already has the most game space it can hold.';
+    return;
+  }
+  const options = DISK_SIZES_GB.filter(n => n <= st.max_add_gb);
+  let picked = options.includes(100) ? 100 : options[options.length - 1];
+  const per = diskInrPerGbHour();
+  const show = () => {
+    yes.disabled = !(picked >= 1 && picked <= st.max_add_gb);
+    yes.textContent = picked >= 1 ? `Add ${picked} GB` : 'Add disk';
+    $('diskdlg-price').textContent = picked >= 1 && per != null
+      ? `+${rsh(picked * per)} an hour while the machine exists` : 'Billed by the hour while the machine exists.';
+    $('diskdlg-warn').textContent = [
+      st.move ? 'Your games are moved onto the new disk. Steam closes while that happens, and so does any game you are playing. It can take several minutes.'
+              : 'Takes about a minute. Your game keeps running. If Steam does not show the new space, restart it.',
+      st.move ? '' : 'AWS lets a disk be made bigger once every 6 hours.',
+      'The disk is deleted with the machine.',
+    ].filter(Boolean).join('\n');
+  };
+  for (const n of options) {
+    const row = document.createElement('label');
+    row.className = 'flex items-center gap-space-sm font-body-md text-body-md';
+    const r = Object.assign(document.createElement('input'), { type: 'radio', name: 'diskdlg-size', value: String(n), checked: n === picked });
+    r.className = 'accent-primary';
+    r.onchange = () => { picked = n; other.value = ''; show(); };
+    row.append(r, `${n} GB`);
+    sizes.append(row);
+  }
+  const otherRow = document.createElement('label');
+  otherRow.className = 'flex items-center gap-space-sm font-body-md text-body-md';
+  const other = Object.assign(document.createElement('input'), { type: 'number', min: '1', max: String(st.max_add_gb), placeholder: 'Other' });
+  other.className = 'field w-28';
+  other.oninput = () => {
+    picked = Math.ceil(Number(other.value) / st.step_gb) * st.step_gb || 0;
+    for (const r of sizes.querySelectorAll('input[type=radio]')) r.checked = false;
+    show();
+  };
+  otherRow.append(other, 'GB');
+  sizes.append(otherRow);
+  show();
+  // The button closes the dialog itself (it is a form's); this runs first.
+  yes.onclick = async () => {
+    const gb = picked;
+    if (!gb) return;
+    const done = await libraryRun(['disk', 'add', String(gb)], 'Adding space', null, null, () => 'Your games were not deleted.');
+    if (done) {
+      $('refdlg').close();
+      note(`Added ${gb} GB for your games`, 'text-primary');
+    }
+  };
+}
+
 $('d-guards').onclick = () => goView('guards');
 $('d-bill-more').onclick = () => goView('cost');
 $('c-egress-settings').onclick = () => goView('settings');
@@ -7060,7 +7151,7 @@ function resumeBuild(s) {
 // A build, with the games ticked now. Try again uses the ones the failed build
 // had, so a retry builds the same machine.
 function buildWith(apps, games, gamesGb) {
-  return startRun(['init'], { env: { GAME_APPS: apps }, apps, games, gamesGb });
+  return startRun(['init'], { env: { GAME_APPS: apps, GAME_EXTRA_DISK_GB: String(extraPick) }, apps, games, gamesGb });
 }
 function retryBuild() {
   const r = run || {};

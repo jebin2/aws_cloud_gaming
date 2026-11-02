@@ -255,11 +255,15 @@ func (i *Init) provision(ctx context.Context, pre check.Result, ntfy string) (pr
 		apps = "all"
 	}
 	var data GameDisk
-	if i.ExtraDisk != nil && apps != "none" {
+	if i.ExtraDisk != nil {
 		data = i.ExtraDisk(ctx, apps)
 	}
 	if data.GB > provision.MaxExtraDiskGB {
-		i.Out.Die(fmt.Sprintf("your games need %.0f GB - more than a game PC here can hold (%d GB). Untick a game and try again", data.NeedGB, provision.MaxExtraDiskGB))
+		if data.Asked {
+			i.Out.Die(fmt.Sprintf("a %d GB disk is more than a game PC here can hold (%d GB). Ask for less and try again", data.GB, provision.MaxExtraDiskGB))
+		} else {
+			i.Out.Die(fmt.Sprintf("your games need %.0f GB - more than a game PC here can hold (%d GB). Untick a game and try again", data.NeedGB, provision.MaxExtraDiskGB))
+		}
 		return provision.Result{}, false
 	}
 	if data.GB > 0 {
@@ -267,7 +271,11 @@ func (i *Init) provision(ctx context.Context, pre check.Result, ntfy string) (pr
 		if data.INRHour > 0 {
 			cost = fmt.Sprintf(" (about Rs %.1f an hour more)", data.INRHour)
 		}
-		i.cont("", fmt.Sprintf("==> your games need %.0f GB and this machine's own drive holds %.0f GB, so a %d GB disk is added for them%s", data.NeedGB, data.StoreGB, data.GB, cost))
+		if data.Asked {
+			i.cont("", fmt.Sprintf("==> a %d GB disk is added for your games, as you asked%s", data.GB, cost))
+		} else {
+			i.cont("", fmt.Sprintf("==> your games need %.0f GB and this machine's own drive holds %.0f GB, so a %d GB disk is added for them%s", data.NeedGB, data.StoreGB, data.GB, cost))
+		}
 	}
 	login := i.Env.Get("GAME_STEAM_LOGIN")
 	if login == "" {
@@ -302,7 +310,9 @@ func (i *Init) provision(ctx context.Context, pre check.Result, ntfy string) (pr
 type GameDisk struct {
 	GB              int
 	NeedGB, StoreGB float64
-	INRHour         float64
+	// Asked: the size was chosen by a person, not worked out from the games.
+	Asked   bool
+	INRHour float64
 }
 
 func (i *Init) diskGB() int {

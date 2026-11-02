@@ -22,3 +22,12 @@ func ExtraDiskGB(needGB, reserveGB, storeGB float64) int {
 	}
 	return int(math.Ceil((needGB+reserveGB)/ExtraDiskStepGB)) * ExtraDiskStepGB
 }
+
+// RoundExtraDiskGB is a size asked for, rounded up to the step; anything under 1
+// is no disk.
+func RoundExtraDiskGB(gb int) int {
+	if gb < 1 {
+		return 0
+	}
+	return (gb + ExtraDiskStepGB - 1) / ExtraDiskStepGB * ExtraDiskStepGB
+}

@@ -418,6 +418,23 @@ func TestGamesThatDoNotFitTheMachinesDriveGetADiskOfTheirOwn(t *testing.T) {
 	}
 }
 
+func TestADiskAskedForIsAddedEvenWhenTheGamesFit(t *testing.T) {
+	r := newRig(t)
+	r.i.ExtraDisk = func(context.Context, string) GameDisk {
+		return GameDisk{GB: 100, NeedGB: 40, StoreGB: 115, Asked: true, INRHour: 1.2}
+	}
+	if rc := r.i.Run(context.Background()); rc != 0 {
+		t.Fatalf("rc %d\n%s\n%s", rc, r.o, r.e)
+	}
+	m := r.a.lastRun.BlockDeviceMappings
+	if len(m) != 2 || *m[1].Ebs.VolumeSize != 100 {
+		t.Errorf("%+v", m)
+	}
+	if !strings.Contains(r.o.String(), "a 100 GB disk is added for your games, as you asked (about Rs 1.2 an hour more)") || strings.Contains(r.o.String(), "your games need") {
+		t.Errorf("it does not say the games need it when they do not:\n%s", r.o)
+	}
+}
+
 func TestMoreThanAGamePCCanHoldStopsBeforeLaunching(t *testing.T) {
 	r := newRig(t)
 	r.i.ExtraDisk = func(context.Context, string) GameDisk { return GameDisk{GB: 1500, NeedGB: 1400, StoreGB: 115} }

@@ -5,6 +5,7 @@
     ["library", "push"], ["library", "pull"], ["library", "forget"],
     ["library", "clean"], ["library", "account"], ["library", "move"],
     ["library", "reset"], ["library", "keep-for"],
+    ["disk", "add"],
     ["creds", "set"],
     ["creds", "tailscale", "signin"],
     ["creds", "tailscale", "authkey"],
@@ -18,5 +19,5 @@
     "clean-orphans", "delete-volume", "destroy-all", "forget-game", "forget-login",
     "move-game", "host-sudo", "host-ssh-password", "aws-disconnect"
   ],
-  "env": ["GAME_APPS"]
+  "env": ["GAME_APPS", "GAME_EXTRA_DISK_GB"]
 }

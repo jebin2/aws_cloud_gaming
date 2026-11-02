@@ -269,6 +269,19 @@
             <div class="h-full bg-primary" id="b-bar" style="width:0%"></div>
           </div>
           <p id="b-extra" class="mt-space-xs font-code-sm text-code-sm text-on-surface-variant" hidden></p>
+          <!-- Always there: more room than the games need is allowed. The disk
+               is the larger of this and what the games need. -->
+          <label class="mt-space-sm flex flex-wrap items-center gap-space-sm font-code-sm text-code-sm text-on-surface-variant">
+            Disk for your games
+            <select id="b-extra-pick"
+                    class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 text-on-surface">
+              <option value="0">Only if the games need one</option>
+              <option value="50">50 GB</option>
+              <option value="100">100 GB</option>
+              <option value="200">200 GB</option>
+              <option value="500">500 GB</option>
+            </select>
+          </label>
         </div>
       </div>
 
@@ -613,6 +626,23 @@
     <menu class="dlg-actions">
       <button value="no" class="btn" id="confirm-no">Cancel</button>
       <button value="yes" class="btn btn-primary" id="confirm-yes">Continue</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- More room for the games on a machine that is running. What it will do
+     (make the disk bigger, or move the games onto a new one) is cg's to say:
+     cg disk --json. -->
+<dialog id="diskdlg" class="dlg min-w-[460px] max-w-[560px]">
+  <form method="dialog">
+    <p class="dlg-title">Add disk</p>
+    <p class="dlg-sub" id="diskdlg-now">Looking at your game PC&hellip;</p>
+    <div class="mt-space-md flex flex-col gap-space-xs" id="diskdlg-sizes"></div>
+    <p class="mt-space-md font-code-sm text-code-sm text-on-surface" id="diskdlg-price"></p>
+    <p class="mt-space-sm font-code-sm text-code-sm text-on-surface-variant whitespace-pre-line" id="diskdlg-warn"></p>
+    <menu class="dlg-actions">
+      <button value="no" class="btn" id="diskdlg-no">Cancel</button>
+      <button value="yes" class="btn btn-primary" id="diskdlg-yes" disabled>Add disk</button>
     </menu>
   </form>
 </dialog>

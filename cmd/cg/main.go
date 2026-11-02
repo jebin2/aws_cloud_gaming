@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"syscall"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/commands/awscmd"
@@ -249,6 +250,20 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			return 1
 		}
 		return d.Clean(ctx)
+	case "disk":
+		d, c, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
+		if err != nil {
+			out.Die(err.Error())
+			return 1
+		}
+		if len(args) > 0 && args[0] == "add" {
+			gb := 0
+			if len(args) > 1 {
+				gb, _ = strconv.Atoi(args[1])
+			}
+			return d.AddDisk(ctx, c, gb)
+		}
+		return d.Disk(ctx, c, jsonFlag)
 	case "pair":
 		d, _, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
 		if err != nil {

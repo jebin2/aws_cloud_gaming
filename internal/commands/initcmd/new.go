@@ -99,11 +99,20 @@ func New(ctx context.Context, get config.Lookup, env *config.Env, out *output.Ou
 		ExtraDisk: func(ctx context.Context, apps string) GameDisk {
 			need, ok := Chooser{Lib: gameLib(), Env: env, Out: out}.Need(ctx, apps)
 			own, known := storeGB(ctx, ec, env, cache)
-			if !ok || !known {
+			gb := 0
+			if ok && known {
+				gb = provision.ExtraDiskGB(need, float64(env.Int("GAME_DISK_RESERVE_GB")), own)
+			}
+			// A disk asked for is added whether or not the games need one: more
+			// room than they take is what it is for.
+			asked := false
+			if want := provision.RoundExtraDiskGB(env.Int("GAME_EXTRA_DISK_GB")); want > gb {
+				gb, asked = want, true
+			}
+			if gb == 0 {
 				return GameDisk{}
 			}
-			gb := provision.ExtraDiskGB(need, float64(env.Int("GAME_DISK_RESERVE_GB")), own)
-			return GameDisk{GB: gb, NeedGB: need, StoreGB: own, INRHour: float64(gb) * diskINRPerGBHour(ctx, popts, region)}
+			return GameDisk{GB: gb, NeedGB: need, StoreGB: own, Asked: asked, INRHour: float64(gb) * diskINRPerGBHour(ctx, popts, region)}
 		},
 		Lib: func(named string) provision.Library {
 			return provision.Library{S3: s3.NewFromConfig(cfg), IAM: iam.NewFromConfig(cfg), Account: account, Host: host, Region: region, Named: named, TagKey: config.TagKey, Beat: out.Wait}
