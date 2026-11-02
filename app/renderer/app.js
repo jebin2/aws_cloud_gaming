@@ -5511,7 +5511,7 @@ const READ_NAME = {
   creds: 'AWS key', tskey: 'Tailscale', deps: 'Local tools', cost: 'Exact cost this month',
   hosts: 'Servers',
 };
-const readName = json => (json.startsWith('host:') ? `${json.slice(5)}, your machine` : READ_NAME[json] || json);
+const readName = json => (json.startsWith('host:') ? json.slice(5) : READ_NAME[json] || json);
 // The top Refresh, as a popup: what is being read, each ticking as it lands,
 // closed once the page has been redrawn. A read that failed keeps it open with
 // the reason, because a popup that vanished would say it all worked.
