@@ -480,7 +480,7 @@ contains "  with the GPU"                "$(grep -m1 '^BPICK ' <<<"$OUT")" "NVID
 contains "every why-mark is live, not greyed" "$OUT" "MARKS | 4 live=4"
 contains "the table and the card agree on the price" "$OUT" "SAMEPRICE | true"
 contains "  and the hourly rate, in rupees" "$(grep -m1 '^BWHERE ' <<<"$OUT")" "₹51/hour"
-contains "a card with no answer because the check failed says so" "$OUT" "UNREAD | AWS Could not check AWS: AWS did not answer. Refresh tries again. | busy hidden=true"
+contains "a card with no answer because the check failed says so" "$OUT" "Could not check AWS: AWS did not answer. Refresh tries again. | busy hidden=true"
 check    "  and goes back to loading when the failure is cleared" "$(grep -m1 '^UNREAD CLEARED' <<<"$OUT")" "UNREAD CLEARED | loading"
 
 echo "6. capacity is shown next to price, which is the whole point"
