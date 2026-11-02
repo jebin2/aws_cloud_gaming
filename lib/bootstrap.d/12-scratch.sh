@@ -19,8 +19,23 @@ progress "setting up local NVMe at /scratch"
 cat > /usr/local/bin/mount-scratch.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-DEV=$(lsblk -dno NAME,MODEL | awk '/Instance Storage/{print "/dev/"$1; exit}')
-[[ -n ${DEV:-} ]] || { echo "no instance store present"; exit 0; }
+DATA_GB=__CG_DATA_GB__
+DEV=""
+if (( DATA_GB > 0 )); then
+  # The games do not fit the machine's own drive, so cg added a disk for them and
+  # this is it: an EBS disk with nothing mounted on it (the root disk has its
+  # partitions mounted). It is told apart from the root disk by that, because its
+  # device name depends on the order the instance finds its disks in. Already
+  # mounted at /scratch counts too: this runs again on every boot.
+  for n in $(lsblk -dno NAME,MODEL | awk '/Elastic Block Store/{print $1}'); do
+    mp=$(lsblk -no MOUNTPOINT "/dev/$n" | tr -d '[:space:]')
+    if [[ -z $mp || $mp == /scratch ]]; then DEV="/dev/$n"; break; fi
+  done
+  [[ -n $DEV ]] || { echo "the disk added for the games is not attached"; exit 1; }
+else
+  DEV=$(lsblk -dno NAME,MODEL | awk '/Instance Storage/{print "/dev/"$1; exit}')
+  [[ -n ${DEV:-} ]] || { echo "no instance store present"; exit 0; }
+fi
 # A reboot keeps the instance store and its filesystem; only a stop wipes it.
 # So format only when there is nothing there - reformatting on every boot would
 # throw away a library that survived the build's own reboot.

@@ -317,7 +317,9 @@ contains "an archive table"              "$html" 'id="b-games"'
 lacks    "  by name, not by Steam's id"   "$js" 'appid ${g.appid}'
 contains "  and when each is deleted"    "$js" "deleteOn(g, days, seen, marks)"
 contains "the allocation bar"            "$html" 'id="b-bar"'
-contains "  says what is left, plainly"  "$js" "GB over. Deselect a game."
+contains "  says what is left, plainly"  "$js" "is more than a game PC here can hold. Deselect a game."
+contains "  and the extra disk is said"   "$js" "a \${extra} GB disk will be added"
+contains "  with its price beside it"      "$html" 'id="b-extra"'
 contains "the machine comes from cg"     "$js" "const spec = s.spec || {}"
 check    "  with no type hardcoded"      "$(grep -c 'g6\.xlarge\|L4\|16 GiB' app/renderer/app.js)" "0"
 lacks    "no build time, no second rate line" "$js" "from the moment it starts"

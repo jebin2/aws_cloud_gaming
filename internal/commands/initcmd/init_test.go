@@ -44,6 +44,7 @@ type acct struct {
 	launched         time.Time
 	calls            []string
 	profile          bool
+	lastRun          *ec2.RunInstancesInput
 }
 
 func (a *acct) exists() bool { return a.state != "" }
@@ -61,6 +62,7 @@ func (a *acct) DescribeInstances(_ context.Context, in *ec2.DescribeInstancesInp
 }
 func (a *acct) RunInstances(_ context.Context, in *ec2.RunInstancesInput, _ ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
 	a.runs++
+	a.lastRun = in
 	if a.launchErr != nil {
 		return nil, a.launchErr
 	}
@@ -391,6 +393,39 @@ func TestAFreshBuildFromNothingToReady(t *testing.T) {
 	}
 	if r.budgets.created != 1 || r.up.puts != 1 {
 		t.Errorf("budget %d bundle %d", r.budgets.created, r.up.puts)
+	}
+}
+
+func TestGamesThatDoNotFitTheMachinesDriveGetADiskOfTheirOwn(t *testing.T) {
+	r := newRig(t)
+	if rc := r.i.Run(context.Background()); rc != 0 || len(r.a.lastRun.BlockDeviceMappings) != 1 {
+		t.Fatalf("games that fit leave the launch as it was: rc %d\n%s", rc, r.e)
+	}
+
+	r = newRig(t)
+	r.i.ExtraDisk = func(_ context.Context, apps string) GameDisk {
+		return GameDisk{GB: 190, NeedGB: 170, StoreGB: 115, INRHour: 2.3}
+	}
+	if rc := r.i.Run(context.Background()); rc != 0 {
+		t.Fatalf("rc %d\n%s\n%s", rc, r.o, r.e)
+	}
+	m := r.a.lastRun.BlockDeviceMappings
+	if len(m) != 2 || *m[0].Ebs.VolumeSize != 50 || *m[1].Ebs.VolumeSize != 190 || *m[1].DeviceName != "/dev/sdf" {
+		t.Errorf("a 50 GB root disk and a 190 GB games disk: %+v", m)
+	}
+	if !strings.Contains(r.o.String(), "your games need 170 GB and this machine's own drive holds 115 GB, so a 190 GB disk is added for them (about Rs 2.3 an hour more)") {
+		t.Errorf("the cost is said before the launch:\n%s", r.o)
+	}
+}
+
+func TestMoreThanAGamePCCanHoldStopsBeforeLaunching(t *testing.T) {
+	r := newRig(t)
+	r.i.ExtraDisk = func(context.Context, string) GameDisk { return GameDisk{GB: 1500, NeedGB: 1400, StoreGB: 115} }
+	if rc := r.i.Run(context.Background()); rc != 1 || r.a.runs != 0 {
+		t.Fatalf("rc %d, launches %d", rc, r.a.runs)
+	}
+	if !strings.Contains(r.e.String(), "your games need 1400 GB - more than a game PC here can hold (1000 GB)") {
+		t.Errorf("%s", r.e)
 	}
 }
 

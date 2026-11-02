@@ -304,9 +304,10 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('NOCAP | fit | ' + document.getElementById('b-fit').textContent.trim());
   out.push('NOCAP | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
   out.push('NOCAP | build | ' + (document.getElementById('b-build').disabled ? 'OFF' : 'on'));
-  // A g4dn.xlarge's disk, and a game bigger than all of it: not offered, and
-  // the row says why - ticking it could never work, whatever else is unticked.
-  const small = { ...DATA.library, disk_type: 'g4dn.xlarge', disk_gb: 116, selectable_gb: 96,
+  // A g4dn.xlarge's drive, and a game bigger than all of it: offered all the
+  // same, because cg adds a disk for it - and the price of that is said. Only a
+  // game too big for even that is refused.
+  const small = { ...DATA.library, disk_type: 'g4dn.xlarge', disk_gb: 116, selectable_gb: 96, reserve_gb: 20,
                   games: [{ appid: '9', name: 'Big game', bytes: 175 * 1073741824, usd_month: 4.4, pushed: '2026-10-01T00:00:00Z' },
                           { appid: '8', name: 'Small game', bytes: 3 * 1073741824, usd_month: 0.1, pushed: '2026-10-01T00:00:00Z' }],
                   total_bytes: 178 * 1073741824 };
@@ -317,6 +318,18 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('SMALL | small | ' + (boxes[1].disabled ? 'off' : 'on'));
   boxes[0].closest('tr').click();
   out.push('SMALL | clicked | ' + boxes[0].checked);
+  out.push('SMALL | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
+  out.push('SMALL | extra | ' + document.getElementById('b-extra').textContent.trim() + ' | hidden=' + document.getElementById('b-extra').hidden);
+  out.push('SMALL | build | ' + (document.getElementById('b-build').disabled ? 'OFF' : 'on'));
+  boxes[0].closest('tr').click();
+  out.push('SMALL | unticked | extra hidden=' + document.getElementById('b-extra').hidden);
+  const huge = { ...small, games: [{ appid: '7', name: 'Huge game', bytes: 990 * 1073741824, usd_month: 9, pushed: '2026-10-01T00:00:00Z' }],
+                 total_bytes: 990 * 1073741824 };
+  paintLibrary(huge);
+  const hb = document.querySelector('#b-games input[type=checkbox]');
+  out.push('HUGE | box | ' + (hb.disabled ? 'off' : 'on') + ' | ' + hb.closest('tr').textContent.replace(/\s+/g, ' ').trim());
+  out.push('EXTRADISK | ' + [extraDiskGb(121, 20, 232), extraDiskGb(212, 20, 232), extraDiskGb(213, 20, 232), extraDiskGb(140, 20, 115),
+                              extraDiskGb(170, 20, 115), extraDiskGb(50, 20, 0), extraDiskGb(0, 20, 115), extraDiskGb(140, 20, null)].join(','));
   paintLibrary(DATA.library);
   if (window.__errs.length) out.push('ERRORS: ' + window.__errs.join(' | '));
   const card = f => (document.querySelector('#b-machine-card [data-f=' + f + ']') || {}).textContent || '';
@@ -425,10 +438,18 @@ contains "  and Build is still allowed"    "$OUT" "NOCAP | build | on"
 check    "number headings are right-aligned, over their numbers" "$(grep '^HEADALIGN' <<<"$OUT")" "HEADALIGN | right,right"
 contains "the machine card says how much room it has" "$(grep '^BPICK' <<<"$OUT")" " GB"
 contains "the meter names the machine"     "$OUT" "SMALL | fit | Disk space (g4dn.xlarge)"
-contains "a game bigger than its disk is not offered" "$OUT" "SMALL | big | off"
-contains "  and says why"                  "$OUT" "Exceeds g4dn.xlarge capacity (96 GB). Choose a larger disk."
-contains "  a game that fits still is"     "$OUT" "SMALL | small | on"
-contains "  and clicking its row does nothing" "$OUT" "SMALL | clicked | false"
+contains "a game bigger than the machine's drive is still offered" "$OUT" "SMALL | big | on"
+contains "  a game that fits is too"        "$OUT" "SMALL | small | on"
+contains "  and ticking the big one works"  "$OUT" "SMALL | clicked | true"
+contains "  and says a disk will be added"  "$OUT" "SMALL | pct | 175.0 GB · a 200 GB disk will be added"
+contains "  with what it is, before the build" "$OUT" "SMALL | extra | Extra space for your games: 200 GB"
+lacks    "  not hidden"                    "$OUT" "SMALL | extra | hidden=true"
+contains "  Build stays allowed"            "$OUT" "SMALL | build | on"
+contains "  and the note goes when the game does" "$OUT" "SMALL | unticked | extra hidden=true"
+contains "a game too big for any added disk is not offered" "$OUT" "HUGE | box | off"
+contains "  and says why"                  "$OUT" "More than a game PC here can hold (1000 GB)."
+# The same numbers as provision's ExtraDiskGB test: one rule, two places.
+contains "the app and cg size the disk alike" "$OUT" "EXTRADISK | 0,0,240,160,190,70,0,0"
 
 echo "2. the table lives on Settings, and only there"
 contains "the Settings screen has it"  "$OUT" "TABLE s-chooser"

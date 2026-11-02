@@ -38,7 +38,10 @@ type Init struct {
 	// The steps that are their own commands.
 	EnsureWatchdog func(ctx context.Context)
 	ChooseGames    func(ctx context.Context)
-	Preflight      func(ctx context.Context) (check.Result, int)
+	// ExtraDisk is the disk the chosen games need added, when the machine's own drive
+	// is too small for them; nil adds none.
+	ExtraDisk func(ctx context.Context, apps string) GameDisk
+	Preflight func(ctx context.Context) (check.Result, int)
 
 	// The AWS side.
 	Lib func(bucket string) provision.Library
@@ -251,6 +254,21 @@ func (i *Init) provision(ctx context.Context, pre check.Result, ntfy string) (pr
 	if apps == "" {
 		apps = "all"
 	}
+	var data GameDisk
+	if i.ExtraDisk != nil && apps != "none" {
+		data = i.ExtraDisk(ctx, apps)
+	}
+	if data.GB > provision.MaxExtraDiskGB {
+		i.Out.Die(fmt.Sprintf("your games need %.0f GB - more than a game PC here can hold (%d GB). Untick a game and try again", data.NeedGB, provision.MaxExtraDiskGB))
+		return provision.Result{}, false
+	}
+	if data.GB > 0 {
+		cost := ""
+		if data.INRHour > 0 {
+			cost = fmt.Sprintf(" (about Rs %.1f an hour more)", data.INRHour)
+		}
+		i.cont("", fmt.Sprintf("==> your games need %.0f GB and this machine's own drive holds %.0f GB, so a %d GB disk is added for them%s", data.NeedGB, data.StoreGB, data.GB, cost))
+	}
 	login := i.Env.Get("GAME_STEAM_LOGIN")
 	if login == "" {
 		login = "use"
@@ -259,7 +277,7 @@ func (i *Init) provision(ctx context.Context, pre check.Result, ntfy string) (pr
 	if i.Prices != nil {
 		xr, inr = i.Prices(ctx, bucketRegion)
 	}
-	res, err := p.Run(ctx, provision.Params{XRegionUSD: xr, INR: inr, Host: host, Region: region, Type: pre.Type, DiskGB: i.diskGB(), Spot: pre.Spot, TagKey: config.TagKey,
+	res, err := p.Run(ctx, provision.Params{XRegionUSD: xr, INR: inr, Host: host, Region: region, Type: pre.Type, DiskGB: i.diskGB(), DataGB: data.GB, Spot: pre.Spot, TagKey: config.TagKey,
 		AuthKey: pre.AuthKey, Apps: apps, Login: login, ReserveGB: i.Env.Setting("GAME_DISK_RESERVE_GB"),
 		Bucket: bucket, BucketRegion: bucketRegion, NtfyURL: ntfy, KeyFile: filepath.Join(home, ".ssh", host+".pem")})
 	if err != nil {
@@ -276,6 +294,15 @@ func (i *Init) provision(ctx context.Context, pre check.Result, ntfy string) (pr
 		return res, false
 	}
 	return res, true
+}
+
+// GameDisk is the disk added for the games: its size (0: none), what the games
+// need, what the machine's own drive holds, and what the disk costs an hour in
+// rupees (0: not known).
+type GameDisk struct {
+	GB              int
+	NeedGB, StoreGB float64
+	INRHour         float64
 }
 
 func (i *Init) diskGB() int {

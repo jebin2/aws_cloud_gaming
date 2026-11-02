@@ -99,7 +99,15 @@ flowchart TB
 | Security group, key pair, budget | AWS | **yes** - free, reused |
 
 The root disk size is `GAME_DISK_GB`, 50 GB by default. The NVMe is
-wiped whenever the instance stops, which is why S3 holds the durable copy. Details:
+wiped whenever the instance stops, which is why S3 holds the durable copy.
+
+**Games that do not fit the NVMe.** Some types have an NVMe of about 115 GB, some none. When the
+games chosen for a build (plus the `GAME_DISK_RESERVE_GB` kept free) take more than the machine's own
+drive holds, `cg init` adds a gp3 disk for them at launch: sized to the games, rounded up to 10 GB,
+at most 1000 GB, deleted with the box. The box mounts it at `/scratch` in place of the NVMe, so the
+library, the restore and the push work unchanged (`lib/bootstrap.d/12-scratch.sh`,
+`provision.ExtraDiskGB`). Nobody sets its size; the Build page shows it and its price before the build.
+It survives a stop, and costs $0.0912/GB-month while the box exists. Details:
 [game-library.md](game-library.md).
 
 ## Flow 1 - `cg init`: build a box

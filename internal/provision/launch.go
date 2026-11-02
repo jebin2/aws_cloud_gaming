@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,8 +41,11 @@ type SSM interface {
 type Params struct {
 	Host, Region, Type string
 	DiskGB             int
-	Spot               bool
-	TagKey             string
+	// DataGB is the disk added for the games when the machine's own drive is too
+	// small for them (see ExtraDiskGB); 0 leaves the games on that drive.
+	DataGB int
+	Spot   bool
+	TagKey string
 	// Joining the tailnet, and what the build restores.
 	AuthKey, Apps, Login, ReserveGB string
 	// The bucket the library lives in, and where it is.
@@ -84,6 +88,20 @@ type LaunchError struct {
 
 func (e *LaunchError) Error() string {
 	return "could not launch the instance - see the launch error above"
+}
+
+// blockDevices is the root disk, and the games disk when one is asked for. Both
+// are deleted with the box, so neither bills once it is gone.
+func blockDevices(a Params) []ec2types.BlockDeviceMapping {
+	disk := func(dev string, gb int) ec2types.BlockDeviceMapping {
+		return ec2types.BlockDeviceMapping{DeviceName: aws.String(dev), Ebs: &ec2types.EbsBlockDevice{
+			VolumeSize: aws.Int32(int32(gb)), VolumeType: ec2types.VolumeTypeGp3, DeleteOnTermination: aws.Bool(true)}}
+	}
+	out := []ec2types.BlockDeviceMapping{disk("/dev/sda1", a.DiskGB)}
+	if a.DataGB > 0 {
+		out = append(out, disk("/dev/sdf", a.DataGB))
+	}
+	return out
 }
 
 func (p Provisioner) now() time.Time {
@@ -285,7 +303,7 @@ func (p Provisioner) launch(ctx context.Context, a Params) (id string, restored 
 		ImageId: aws.String(ami), InstanceType: ec2types.InstanceType(a.Type), KeyName: aws.String(a.Host), SecurityGroupIds: []string{sg},
 		IamInstanceProfile: &ec2types.IamInstanceProfileSpecification{Name: aws.String(a.Host + "-box")},
 		MinCount:           aws.Int32(1), MaxCount: aws.Int32(1),
-		BlockDeviceMappings: []ec2types.BlockDeviceMapping{{DeviceName: aws.String("/dev/sda1"), Ebs: &ec2types.EbsBlockDevice{VolumeSize: aws.Int32(int32(a.DiskGB)), VolumeType: ec2types.VolumeTypeGp3, DeleteOnTermination: aws.Bool(true)}}},
+		BlockDeviceMappings: blockDevices(a),
 		TagSpecifications: []ec2types.TagSpecification{
 			{ResourceType: ec2types.ResourceTypeInstance, Tags: []ec2types.Tag{{Key: aws.String("Name"), Value: aws.String(a.Host)}, {Key: aws.String(p.tag(a)), Value: aws.String(a.Host)}}},
 			{ResourceType: ec2types.ResourceTypeVolume, Tags: []ec2types.Tag{{Key: aws.String("Name"), Value: aws.String(a.Host)}, {Key: aws.String(p.tag(a)), Value: aws.String(a.Host)}}}},
@@ -414,7 +432,7 @@ func (p Provisioner) userData(ctx context.Context, a Params) (UserData, error) {
 	if login == "" {
 		login = "use"
 	}
-	u, err := Assemble(p.Src, map[string]string{"TS_AUTHKEY": a.AuthKey, "TS_HOST": a.Host, "HOST_TGZ_URL": url, "S3_BUCKET": a.Bucket,
+	u, err := Assemble(p.Src, map[string]string{"CG_DATA_GB": strconv.Itoa(a.DataGB), "TS_AUTHKEY": a.AuthKey, "TS_HOST": a.Host, "HOST_TGZ_URL": url, "S3_BUCKET": a.Bucket,
 		"CG_APPS": apps, "CG_LOGIN": login, "CG_RESERVE_GB": reserve, "CG_TARGET": "aws", "CG_USER": "ubuntu", "CG_FAMILY": "ubuntu"})
 	if err != nil {
 		return u, fmt.Errorf("could not render user-data: %s", firstLine(err))

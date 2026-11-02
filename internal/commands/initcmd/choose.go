@@ -11,6 +11,7 @@ import (
 	"github.com/jebin2/aws_cloud_gaming/internal/config"
 	"github.com/jebin2/aws_cloud_gaming/internal/library"
 	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/aws_cloud_gaming/internal/provision"
 )
 
 // Chooser asks which archived games to restore, before anything launches: the
@@ -30,6 +31,8 @@ type Chooser struct {
 	// box enforces the real limit at boot.
 	AvailGB   *float64
 	ReserveGB float64
+	// INRPerGBHour is what a GB of added disk costs an hour in rupees; 0 when not known.
+	INRPerGBHour float64
 }
 
 const gib = 1073741824.0
@@ -120,6 +123,44 @@ func (c Chooser) pick(ctx context.Context, current string) (string, bool) {
 }
 
 func (c Chooser) gb(a library.App) float64 { return float64(a.Bytes) / gib }
+
+// Need is what the games in sel (GAME_APPS: "all", "none" or appids) take, from the
+// archive's index; ok is false when the index could not be read, and then nothing
+// is sized on a guess.
+func (c Chooser) Need(ctx context.Context, sel string) (gb float64, ok bool) {
+	if sel == "none" {
+		return 0, true
+	}
+	bucket := c.Lib.Bucket
+	if bucket == "" {
+		b, found := c.Lib.BucketName()
+		if !found {
+			return 0, false
+		}
+		bucket = b
+	}
+	region := c.Lib.Region
+	if loc, err := c.Lib.S3.Location(ctx, bucket); err == nil && loc != "" {
+		region = loc
+	}
+	apps, missing, err := c.Lib.IndexAt(ctx, bucket, region)
+	if missing {
+		return 0, true
+	}
+	if err != nil {
+		return 0, false
+	}
+	want := map[string]bool{}
+	for _, id := range strings.Split(sel, ",") {
+		want[strings.TrimSpace(id)] = true
+	}
+	for _, a := range apps {
+		if sel == "all" || want[library.IDString(a.AppID)] {
+			gb += c.gb(a)
+		}
+	}
+	return gb, true
+}
 
 // fit truncates to n columns and pads to exactly n.
 func fit(s string, n int) string {
@@ -228,10 +269,22 @@ func (c Chooser) interactive(apps []library.App) (string, bool) {
 			names = append(names, a.Name)
 			ids = append(ids, library.IDString(a.AppID))
 		}
+		if c.AvailGB != nil && total > *c.AvailGB && provision.ExtraDiskGB(total, c.ReserveGB, *c.AvailGB+c.ReserveGB) <= provision.MaxExtraDiskGB {
+			// More than the machine's own drive holds is no longer a refusal: the
+			// build adds a disk for the games, and says what it costs.
+			gb := provision.ExtraDiskGB(total, c.ReserveGB, *c.AvailGB+c.ReserveGB)
+			cost := ""
+			if c.INRPerGBHour > 0 {
+				cost = fmt.Sprintf(" (about Rs %.1f an hour more)", float64(gb)*c.INRPerGBHour)
+			}
+			c.say("  %.0f GB selected, more than this machine's own drive holds (%.0f GB). A %d GB disk will be added for the games%s. Restoring: %s\n\n",
+				total, *c.AvailGB+c.ReserveGB, gb, cost, strings.Join(names, ", "))
+			return strings.Join(ids, ","), true
+		}
 		if c.AvailGB != nil && total > *c.AvailGB {
-			// Refuse and explain, rather than silently picking a subset: which game to
-			// drop is not a decision a tool should make for you.
-			c.say("  %.0f GB selected, %.0f GB available - over by %.0f GB.\n", total, *c.AvailGB, total-*c.AvailGB)
+			// Past even that: refuse and explain, rather than silently picking a
+			// subset - which game to drop is not a decision a tool should make for you.
+			c.say("  %.0f GB selected, more than a game PC here can hold (%d GB).\n", total, provision.MaxExtraDiskGB)
 			var parts []string
 			for _, a := range sel {
 				parts = append(parts, fmt.Sprintf("%s %.0f GB", trunc(a.Name, 20), c.gb(a)))

@@ -3226,10 +3226,10 @@ function paintPicker(d) {
 
     const box = document.createElement('input');
     box.type = 'checkbox'; box.className = 'accent-primary align-middle'; box.dataset.appid = g.appid;
-    // A game bigger than the machine's whole game disk can never be restored
-    // onto it, whatever else is unticked: it is not offered, and says why.
-    const cap = d.selectable_gb;
-    const tooBig = cap != null && g.bytes / 1073741824 > cap;
+    // A game too big even for the disk cg adds can never be restored, whatever
+    // else is unticked: it is not offered, and says why. Bigger than the machine's
+    // own drive is no longer that - cg adds a disk for it.
+    const tooBig = extraDiskGb(g.bytes / 1073741824, d.reserve_gb ?? 20, d.selectable_gb == null ? null : d.selectable_gb + (d.reserve_gb ?? 20)) > MAX_EXTRA_DISK_GB;
     if (tooBig) { picked.delete(g.appid); box.dataset.toobig = 'yes'; }
     box.checked = picked.has(g.appid);
     box.onchange = () => { box.checked ? picked.add(g.appid) : picked.delete(g.appid); paintFit(); };
@@ -3239,7 +3239,7 @@ function paintPicker(d) {
     nameCell.textContent = g.name || g.installdir || g.appid;
     if (tooBig) {
       nameCell.append(el('span', 'block font-code-sm text-code-sm text-error',
-        `Exceeds ${d.disk_type || 'machine'} capacity (${cap} GB). Choose a larger disk.`));
+        `More than a game PC here can hold (${MAX_EXTRA_DISK_GB} GB).`));
       tr.className = tr.className.replace('cursor-pointer', 'opacity-60');
     }
     cell('py-space-sm px-space-md text-right text-on-surface-variant').textContent = GB(g.bytes);
@@ -3249,6 +3249,21 @@ function paintPicker(d) {
     body.append(tr);
   }
   paintFit();
+}
+
+// The disk cg adds when the games do not fit the machine's own drive - the same
+// rule as provision.ExtraDiskGB, so the price shown is the disk that is made. null
+// when the drive is not known: nothing is sized on a guess.
+const EXTRA_DISK_STEP_GB = 10, MAX_EXTRA_DISK_GB = 1000;
+function extraDiskGb(need, reserve, store) {
+  if (store == null || need <= 0 || need + reserve <= store) return 0;
+  return Math.ceil((need + reserve) / EXTRA_DISK_STEP_GB) * EXTRA_DISK_STEP_GB;
+}
+// What a GB of added disk costs an hour, in rupees, from cg's rates; null when
+// they are not read yet.
+function diskInrPerGbHour() {
+  const r = (statusNow && statusNow.rates) || {};
+  return r.inr_per_usd && r.ebs_gb_month && r.month_hours ? r.ebs_gb_month * r.inr_per_usd / r.month_hours : null;
 }
 
 function selectedGb() {
@@ -3261,17 +3276,33 @@ function paintFit() {
   // has been read the meter says so, and nothing is refused on a guess: the box
   // enforces the real limit at boot, which is where it must be enforced.
   const gb = selectedGb(), cap = archive.selectable_gb;
-  const over = cap != null && gb > cap;
+  const reserve = archive.reserve_gb ?? 20;
+  const extra = extraDiskGb(gb, reserve, cap == null ? null : cap + reserve);
+  const over = extra > MAX_EXTRA_DISK_GB;
   // Whose disk: the machine the next build makes, as cg read it.
   $('b-fit').textContent = archive.disk_type ? `Disk space (${archive.disk_type})` : 'Disk space';
   $('b-fit').className = 'font-code-sm text-code-sm text-outline';
-  const pct = cap != null ? Math.min(100, (gb / cap) * 100) : 0;
-  $('b-fit-pct').textContent = over ? `${(gb - cap).toFixed(1)} GB over. Deselect a game.`
+  const room = extra ? extra - reserve : cap;
+  const pct = room != null && room > 0 ? Math.min(100, (gb / room) * 100) : 0;
+  $('b-fit-pct').textContent = over ? `${gb.toFixed(1)} GB is more than a game PC here can hold. Deselect a game.`
+    : extra ? `${gb.toFixed(1)} GB · a ${extra} GB disk will be added`
     : cap != null ? `${gb.toFixed(1)} of ${cap} GB`
     : picked.size ? `${gb.toFixed(1)} GB · capacity unknown` : '';
   $('b-fit-pct').className = 'font-code-sm text-code-sm ' + (over ? 'text-error' : 'text-on-surface-variant');
   $('b-bar').style.width = pct + '%';
   $('b-bar').className = 'h-full ' + (over ? 'bg-error' : 'bg-primary');
+  // What the extra disk adds to the hour, and what the hour comes to: said before
+  // the build, because it is money.
+  const note = $('b-extra');
+  const per = diskInrPerGbHour();
+  const add = extra && per != null ? extra * per : null;
+  const base = statusNow ? machineFacts().price : null;
+  note.textContent = !extra || over ? '' : [
+    `Extra space for your games: ${extra} GB`,
+    add != null ? `+${rsh(add)} an hour` : '',
+    add != null && base != null ? `about ${rsh(base + add)} an hour in all while it runs` : '',
+  ].filter(Boolean).join(' · ');
+  note.hidden = !note.textContent;
   // A box is already running: there is nothing to build, and cg would refuse.
   // The screen says so and offers what you can actually do with it.
   const up = !!boxNow;

@@ -78,6 +78,9 @@ func New(ctx context.Context, get config.Lookup, env *config.Env, out *output.Ou
 	r := local.Exec{}
 	popts := pricing.Options{Getenv: env.Get, Source: pricing.AWSSource{API: pricing.SDKProducts{Client: awspricing.NewFromConfig(us)}}}
 	sun := sunshine.Client{}
+	gameLib := func() library.Library {
+		return library.Library{S3: store, Host: host, Region: region, Account: account, Bucket: env.Get("GAME_S3_BUCKET")}
+	}
 	ts := func(t string) tskey.Client { return tskey.Client{Token: t} }
 	email := env.Get("GAME_ALERT_EMAIL")
 	if email == "" {
@@ -89,8 +92,18 @@ func New(ctx context.Context, get config.Lookup, env *config.Env, out *output.Ou
 		Preflight:      func(ctx context.Context) (check.Result, int) { return check.New(env, false, out).Run(ctx) },
 		ChooseGames: func(ctx context.Context) {
 			avail, reserve := availableGB(ctx, ec, env, cache)
-			Chooser{Lib: library.Library{S3: store, Host: host, Region: region, Account: account, Bucket: env.Get("GAME_S3_BUCKET")}, Env: env, Out: out,
-				Ask: ask.New(out, os.Getenv("CG_YES") == "1"), AvailGB: avail, ReserveGB: reserve}.Choose(ctx)
+			Chooser{Lib: gameLib(), Env: env, Out: out,
+				Ask: ask.New(out, os.Getenv("CG_YES") == "1"), AvailGB: avail, ReserveGB: reserve,
+				INRPerGBHour: diskINRPerGBHour(ctx, popts, region)}.Choose(ctx)
+		},
+		ExtraDisk: func(ctx context.Context, apps string) GameDisk {
+			need, ok := Chooser{Lib: gameLib(), Env: env, Out: out}.Need(ctx, apps)
+			own, known := storeGB(ctx, ec, env, cache)
+			if !ok || !known {
+				return GameDisk{}
+			}
+			gb := provision.ExtraDiskGB(need, float64(env.Int("GAME_DISK_RESERVE_GB")), own)
+			return GameDisk{GB: gb, NeedGB: need, StoreGB: own, INRHour: float64(gb) * diskINRPerGBHour(ctx, popts, region)}
 		},
 		Lib: func(named string) provision.Library {
 			return provision.Library{S3: s3.NewFromConfig(cfg), IAM: iam.NewFromConfig(cfg), Account: account, Host: host, Region: region, Named: named, TagKey: config.TagKey, Beat: out.Wait}
@@ -131,25 +144,47 @@ func New(ctx context.Context, get config.Lookup, env *config.Env, out *output.Ou
 // is refused here.
 func availableGB(ctx context.Context, c *ec2.Client, env *config.Env, cache string) (avail *float64, reserve float64) {
 	reserve = float64(env.Int("GAME_DISK_RESERVE_GB"))
-	t := env.Setting("GAME_INSTANCE_TYPE")
-	// Measured on a real one once one has run (cg status writes it, cached per type).
-	if b, err := os.ReadFile(filepath.Join(cache, "scratch-"+t)); err == nil {
-		if n, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && n > 0 {
-			a := float64(n) - reserve
-			if a < 0 {
-				a = 0
-			}
-			return &a, reserve
-		}
-	}
-	o, err := c.DescribeInstanceTypes(ctx, &ec2.DescribeInstanceTypesInput{InstanceTypes: []ec2types.InstanceType{ec2types.InstanceType(t)}})
-	if err != nil || len(o.InstanceTypes) == 0 || o.InstanceTypes[0].InstanceStorageInfo == nil || o.InstanceTypes[0].InstanceStorageInfo.TotalSizeInGB == nil {
+	disk, known := storeGB(ctx, c, env, cache)
+	if !known {
 		return nil, reserve
 	}
-	disk := float64(*o.InstanceTypes[0].InstanceStorageInfo.TotalSizeInGB) * 1e9 / 1073741824
 	a := disk - reserve
 	if a < 0 {
 		a = 0
 	}
 	return &a, reserve
+}
+
+// storeGB is the machine's own drive for the type being built, in GiB; known is
+// false when it could not be read. A type with no drive of its own is known, and
+// holds 0.
+func storeGB(ctx context.Context, c *ec2.Client, env *config.Env, cache string) (gb float64, known bool) {
+	t := env.Setting("GAME_INSTANCE_TYPE")
+	// Measured on a real one once one has run (cg status writes it, cached per type).
+	if b, err := os.ReadFile(filepath.Join(cache, "scratch-"+t)); err == nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && n > 0 {
+			return float64(n), true
+		}
+	}
+	o, err := c.DescribeInstanceTypes(ctx, &ec2.DescribeInstanceTypesInput{InstanceTypes: []ec2types.InstanceType{ec2types.InstanceType(t)}})
+	if err != nil || len(o.InstanceTypes) == 0 {
+		return 0, false
+	}
+	if o.InstanceTypes[0].InstanceStorageInfo == nil || o.InstanceTypes[0].InstanceStorageInfo.TotalSizeInGB == nil {
+		return 0, true
+	}
+	return float64(*o.InstanceTypes[0].InstanceStorageInfo.TotalSizeInGB) * 1e9 / 1073741824, true
+}
+
+// diskINRPerGBHour is what a GB of added disk costs an hour while the box exists,
+// in rupees with GST, or 0 when the rates could not be read. Its month is this
+// month's hours, the same as the app's.
+func diskINRPerGBHour(ctx context.Context, popts pricing.Options, region string) float64 {
+	r := pricing.Load(ctx, popts, region)
+	if r.EBSGBMonth == nil || r.INRPerUSD == nil {
+		return 0
+	}
+	now := time.Now()
+	hours := float64(time.Date(now.Year(), now.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day() * 24)
+	return *r.EBSGBMonth * *r.INRPerUSD / hours
 }

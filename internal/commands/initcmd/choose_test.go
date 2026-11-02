@@ -62,6 +62,12 @@ func (noBucket) Get(context.Context, string, string, string) ([]byte, error) {
 	return nil, errors.New("NoSuchBucket: the specified bucket does not exist")
 }
 
+type brokenStore struct{ *library.MemStore }
+
+func (brokenStore) Get(context.Context, string, string, string) ([]byte, error) {
+	return nil, errors.New("boom: the network went away")
+}
+
 func TestAGuessedBucketThatIsNotThereIsNotAnEmptyArchive(t *testing.T) {
 	r := newChoose(t, "", true, "")
 	r.c.Lib.S3 = noBucket{r.store}
@@ -117,22 +123,54 @@ func TestEnterIsNoneAndNumbersOrAppidsPick(t *testing.T) {
 	}
 }
 
-func TestMoreThanFitsIsRefusedAndExplainedNotTrimmed(t *testing.T) {
-	r := newChoose(t, "all\n3\n", true, "")
-	if got := r.c.Choose(context.Background()); got != "3" {
-		t.Fatalf("%q\n%s", got, r.prompts)
+func TestMoreThanFitsAddsADiskAndSaysWhatItCosts(t *testing.T) {
+	r := newChoose(t, "all\n", true, "")
+	r.c.INRPerGBHour = 0.012
+	if got := r.c.Choose(context.Background()); got != "1091500,2,3" {
+		t.Fatalf("all of it is 158 GB on a 170 GB drive with 20 GB kept free: it is chosen, not refused: %q\n%s", got, r.prompts)
 	}
 	p := r.prompts.String()
-	for _, want := range []string{"158 GB selected, 150 GB available - over by 8 GB.", "Cyberpunk 2077 100 GB + Diablo IV 50 GB + Hades 8 GB", "These fit on their own: Cyberpunk 2077 (100 GB), Diablo IV (50 GB), Hades (8 GB)"} {
+	for _, want := range []string{"158 GB selected, more than this machine's own drive holds (170 GB).", "A 180 GB disk will be added for the games (about Rs 2.2 an hour more)."} {
 		if !strings.Contains(p, want) {
 			t.Errorf("lacks %q in:\n%s", want, p)
 		}
+	}
+	// The price is left out, not guessed, when the rates could not be read.
+	r = newChoose(t, "all\n", true, "")
+	r.c.Choose(context.Background())
+	if strings.Contains(r.prompts.String(), "an hour more") {
+		t.Errorf("no rate, no price: %s", r.prompts)
 	}
 	// A disk that could not be read refuses nothing: the box enforces the real limit.
 	r = newChoose(t, "all\n", true, "")
 	r.c.AvailGB = nil
 	if got := r.c.Choose(context.Background()); got != "1091500,2,3" || !strings.Contains(r.prompts.String(), "the machine's space could not be read") {
 		t.Errorf("%q", got)
+	}
+}
+
+func TestMoreThanAGamePCCanHoldIsRefused(t *testing.T) {
+	r := newChoose(t, "all\n3\n", true, "")
+	small := 1.0 // 158 GB plus the reserve is over the ceiling; Hades alone is not
+	r.c.AvailGB, r.c.ReserveGB = &small, 900
+	if got := r.c.Choose(context.Background()); got != "3" {
+		t.Fatalf("%q\n%s", got, r.prompts)
+	}
+	if !strings.Contains(r.prompts.String(), "more than a game PC here can hold (1000 GB)") {
+		t.Errorf("%s", r.prompts)
+	}
+}
+
+func TestNeedIsWhatTheChosenGamesTake(t *testing.T) {
+	r := newChoose(t, "", true, "")
+	for sel, want := range map[string]float64{"all": 158, "none": 0, "3": 8, "2,3": 58, "1091500, 2": 150, "999": 0} {
+		if got, ok := r.c.Need(context.Background(), sel); !ok || got != want {
+			t.Errorf("%q: %.0f ok=%v, want %.0f", sel, got, ok, want)
+		}
+	}
+	r.c.Lib.S3 = brokenStore{r.store}
+	if _, ok := r.c.Need(context.Background(), "all"); ok {
+		t.Error("an archive that cannot be read is not sized on a guess")
 	}
 }
 
