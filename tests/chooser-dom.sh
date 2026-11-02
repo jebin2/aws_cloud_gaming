@@ -346,6 +346,15 @@ cat > "$T/r/probe.js" <<'PROBE'
     .filter(th => /Game disk|Spot availability/.test(th.textContent)).map(th => getComputedStyle(th).textAlign).join(','));
   out.push('BWHERE | ' + card('where'));
   out.push('BNOTE | ' + card('warn'));
+  // No answer yet is a skeleton; no answer because the check failed says so.
+  const kept = statusNow, cardEl = document.getElementById('b-machine-card');
+  statusNow = null; readFailures.set('status', 'AWS did not answer.');
+  paintMachineCards();
+  out.push('UNREAD | ' + cardEl.textContent.replace(/\s+/g, ' ').trim() + ' | busy hidden=' + document.getElementById('b-busy').hidden);
+  readFailures.delete('status');
+  paintMachineCards();
+  out.push('UNREAD CLEARED | ' + cardEl.dataset.state);
+  statusNow = kept; paintMachineCards();
   // The why-mark in a greyed cell, even on a greyed row, is not greyed itself.
   const marks = [...document.querySelectorAll('#s-chooser .reason')];
   const live = m => { const st = getComputedStyle(m), a = getComputedStyle(m.closest('label').querySelector('.amount'));
@@ -502,6 +511,8 @@ contains "  with the GPU"                "$(grep -m1 '^BPICK ' <<<"$OUT")" "NVID
 contains "every why-mark is live, not greyed" "$OUT" "MARKS | 4 live=4"
 contains "the table and the card agree on the price" "$OUT" "SAMEPRICE | true"
 contains "  and the hourly rate, in rupees" "$(grep -m1 '^BWHERE ' <<<"$OUT")" "₹51/hour"
+contains "a card with no answer because the check failed says so" "$OUT" "UNREAD | AWS Could not check AWS: AWS did not answer. Refresh tries again. | busy hidden=true"
+check    "  and goes back to loading when the failure is cleared" "$(grep -m1 '^UNREAD CLEARED' <<<"$OUT")" "UNREAD CLEARED | loading"
 
 echo "6. capacity is shown next to price, which is the whole point"
 contains "the good score is there" "$OUT" "9/10"

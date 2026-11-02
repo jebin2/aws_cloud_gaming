@@ -775,18 +775,26 @@ function paintMachineCards() {
     const { box, s } = renderMachineCard($(`${p}-machine-card`)) || {};
     if (!s) {
       const card = $(`${p}-machine-card`);
-      if (card.dataset.state !== 'loading') {
+      // Still reading is a skeleton; a read that failed, or one that is waiting
+      // for a task that runs alone, says so. A skeleton that never ends looks
+      // exactly like one that is about to.
+      const why = readFailures.has('status') ? `Could not check AWS: ${readFailures.get('status')} Refresh tries again.`
+        : writing() ? `Waiting: ${busyWhy()}` : '';
+      const state = why ? 'unread' : 'loading';
+      if (card.dataset.state !== state || (why && card.dataset.why !== why)) {
         card.textContent = '';
-        card.dataset.state = 'loading';
+        card.dataset.state = state;
+        card.dataset.why = why;
         card.append(el('p', 'font-body-sm text-body-sm font-medium text-on-surface-variant', 'AWS'),
-                    el('span', 'skel mt-space-xs h-9 w-48'), el('span', 'skel mt-space-sm h-4 w-72'));
+                    ...(why ? [el('p', 'font-body-md text-body-md text-on-surface-variant mt-space-xs', why)]
+                            : [el('span', 'skel mt-space-xs h-9 w-48'), el('span', 'skel mt-space-sm h-4 w-72')]));
       }
       for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk'] : [])]) $(`${p}-${b}`).hidden = true;
-      $(`${p}-busy`).hidden = false;
+      $(`${p}-busy`).hidden = !!why;
       continue;
     }
     const card = $(`${p}-machine-card`);
-    if (card.dataset.state === 'loading') { delete card.dataset.state; card.classList.add('card-in'); }
+    if (card.dataset.state === 'loading' || card.dataset.state === 'unread') { delete card.dataset.state; delete card.dataset.why; card.classList.add('card-in'); }
     const building = jobsFor('init') || unfinished(box);
     const running = !!(box && box.state === 'running');
     $(`${p}-busy`).hidden = !building;
@@ -4660,6 +4668,8 @@ window.cg.onEvent(({ id, event }) => {
     if (job.json && readingBehindGate) paintOnboardSoon();
     // A machine's check that failed: its card leaves the loading state to say so.
     if (job.json && job.json.startsWith('host:') && readFailures.has(job.json)) paintHostCards();
+    // The AWS card on Home and Machine says why it has no answer, instead of staying a skeleton.
+    if (job.json === 'status' && readFailures.has('status')) paintMachineCards();
     // The read that judges a step that has just been done: it has answered, so
     // the step shows what it says - ticked, or back to what is still missing.
     if (onbVerifying && job.json && onbPending.has(job.json)) {
