@@ -4655,6 +4655,14 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart,
       // A step's read-back that never ran must not hold the step - and the
       // add dialog's Close with it - waiting for it for good.
       if (json && onbVerifying && onbPending.delete(json) && !onbPending.size) onbVerified();
+      // A READ that was turned away is not an answer: nothing records it as
+      // failed, so its row sat on "checking..." for ever. It is asked again the
+      // moment the task in its way ends.
+      if (json && !wantRc && jobs.size) {
+        await new Promise(wake => jobEnded.push(wake));
+        return resolve(runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart, onStep, group, aside }));
+      }
+      if (json && !wantRc) { readFailures.set(json, why); updateHeader(); }   // never a silent "checking"
       return resolve(wantRc ? { rc: null, err: why } : undefined);
     }
     jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, wantRc, onStep, group, aside,
