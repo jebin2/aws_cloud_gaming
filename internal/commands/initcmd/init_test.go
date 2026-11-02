@@ -380,7 +380,7 @@ func TestAFreshBuildFromNothingToReady(t *testing.T) {
 	if !strings.Contains(got, "Tailscale    gamevps · 100.64.0.7 · key expiry ON - see below") {
 		t.Errorf("the summary: %s", got)
 	}
-	if len(r.notes) != 1 || r.notes[0] != "box ready|default|video_game" {
+	if len(r.notes) != 1 || r.notes[0] != "Your game PC is ready|default|video_game" {
 		t.Errorf("%v", r.notes)
 	}
 	if _, err := os.Stat(filepath.Join(r.i.Cache, "built-i-0new")); err != nil {
@@ -490,7 +490,7 @@ func TestABuildThatStopsLeavesTheBoxAndSaysItIsBilling(t *testing.T) {
 	if !strings.Contains(r.e.String(), "the build did not finish. The instance is still running and still") || !strings.Contains(r.e.String(), "stop it with cg stop once you have looked at the log.") {
 		t.Errorf("%s", r.e)
 	}
-	if len(r.notes) != 1 || r.notes[0] != "build failed|high|warning" {
+	if len(r.notes) != 1 || r.notes[0] != "Your game PC could not be set up|high|warning" {
 		t.Errorf("%v", r.notes)
 	}
 	if _, err := os.Stat(filepath.Join(r.i.Cache, "built-i-0new")); err == nil {

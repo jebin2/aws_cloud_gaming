@@ -203,21 +203,29 @@ kept running longer than 14 days holds the archive the whole time.
 Push notifications through [ntfy](https://ntfy.sh), **off unless `GAME_NTFY_URL` is set** in
 `.env` - a topic name, or a full URL for a self-hosted ntfy. `cg notify` sends a test.
 
-| Event | Sent by |
-|---|---|
-| an idle box terminated or stopped | the cloud watchdog |
-| an idle box shutting down, and whether its games were mirrored | the on-host watchdog |
-| its upload before shutdown still running after an hour - then hourly | the on-host watchdog |
-| the upload on the way down failing, or cut off by the shutdown timeout | the box, as it goes down |
-| a shutdown still going after 30 minutes - once | the cloud watchdog |
-| a stuck shutdown forced - once | the cloud watchdog |
-| a box still stuck an hour after forcing - then hourly | the cloud watchdog |
-| the game archive 24 hours from deletion - once per countdown | the cloud watchdog |
-| the game archive deleted | the cloud watchdog |
-| the box confirmed gone - however it ended - and what S3 still bills for the games | the cloud watchdog, from EC2's events |
-| a spot box about to be reclaimed - AWS's 2-minute warning | the cloud watchdog, from EC2's events |
-| the cloud watchdog failing - at most once an hour | the cloud watchdog |
-| a build finished, or failed | `cg init` |
+Messages are written for a person: what happened, whether the games are safe, what it costs.
+No instance ids, setting names, AWS service names or commands (`tests/notification-words.sh`
+keeps it that way). Only what costs money or loses games buzzes the phone; routine ones are
+low priority.
+
+| Event | Sent by | Buzzes |
+|---|---|---|
+| the game PC switched off or removed because nobody was playing | the cloud watchdog | no |
+| the game PC confirmed off or gone - however it ended - and what the saved games still cost | the cloud watchdog, from EC2's events | no |
+| a failed or cut-off save on the way down | the game PC, as it goes down | yes |
+| the save before shutdown still running after an hour - then hourly | the game PC | yes |
+| a shutdown still going after 30 minutes - once | the cloud watchdog | no |
+| a stuck shutdown forced - once | the cloud watchdog | yes |
+| a game PC still stuck an hour after forcing - then hourly | the cloud watchdog | yes |
+| a stopped game PC deleted tomorrow / deleted | the cloud watchdog | yes / no |
+| the saved games 24 hours from deletion - once per countdown | the cloud watchdog | yes |
+| the saved games deleted | the cloud watchdog | yes |
+| a spot reclaim - AWS's 2-minute warning | the cloud watchdog, from EC2's events | yes |
+| the cloud watchdog failing - at most once an hour | the cloud watchdog | yes |
+| the game PC ready, or not set up | `cg init` | no / yes |
+
+A normal idle shutdown is one message, the cloud watchdog's; the game PC itself speaks only
+when the save failed.
 
 **Never load-bearing.** A notification that cannot be sent is logged and ignored: it never
 changes what a guard decides, and a dry run sends nothing. Delivery is best effort, so nothing

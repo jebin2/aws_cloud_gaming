@@ -45,9 +45,9 @@ contains "its output still reaches the journal" "$(cat "$T/out")" "pushing Diabl
 echo "2. a push that fails: said, with its last line, and its exit status kept"
 out=$(PUSH_RC=3 run)
 check    "the push's exit status"        "$out" "rc=3"
-contains "notified"                      "$(cat "$T/log")" "[shutdown upload FAILED]"
-contains "  with the reason"             "$(cat "$T/log")" "not restored on this boot"
-contains "  and the exit status"         "$(cat "$T/log")" "exited 3"
+contains "notified"                      "$(cat "$T/log")" "[Your latest games were not saved]"
+contains "  in words for a person"       "$(cat "$T/log")" "You may need to download them again"
+contains "  the reason stays in the journal, not on the phone" "$(cat "$T/out")" "not restored on this boot"
 
 echo "3. cut off by the shutdown timeout: said, and the push stopped"
 rm -f "$T/log"; touch "$T/log"
@@ -63,7 +63,7 @@ for _ in $(seq 1 50); do [[ -s $T/push.pid ]] && break; sleep 0.1; done
 pushpid=$(cat "$T/push.pid" 2>/dev/null)
 kill -TERM "$wrapper"; wait "$wrapper"; rc=$?
 check    "exit 143, as for SIGTERM"      "rc=$rc" "rc=143"
-contains "notified"                      "$(cat "$T/log")" "[shutdown upload cut off]"
+contains "notified"                      "$(cat "$T/log")" "[Your latest games were not saved]"
 for _ in $(seq 1 20); do kill -0 "$pushpid" 2>/dev/null || break; sleep 0.1; done
 check    "the push is not left running"  "$(kill -0 "$pushpid" 2>/dev/null && echo running || echo gone)" "gone"
 

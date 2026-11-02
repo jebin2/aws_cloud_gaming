@@ -412,15 +412,15 @@ check "deleting: only the listings are billed requests" "$(field 4 "$r")" "s3:li
 
 echo "34. notifications from the idle check - only when a URL is set"
 r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; ec2 = EC2([inst(spot=True)]); cw = CW(QUIET)')
-check "terminated, then notified" "$(field 2 "$r")" "terminate:i-a,notify:gamevps: idle box terminated"
+check "terminated, then notified" "$(field 2 "$r")" "terminate:i-a,notify:Game PC removed - nobody was playing"
 r=$(case_ 'ec2 = EC2([inst(spot=True)]); cw = CW(QUIET)')
 lacks "no URL: no notification" "$(field 2 "$r")" "notify"
 r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; ec2 = EC2([inst(spot=False)]); cw = CW(QUIET)')
-check "on demand says stopped" "$(field 2 "$r")" "stop:i-a,notify:gamevps: idle box stopped"
+check "on demand says stopped" "$(field 2 "$r")" "stop:i-a,notify:Game PC switched off - nobody was playing"
 r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; ec2 = EC2([inst()]); cw = CW(QUIET); dry = True')
 lacks "a dry run never notifies" "$(field 2 "$r")" "notify"
 r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; ec2 = EC2([inst(state="shutting-down", reason="User initiated (2026-09-15 10:00:00 GMT)")]); cw = CW()')
-check "forced, then notified, and recorded" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown,notify:gamevps: stuck shutdown forced,tag:i-a=2026-09-15T10:00:00Z/2026-09-15T12:00:00Z"
+check "forced, then notified, and recorded" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown,notify:Game PC was forced off,tag:i-a=2026-09-15T10:00:00Z/2026-09-15T12:00:00Z"
 r=$(case_ 'w.NTFY_URL = "https://ntfy.sh/t"; SEND_FAILS = True; ec2 = EC2([inst()]); cw = CW(QUIET)')
 check "a failed send changes nothing" "$(field 1 "$r")|$(field 2 "$r")" "terminate|terminate:i-a"
 contains "  and is logged" "$r" "notification not sent (ignored)"
@@ -429,14 +429,14 @@ echo "35. the 24-hour archive warning - once per countdown, recorded in SSM"
 MARK='ssm = SSM(last_seen=ago(hours=3))'
 r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; $MARK")
 check "warned, and recorded against the deletion time" "$(field 1 "$r")|$(field 2 "$r")" \
-  "kept|notify:gamevps: game archive deleted in 21h,warned=2026-09-16T09:00:00Z"
+  "kept|notify:Saved games will be deleted in 21 hours,warned=2026-09-16T09:00:00Z"
 r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; ssm = SSM(last_seen=ago(hours=3), warned=ago(hours=-21))")
 check "already warned for this deletion: silent" "$(field 2 "$r")" "-"
 # Warned under 1 day, then the days were raised: the same mark, a later deletion.
 r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 14; ssm = SSM(last_seen=ago(days=13, hours=3), warned=ago(days=12, hours=3))")
-contains "days changed after a warning: warned again" "$(field 2 "$r")" "notify:gamevps: game archive deleted in 21h"
+contains "days changed after a warning: warned again" "$(field 2 "$r")" "notify:Saved games will be deleted in 21 hours"
 r=$(arch_ "w.NTFY_URL = 'u'; w.EXPIRY_DAYS = 1; ssm = SSM(last_seen=ago(hours=3), warned=ago(days=9))")
-contains "a warning for an OLD mark does not count" "$(field 2 "$r")" "notify:gamevps: game archive deleted in 21h"
+contains "a warning for an OLD mark does not count" "$(field 2 "$r")" "notify:Saved games will be deleted in 21 hours"
 r=$(arch_ "w.NTFY_URL = 'u'; ssm = SSM(last_seen=ago(days=3))")
 check "more than 24h left: silent" "$(field 2 "$r")" "-"
 r=$(arch_ "w.NTFY_URL = 'u'; SEND_FAILS = True; w.EXPIRY_DAYS = 1; $MARK")
@@ -448,9 +448,9 @@ check "a dry run: no warning, no mark" "$(field 2 "$r")" "-"
 
 echo "36. archive deleted, and a failing watchdog, are notified"
 r=$(arch_ "w.NTFY_URL = 'u'")
-contains "deleted, remembered, then notified" "$(field 2 "$r")" "delete-bucket,deleted=2026-09-15T12:00:00Z,notify:gamevps: game archive deleted"
+contains "deleted, remembered, then notified" "$(field 2 "$r")" "delete-bucket,deleted=2026-09-15T12:00:00Z,notify:Saved games deleted"
 r=$(arch_ "w.NTFY_URL = 'u'; mode = 'all'; ec2 = EC2([('i-a', 'running')], fail_idle=True)")
-contains "failing: notified" "$(field 2 "$r")" "notify:gamevps: cloud watchdog failing"
+contains "failing: notified" "$(field 2 "$r")" "notify:The cost-protection check is not working"
 r=$(arch_ "w.NTFY_URL = 'u'; mode = 'all'; now = NOW + timedelta(minutes=17); ec2 = EC2([('i-a', 'running')], fail_idle=True)")
 lacks "but at most once an hour" "$(field 2 "$r")" "notify"
 
@@ -523,9 +523,9 @@ PY
 
 echo "37. the box confirmed gone, from EC2's own state-change event"
 r=$(state_ '')
-check "terminated: notified" "$(field 1 "$r")|$(field 2 "$r")" "terminated|describe:i-a,last-seen=2026-09-15T12:00:00Z,metric,notify:gamevps: box terminated"
+check "terminated: notified" "$(field 1 "$r")|$(field 2 "$r")" "terminated|describe:i-a,last-seen=2026-09-15T12:00:00Z,metric,notify:Game PC removed"
 r=$(state_ 'ev = event("stopped")')
-check "stopped: notified" "$(field 2 "$r")" "describe:i-a,last-seen=2026-09-15T12:00:00Z,metric,notify:gamevps: box stopped"
+check "stopped: notified" "$(field 2 "$r")" "describe:i-a,last-seen=2026-09-15T12:00:00Z,metric,notify:Game PC is off"
 r=$(state_ 'ec2 = EC2(name="someone-else")')
 check "another instance in the account: silent" "$(field 1 "$r")|$(field 2 "$r")" "not-ours|describe:i-a"
 r=$(state_ 'ec2 = EC2(fails=True)')
@@ -539,14 +539,14 @@ contains "  logged" "$r" "i-a terminated - compute no longer bills."
 r=$(state_ 'mode = "handler"')
 # The handler uses the real clock, so the mark's value is not asserted here.
 contains "the handler routes it, and runs no idle or archive check" "$(field 2 "$r")" "describe:i-a,last-seen="
-contains "  with its clients" "$(field 2 "$r")" "notify:gamevps: box terminated,clients:ec2+cloudwatch+ssm"
+contains "  with its clients" "$(field 2 "$r")" "notify:Game PC removed,clients:ec2+cloudwatch+ssm"
 
 r=$(state_ 'ev = spot()')
-check "a spot interruption warning: notified" "$(field 1 "$r")|$(field 2 "$r")" "interruption|describe:i-a,notify:gamevps: spot box being reclaimed"
+check "a spot interruption warning: notified" "$(field 1 "$r")|$(field 2 "$r")" "interruption|describe:i-a,notify:AWS is taking your game PC back"
 r=$(state_ 'ev = spot(); ec2 = EC2(name="someone-else")')
 check "another instance's warning: silent" "$(field 1 "$r")|$(field 2 "$r")" "not-ours|describe:i-a"
 r=$(state_ 'ev = spot(); mode = "handler"')
-check "the handler routes a warning too" "$(field 2 "$r")" "describe:i-a,notify:gamevps: spot box being reclaimed,clients:ec2+cloudwatch+ssm"
+check "the handler routes a warning too" "$(field 2 "$r")" "describe:i-a,notify:AWS is taking your game PC back,clients:ec2+cloudwatch+ssm"
 
 echo "37c. the archive countdown starts when the box really ended"
 r=$(state_ '')
@@ -561,7 +561,7 @@ r=$(state_ 'ev = spot()')
 lacks "a spot warning is not an end" "$(field 2 "$r")" "last-seen"
 r=$(state_ 'ssm.fails = True')
 contains "SSM refusing: said" "$r" "could not record when the box ended"
-contains "  and the notification still sent" "$(field 2 "$r")" "notify:gamevps: box terminated"
+contains "  and the notification still sent" "$(field 2 "$r")" "notify:Game PC removed"
 
 echo "37b. 'box gone' says what still bills in S3 - from the free size metric"
 r=$(state_ '')
@@ -575,18 +575,18 @@ r=$(state_ 'cw = CWS(gb=0.5)')
 contains "a small archive keeps a decimal" "$r" "about 0.5 GB of games"
 r=$(state_ 'cw = CWS(fails=True)')
 contains "size unreadable: says so"  "$r" "size could not be read"
-contains "  and still notifies"      "$(field 2 "$r")" "notify:gamevps: box terminated"
+contains "  and still notifies"      "$(field 2 "$r")" "notify:Game PC removed"
 r=$(state_ 'ev = event("stopped")')
 contains "stopped: the disk still bills" "$r" "its disk still does. S3 still holds"
 
 echo "38. a slow, then a stuck, shutdown - each said once, then hourly while it lasts"
 SD="inst(state='shutting-down', reason='User initiated (2026-09-15 11:25:00 GMT)'"
 r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([$SD)]); cw = CW()")
-check "35 min: a heads-up, recorded against this shutdown" "$(field 2 "$r")" "notify:gamevps: shutdown slow,tag:i-a=2026-09-15T11:25:00Z"
+check "35 min: a heads-up, recorded against this shutdown" "$(field 2 "$r")" "notify:Game PC is slow to switch off,tag:i-a=2026-09-15T11:25:00Z"
 r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([$SD, tags=[{'Key': 'cg-slow-noted', 'Value': '2026-09-15T11:25:00Z'}])]); cw = CW()")
 check "  already sent for this shutdown: silent" "$(field 2 "$r")" "-"
 r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([$SD, tags=[{'Key': 'cg-slow-noted', 'Value': '2026-09-01T08:00:00Z'}])]); cw = CW()")
-contains "  a mark from an EARLIER shutdown does not count" "$(field 2 "$r")" "notify:gamevps: shutdown slow"
+contains "  a mark from an EARLIER shutdown does not count" "$(field 2 "$r")" "notify:Game PC is slow to switch off"
 r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([inst(state='shutting-down', reason='User initiated (2026-09-15 11:45:00 GMT)')]); cw = CW()")
 check "15 min: nothing yet" "$(field 2 "$r")" "-"
 r=$(case_ "w.NTFY_URL = 'u'; dry = True; ec2 = EC2([$SD)]); cw = CW()")
@@ -599,7 +599,7 @@ check "forced again 3 min later: silent" "$(field 2 "$r")" "terminate:i-a+SkipOs
 r=$(case_ "w.NTFY_URL = 'u'; NOW = NOW + timedelta(minutes=30); ec2 = EC2([$FD]); cw = CW()")
 check "still stuck half an hour later: silent" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown"
 r=$(case_ "w.NTFY_URL = 'u'; NOW = NOW + timedelta(minutes=60); ec2 = EC2([$FD]); cw = CW()")
-check "an hour after forcing: the hourly reminder" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown,notify:gamevps: box still stuck after forcing"
+check "an hour after forcing: the hourly reminder" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown,notify:Game PC will not switch off - it may still be charging"
 
 # --- one game at a time, wherever it is saved ---------------------------------
 # A region move left 162.8 GB of Diablo IV in a bucket nothing pointed at. With
@@ -805,11 +805,11 @@ r=$(stopped_ 'ec2 = EC2([box(stopped=days(3))])')
 check    "stopped 3 days of 14: kept, nothing done" "$(field 1 "$r") | $(field 2 "$r")" "kept | -"
 contains "  and when it goes is said"   "$r" "deleted in 11d unless it is started"
 r=$(stopped_ 'ec2 = EC2([box(stopped=days(13.5))])')
-check    "inside the last day: warned"  "$(field 2 "$r")" "notify:gamevps: stopped box deleted tomorrow,tag:cg-stopped-warned=2026-10-12T00:02:00Z"
+check    "inside the last day: warned"  "$(field 2 "$r")" "notify:Game PC will be deleted tomorrow,tag:cg-stopped-warned=2026-10-12T00:02:00Z"
 r=$(stopped_ 'ec2 = EC2([box(stopped=days(13.5), tags=[{"Key": "cg-stopped-warned", "Value": "2026-10-12T00:02:00Z"}])])')
 check    "  once"                       "$(field 2 "$r")" "-"
 r=$(stopped_ 'ec2 = EC2([box(stopped=days(15))])')
-check    "past the 14 days: deleted"    "$(field 1 "$r") | $(field 2 "$r")" "terminate | terminate:i-s,notify:gamevps: stopped box deleted"
+check    "past the 14 days: deleted"    "$(field 1 "$r") | $(field 2 "$r")" "terminate | terminate:i-s,notify:Old game PC deleted"
 contains "  saying its games stay in S3" "$r" "its games stay in S3 for 14 days"
 r=$(stopped_ 'ec2 = EC2([box(stopped=days(15), spot=True)])')
 check    "a spot box is not this check's" "$(field 1 "$r") | $(field 2 "$r")" "- | -"

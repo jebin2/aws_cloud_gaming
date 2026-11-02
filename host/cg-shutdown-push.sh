@@ -22,8 +22,8 @@ push=""
 cut_off() {
   [[ -n $push ]] && kill "$push" 2>/dev/null
   cat "$out" 2>/dev/null
-  notify "shutdown upload cut off" \
-    "The box went down before its games finished mirroring to S3. Games since the last push are lost."
+  notify "Your latest games were not saved" \
+    "The game PC went down before they finished saving. You may need to download them again."
   exit 143
 }
 trap cut_off TERM INT
@@ -36,9 +36,8 @@ wait "$push"; rc=$?
 cat "$out" 2>/dev/null
 
 if (( rc != 0 )); then
-  last=$(grep -v '^[[:space:]]*$' "$out" 2>/dev/null | tail -n 1)
-  notify "shutdown upload FAILED" \
-    "cg-library push exited $rc as the box went down${last:+: $last}. Games since the last push may be lost."
+  notify "Your latest games were not saved" \
+    "Saving failed as the game PC went down. You may need to download them again."
 fi
 [[ $out == /dev/null ]] || rm -f "$out"
 exit "$rc"

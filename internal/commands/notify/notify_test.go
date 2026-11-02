@@ -44,8 +44,8 @@ func TestSendsToTheTopicAndNeverPrintsIt(t *testing.T) {
 	if rc := Send(context.Background(), nil, env(t, "GAME_NTFY_URL="+s.URL+"/secret-topic-123"), out); rc != 0 {
 		t.Fatalf("rc %d %s", rc, e.String())
 	}
-	if got.Method != "POST" || got.URL.Path != "/secret-topic-123" || got.Header.Get("Title") != "gamevps: test" || got.Header.Get("Tags") != "bell" ||
-		body != "Notifications from cloud_gaming reach this device." {
+	if got.Method != "POST" || got.URL.Path != "/secret-topic-123" || got.Header.Get("Title") != "Test message" || got.Header.Get("Tags") != "bell" ||
+		body != "Phone messages from your game PC will arrive here." {
 		t.Errorf("%v %q", got.Header, body)
 	}
 	all := o.String() + e.String()

@@ -89,20 +89,22 @@ chmod +x "$T/bin/curl" "$T/bin/cg-library"
 run 3 >/dev/null
 check "no URL: no request"              "$(grep -c '^CURL' "$T/log" || true)" "0"
 CG_NTFY_URL=https://ntfy.sh/t run 3 >/dev/null
-check "URL: one request, to it"         "$(grep -c '^CURL.*https://ntfy.sh/t' "$T/log")" "1"
+check "a good save: no message (the cloud watchdog tells the shutdown)" "$(grep -c '^CURL' "$T/log" || true)" "0"
+CG_NTFY_URL=https://ntfy.sh/t run 3 1 >/dev/null
+check "a failed save: one request, to the topic" "$(grep -c '^CURL.*https://ntfy.sh/t' "$T/log")" "1"
 check "  sent before the shutdown"      "$(grep -oE '^(CURL|SHUTDOWN)' "$T/log" | tr '\n' ' ')" "CURL SHUTDOWN "
-check "  and says the games were mirrored" "$(grep -c '^CURL.*games mirrored to S3' "$T/log")" "1"
-CG_NTFY_URL=https://ntfy.sh/t CURL_RC=7 run 3 >/dev/null
+check "  and says the latest games were not saved" "$(grep -c '^CURL.*latest games were not saved' "$T/log")" "1"
+CG_NTFY_URL=https://ntfy.sh/t CURL_RC=7 run 3 1 >/dev/null
 check "a failed request still shuts down" "$(grep -c '^SHUTDOWN' "$T/log")" "1"
 CG_NTFY_URL=https://ntfy.sh/t run 0 >/dev/null
 check "below the limit: nothing sent"   "$(grep -c '^CURL' "$T/log" || true)" "0"
 
 echo "6. an upload before shutdown that runs long is said out loud - and still ends in a shutdown"
 CG_NTFY_URL=https://ntfy.sh/t PUSH_SLEEP=2 UPLOAD_WARN_SEC=1 run 3 >/dev/null
-check "one 'still running' notification"  "$(grep -c '^CURL.*upload before shutdown still running' "$T/log")" "1"
-check "  then the usual one, then the shutdown" "$(grep -oE '^(CURL|SHUTDOWN)' "$T/log" | tr '\n' ' ')" "CURL CURL SHUTDOWN "
+check "one 'still saving' notification"  "$(grep -c '^CURL.*Still saving your games' "$T/log")" "1"
+check "  then the shutdown, with no second message" "$(grep -oE '^(CURL|SHUTDOWN)' "$T/log" | tr '\n' ' ')" "CURL SHUTDOWN "
 CG_NTFY_URL=https://ntfy.sh/t run 3 >/dev/null
-check "a quick upload says nothing of the kind" "$(grep -c 'still running' "$T/log" || true)" "0"
+check "a quick upload says nothing of the kind" "$(grep -c 'Still saving' "$T/log" || true)" "0"
 PUSH_SLEEP=2 UPLOAD_WARN_SEC=1 run 3 >/dev/null
 check "no URL: no request, however long"  "$(grep -c '^CURL' "$T/log" || true)" "0"
 

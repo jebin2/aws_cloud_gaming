@@ -106,12 +106,18 @@ def send(url, title, message, priority, tags):
 
 
 def notify(title, message, priority="default", tags=""):
-    """Best effort. A notification that cannot be sent is logged and ignored: it
+    """Words for a person, not for a log: the title says what happened, the message
+    whether the games are safe and what it costs. No instance ids, setting names or
+    AWS service names - the log lines next to each call keep those. Priority is
+    kept for what costs money or loses games: the rest is "low", which shows up
+    without buzzing the phone.
+
+    Best effort. A notification that cannot be sent is logged and ignored: it
     must never change what a guard decides or does."""
     if not NTFY_URL:
         return False
     try:
-        send(NTFY_URL, "%s: %s" % (TS_HOST, title), message, priority, tags)
+        send(NTFY_URL, title, message, priority, tags)
         return True
     except Exception as exc:
         say("notification not sent (ignored): %s" % exc)
@@ -163,20 +169,21 @@ def state_changed(ec2, event, cw=None, now=None, ssm=None):
         mark_gone(ssm, now)
     if state == "interruption":
         say("%s spot interruption warning - AWS reclaims it in about 2 minutes" % iid)
-        notify("spot box being reclaimed",
-               "AWS takes %s back in about 2 minutes. Games since the last push may not finish mirroring."
-               % iid, "urgent", "warning")
+        notify("AWS is taking your game PC back",
+               "You have about 2 minutes. Games you installed in the last few minutes may not be saved.",
+               "urgent", "warning")
     elif state == "terminated":
         # "No longer bills" was half true while the games sit in S3, so say what still does.
-        note = archive_note(cw, now)
-        say("%s terminated - compute no longer bills.%s" % (iid, note))
-        notify("box terminated", "%s is gone - compute no longer bills.%s" % (iid, note),
-               "default", "white_check_mark")
+        look = archive_look(cw, now)
+        say("%s terminated - compute no longer bills.%s" % (iid, archive_note(look, now)))
+        notify("Game PC removed",
+               "The charge for the PC has stopped.%s" % archive_words(look, now), "low", "white_check_mark")
     else:
-        note = archive_note(cw, now)
-        say("%s stopped - compute no longer bills, its disk still does.%s" % (iid, note))
-        notify("box stopped", "%s is stopped - compute no longer bills, its disk still does.%s" % (iid, note),
-               "default", "white_check_mark")
+        look = archive_look(cw, now)
+        say("%s stopped - compute no longer bills, its disk still does.%s" % (iid, archive_note(look, now)))
+        notify("Game PC is off",
+               "The charge for the PC has stopped. A small storage charge continues until you start it "
+               "again or delete it.%s" % archive_words(look, now), "low", "white_check_mark")
     return {"state": state, "instance": iid}
 
 
@@ -201,7 +208,9 @@ def run_all(ec2, cw, s3, ssm, trail, now, dry=False, s3_for=None):
     if failure:
         # At most hourly: a watchdog that is failing fails every 5 minutes.
         if not dry and now.minute < 5:
-            notify("cloud watchdog failing", str(failure)[:300], "urgent", "rotating_light")
+            notify("The cost-protection check is not working",
+                   "The check that switches off idle game PCs failed. Open the cg app to see why.",
+                   "urgent", "rotating_light")
         raise failure
     return result
 
@@ -308,8 +317,10 @@ def decide(ec2, cw, inst, now, dry):
     call(ec2, verb, iid)
     say("%s %s - %s issued; the box mirrors its games to S3 as it shuts down"
         % (iid, why, verb))
-    notify("idle box %s" % ("terminated" if verb == "terminate" else "stopped"),
-           "%s %s. Its games are mirrored to S3 as it shuts down." % (iid, why), "high", "zzz")
+    notify("Game PC switched off - nobody was playing" if verb == "stop"
+           else "Game PC removed - nobody was playing",
+           "It sat idle for %d minutes, so it is being shut down to stop the charge. "
+           "Your games are being saved." % IDLE_MINUTES, "low", "zzz")
     return {"instance": iid, "action": verb, "reason": why}
 
 
@@ -352,9 +363,9 @@ def going_down(ec2, inst, now, dry):
         say("%s %s for %dm - letting it finish (the games are mirrored on the way down; forced at %dm)"
             % (iid, state, took, STUCK_MINUTES))
         if not dry and took >= SLOW_MINUTES and tag_value(inst, SLOW_TAG) != mark:
-            if notify("shutdown slow",
-                      "%s has been %s for %dm - probably still mirroring its games. Forced at %dm."
-                      % (iid, state, took, STUCK_MINUTES), "default", "hourglass"):
+            if notify("Game PC is slow to switch off",
+                      "It is probably still saving your games. It will be forced off at %d minutes."
+                      % STUCK_MINUTES, "low", "hourglass"):
                 ec2.create_tags(Resources=[iid], Tags=[{"Key": SLOW_TAG, "Value": mark}])
         return {"instance": iid, "action": "none", "reason": "going down"}
 
@@ -370,13 +381,13 @@ def going_down(ec2, inst, now, dry):
     call(ec2, verb, iid, force=True)
     say("%s %s - FORCED %s, skipping the OS shutdown" % (iid, why, verb))
     if forced[0] != mark:
-        if notify("stuck shutdown forced", "%s %s - forced %s, skipping the OS shutdown." % (iid, why, verb),
-                  "high", "warning"):
+        if notify("Game PC was forced off",
+                  "It got stuck switching off, so AWS was told to cut it. Games from the last session "
+                  "may not be saved.", "high", "warning"):
             ec2.create_tags(Resources=[iid], Tags=[{"Key": FORCED_TAG, "Value": "%s/%s" % (mark, iso(now))}])
     elif len(forced) > 1 and now.minute < 5 and forced[1] <= iso(now - timedelta(hours=1)):
-        notify("box still stuck after forcing",
-               "%s has been %s for %dm, and forcing it has not ended it. Check the EC2 console - it may "
-               "still bill." % (iid, state, took), "urgent", "rotating_light")
+        notify("Game PC will not switch off - it may still be charging",
+               "Open the cg app and delete it, or check your AWS account.", "urgent", "rotating_light")
     return {"instance": iid, "action": "force-" + verb, "reason": why}
 
 
@@ -494,9 +505,9 @@ def expire_stopped(ec2, now, dry=False):
             left = window - stopped_for
             say("%s stopped %s ago - deleted in %s unless it is started" % (iid, span(stopped_for), span(left)))
             if not dry and left <= timedelta(hours=24) and tag_value(inst, STOPPED_WARNED_TAG) != iso(since):
-                notify("stopped box deleted tomorrow",
-                       "%s has been stopped for %s; its disk still bills. It is deleted in %s unless it is "
-                       "started - its games are in S3, kept %d days more." % (iid, span(stopped_for), span(left), EXPIRY_DAYS),
+                notify("Game PC will be deleted tomorrow",
+                       "It has been off for %s and still has a small storage charge. Start it before then "
+                       "to keep it. Your games are saved either way." % words(stopped_for),
                        "high", "hourglass")
                 ec2.create_tags(Resources=[iid], Tags=[{"Key": STOPPED_WARNED_TAG, "Value": iso(since)}])
             out.append({"instance": iid, "action": "kept", "left": span(left)})
@@ -509,9 +520,9 @@ def expire_stopped(ec2, now, dry=False):
         call(ec2, "terminate", iid)
         say("%s %s - deleted; its disk no longer bills, and its games stay in S3 for %d days"
             % (iid, why, EXPIRY_DAYS))
-        notify("stopped box deleted",
-               "%s was %s. Its disk no longer bills. Its games are in S3, kept %d days more - "
-               "the next build restores them." % (iid, why, EXPIRY_DAYS), "high", "wastebasket")
+        notify("Old game PC deleted",
+               "It had been off for %s, so its storage charge has stopped. Your games are saved - "
+               "the next game PC restores them." % words(stopped_for), "default", "wastebasket")
         out.append({"instance": iid, "action": "terminate"})
     return out
 
@@ -527,6 +538,15 @@ def span(delta):
     if hours < 24:
         return "%dh" % hours
     return "%dd" % (hours // 24) if hours % 24 == 0 else "%dd %dh" % (hours // 24, hours % 24)
+
+
+def words(delta):
+    """span() for a person: "3 days", "21 hours"."""
+    hours = max(0, int(delta.total_seconds() // 3600))
+    if hours < 24:
+        return "%d hour%s" % (hours, "" if hours == 1 else "s")
+    days = hours // 24
+    return "%d day%s" % (days, "" if days == 1 else "s")
 
 
 def boxes(ec2):
@@ -580,15 +600,26 @@ def archive_size(cw, now):
     return points[-1].get("Average", 0), points[-1]["Timestamp"]
 
 
-def archive_note(cw, now):
-    """What still bills in S3, for the "box is gone" notification, from the free metric."""
+def archive_look(cw, now):
+    """The archive's size from the free metric, read once for both wordings of the
+    "box is gone" notification: (size, day), None when there is nothing to read
+    it with, or the exception when it could not be read."""
     if not BUCKET or cw is None:
-        return ""
+        return None
     try:
-        size, day = archive_size(cw, now)
+        return archive_size(cw, now)
     except Exception as exc:
         say("archive size could not be read: %s" % exc)
+        return exc
+
+
+def archive_note(look, now):
+    """What still bills in S3, for the log, from the free metric."""
+    if look is None:
+        return ""
+    if isinstance(look, Exception):
         return " The S3 game archive's size could not be read."
+    size, day = look
     if not size:
         return " No game archive is measured in S3, so nothing else bills."
     gb = size / 1073741824
@@ -605,6 +636,27 @@ def archive_note(cw, now):
             EXPIRY_DAYS, (now + timedelta(days=EXPIRY_DAYS)).strftime("%Y-%m-%d"))
     else:
         note += " Kept until you delete it: cg destroy --all."
+    return note
+
+
+def archive_words(look, now):
+    """archive_note() for the phone: what the saved games cost, in rupees, and when
+    they go. Nothing at all when the size cannot be read - a message that says
+    less is better than one that guesses."""
+    if look is None or isinstance(look, Exception):
+        return ""
+    size, _day = look
+    if not size:
+        return " No games are stored, so nothing else is charged."
+    gb = size / 1073741824
+    note = " Your saved games take up about %s GB" % (("%.1f" if gb < 10 else "%.0f") % gb)
+    if S3_USD_PER_GB is not None and INR_PER_USD:
+        note += ", about \u20b9%.0f a month" % (gb * S3_USD_PER_GB * INR_PER_USD)
+    note += "."
+    if EXPIRY_DAYS > 0:
+        note += " They are deleted after %d days with no game PC." % EXPIRY_DAYS
+    else:
+        note += " They are kept until you delete them."
     return note
 
 
@@ -631,9 +683,9 @@ def warn_once(ssm, seen, idle, left):
     due = iso(seen + idle + left)
     if mark_get(ssm, "archive-warned") == due:
         return
-    if notify("game archive deleted in %s" % span(left),
-              "No box for %s. Launch one to keep the games, or set GAME_ARCHIVE_EXPIRY_DAYS=0."
-              % span(idle), "high", "warning"):
+    if notify("Saved games will be deleted in %s" % words(left),
+              "There has been no game PC for %s. Start one to keep your games, or turn the deletion "
+              "off in the cg app's settings." % words(idle), "high", "warning"):
         mark_put(ssm, "archive-warned", due)
 
 
@@ -916,9 +968,9 @@ def expire_archive(ec2, s3, ssm, cw, trail, now, dry=False, s3_for=None):
             raise
         mark_put(ssm, "archive-deleted", iso(now))
         say("archive: unused for %s - DELETED s3://%s (%d objects)" % (span(now - seen), BUCKET, removed))
-        notify("game archive deleted",
-               "Unused for %s: %d objects removed from S3. The next cg init starts empty, and Steam "
-               "downloads the games again." % (span(now - seen), removed), "high", "wastebasket")
+        notify("Saved games deleted",
+               "Nothing used them for %s. The next game PC starts empty, and Steam downloads your "
+               "games again." % words(now - seen), "high", "wastebasket")
         return "deleted"
     games, buckets = expire_games(s3, s3_for, ssm, now, seen, window, dry)
     if dry:
@@ -926,7 +978,7 @@ def expire_archive(ec2, s3, ssm, cw, trail, now, dry=False, s3_for=None):
     if not games and not buckets:
         return "kept"
     names = ", ".join(str(a.get("name") or a.get("appid")) for a in games) or "nothing but leftovers"
-    notify("saved games deleted",
-           "Unused for %s: %s. Steam downloads them again on the next build." % (span(now - seen), names),
-           "high", "wastebasket")
+    notify("Saved games deleted",
+           "Nothing used them for %s: %s. Steam downloads them again on the next game PC."
+           % (words(now - seen), names), "high", "wastebasket")
     return "deleted"

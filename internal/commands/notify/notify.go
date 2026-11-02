@@ -35,9 +35,9 @@ func Send(ctx context.Context, client *http.Client, env *config.Env, out *output
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader("Notifications from cloud_gaming reach this device."))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader("Phone messages from your game PC will arrive here."))
 	if err == nil {
-		req.Header.Set("Title", env.Host()+": test")
+		req.Header.Set("Title", "Test message")
 		req.Header.Set("Tags", "bell")
 		var resp *http.Response
 		if resp, err = client.Do(req); err == nil {
@@ -74,7 +74,7 @@ func Push(ctx context.Context, client *http.Client, env *config.Env, out *output
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(message))
 	if err == nil {
-		req.Header.Set("Title", env.Host()+": "+title)
+		req.Header.Set("Title", title)
 		req.Header.Set("Priority", priority)
 		req.Header.Set("Tags", tags)
 		var resp *http.Response

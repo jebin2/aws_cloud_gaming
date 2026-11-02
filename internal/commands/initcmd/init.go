@@ -434,7 +434,7 @@ func (i *Init) finish(ctx context.Context, bx box.Box, pre check.Result, id, nod
 		}
 	}
 	if err := f.Finish(ctx); err != nil {
-		i.Notify(ctx, "build failed", "The box is still running and billing. Look at: cg log build", "high", "warning")
+		i.Notify(ctx, "Your game PC could not be set up", "It is still running and charging. Open the cg app to see what went wrong.", "high", "warning")
 		return i.die("the build did not finish. The instance is still running and still\n       billing - stop it with cg stop once you have looked at the log.")
 	}
 
@@ -456,7 +456,7 @@ func (i *Init) finish(ctx context.Context, bx box.Box, pre check.Result, id, nod
 			}
 		}
 	}
-	i.Notify(ctx, "box ready", "Built, paired and running - it bills by the hour. Play with: cg open", "default", "video_game")
+	i.Notify(ctx, "Your game PC is ready", "It is built and running. It charges by the hour, so switch it off when you are done.", "default", "video_game")
 
 	armed, idle := false, 0
 	if i.WatchdogState != nil {

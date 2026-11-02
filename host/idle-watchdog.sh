@@ -87,7 +87,7 @@ if (( idle >= IDLE_LIMIT )); then
   # takes, and the extra minutes cost a few rupees of spot time against a
   # re-download measured in hours. ExecStop stays as the backstop for stops this
   # watchdog did not initiate.
-  mirrored="no game mirror on this box"
+  unsaved=""
   if [[ -x $CG_LIBRARY_BIN ]]; then
     logger -t idle-watchdog "idle limit reached - mirroring the library before shutdown"
     # In the background, so it can be watched. A push that hangs keeps the box
@@ -105,21 +105,23 @@ if (( idle >= IDLE_LIMIT )); then
     while kill -0 "$pushjob" 2>/dev/null; do
       sleep "$UPLOAD_POLL_SEC"
       if (( SECONDS - started >= next_warn )) && kill -0 "$pushjob" 2>/dev/null; then
-        notify "upload before shutdown still running" \
-          "Mirroring games for $(( (SECONDS - started) / 60 )) min - the box stays up, and bills, until it ends."
+        notify "Still saving your games" \
+          "It has been $(( (SECONDS - started) / 60 )) minutes. The game PC stays on, and charging, until it finishes."
         next_warn=$(( next_warn + 3600 ))
       fi
     done
     wait "$pushjob" 2>/dev/null || true
     if [[ $(cat "$rcfile" 2>/dev/null) == 0 ]]; then
       logger -t idle-watchdog "mirror complete"
-      mirrored="games mirrored to S3"
+      unsaved=""
     else
       logger -t idle-watchdog "mirror FAILED - shutting down anyway; games since the last push are lost"
-      mirrored="the game mirror FAILED - games since the last push are lost"
+      unsaved="Your latest games were not saved - they may need downloading again."
     fi
   fi
-  notify "idle box shutting down" "No stream or download for ${IDLE_LIMIT} minutes; $mirrored."
+  # Only a failure is worth a message from here: the cloud watchdog already says
+  # the idle box is going, and one message per shutdown is enough.
+  [[ -z $unsaved ]] || notify "Your latest games were not saved" "$unsaved"
   logger -t idle-watchdog "shutting down"
   "$SHUTDOWN_BIN" -h now "idle watchdog"
 fi
