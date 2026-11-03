@@ -302,4 +302,29 @@ out=$(printf 'FORGET\n' | run forget 111111); rc=$?
 check    "exits non-zero"             "$rc" "1"
 contains "says it is not there"       "$out" "not in the archive"
 
+echo "18. a game in another library (an added disk, Steam's own folder) is archived too"
+# Installed from Steam's default folder on the root disk, or on an added disk: the
+# archive's own library is empty, and "no games installed" was wrong.
+rm -rf "$T/scratch/steam/steamapps/"*
+mkdir -p "$T/other/steamapps/common/Hades" "$T/other/steamapps/compatdata/1145360" "$T/other/steamapps/shadercache/1145360"
+cat > "$T/other/steamapps/appmanifest_1145360.acf" <<ACF
+"AppState"
+{
+	"appid"		"1145360"
+	"name"		"Hades"
+	"installdir"		"Hades"
+	"StateFlags"		"4"
+}
+ACF
+dd if=/dev/zero of="$T/other/steamapps/common/Hades/game.bin" bs=1M count=5 status=none
+out=$(CG_EXTRA_LIBS="$T/other" run push)
+contains "it is found"                "$out" "pushing Hades"
+contains "and said to be elsewhere"   "$out" "also in $T/other"
+contains "its files are synced from there" "$(cat "$T/s5.log")" "$T/other/steamapps/common/Hades/"
+lacks    "the archive is not told there is nothing" "$out" "no games installed"
+out=$(run push)
+contains "without being named, only the archive's own library is looked in (a test or a chosen place)" "$out" "no games installed"
+out=$(CG_EXTRA_LIBS="$T/other" run check)
+lacks    "check looks there too"      "$out" "no games installed"
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

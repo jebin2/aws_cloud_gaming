@@ -114,6 +114,31 @@ is_steam_tool() { # is_steam_tool <appid> <installdir>
   return 1
 }
 
+# Every Steam library on this machine that has games in it. The games are not
+# all in one place: the archive's own library is /scratch/steam, but a disk added
+# later is /scratch2/steam, and a game installed from Steam's own default folder
+# lands on the root disk. Steam lists its libraries in libraryfolders.vdf, so that
+# is read too. CG_LIB_DIR set means a test or a person who chose one place:
+# only that, plus CG_EXTRA_LIBS if given.
+all_libs() {
+  {
+    echo "$LIB"
+    if [[ -n ${CG_LIB_DIR:-} ]]; then
+      for p in ${CG_EXTRA_LIBS:-}; do echo "$p"; done
+    else
+      echo /scratch2/steam
+      for v in /home/*/.local/share/Steam/config/libraryfolders.vdf; do
+        [[ -f $v ]] && sed -n 's/.*"path"[[:space:]]*"\(.*\)".*/\1/p' "$v"
+      done
+      for r in /home/*/.local/share/Steam; do [[ -d $r ]] && echo "$r"; done
+    fi
+  } | while read -r p; do
+    [[ -n $p ]] || continue
+    p=$(readlink -f "$p" 2>/dev/null) || continue
+    [[ -d $p/steamapps ]] && printf '%s\n' "$p"
+  done | awk '!seen[$0]++'
+}
+
 local_apps() {
   local f id dir name flags
   for f in "$LIB"/steamapps/appmanifest_*.acf; do
@@ -552,12 +577,8 @@ cmd_push() {
     die "the library was not restored on this boot; push would overwrite the archive with a partial copy (--force overrides)"
   fi
 
-  local apps; apps=$(local_apps)
-  if [[ -z ${apps//[[:space:]]/} ]]; then
-    log "no games installed - nothing to push (the archive is left alone)"
-    return 0
-  fi
-
+  local lib0="$LIB" libs; libs=$(all_libs)
+  local pushed_ids=" " any=0
   local strategy=(--size-only)
   (( verify )) && strategy=()
   # Read once: the index is re-written inside the loop, and re-reading it per
@@ -565,65 +586,79 @@ cmd_push() {
   local idx_cache; idx_cache=$(index_get)
   local id dir name bytes archived t0 n=0
   t0=$(date +%s)
-  while IFS=$'\t' read -r id dir name flags; do
-    [[ -n ${id:-} ]] || continue
-    if ! app_is_whole "${flags:-0}"; then
-      log "SKIPPING $name ($id): Steam says StateFlags=$flags - downloading, validating"
-      log "  or needing repair. Pushing it would overwrite a complete archive with"
-      log "  a partial copy. It will archive itself once Steam finishes."
-      continue
-    fi
-    bytes=$(app_bytes "$dir" "$id")
-    # Per-app size guard. The whole-tree version had one because pushing an
-    # empty disk could empty the whole archive; per-app prefixes make that
-    # impossible, but a single game that is half-present locally can still
-    # overwrite its own complete copy. Same protection, scoped to one game.
-    archived=$(printf '%s' "$idx_cache" | python3 -c '
+  for LIB in $libs; do
+    local apps; apps=$(local_apps)
+    [[ -n ${apps//[[:space:]]/} ]] || continue
+    any=1
+    [[ $LIB == "$lib0" ]] || log "also in $LIB"
+    while IFS=$'\t' read -r id dir name flags; do
+      [[ -n ${id:-} ]] || continue
+      case $pushed_ids in *" $id "*) continue ;; esac
+      pushed_ids="$pushed_ids$id "
+      if ! app_is_whole "${flags:-0}"; then
+        log "SKIPPING $name ($id): Steam says StateFlags=$flags - downloading, validating"
+        log "  or needing repair. Pushing it would overwrite a complete archive with"
+        log "  a partial copy. It will archive itself once Steam finishes."
+        continue
+      fi
+      bytes=$(app_bytes "$dir" "$id")
+      # Per-app size guard. The whole-tree version had one because pushing an
+      # empty disk could empty the whole archive; per-app prefixes make that
+      # impossible, but a single game that is half-present locally can still
+      # overwrite its own complete copy. Same protection, scoped to one game.
+      archived=$(printf '%s' "$idx_cache" | python3 -c '
 import json,sys
 appid=sys.argv[1]
 try:    apps=json.load(sys.stdin).get("apps",[])
 except Exception: apps=[]
 print(next((a.get("bytes",0) for a in apps if str(a.get("appid"))==appid), 0))' "$id")
-    if (( ${archived:-0} > 0 )) && (( bytes * 2 < archived )) && (( ! force )); then
-      log "SKIPPING $name ($id): local $(hb "$bytes") is less than half the archived $(hb "$archived")"
-      log "  that looks like a broken install, not an uninstall. --force overrides;"
-      log "  to remove it deliberately: cg library forget $id"
-      continue
-    fi
-    log "pushing $name ($id, $(hb "$bytes"))"
-    # The manifest goes LAST, after every file it describes. Pushed first, an
-    # interrupted upload leaves an archive whose manifest says StateFlags 4 -
-    # fully installed - beside a quarter of the files. Restoring that gives
-    # Steam a game it believes is complete and which fails at launch, and the
-    # repair is a verify pass that re-downloads the lot. Manifest last means an
-    # interrupted push leaves no manifest, so the game simply is not there.
-    local ok=1 src
-    for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
-      src="$LIB/steamapps/$pair"
-      [[ -d $src ]] || continue
-      # --delete INSIDE this app's prefix only. A file removed from the game is
-      # propagated; a game that is not installed is never touched.
-      "$S5" --numworkers "$WORKERS" sync --delete "${strategy[@]}" "${TUNE[@]}" \
-        "${EXCLUDES[@]}" "$src/" "$S3/steamapps/$pair/" >/dev/null 2>&1 \
-        || { ok=0; log "  WARNING: $pair did not sync cleanly"; }
-    done
-    symlinks_record "$id" "$dir"
-    if (( ok )); then
-      "$S5" cp "$LIB/steamapps/appmanifest_$id.acf" "$S3/steamapps/" >/dev/null 2>&1 || ok=0
-    fi
-    if (( ok )); then
-      index_put "$(index_merge "$id" "$dir" "$name" "$bytes")"
-      n=$((n+1))
-    else
-      # No manifest and no index entry: the half-uploaded files are wasted
-      # space, not a trap. The next push completes them; `forget` clears them.
-      "$S5" rm "$S3/steamapps/appmanifest_$id.acf" >/dev/null 2>&1 || true
-      log "  $name is NOT archived - files uploaded but the manifest was withheld"
-      log "  (a partial game that Steam thinks is installed is worse than none)"
-    fi
-  done <<< "$apps"
+      if (( ${archived:-0} > 0 )) && (( bytes * 2 < archived )) && (( ! force )); then
+        log "SKIPPING $name ($id): local $(hb "$bytes") is less than half the archived $(hb "$archived")"
+        log "  that looks like a broken install, not an uninstall. --force overrides;"
+        log "  to remove it deliberately: cg library forget $id"
+        continue
+      fi
+      log "pushing $name ($id, $(hb "$bytes"))"
+      # The manifest goes LAST, after every file it describes. Pushed first, an
+      # interrupted upload leaves an archive whose manifest says StateFlags 4 -
+      # fully installed - beside a quarter of the files. Restoring that gives
+      # Steam a game it believes is complete and which fails at launch, and the
+      # repair is a verify pass that re-downloads the lot. Manifest last means an
+      # interrupted push leaves no manifest, so the game simply is not there.
+      local ok=1 src
+      for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
+        src="$LIB/steamapps/$pair"
+        [[ -d $src ]] || continue
+        # --delete INSIDE this app's prefix only. A file removed from the game is
+        # propagated; a game that is not installed is never touched.
+        "$S5" --numworkers "$WORKERS" sync --delete "${strategy[@]}" "${TUNE[@]}" \
+          "${EXCLUDES[@]}" "$src/" "$S3/steamapps/$pair/" >/dev/null 2>&1 \
+          || { ok=0; log "  WARNING: $pair did not sync cleanly"; }
+      done
+      symlinks_record "$id" "$dir"
+      if (( ok )); then
+        "$S5" cp "$LIB/steamapps/appmanifest_$id.acf" "$S3/steamapps/" >/dev/null 2>&1 || ok=0
+      fi
+      if (( ok )); then
+        index_put "$(index_merge "$id" "$dir" "$name" "$bytes")"
+        n=$((n+1))
+      else
+        # No manifest and no index entry: the half-uploaded files are wasted
+        # space, not a trap. The next push completes them; `forget` clears them.
+        "$S5" rm "$S3/steamapps/appmanifest_$id.acf" >/dev/null 2>&1 || true
+        log "  $name is NOT archived - files uploaded but the manifest was withheld"
+        log "  (a partial game that Steam thinks is installed is worse than none)"
+      fi
+    done <<< "$apps"
+    # Only the archive's own library owns this marker.
+    [[ $LIB == "$lib0" ]] && "$S5" cp "$LIB/steamapps/libraryfolder.vdf" "$S3/steamapps/" >/dev/null 2>&1 || true
+  done
+  LIB="$lib0"
+  if (( ! any )); then
+    log "no games installed - nothing to push (the archive is left alone)"
+    return 0
+  fi
 
-  "$S5" cp "$LIB/steamapps/libraryfolder.vdf" "$S3/steamapps/" >/dev/null 2>&1 || true
   date -Iseconds > "$STATE/last-push"
   log "pushed $n game(s) in $(( $(date +%s) - t0 ))s"
 }
@@ -706,9 +741,11 @@ cmd_status() {
 }
 
 cmd_check() {
-  local apps; apps=$(local_apps)
-  [[ -n ${apps//[[:space:]]/} ]] || { log "no games installed - nothing to push"; return 0; }
-  local id dir name flags pending=0 out
+  local lib0="$LIB" any=0 id dir name flags pending=0 out apps
+  for LIB in $(all_libs); do
+  apps=$(local_apps)
+  [[ -n ${apps//[[:space:]]/} ]] || continue
+  any=1
   while IFS=$'\t' read -r id dir name flags; do
     [[ -n ${id:-} ]] || continue
     for pair in "common/$dir" "compatdata/$id" "shadercache/$id"; do
@@ -719,6 +756,9 @@ cmd_check() {
       [[ -n ${out//[[:space:]]/} ]] && pending=$((pending + $(grep -c . <<<"$out")))
     done
   done <<< "$apps"
+  done
+  LIB="$lib0"
+  (( any )) || { log "no games installed - nothing to push"; return 0; }
   if (( pending == 0 )); then log "library is mirrored - nothing to push"; return 0; fi
   log "NOT mirrored: $pending object(s) differ from the archive"
   return 1

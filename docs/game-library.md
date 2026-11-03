@@ -9,6 +9,12 @@ On **local NVMe** (`/scratch/steam`), mirrored to **S3**. The instance store is 
 on the box and costs nothing, and it is wiped on every *stop* - so the S3 archive is the durable
 copy, and the box restores from it at boot.
 
+Games are not always in that one place. A disk added later is `/scratch2/steam`, and a game installed
+from Steam's own default folder lands on the root disk. **Push, check and `cg games` look in every library
+on the box**: `/scratch/steam`, `/scratch2/steam`, and each folder Steam lists in `libraryfolders.vdf` (the
+log says `also in <folder>` for any but the first). A game found in two is archived once. **Restore** still
+puts everything back in `/scratch/steam`, the first library, and skips what does not fit.
+
 The restore starts at the **top** of the build and runs in the background while everything else
 installs, so it overlaps the NVIDIA driver rather than being a wait of its own. The readiness
 marker waits for it, so `cg init` reports the box ready when the games are actually there.
