@@ -3322,10 +3322,10 @@ function paintFit() {
   const add = extra && per != null ? extra * per : null;
   const base = statusNow ? machineFacts().price : null;
   note.textContent = !extra || over ? '' : [
-    `Extra space for your games: ${extra} GB${extra > auto ? ' (your choice)' : ''}`,
-    add != null ? `+${rsh(add)} an hour` : '',
-    add != null && base != null ? `about ${rsh(base + add)} an hour in all while it runs` : '',
-  ].filter(Boolean).join(' · ');
+    extra > auto ? `You chose ${extra} GB of extra space for your games.` : `Your games need ${extra} GB of extra space.`,
+    add != null && base != null ? `It adds ${rsh(add)} an hour, so this machine costs about ${rsh(base + add)} an hour while it runs.`
+      : add != null ? `It adds ${rsh(add)} an hour.` : '',
+  ].filter(Boolean).join(' ');
   note.hidden = !note.textContent;
   // A box is already running: there is nothing to build, and cg would refuse.
   // The screen says so and offers what you can actually do with it.

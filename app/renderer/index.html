@@ -271,17 +271,16 @@
           <p id="b-extra" class="mt-space-xs font-code-sm text-code-sm text-on-surface-variant" hidden></p>
           <!-- Always there: more room than the games need is allowed. The disk
                is the larger of this and what the games need. -->
-          <label class="mt-space-sm flex flex-wrap items-center gap-space-sm font-code-sm text-code-sm text-on-surface-variant">
-            Disk for your games
-            <select id="b-extra-pick"
-                    class="bg-surface border border-surface-variant rounded px-space-sm py-0.5 text-on-surface">
-              <option value="0">Only if the games need one</option>
+          <div class="flex items-center gap-space-sm mt-space-sm">
+            <label class="font-code-sm text-code-sm text-outline" for="b-extra-pick">Extra space</label>
+            <select id="b-extra-pick" class="field w-auto py-space-xs cursor-pointer">
+              <option value="0">Only what the games need</option>
               <option value="50">50 GB</option>
               <option value="100">100 GB</option>
               <option value="200">200 GB</option>
               <option value="500">500 GB</option>
             </select>
-          </label>
+          </div>
         </div>
       </div>
 
