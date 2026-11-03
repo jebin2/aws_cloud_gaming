@@ -3322,6 +3322,24 @@ function paintFit() {
   $('b-fit-pct').className = 'font-code-sm text-code-sm ' + (over ? 'text-error' : 'text-on-surface-variant');
   $('b-bar').style.width = pct + '%';
   $('b-bar').className = 'h-full ' + (over ? 'bg-error' : 'bg-primary');
+  // The slider is the room for games, in GB: it starts at what the machine's own
+  // drive holds, can never be dragged under what the ticked games need (that end
+  // follows the games as they are ticked), and a bigger disk is added past the
+  // drive's size. Nothing is offered until the drive is known.
+  const slider = $('b-extra-pick');
+  const top = MAX_EXTRA_DISK_GB - reserve;
+  slider.disabled = cap == null;
+  if (cap != null) {
+    const floor = Math.min(auto ? auto - reserve : cap, top);
+    slider.min = String(floor);
+    slider.max = String(top);
+    slider.value = String(extra ? Math.min(extra - reserve, top) : cap);
+    $('b-extra-lo').textContent = `${floor} GB${auto ? ' (your games)' : ' (the machine\'s own drive)'}`;
+    $('b-extra-hi').textContent = `${top} GB`;
+    $('b-extra-val').textContent = `${extra ? extra - reserve : cap} GB`;
+  } else {
+    $('b-extra-lo').textContent = $('b-extra-hi').textContent = $('b-extra-val').textContent = '';
+  }
   // What the extra disk adds to the hour, and what the hour comes to: said before
   // the build, because it is money.
   const note = $('b-extra');
@@ -7048,7 +7066,16 @@ $('b-login-choice').onchange = async ev => {
 };
 
 // The disk asked for on the Build page: said in the line under the games.
-$('b-extra-pick').onchange = ev => { extraPick = Number(ev.target.value) || 0; paintFit(); };
+// A position on the slider is room for games; the disk asked for is that plus the
+// part Steam and the system keep. At or under the machine's own drive, or under what
+// the games need, it is no choice at all: the disk follows the games.
+$('b-extra-pick').oninput = ev => {
+  const cap = archive.selectable_gb, reserve = archive.reserve_gb ?? 20;
+  const room = Number(ev.target.value) || 0;
+  extraPick = cap == null || room <= cap ? 0
+    : Math.min(MAX_EXTRA_DISK_GB, Math.ceil((room + reserve) / EXTRA_DISK_STEP_GB) * EXTRA_DISK_STEP_GB);
+  paintFit();
+};
 
 // Add disk, on the running machine. cg says what it will do (second) and how
 // much room there is to add (max_add_gb); this only asks how much, says the

@@ -319,16 +319,19 @@ cat > "$T/r/probe.js" <<'PROBE'
   boxes[0].closest('tr').click();
   out.push('SMALL | clicked | ' + boxes[0].checked);
   out.push('SMALL | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
+  out.push('SLIDER | follows the game | min=' + document.getElementById('b-extra-pick').min + ' value=' + document.getElementById('b-extra-pick').value);
   out.push('SMALL | extra | ' + document.getElementById('b-extra').textContent.trim() + ' | hidden=' + document.getElementById('b-extra').hidden);
   out.push('SMALL | build | ' + (document.getElementById('b-build').disabled ? 'OFF' : 'on'));
   boxes[0].closest('tr').click();
   out.push('SMALL | unticked | extra hidden=' + document.getElementById('b-extra').hidden);
   // A disk can be asked for with nothing ticked, and the choice is said as one.
   const pick = document.getElementById('b-extra-pick');
-  pick.value = '200'; pick.dispatchEvent(new Event('change'));
+  out.push('SLIDER | start | min=' + pick.min + ' max=' + pick.max + ' value=' + pick.value + ' disabled=' + pick.disabled);
+  pick.value = '180'; pick.dispatchEvent(new Event('input'));
+  out.push('SLIDER | pulled | value=' + pick.value + ' | ' + document.getElementById('b-extra-val').textContent);
   out.push('PICK | extra | ' + document.getElementById('b-extra').textContent.trim() + ' | hidden=' + document.getElementById('b-extra').hidden);
   out.push('PICK | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
-  pick.value = '0'; pick.dispatchEvent(new Event('change'));
+  pick.value = '96'; pick.dispatchEvent(new Event('input'));
   out.push('PICK | cleared | extra hidden=' + document.getElementById('b-extra').hidden);
   const huge = { ...small, games: [{ appid: '7', name: 'Huge game', bytes: 990 * 1073741824, usd_month: 9, pushed: '2026-10-01T00:00:00Z' }],
                  total_bytes: 990 * 1073741824 };
@@ -466,6 +469,9 @@ contains "  with what it is, before the build" "$OUT" "SMALL | extra | Your game
 lacks    "  not hidden"                    "$OUT" "SMALL | extra | hidden=true"
 contains "  Build stays allowed"            "$OUT" "SMALL | build | on"
 contains "  and the note goes when the game does" "$OUT" "SMALL | unticked | extra hidden=true"
+contains "the slider starts at the machine's own drive and reaches the most a machine can hold" "$OUT" "SLIDER | start | min=96 max=980 value=96 disabled=false"
+contains "  and its low end follows the games ticked" "$OUT" "SLIDER | follows the game | min=180 value=180"
+contains "  pulled further by hand it says the room" "$OUT" "SLIDER | pulled | value=180 | 180 GB"
 contains "a disk can be asked for with no game ticked" "$OUT" "PICK | extra | You chose 200 GB of extra space for your games."
 contains "  and the meter says it will be added" "$OUT" "PICK | pct | 0.0 GB · a 200 GB disk will be added"
 contains "  and choosing none takes it away" "$OUT" "PICK | cleared | extra hidden=true"
