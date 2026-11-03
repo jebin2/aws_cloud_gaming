@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regression test for the Steam library invariant.
 #
-# Extracts steam-ensure-library.sh straight out of lib/bootstrap.d/90-steam-prewarm.sh
+# Extracts steam-ensure-library.sh straight out of lib/bootstrap.d/72-steam-prewarm.sh
 # and exercises it against a faked Steam install, so the logic that has broken
 # most often in this project can be checked without spending a build.
 #
@@ -12,7 +12,7 @@
 # entry (what a first sign-in can do).
 set -uo pipefail
 cd "$(dirname "$0")/.."
-MOD=lib/bootstrap.d/90-steam-prewarm.sh
+MOD=lib/bootstrap.d/72-steam-prewarm.sh
 [[ -f $MOD ]] || { echo "cannot find $MOD"; exit 1; }
 SRC=$(mktemp)
 awk "/^cat > \\/usr\\/local\\/bin\\/steam-ensure-library.sh <<'EOF'\$/{f=1;next} f&&/^EOF\$/{exit} f" "$MOD" > "$SRC"

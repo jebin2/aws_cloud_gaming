@@ -351,6 +351,8 @@ contains "each library has its own budget" "$out" "disk budget"
 check    "  one for each"                 "$(grep -c 'disk budget' <<<"$out")" "2"
 contains "the manifest follows its game" "$log" "appmanifest_2358720.acf $T/extra/steam/steamapps/"
 
+check    "the login is said to be back, so the Steam update need not wait for the games" "$([[ -f $T/state/account-done ]] && echo yes || echo no)" "yes"
+
 echo "21. an added disk that is not mounted is never replaced by the root disk"
 rm -rf "$T/extra"; printf '#!/usr/bin/env bash\n[[ $2 == "$T/scratch" ]]\n' > "$T/bin/mountpoint"; sed -i "s#\$T/scratch#$T/scratch#" "$T/bin/mountpoint"; chmod +x "$T/bin/mountpoint"
 out=$(CG_EXTRA_APPS=2358720 CG_EXTRA_LIB="$T/extra/steam" run pull --apps 2358720)

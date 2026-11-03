@@ -295,7 +295,7 @@ Test it without spending a build:
 
     ./tests/steam-library.sh
 
-That extracts the script straight out of `lib/bootstrap.d/90-steam-prewarm.sh` and runs it
+That extracts the script straight out of `lib/bootstrap.d/72-steam-prewarm.sh` and runs it
 against a faked Steam install - including a fake client that prunes any library whose marker is
 missing, which is the behaviour the whole design defends against.
 

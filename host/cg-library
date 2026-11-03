@@ -270,6 +270,9 @@ cmd_pull() {
   # would land on the 50 GB root volume and fill it.
   mountpoint -q "$parent" || die "$parent is not a mountpoint - refusing to restore onto the root disk"
   mkdir -p "$LIB/steamapps"
+  # Said when the login is back in place (below): the Steam client update, which
+  # does not wait for the games, does wait for this.
+  rm -f "$STATE/account-done"
 
   # Before anything else, and regardless of which games were chosen: the login
   # lives on the root disk, so it is gone on every new box, and a boot that
@@ -284,6 +287,7 @@ cmd_pull() {
   else
     account_pull
   fi
+  touch "$STATE/account-done"
 
   if [[ $want == none ]]; then
     log "CG_APPS=none - restoring nothing by request (the box is for something else)"

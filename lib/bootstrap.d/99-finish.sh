@@ -10,6 +10,11 @@ aws_box && { chown -R "$USER_NAME:$USER_NAME" "$USER_HOME/.config" "$USER_HOME/.
 
 progress "finishing up"
 if aws_box; then
+# The Steam client update started early (72-steam-prewarm.sh): give it the time it
+# has left, up to five minutes, rather than cut it off; what it has not finished,
+# the run after the reboot does.
+for _ in $(seq 1 60); do systemctl is-active --quiet cg-steam-early.service 2>/dev/null || break; sleep 5; done
+systemctl stop cg-steam-early.service 2>/dev/null || true
 # Back to the safe setting for the machine that will run for hours (see 10-base.sh).
 rm -f /etc/dpkg/dpkg.cfg.d/99-cg-build-unsafe-io
 # Where the time went, from the markers: each step's seconds, those over 15 only.

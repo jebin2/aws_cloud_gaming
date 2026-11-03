@@ -202,7 +202,9 @@ MARK="$HOME/.steam-prewarmed"
 LOG="$HOME/steam-prewarm.log"
 PHASE="$HOME/.steam-phase"
 phase() { echo "$*" > "$PHASE"; }
-export DISPLAY=:0
+# CG_EARLY=1 is the run started during the build, on a virtual screen (CG_DISPLAY),
+# that only unpacks and updates the client: see steam-prewarm-early.sh below.
+export DISPLAY="${CG_DISPLAY:-:0}"
 export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
 # Steam's first run puts up a zenity dialog. Without a session bus zenity dies
 # and Steam reports "Installation cancelled" - a systemd User= service gets no
@@ -270,6 +272,17 @@ client_installed() {
   [[ -n $r && -d "$r/ubuntu12_64" ]]
 }
 
+# The client update does not touch the games, so it does not wait for them. It does
+# wait for the saved Steam login to be put back (the restore's first, small step):
+# a Steam that starts while that is being unpacked would write over it.
+if [[ -z ${CG_EARLY:-} ]]; then
+  for _ in $(seq 1 36); do
+    [[ -f /var/lib/cg-library/account-done ]] && break
+    [[ $(systemctl is-active cg-library-restore.service 2>/dev/null) != activating ]] && break
+    sleep 5
+  done
+fi
+
 phase "unpacking client and downloading update"
 attempt=0
 while (( attempt < 3 )) && ! client_installed; do
@@ -305,6 +318,18 @@ done
 ROOT=$(readlink -f "$HOME/.steam/steam" 2>/dev/null || echo "")
 [[ -n $ROOT && -d "$ROOT/ubuntu12_64" ]] || { echo "client did not install" >>"$LOG"; exit 0; }
 
+# The run started during the build stops here: the client is unpacked and updated,
+# and everything below needs the desktop and the restored games.
+[[ -n ${CG_EARLY:-} ]] && exit 0
+
+# Only now does it need the games: Steam must not adopt a library that is still
+# being filled, or it decides the games are damaged. The client update above
+# ran beside the restore; this waits for the rest of it.
+if [[ $(systemctl is-active cg-library-restore.service 2>/dev/null) == activating ]]; then
+  phase "waiting for your games to finish restoring"
+  while [[ $(systemctl is-active cg-library-restore.service 2>/dev/null) == activating ]]; do sleep 5; done
+fi
+
 # Registering the NVMe library is an invariant that must survive stops and
 # sign-ins, so it lives in its own idempotent script that also runs on every
 # boot. Call it here so a fresh build is ready without waiting for a reboot.
@@ -321,23 +346,46 @@ chmod 755 /usr/local/bin/steam-prewarm.sh
 cat > /etc/systemd/system/steam-prewarm.service <<'EOF'
 [Unit]
 Description=Download and update the Steam client once, after the desktop is up
-# The library is restored from S3 at boot; starting Steam before that
-# finishes would have it adopt a half-populated library and decide the
-# games are damaged.
-After=graphical.target cg-library-restore.service
-Requires=cg-library-restore.service
+# Not ordered after the library restore: updating the client does not touch the
+# games, and waiting for a 140 GB restore first added its whole length to the
+# build. What does need the games finished - telling Steam where they are - waits
+# for the restore inside the script.
+After=graphical.target
 
 [Service]
 Type=oneshot
 User=ubuntu
 ExecStart=/usr/local/bin/steam-prewarm.sh
 RemainAfterExit=yes
-TimeoutStartSec=1200
+# The client takes minutes; waiting for the restore to finish takes as long as the
+# restore does (about 10 minutes for 140 GB, more on a slow day).
+TimeoutStartSec=7200
 
 [Install]
 WantedBy=graphical.target
 EOF
 systemctl enable steam-prewarm.service
+
+# Started NOW, during the build, on a virtual screen: the client's download and
+# unpack (about five minutes) has no need of the driver, the desktop or the games,
+# and used to start only after the reboot. It runs beside the rest of the build,
+# and the run after the reboot finds the client installed and goes on from there.
+# A run still going when the build ends is waited for (99-finish.sh) and, failing
+# that, stopped: the run after the reboot carries on from what was downloaded.
+pkg xvfb
+cat > /usr/local/bin/steam-prewarm-early.sh <<'EOF'
+#!/usr/bin/env bash
+set -uo pipefail
+Xvfb :99 -screen 0 1280x720x24 -nolisten tcp >/dev/null 2>&1 &
+XPID=$!
+trap 'kill $XPID 2>/dev/null' EXIT
+CG_EARLY=1 CG_DISPLAY=:99 /usr/local/bin/steam-prewarm.sh
+EOF
+chmod 755 /usr/local/bin/steam-prewarm-early.sh
+systemctl reset-failed cg-steam-early.service 2>/dev/null || true
+systemd-run --quiet --unit=cg-steam-early --uid="$USER_NAME" --gid="$USER_NAME" \
+  --setenv=HOME="$USER_HOME" /usr/local/bin/steam-prewarm-early.sh \
+  || echo "note: the Steam client update could not be started early - it runs after the reboot instead"
 else
   install -o "$USER_NAME" -g "$USER_NAME" /dev/null "$USER_HOME/.steam-prewarmed"
 fi
