@@ -118,19 +118,25 @@ is_steam_tool() { # is_steam_tool <appid> <installdir>
 # all in one place: the archive's own library is /scratch/steam, but a disk added
 # later is /scratch2/steam, and a game installed from Steam's own default folder
 # lands on the root disk. Steam lists its libraries in libraryfolders.vdf, so that
-# is read too. CG_LIB_DIR set means a test or a person who chose one place:
-# only that, plus CG_EXTRA_LIBS if given.
+# is read too.
+#
+# CG_EXTRA_LIBS set (even to nothing) means "exactly these, besides the first":
+# a test, or a person who chose their places. It is NOT keyed on CG_LIB_DIR, which
+# /etc/cg-library.conf always sets on a real machine - that made this look in one
+# place only, and a game on the root disk was "no games installed".
+# CG_HOMES is where the users' homes are (/home), only so a test can point it.
 all_libs() {
+  local homes="${CG_HOMES:-/home}" p v r
   {
     echo "$LIB"
-    if [[ -n ${CG_LIB_DIR:-} ]]; then
-      for p in ${CG_EXTRA_LIBS:-}; do echo "$p"; done
+    if [[ -n ${CG_EXTRA_LIBS+x} ]]; then
+      for p in $CG_EXTRA_LIBS; do echo "$p"; done
     else
       echo /scratch2/steam
-      for v in /home/*/.local/share/Steam/config/libraryfolders.vdf; do
+      for v in "$homes"/*/.local/share/Steam/config/libraryfolders.vdf; do
         [[ -f $v ]] && sed -n 's/.*"path"[[:space:]]*"\(.*\)".*/\1/p' "$v"
       done
-      for r in /home/*/.local/share/Steam; do [[ -d $r ]] && echo "$r"; done
+      for r in "$homes"/*/.local/share/Steam; do [[ -d $r ]] && echo "$r"; done
     fi
   } | while read -r p; do
     [[ -n $p ]] || continue

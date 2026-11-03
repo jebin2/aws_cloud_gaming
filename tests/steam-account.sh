@@ -64,7 +64,7 @@ mkdir -p "$T/remote"
 
 run() {
   S5LOG="$T/s5.log" REMOTE="$T/remote" PATH="$T/bin:$PATH" T_UP="$T/up" \
-  CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam \
+  CG_EXTRA_LIBS="${CG_EXTRA_LIBS-}" CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam \
   CG_STATE_DIR="$T/state" CG_S5CMD="$T/bin/s5cmd" CG_BOOT_ID_FILE="$T/bootid" \
   CG_STEAM_BASE="$T/home" CG_STEAM_DIR="$SD" HOME="$T/home" \
   MOUNTED="${MOUNTED:-1}" UPLOAD_FAILS="${UPLOAD_FAILS:-0}" \

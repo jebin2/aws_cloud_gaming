@@ -78,7 +78,7 @@ ACF
 run() {
   : > "$T/s5.log"
   S5LOG="$T/s5.log" IDX="$T/index.json" PATH="$T/bin:$PATH" \
-  CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam \
+  CG_EXTRA_LIBS="${CG_EXTRA_LIBS-}" CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam \
   CG_STATE_DIR="$T/state" CG_S5CMD="$T/bin/s5cmd" CG_BOOT_ID_FILE="$T/bootid" \
   CG_APPS="${CG_APPS:-all}" CG_DISK_BUDGET="${CG_DISK_BUDGET:-400000000000}" \
   bash "$SRC" "$@" 2>&1
@@ -326,5 +326,18 @@ out=$(run push)
 contains "without being named, only the archive's own library is looked in (a test or a chosen place)" "$out" "no games installed"
 out=$(CG_EXTRA_LIBS="$T/other" run check)
 lacks    "check looks there too"      "$out" "no games installed"
+
+echo "19. on a real machine CG_LIB_DIR is always set (by its config), and the root disk is still looked in"
+# This is the case that was missed: scanning was keyed on CG_LIB_DIR being unset.
+rm -rf "$T/homes" "$T/scratch/steam/steamapps/"*
+mkdir -p "$T/homes/ubuntu/.local/share/Steam/steamapps/common/Hades" "$T/homes/ubuntu/.local/share/Steam/steamapps/compatdata/1145360"
+cp "$T/other/steamapps/appmanifest_1145360.acf" "$T/homes/ubuntu/.local/share/Steam/steamapps/"
+dd if=/dev/zero of="$T/homes/ubuntu/.local/share/Steam/steamapps/common/Hades/game.bin" bs=1M count=3 status=none
+out=$(env -u CG_EXTRA_LIBS CG_HOMES="$T/homes" S5LOG="$T/s5.log" IDX="$T/index.json" PATH="$T/bin:$PATH" \
+  CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam CG_STATE_DIR="$T/state" \
+  CG_S5CMD="$T/bin/s5cmd" CG_BOOT_ID_FILE="$T/bootid" CG_APPS=all CG_DISK_BUDGET=400000000000 \
+  bash "$SRC" push 2>&1)
+contains "a game in the user's own Steam folder is found" "$out" "pushing Hades"
+lacks    "  and the archive is not told there is nothing" "$out" "no games installed"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

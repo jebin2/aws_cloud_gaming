@@ -58,7 +58,7 @@ chmod +x "$T/bin/mountpoint"
 
 run() { # run <args...>
   S5LOG="$T/s5.log" PATH="$T/bin:$PATH" \
-  CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam \
+  CG_EXTRA_LIBS="${CG_EXTRA_LIBS-}" CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam \
   CG_STATE_DIR="$T/state" CG_S5CMD="$T/bin/s5cmd" CG_BOOT_ID_FILE="$T/bootid" \
   REMOTE_BYTES="${REMOTE_BYTES:-0}" REMOTE_OBJECTS="${REMOTE_OBJECTS:-0}" \
   SYNC_FAILS="${SYNC_FAILS:-0}" MOUNTED="${MOUNTED:-1}" \

@@ -44,7 +44,7 @@ app 9999991 "HunterGame" "Proton Hunter"
 
 : > "$T/s5.log"
 out=$(S5LOG="$T/s5.log" PATH="$T/bin:$PATH" HOME="$T/home" \
-  CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam \
+  CG_EXTRA_LIBS="${CG_EXTRA_LIBS-}" CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam \
   CG_STATE_DIR="$T/state" CG_S5CMD="$T/bin/s5cmd" CG_BOOT_ID_FILE="$T/bootid" \
   CG_STEAM_BASE="$T/home" timeout 60 bash "$SRC" push 2>&1)
 log=$(cat "$T/s5.log")
