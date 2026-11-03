@@ -721,6 +721,8 @@ echo "6. the actions that spend money ask first"
 # window.confirm draws a native alert that belongs to no design.
 check    "no native alert boxes"         "$(grep -cE '(^|[^a-zA-Z.])confirm\(' app/renderer/app.js)" "0"
 contains "  the app asks in its own dialog" "$html" 'id="confirm-title"'
+contains "  and says the disk it adds, with what it costs" "$js" 'An extra ${extra} GB disk is added'
+contains "  and what the hour comes to in all" "$js" 'Billed about ${rsh(base + add)}/hour while running'
 contains "a build confirms, with its rate" "$js" 'Billed ${rate != null ? `${rate}/hour` : '"'"'hourly'"'"'} while running.'
 contains "  and passes the chosen games" "$js" "GAME_APPS: apps"
 contains "a delete confirms"             "$js" "Delete the machine?"

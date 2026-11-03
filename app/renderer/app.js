@@ -3314,6 +3314,10 @@ function selectedGb() {
 // The size of disk a person asked for on the Build page; 0 is "only if the games
 // need one". The disk made is the larger of this and what the games need.
 let extraPick = 0;
+// What the last paintFit worked out, for the confirmation before a build to say:
+// the size of the added disk (0: none), how many games go on it, what it adds to
+// the hour, and what the machine costs without it.
+let fitPlan = { extra: 0, onExtra: 0, add: null, base: null };
 function paintFit() {
   // The disk a box offers is cg's arithmetic, read with the archive. Until it
   // has been read the meter says so, and nothing is refused on a guess: the box
@@ -3372,6 +3376,7 @@ function paintFit() {
       : add != null ? `It adds ${rsh(add)} an hour.` : '',
   ].filter(Boolean).join(' ');
   note.hidden = !note.textContent;
+  fitPlan = { extra: over ? 0 : extra, onExtra: onExtra.length, add, base };
   // A box is already running: there is nothing to build, and cg would refuse.
   // The screen says so and offers what you can actually do with it.
   const up = !!boxNow;
@@ -7270,11 +7275,20 @@ $('b-build').onclick = async () => {
   const apps = picked.size ? [...picked].join(',') : 'none';
   const gb = selectedGb();
   const rate = statusNow ? machineFacts().priceText : null;
+  // The disk added for the games, said here as well as under the slider: this is
+  // the last thing read before money is spent.
+  const { extra, onExtra, add, base } = fitPlan;
+  const disk = extra
+    ? `\n\nAn extra ${extra} GB disk is added ${onExtra ? "for the games that do not fit the machine's own drive" : 'for your games, as you chose'}`
+      + `${add != null ? `, ${rsh(add)} an hour` : ''}.`
+    : '';
+  const bill = extra && add != null && base != null
+    ? `Billed about ${rsh(base + add)}/hour while running (${rate != null ? rate : rsh(base)} for the machine, ${rsh(add)} for the disk).`
+    : `Billed ${rate != null ? `${rate}/hour` : 'hourly'} while running.`;
   const ok = await askConfirm({
     title: 'Build the machine?',
     body: `${picked.size ? `${picked.size} game${picked.size === 1 ? '' : 's'}, ${gb.toFixed(1)} GB, will be`
-                         : 'No games will be'} restored during the build.\n\n`
-        + `Billed ${rate != null ? `${rate}/hour` : 'hourly'} while running.`,
+                         : 'No games will be'} restored during the build.${disk}\n\n${bill}`,
     yes: 'Build',
   });
   if (!ok) return;
