@@ -14,7 +14,14 @@ exec > >(tee /var/log/cloud-gaming-bootstrap.log) 2>&1
 
 # Progress markers. `set -x` traces every command, which is far too noisy to
 # watch remotely, so these give cg init a clean line to stream instead.
-progress() { set +x; echo ">>> $*"; set -x; }
+# Each marker also leaves the seconds since the build began in a file, so the end
+# of the build can say where the time went (see 99-finish.sh) and a slow step is
+# found from a number rather than a guess.
+progress() {
+  set +x; echo ">>> $*"
+  if [ "$CG_TARGET" = aws ]; then echo "$SECONDS $*" >> /var/log/cg-build-times.log; fi
+  set -x
+}
 
 # Assert that a step achieved its effect, not merely that it ran. Nearly every
 # failure in this build has been something reporting success while broken - a

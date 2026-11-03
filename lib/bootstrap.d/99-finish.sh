@@ -10,6 +10,11 @@ aws_box && { chown -R "$USER_NAME:$USER_NAME" "$USER_HOME/.config" "$USER_HOME/.
 
 progress "finishing up"
 if aws_box; then
+# Back to the safe setting for the machine that will run for hours (see 10-base.sh).
+rm -f /etc/dpkg/dpkg.cfg.d/99-cg-build-unsafe-io
+# Where the time went, from the markers: each step's seconds, those over 15 only.
+times=$(awk 'NR > 1 { d = $1 - prev; if (d >= 15) { printf "%s%s %ds", sep, name, d; sep = ", " } } { prev = $1; $1 = ""; name = substr($0, 2) }' /var/log/cg-build-times.log 2>/dev/null || true)
+[ -n "$times" ] && progress "where the time went: $times"
 cat > /etc/systemd/system/cloud-gaming-ready.service <<'EOF'
 [Unit]
 Description=Signal that the streaming desktop is up

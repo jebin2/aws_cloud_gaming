@@ -15,5 +15,15 @@ $nrconf{override_rc}{qr(^cg-library-)} = 0;
 NRCONF
 fi
 
+# The AWS box is built once and thrown away if the build fails, so dpkg need not
+# flush every file it unpacks to disk (force-unsafe-io): on network disks that wait
+# is a good part of installing a few thousand files. Taken out again before the
+# build ends (99-finish.sh), so the running machine's package database is as safe
+# as any. No translation files either: nothing here reads them.
+if aws_box; then
+  echo 'force-unsafe-io' > /etc/dpkg/dpkg.cfg.d/99-cg-build-unsafe-io
+  echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/99-cg-build-no-translations
+fi
+
 progress "installing base packages"
 pkg curl jq
