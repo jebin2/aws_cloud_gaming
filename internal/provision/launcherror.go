@@ -80,6 +80,45 @@ func SpotHolders(ctx context.Context, c interface {
 	return hs, true
 }
 
+// VcpuHolders: the machines of this account in a region that count against the
+// vCPU allowance now - one that is starting, running, stopping or shutting down,
+// whatever it was bought as. A stopped one does not count. Read-only and free. ok
+// is false when AWS could not be asked.
+func VcpuHolders(ctx context.Context, c interface {
+	DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
+}) (hs []Holder, ok bool) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	o, err := c.DescribeInstances(ctx, &ec2.DescribeInstancesInput{Filters: []ec2types.Filter{
+		{Name: aws.String("instance-state-name"), Values: []string{"pending", "running", "stopping", "shutting-down"}}}})
+	if err != nil {
+		return nil, false
+	}
+	for _, r := range o.Reservations {
+		for _, i := range r.Instances {
+			h := Holder{ID: aws.ToString(i.InstanceId), Type: string(i.InstanceType)}
+			if i.State != nil {
+				h.State = string(i.State.Name)
+			}
+			if i.LaunchTime != nil {
+				h.Launched = i.LaunchTime.UTC().Format("2006-01-02T15:04:05+00:00")
+			}
+			hs = append(hs, h)
+		}
+	}
+	return hs, true
+}
+
+// holdersFor reads the machines that hold the allowance a refusal is about.
+func holdersFor(ctx context.Context, c interface {
+	DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
+}, code string) ([]Holder, bool) {
+	if code == "VcpuLimitExceeded" {
+		return VcpuHolders(ctx, c)
+	}
+	return SpotHolders(ctx, c)
+}
+
 // Report says what to say when run-instances refuses. The first line carries the
 // "!! " marker that turns into a `fail` line, which is what lets the desktop app
 // show the cause in its own panel instead of as line 183 of a scrolling log.
@@ -124,7 +163,14 @@ func (f LaunchFailure) Report() []string {
 		if t == "" {
 			t = "this machine"
 		}
-		headline = fmt.Sprintf("your AWS quota is too small for %s in %s", t, here)
+		switch {
+		case f.Code == "VcpuLimitExceeded" && len(live) > 0:
+			headline = fmt.Sprintf("a game PC in %s is still there and uses your allowance: %s (%s)", here, live[0].ID, live[0].State)
+		case f.Code == "VcpuLimitExceeded" && len(f.Holders) > 0:
+			headline = "your previous game PC is still shutting down - try again in a minute or two"
+		default:
+			headline = fmt.Sprintf("your AWS quota is too small for %s in %s", t, here)
+		}
 	case "InvalidKeyPair.NotFound":
 		headline = fmt.Sprintf("the SSH key pair %s is missing from %s", f.KeyName, here)
 	case "AccessDenied", "AccessDeniedException", "UnauthorizedOperation":

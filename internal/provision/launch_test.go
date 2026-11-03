@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -41,7 +42,9 @@ type cloud struct {
 
 func (c *cloud) DescribeInstances(_ context.Context, in *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 	for _, f := range in.Filters {
-		if aws.ToString(f.Name) == "instance-lifecycle" {
+		// The spot holders (by lifecycle) and the vCPU holders (by state, shutting down
+		// included: a machine on its way out still counts).
+		if aws.ToString(f.Name) == "instance-lifecycle" || (aws.ToString(f.Name) == "instance-state-name" && slices.Contains(f.Values, "shutting-down")) {
 			return &ec2.DescribeInstancesOutput{Reservations: []ec2types.Reservation{{Instances: c.holders}}}, nil
 		}
 	}
@@ -360,6 +363,31 @@ func TestInitWaitsOutTheSpotAllowanceOfTheBoxThatJustDied(t *testing.T) {
 	}
 	var le *LaunchError
 	if _, err = p.Run(context.Background(), a); !errors.As(err, &le) || c.runs < 10 || c.runs > 25 {
+		t.Errorf("err=%v runs=%d", err, c.runs)
+	}
+}
+
+// The same for an on-demand box: the vCPU allowance is held for a minute or two by
+// the one that was just deleted, and "ask AWS for more" would be the wrong answer.
+func TestInitWaitsOutTheAllowanceOfAnOnDemandBoxThatJustDied(t *testing.T) {
+	p, c, _, out, a := rig(t)
+	a.Spot = false
+	quota := &smithy.GenericAPIError{Code: "VcpuLimitExceeded", Message: "You have requested more vCPU capacity than your current vCPU limit of 4"}
+	c.holders = []ec2types.Instance{{InstanceId: aws.String("i-old"), InstanceType: "g4dn.xlarge", State: &ec2types.InstanceState{Name: "shutting-down"}}}
+	c.launchErrs = []error{quota, quota, quota}
+	res, err := p.Run(context.Background(), a)
+	if err != nil || res.InstanceID != "i-new" || c.runs != 4 {
+		t.Fatalf("err=%v runs=%d", err, c.runs)
+	}
+	if !strings.Contains(strings.Join(*out, "\n"), "AWS has not released the allowance of the last box yet - waiting") {
+		t.Error(*out)
+	}
+	// One still running is not waited for: it will not let go.
+	p, c, _, _, a = rig(t)
+	c.holders = []ec2types.Instance{{InstanceId: aws.String("i-old"), InstanceType: "g4dn.xlarge", State: &ec2types.InstanceState{Name: "running"}}}
+	c.launchErrs = []error{quota, quota, quota}
+	var le *LaunchError
+	if _, err = p.Run(context.Background(), a); !errors.As(err, &le) || c.runs != 1 || le.Problem.Kind != SpotSlotHeld {
 		t.Errorf("err=%v runs=%d", err, c.runs)
 	}
 }

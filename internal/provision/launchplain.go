@@ -62,8 +62,28 @@ func (f LaunchFailure) Plain() Problem {
 			p.Text = "AWS frees its place in a minute or two. Try again then."
 		}
 	case "VcpuLimitExceeded", "InstanceLimitExceeded":
-		p.Kind, p.Title = LimitTooSmall, "AWS has not yet allowed you to run this game PC here"
-		p.Text = "Ask AWS for permission. It is free to ask, but AWS can take a while to answer."
+		// Another game PC is what is using the allowance: wait for it, or delete it.
+		// Asking AWS for more would not help, and the permission is not what is missing.
+		stopping := false
+		for _, h := range f.Holders {
+			if h.State == "stopping" {
+				stopping = true
+			}
+		}
+		switch {
+		case f.Code == "VcpuLimitExceeded" && stopping:
+			p.Kind, p.Title = SpotSlotLeave, "Your last game PC is still shutting down"
+			p.Text = "It is saving your games first, which can take several minutes. Try again when it has stopped."
+		case f.Code == "VcpuLimitExceeded" && live:
+			p.Kind, p.Title = SpotSlotHeld, "A game PC you started earlier is still there"
+			p.Text = "It is still charging, and it uses up your allowance for game PCs. Delete it, then build again."
+		case f.Code == "VcpuLimitExceeded" && len(f.Holders) > 0:
+			p.Kind, p.Title = SpotSlotLeave, "Your last game PC is still shutting down"
+			p.Text = "AWS frees its place in a minute or two. Try again then."
+		default:
+			p.Kind, p.Title = LimitTooSmall, "AWS has not yet allowed you to run this game PC here"
+			p.Text = "Ask AWS for permission. It is free to ask, but AWS can take a while to answer."
+		}
 	case "InvalidKeyPair.NotFound":
 		p.Kind, p.Title = KeyMissing, "This place is missing the key the app uses to set up your game PC"
 		p.Text = "Fix it, then build again."

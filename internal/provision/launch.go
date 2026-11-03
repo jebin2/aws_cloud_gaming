@@ -355,8 +355,11 @@ func (p Provisioner) launch(ctx context.Context, a Params) (id string, restored 
 		// terminates, so a rebuild straight after a destroy is refused for a
 		// reason that fixes itself. Wait it out when nothing live holds the
 		// allowance; a running machine that does will not let go, so that fails now.
-		if err != nil && quotaWaited < spotQuotaWait && errorCode(err) == "MaxSpotInstanceCountExceeded" {
-			hs, ok := SpotHolders(ctx, p.EC2)
+		// The same is true of the vCPU allowance an on-demand machine uses: a box
+		// that was just deleted still counts for a minute or two, and a rebuild
+		// straight after it was refused as if the quota were too small.
+		if code := errorCode(err); err != nil && quotaWaited < spotQuotaWait && (code == "MaxSpotInstanceCountExceeded" || code == "VcpuLimitExceeded") {
+			hs, ok := holdersFor(ctx, p.EC2, code)
 			live := false
 			for _, h := range hs {
 				if h.State != "shutting-down" {
@@ -364,7 +367,11 @@ func (p Provisioner) launch(ctx context.Context, a Params) (id string, restored 
 				}
 			}
 			if ok && !live && ctx.Err() == nil {
-				out(fmt.Sprintf("    AWS has not released the spot allowance of the last box yet - waiting (%ds so far)", int(quotaWaited/time.Second)))
+				what := "spot allowance"
+				if code == "VcpuLimitExceeded" {
+					what = "allowance"
+				}
+				out(fmt.Sprintf("    AWS has not released the %s of the last box yet - waiting (%ds so far)", what, int(quotaWaited/time.Second)))
 				p.beat("init.spot-allowance", "waiting", "waiting for AWS to release the spot allowance of the last box", int(quotaWaited/time.Second), int(spotQuotaWait/time.Second))
 				p.sleep(20 * time.Second)
 				quotaWaited += 20 * time.Second
@@ -378,8 +385,8 @@ func (p Provisioner) launch(ctx context.Context, a Params) (id string, restored 
 	if lastErr != nil {
 		f.Code, f.Message = ErrorParts(lastErr)
 	}
-	if f.Code == "MaxSpotInstanceCountExceeded" {
-		f.Holders, f.HoldersKnown = SpotHolders(ctx, p.EC2)
+	if f.Code == "MaxSpotInstanceCountExceeded" || f.Code == "VcpuLimitExceeded" {
+		f.Holders, f.HoldersKnown = holdersFor(ctx, p.EC2, f.Code)
 	}
 	return "", false, &LaunchError{Report: f.Report(), Problem: f.Plain(), Code: f.Code, Said: f.Message, Region: f.Region}
 }
