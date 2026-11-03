@@ -269,7 +269,9 @@
             <div class="h-full bg-primary" id="b-bar" style="width:0%"></div>
           </div>
           <p id="b-extra" class="mt-space-xs font-code-sm text-code-sm text-on-surface-variant" hidden></p>
-          <!-- Always there: more room than the games need is allowed. It starts at what
+          <!-- Whole GB, not tens: the machine's own drive (96 GB) is not on a grid of tens,
+               and a thumb that snaps off the number shown reads as a bug. The disk asked
+               for is rounded up to 10 GB when it is read. Always there: more room than the games need is allowed. It starts at what
                the machine's own drive holds, grows by itself as games are ticked, and
                can be pulled further by hand. -->
           <div class="mt-space-md">
@@ -278,7 +280,7 @@
               <span id="b-extra-val" class="text-on-surface"></span>
             </div>
             <input type="range" id="b-extra-pick" class="w-full accent-primary mt-space-xs cursor-pointer"
-                   min="0" max="980" step="10" value="0" disabled>
+                   min="0" max="980" step="1" value="0" disabled>
             <div class="flex justify-between font-code-sm text-code-sm text-outline">
               <span id="b-extra-lo"></span><span id="b-extra-hi"></span>
             </div>
