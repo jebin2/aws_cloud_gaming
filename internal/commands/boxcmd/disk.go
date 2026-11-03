@@ -383,8 +383,11 @@ LIB=/scratch2/steam
 ROOT=$(readlink -f "$HOME/.steam/steam" 2>/dev/null || echo "")
 [[ -n $ROOT && -d "$ROOT/config" ]] || exit 0
 CONF="$ROOT/config/libraryfolders.vdf"
+# The client itself, by exact name. Matching "/ubuntu12_64/steam" as a pattern also
+# matched steamwebhelper and the other processes Steam leaves running for a while
+# after it closes, so the wait never ended.
 steam_running() {
-  pgrep -x steam >/dev/null 2>&1 || pgrep -u "$(id -u)" -f '/ubuntu12_(32|64)/steam' >/dev/null 2>&1
+  pgrep -u "$(id -u)" -x steam >/dev/null 2>&1
 }
 for _ in $(seq 1 43200); do steam_running || break; sleep 1; done
 steam_running && exit 0
