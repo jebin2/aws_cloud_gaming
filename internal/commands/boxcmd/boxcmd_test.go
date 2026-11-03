@@ -38,6 +38,7 @@ type fakeEC2 struct {
 	spotState             string
 	describeErr           error
 	startErr              error
+	stoppingPolls         int // reads that still say "stopping" before it is stopped
 	calls                 []string
 	images                map[string]string // id -> state
 	snaps                 map[string][]string
@@ -52,6 +53,11 @@ type fakeEC2 struct {
 func (f *fakeEC2) DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 	if f.describeErr != nil {
 		return nil, f.describeErr
+	}
+	if f.state == "stopping" && f.stoppingPolls > 0 {
+		if f.stoppingPolls--; f.stoppingPolls == 0 {
+			f.state = "stopped"
+		}
 	}
 	in := ec2types.Instance{InstanceId: aws.String("i-0abc"), State: &ec2types.InstanceState{Name: ec2types.InstanceStateName(f.state)}, InstanceLifecycle: ec2types.InstanceLifecycleType(f.lifecycle),
 		BlockDeviceMappings: []ec2types.InstanceBlockDeviceMapping{{Ebs: &ec2types.EbsInstanceBlockDevice{VolumeId: aws.String("vol-1")}}}}

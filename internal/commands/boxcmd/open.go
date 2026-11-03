@@ -165,8 +165,25 @@ func (d Deps) Open(ctx context.Context) int {
 				return d.die(fmt.Sprintf("spot request is '%s'", srs))
 			}
 		}
+		// A machine that stopped itself is still "stopping" while it saves the games
+		// (a big first save takes many minutes), and AWS counts it against the
+		// allowance for game PCs until it has stopped. Starting it then is refused,
+		// and the refusal says "vCPU limit", which sends a person off to ask AWS for
+		// more when all that is needed is to wait.
+		if st == "stopping" {
+			d.Out.SayID("open.stopping", "The machine is still shutting down and saving your games. Waiting for it to finish")
+			if !d.Box.WaitState(ctx, "stopped", 35*time.Minute) {
+				if ctx.Err() != nil {
+					return 1
+				}
+				return d.die("the machine is still shutting down and saving your games. Try again in a few minutes")
+			}
+		}
 		d.Out.Echo("starting " + d.Box.ID + " ...")
 		if err := d.Box.Start(ctx); err != nil {
+			if strings.Contains(err.Error(), "VcpuLimitExceeded") {
+				return d.die("AWS would not start the machine: your allowance for game PCs here is all in use. Another game PC may be running or still shutting down - wait for it to stop, then try again")
+			}
 			return d.die("AWS would not start the machine: " + firstErrorLine(err.Error()))
 		}
 		d.Box.WaitState(ctx, "running", 600*time.Second)
