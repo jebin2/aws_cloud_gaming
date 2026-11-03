@@ -763,6 +763,7 @@ function paintMachineCards() {
   for (const p of ['d', 'b']) {
     if (!$(`${p}-build`)) continue;
     $(`${p}-fix`).hidden = !stuck;
+    if (p === 'd') $('d-details').hidden = false;   // hidden below while the card is still a skeleton
     if (stuck) {
       const card = $(`${p}-machine-card`);
       card.textContent = '';
@@ -791,6 +792,9 @@ function paintMachineCards() {
       }
       for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk'] : [])]) $(`${p}-${b}`).hidden = true;
       $(`${p}-busy`).hidden = !!why;
+      // Nothing to look into yet: a Details button over a skeleton opens a page
+      // that has nothing to say either. Once there is a reason, it is the way in.
+      if (p === 'd') $('d-details').hidden = !why;
       continue;
     }
     const card = $(`${p}-machine-card`);
