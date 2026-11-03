@@ -268,7 +268,6 @@
           <div class="h-1.5 rounded-full bg-surface-container mt-space-xs overflow-hidden">
             <div class="h-full bg-primary" id="b-bar" style="width:0%"></div>
           </div>
-          <p id="b-extra" class="mt-space-xs font-code-sm text-code-sm text-on-surface-variant" hidden></p>
           <!-- Whole GB, not tens: the machine's own drive (96 GB) is not on a grid of tens,
                and a thumb that snaps off the number shown reads as a bug. The disk asked
                for is rounded up to 10 GB when it is read. Always there: more room than the games need is allowed. It starts at what
@@ -284,6 +283,12 @@
             <div class="flex justify-between font-code-sm text-code-sm text-outline">
               <span id="b-extra-lo"></span><span id="b-extra-hi"></span>
             </div>
+          </div>
+          <!-- Under the slider, in a box that keeps its height whether or not there is
+               anything to say: above it, the line appearing and going moved the slider
+               out from under the pointer while it was being dragged. -->
+          <div class="mt-space-sm min-h-[3.5rem]">
+            <p id="b-extra" class="font-code-sm text-code-sm text-on-surface-variant" hidden></p>
           </div>
         </div>
       </div>
