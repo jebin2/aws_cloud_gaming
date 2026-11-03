@@ -32,7 +32,7 @@
 # The S3 game library is the AWS box's: a machine of yours keeps its games.
 if aws_box; then
 progress "installing the S3 game library mirror"
-( cd /opt/cloud-gaming-host && bash ./install-library.sh '__S3_BUCKET__' steam '__CG_APPS__' '__CG_LOGIN__' '__CG_RESERVE_GB__' ) \
+( cd /opt/cloud-gaming-host && bash ./install-library.sh '__S3_BUCKET__' steam '__CG_APPS__' '__CG_LOGIN__' '__CG_RESERVE_GB__' '__CG_EXTRA_APPS__' ) \
   || echo ">>> FAILED: library mirror install - games will not persist a stop"
 
 # The restore needs credentials from the instance profile. IMDSv2 needs a token,

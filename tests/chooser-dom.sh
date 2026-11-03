@@ -322,12 +322,19 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('SLIDER | follows the game | min=' + document.getElementById('b-extra-pick').min + ' value=' + document.getElementById('b-extra-pick').value);
   out.push('SMALL | extra | ' + document.getElementById('b-extra').textContent.trim() + ' | hidden=' + document.getElementById('b-extra').hidden);
   out.push('SMALL | build | ' + (document.getElementById('b-build').disabled ? 'OFF' : 'on'));
+  // One that fits the drive beside one that does not: the small one stays on the drive.
+  boxes[1].closest('tr').click();
+  out.push('MIX | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
+  boxes[0].closest('tr').click();
+  out.push('FITS | pct | ' + document.getElementById('b-fit-pct').textContent.trim() + ' | extra hidden=' + document.getElementById('b-extra').hidden);
+  boxes[1].closest('tr').click();
+  boxes[0].closest('tr').click();
   boxes[0].closest('tr').click();
   out.push('SMALL | unticked | extra hidden=' + document.getElementById('b-extra').hidden);
   // A disk can be asked for with nothing ticked, and the choice is said as one.
   const pick = document.getElementById('b-extra-pick');
   out.push('SLIDER | start | min=' + pick.min + ' max=' + pick.max + ' value=' + pick.value + ' disabled=' + pick.disabled);
-  pick.value = '180'; pick.dispatchEvent(new Event('input'));
+  pick.value = '376'; pick.dispatchEvent(new Event('input'));
   out.push('SLIDER | pulled | value=' + pick.value + ' | ' + document.getElementById('b-extra-val').textContent);
   out.push('PICK | extra | ' + document.getElementById('b-extra').textContent.trim() + ' | hidden=' + document.getElementById('b-extra').hidden);
   out.push('PICK | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
@@ -464,16 +471,18 @@ contains "the meter names the machine"     "$OUT" "SMALL | fit | Disk space (g4d
 contains "a game bigger than the machine's drive is still offered" "$OUT" "SMALL | big | on"
 contains "  a game that fits is too"        "$OUT" "SMALL | small | on"
 contains "  and ticking the big one works"  "$OUT" "SMALL | clicked | true"
-contains "  and says a disk will be added"  "$OUT" "SMALL | pct | 175.0 GB · a 200 GB disk will be added"
-contains "  with what it is, before the build" "$OUT" "SMALL | extra | Your games need 200 GB of extra space."
+contains "  and says a disk will be added"  "$OUT" "SMALL | pct | 175.0 GB · 0.0 GB on the drive, 175.0 GB on a 200 GB disk"
+contains "  with what it is, before the build" "$OUT" "SMALL | extra | Games that do not fit the machine's own drive go on a 200 GB extra disk."
 lacks    "  not hidden"                    "$OUT" "SMALL | extra | hidden=true"
 contains "  Build stays allowed"            "$OUT" "SMALL | build | on"
 contains "  and the note goes when the game does" "$OUT" "SMALL | unticked | extra hidden=true"
-contains "the slider starts at the machine's own drive and reaches the most a machine can hold" "$OUT" "SLIDER | start | min=96 max=980 value=96 disabled=false"
-contains "  and its low end follows the games ticked" "$OUT" "SLIDER | follows the game | min=180 value=180"
-contains "  pulled further by hand it says the room" "$OUT" "SLIDER | pulled | value=180 | 180 GB"
-contains "a disk can be asked for with no game ticked" "$OUT" "PICK | extra | You chose 200 GB of extra space for your games."
-contains "  and the meter says it will be added" "$OUT" "PICK | pct | 0.0 GB · a 200 GB disk will be added"
+contains "the slider starts at the machine's own drive and reaches the most a machine can hold" "$OUT" "SLIDER | start | min=96 max=1076 value=96 disabled=false"
+contains "  and its low end follows the games ticked" "$OUT" "SLIDER | follows the game | min=276 value=276"
+contains "  pulled further by hand it says the room" "$OUT" "SLIDER | pulled | value=376 | 376 GB"
+contains "a game that fits the drive stays on it beside one that does not" "$OUT" "MIX | pct | 178.0 GB · 3.0 GB on the drive, 175.0 GB on a 200 GB disk"
+contains "  and with only that one, no disk at all" "$OUT" "FITS | pct | 3.0 of 96 GB | extra hidden=true"
+contains "a disk can be asked for with no game ticked" "$OUT" "PICK | extra | You chose 300 GB of extra space for your games."
+contains "  and the meter says it will be added" "$OUT" "PICK | pct | 0.0 GB · a 300 GB disk will be added"
 contains "  and choosing none takes it away" "$OUT" "PICK | cleared | extra hidden=true"
 contains "a game too big for any added disk is not offered" "$OUT" "HUGE | box | off"
 contains "  and says why"                  "$OUT" "More than a game PC here can hold (1000 GB)."

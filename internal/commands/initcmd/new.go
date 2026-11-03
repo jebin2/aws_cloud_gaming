@@ -97,11 +97,23 @@ func New(ctx context.Context, get config.Lookup, env *config.Env, out *output.Ou
 				INRPerGBHour: diskINRPerGBHour(ctx, popts, region)}.Choose(ctx)
 		},
 		ExtraDisk: func(ctx context.Context, apps string) GameDisk {
-			need, ok := Chooser{Lib: gameLib(), Env: env, Out: out}.Need(ctx, apps)
+			games, ok := Chooser{Lib: gameLib(), Env: env, Out: out}.Games(ctx, apps)
 			own, known := storeGB(ctx, ec, env, cache)
+			reserve := float64(env.Int("GAME_DISK_RESERVE_GB"))
+			var need, over float64
+			for _, g := range games {
+				need += g.GB
+			}
+			// The machine's own drive first, the added disk for what does not fit it.
+			var extraIDs []string
 			gb := 0
 			if ok && known {
-				gb = provision.ExtraDiskGB(need, float64(env.Int("GAME_DISK_RESERVE_GB")), own)
+				_, onExtra := provision.PlaceGames(games, max(own-reserve, 0))
+				gb = provision.ExtraDiskFor(onExtra, reserve)
+				for _, g := range onExtra {
+					extraIDs = append(extraIDs, g.ID)
+					over += g.GB
+				}
 			}
 			// A disk asked for is added whether or not the games need one: more
 			// room than they take is what it is for.
@@ -112,7 +124,7 @@ func New(ctx context.Context, get config.Lookup, env *config.Env, out *output.Ou
 			if gb == 0 {
 				return GameDisk{}
 			}
-			return GameDisk{GB: gb, NeedGB: need, StoreGB: own, Asked: asked, INRHour: float64(gb) * diskINRPerGBHour(ctx, popts, region)}
+			return GameDisk{GB: gb, NeedGB: need, StoreGB: own, OverGB: over, ExtraApps: extraIDs, Asked: asked, INRHour: float64(gb) * diskINRPerGBHour(ctx, popts, region)}
 		},
 		Lib: func(named string) provision.Library {
 			return provision.Library{S3: s3.NewFromConfig(cfg), IAM: iam.NewFromConfig(cfg), Account: account, Host: host, Region: region, Named: named, TagKey: config.TagKey, Beat: out.Wait}

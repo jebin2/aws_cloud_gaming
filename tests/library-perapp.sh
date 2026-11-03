@@ -340,4 +340,22 @@ out=$(env -u CG_EXTRA_LIBS CG_HOMES="$T/homes" S5LOG="$T/s5.log" IDX="$T/index.j
 contains "a game in the user's own Steam folder is found" "$out" "pushing Hades"
 lacks    "  and the archive is not told there is nothing" "$out" "no games installed"
 
+echo "20. restoring: the games the laptop said do not fit the drive go on the added disk"
+rm -rf "$T/scratch/steam/steamapps/"* "$T/extra"; mkdir -p "$T/extra/steam"
+out=$(CG_EXTRA_APPS=2358720 CG_EXTRA_LIB="$T/extra/steam" run pull --apps 2344520,2358720)
+log=$(cat "$T/s5.log")
+contains "the game that fits goes on the drive"  "$log" "$T/scratch/steam/steamapps/common/Diablo IV/"
+contains "the game that does not goes on the added disk" "$log" "$T/extra/steam/steamapps/common/BlackMythWukong/"
+lacks    "  and not the other way round"  "$log" "$T/scratch/steam/steamapps/common/BlackMythWukong/"
+contains "each library has its own budget" "$out" "disk budget"
+check    "  one for each"                 "$(grep -c 'disk budget' <<<"$out")" "2"
+contains "the manifest follows its game" "$log" "appmanifest_2358720.acf $T/extra/steam/steamapps/"
+
+echo "21. an added disk that is not mounted is never replaced by the root disk"
+rm -rf "$T/extra"; printf '#!/usr/bin/env bash\n[[ $2 == "$T/scratch" ]]\n' > "$T/bin/mountpoint"; sed -i "s#\$T/scratch#$T/scratch#" "$T/bin/mountpoint"; chmod +x "$T/bin/mountpoint"
+out=$(CG_EXTRA_APPS=2358720 CG_EXTRA_LIB="$T/extra/steam" run pull --apps 2358720)
+contains "it says so and skips"   "$out" "that is not mounted"
+lacks    "nothing is written to the root disk" "$(cat "$T/s5.log")" "$T/extra/steam/steamapps/common"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$T/bin/mountpoint"
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

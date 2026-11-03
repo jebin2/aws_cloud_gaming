@@ -44,8 +44,11 @@ type Params struct {
 	// DataGB is the disk added for the games when the machine's own drive is too
 	// small for them (see ExtraDiskGB); 0 leaves the games on that drive.
 	DataGB int
-	Spot   bool
-	TagKey string
+	// ExtraApps are the games (appids, comma separated) the restore puts on that
+	// disk; the others go on the machine's own drive.
+	ExtraApps string
+	Spot      bool
+	TagKey    string
 	// Joining the tailnet, and what the build restores.
 	AuthKey, Apps, Login, ReserveGB string
 	// The bucket the library lives in, and where it is.
@@ -432,7 +435,7 @@ func (p Provisioner) userData(ctx context.Context, a Params) (UserData, error) {
 	if login == "" {
 		login = "use"
 	}
-	u, err := Assemble(p.Src, map[string]string{"CG_DATA_GB": strconv.Itoa(a.DataGB), "TS_AUTHKEY": a.AuthKey, "TS_HOST": a.Host, "HOST_TGZ_URL": url, "S3_BUCKET": a.Bucket,
+	u, err := Assemble(p.Src, map[string]string{"CG_DATA_GB": strconv.Itoa(a.DataGB), "CG_EXTRA_APPS": a.ExtraApps, "TS_AUTHKEY": a.AuthKey, "TS_HOST": a.Host, "HOST_TGZ_URL": url, "S3_BUCKET": a.Bucket,
 		"CG_APPS": apps, "CG_LOGIN": login, "CG_RESERVE_GB": reserve, "CG_TARGET": "aws", "CG_USER": "ubuntu", "CG_FAMILY": "ubuntu"})
 	if err != nil {
 		return u, fmt.Errorf("could not render user-data: %s", firstLine(err))

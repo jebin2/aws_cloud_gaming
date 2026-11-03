@@ -22,8 +22,8 @@ with the box, so this bills only while it exists. An on-demand box keeps its vol
 stopped**, so a stopped box bills the full month. EBS volumes cannot be shrunk, so choose the size
 at launch.
 
-**Per hour the games disk exists, when one is added.** If the chosen games do not fit the machine's own
-NVMe, `cg init` adds a gp3 disk for them (their size plus the 20 GB kept free, rounded up to 10 GB) and
+**Per hour the added disk exists, when one is added.** The machine's own NVMe is filled first; if some of the
+chosen games do not fit it, `cg init` adds a gp3 disk for those (their size plus the 20 GB kept free, rounded up to 10 GB) and
 says what it costs before launching: 100 GB is about INR 1.2/hr, 200 GB about INR 2.4/hr. Like the root
 disk it is deleted with a spot box and bills while an on-demand box is stopped. More can be added to a
 running box (Add disk on the Machine page): the same rate for the GB added, from then until the box is deleted.

@@ -2,6 +2,7 @@ package boxcmd
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
+	cg "github.com/jebin2/aws_cloud_gaming"
 	"github.com/jebin2/aws_cloud_gaming/internal/provision"
 )
 
@@ -29,9 +31,10 @@ type DiskAPI interface {
 	ModifyInstanceAttribute(context.Context, *ec2.ModifyInstanceAttributeInput, ...func(*ec2.Options)) (*ec2.ModifyInstanceAttributeOutput, error)
 }
 
-// gamesDevice is where the games disk is attached; the build puts it there too.
-// extraDevice is where a disk added to a machine that had none goes: beside the
-// machine's own drive, mounted at /scratch2, with the games left where they are.
+// The disk added for the games that do not fit the machine's own drive is
+// /dev/sdf when the build made it and /dev/sdg when Add disk did (the same disk,
+// told apart only by when it was made), and is mounted at /scratch2 either way.
+// The machine's own drive stays at /scratch.
 const (
 	gamesDevice = "/dev/sdf"
 	extraDevice = "/dev/sdg"
@@ -61,16 +64,15 @@ type DiskStatus struct {
 	Second bool `json:"second"`
 }
 
-// volumes are the ids of the games disk and of the disk added beside the
-// machine's own drive, "" for one that is not there, and the zone the machine
-// is in.
-func volumes(ctx context.Context, c DiskAPI, id string) (games, extra, zone string, err error) {
+// addedVolume is the id of the disk added for the games, "" when the machine has
+// none, and the zone the machine is in.
+func addedVolume(ctx context.Context, c DiskAPI, id string) (vol, zone string, err error) {
 	o, err := c.DescribeInstances(ctx, &ec2.DescribeInstancesInput{InstanceIds: []string{id}})
 	if err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
 	if len(o.Reservations) == 0 || len(o.Reservations[0].Instances) == 0 {
-		return "", "", "", fmt.Errorf("InvalidInstanceID.NotFound: %s", id)
+		return "", "", fmt.Errorf("InvalidInstanceID.NotFound: %s", id)
 	}
 	in := o.Reservations[0].Instances[0]
 	if in.Placement != nil {
@@ -80,14 +82,11 @@ func volumes(ctx context.Context, c DiskAPI, id string) (games, extra, zone stri
 		if m.Ebs == nil {
 			continue
 		}
-		switch aws.ToString(m.DeviceName) {
-		case gamesDevice:
-			games = aws.ToString(m.Ebs.VolumeId)
-		case extraDevice:
-			extra = aws.ToString(m.Ebs.VolumeId)
+		if d := aws.ToString(m.DeviceName); d == gamesDevice || d == extraDevice {
+			vol = aws.ToString(m.Ebs.VolumeId)
 		}
 	}
-	return games, extra, zone, nil
+	return vol, zone, nil
 }
 
 func volumeGB(ctx context.Context, c DiskAPI, vol string) (int, error) {
@@ -137,18 +136,16 @@ func (d Deps) Disk(ctx context.Context, c DiskAPI, asJSON bool) int {
 		}
 	}
 	if st.Running {
-		games, extra, _, err := volumes(ctx, c, d.Box.ID)
+		vol, _, err := addedVolume(ctx, c, d.Box.ID)
 		if err != nil {
 			return d.die(firstErrorLine(err.Error()))
 		}
-		for _, vol := range []string{games, extra} {
-			if vol != "" {
-				if gb, err := volumeGB(ctx, c, vol); err == nil {
-					st.Disk += gb
-				}
+		if vol != "" {
+			if gb, err := volumeGB(ctx, c, vol); err == nil {
+				st.Disk = gb
 			}
 		}
-		st.Second = games == "" && extra == ""
+		st.Second = vol == ""
 		st.MaxAddGB = provision.MaxExtraDiskGB - st.Disk
 		if t, u, ok := d.df(ctx); ok {
 			st.TotalGB, st.UsedGB, st.FreeGB = t, u, t-u
@@ -194,16 +191,12 @@ func (d Deps) AddDisk(ctx context.Context, c DiskAPI, gb int) int {
 	gb = (gb + step - 1) / step * step
 
 	d.Out.SayID("disk.find", "Looking at the game PC's disks")
-	games, extra, zone, err := volumes(ctx, c, d.Box.ID)
+	vol, zone, err := addedVolume(ctx, c, d.Box.ID)
 	if err != nil {
 		return d.die(firstErrorLine(err.Error()))
 	}
-	// Whichever disk is already there is the one made bigger; a machine with
-	// only its own drive, which cannot grow, gets a second disk.
-	vol, mount := games, gamesMount
-	if extra != "" {
-		vol, mount = extra, extraMount
-	}
+	// A disk already added is the one made bigger; a machine with only its own
+	// drive, which cannot grow, gets one.
 	have := 0
 	if vol != "" {
 		if have, err = volumeGB(ctx, c, vol); err != nil {
@@ -211,10 +204,10 @@ func (d Deps) AddDisk(ctx context.Context, c DiskAPI, gb int) int {
 		}
 	}
 	if have+gb > provision.MaxExtraDiskGB {
-		return d.die(fmt.Sprintf("that is more than a game PC here can hold (%d GB of game disk at most; this one has %d GB)", provision.MaxExtraDiskGB, have))
+		return d.die(fmt.Sprintf("that is more than a game PC here can hold (%d GB of added disk at most; this one has %d GB)", provision.MaxExtraDiskGB, have))
 	}
 	if vol != "" {
-		return d.growDisk(ctx, c, vol, mount, have+gb)
+		return d.growDisk(ctx, c, vol, extraMount, have+gb)
 	}
 	return d.addSecondDisk(ctx, c, zone, gb)
 }
@@ -325,7 +318,11 @@ func (d Deps) addSecondDisk(ctx context.Context, c DiskAPI, zone string, gb int)
 		d.Out.LogAs("warn", "the disk was not marked to go with the machine; cg destroy still removes it")
 	}
 	d.Out.SayID("disk.copy", "Setting the new disk up")
-	if err := d.relay(ctx, remote("bash", "-c", extraScript)); err != nil {
+	script, err := extraScript()
+	if err != nil {
+		return fail("the app is missing a file it needs: " + err.Error())
+	}
+	if err := d.relay(ctx, remote("bash", "-c", script)); err != nil {
 		d.said(err)
 		return d.die("the new disk could not be set up. Your games are untouched; the new disk bills until the machine goes. Try again.")
 	}
@@ -357,10 +354,32 @@ func (d Deps) waitVolume(ctx context.Context, c DiskAPI, vol, want string) bool 
 // machine's own drive is told apart by its model. It is mounted at /scratch2
 // by label on every boot ("nofail": a machine that lost it still starts).
 //
-// Steam is told about the folder by steam-add-extra-library, which waits for
-// Steam to be closed first: Steam writes its list of folders as it exits, and an
-// entry added while it runs is thrown away.
-const extraScript = `set -euo pipefail
+// Steam is told about the folder by steam-add-extra-library, a service that
+// waits for Steam to be closed first: Steam writes its list of folders as it
+// exits, and an entry added while it runs is thrown away. Its files are the ones
+// a new build installs (host/), carried over here so there is one copy of them.
+func extraScript() (string, error) {
+	helper, err := cg.Files.ReadFile("host/steam-add-extra-library")
+	if err != nil {
+		return "", err
+	}
+	unit, err := cg.Files.ReadFile("host/cg-extra-library.service")
+	if err != nil {
+		return "", err
+	}
+	b64 := func(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
+	return fmt.Sprintf(extraScriptHead+`
+echo '%s' | base64 -d | sudo tee /usr/local/bin/steam-add-extra-library >/dev/null
+sudo chmod 755 /usr/local/bin/steam-add-extra-library
+echo '%s' | base64 -d | sudo tee /etc/systemd/system/cg-extra-library.service >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable cg-extra-library >/dev/null 2>&1
+sudo systemctl restart cg-extra-library
+df -h /scratch2 | tail -1
+echo "the new disk is ready"`, b64(helper), b64(unit)), nil
+}
+
+const extraScriptHead = `set -euo pipefail
 dev=""
 for i in $(seq 1 30); do
   for n in $(lsblk -dno NAME,MODEL | awk '/Elastic Block Store/{print $1}'); do
@@ -375,76 +394,4 @@ sudo mkdir -p /scratch2
 grep -q '^LABEL=cgextra ' /etc/fstab || echo 'LABEL=cgextra /scratch2 ext4 defaults,noatime,nofail 0 2' | sudo tee -a /etc/fstab >/dev/null
 mountpoint -q /scratch2 || sudo mount /scratch2
 sudo mkdir -p /scratch2/steam/steamapps/common
-sudo chown -R ubuntu:ubuntu /scratch2
-sudo tee /usr/local/bin/steam-add-extra-library >/dev/null <<'EOS'
-#!/usr/bin/env bash
-set -uo pipefail
-LIB=/scratch2/steam
-# The client itself, by exact name. Matching "/ubuntu12_64/steam" as a pattern also
-# matched steamwebhelper and the other processes Steam leaves running for a while
-# after it closes, so the wait never ended.
-steam_running() {
-  pgrep -u "$(id -u)" -x steam >/dev/null 2>&1
-}
-say() { echo "$*"; }
-add_entry() {
-ROOT=$(readlink -f "$HOME/.steam/steam" 2>/dev/null || echo "")
-CONF="$ROOT/config/libraryfolders.vdf"
-MARKER="$LIB/steamapps/libraryfolder.vdf"
-CID=$(sed -n 's/.*"contentid"[[:space:]]*"\([0-9]*\)".*/\1/p' "$MARKER" 2>/dev/null | tail -1)
-[[ -n $CID ]] || CID=$(python3 -c 'import random;print(random.getrandbits(63))')
-printf '"libraryfolder"\n{\n\t"contentid"\t\t"%s"\n\t"label"\t\t""\n}\n' "$CID" > "$MARKER"
-for F in "$CONF" "$ROOT/steamapps/libraryfolders.vdf"; do
-  [[ -f $F ]] || continue
-  grep -q "$LIB" "$F" && continue
-  python3 - "$F" "$CID" "$LIB" <<'PY'
-import re, sys
-p, cid, lib = sys.argv[1], sys.argv[2], sys.argv[3]
-s = open(p).read()
-n = max([int(x) for x in re.findall(r'^\t"(\d+)"\s*$', s, re.M)] + [0]) + 1
-entry = ('\t"%d"\n\t{\n\t\t"path"\t\t"%s"\n\t\t"label"\t\t""\n' % (n, lib)
-         + '\t\t"contentid"\t\t"' + cid + '"\n\t\t"totalsize"\t\t"0"\n'
-         '\t\t"update_clean_bytes_tally"\t\t"0"\n\t\t"time_last_update_verified"\t\t"0"\n'
-         '\t\t"apps"\n\t\t{\n\t\t}\n\t}\n')
-i = s.rstrip().rfind('}')
-open(p, 'w').write(s[:i] + entry + s[i:])
-PY
-done
-say "added $LIB to Steam's folders"
-}
-# On duty for as long as the machine is up, not once: Steam rewrites its list of
-# folders as it exits, so if it drops the entry, it is put back the next time Steam
-# is closed. Never touched while Steam runs.
-while true; do
-  # The client is not signed in on a fresh machine, and has no list of folders
-  # until it is; nothing to add to yet.
-  ROOT=$(readlink -f "$HOME/.steam/steam" 2>/dev/null || echo "")
-  CONF="$ROOT/config/libraryfolders.vdf"
-  if ! steam_running && [[ -n $ROOT && -f $CONF ]] && ! grep -q "$LIB" "$CONF" 2>/dev/null; then
-    sleep 2
-    steam_running || add_entry
-  fi
-  sleep 2
-done
-EOS
-sudo chmod 755 /usr/local/bin/steam-add-extra-library
-sudo tee /etc/systemd/system/cg-extra-library.service >/dev/null <<'EOU'
-[Unit]
-Description=Keep the extra game disk registered with Steam
-After=local-fs.target
-
-[Service]
-User=ubuntu
-Environment=HOME=/home/ubuntu
-ExecStart=/usr/local/bin/steam-add-extra-library
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOU
-sudo systemctl daemon-reload
-sudo systemctl enable cg-extra-library >/dev/null 2>&1
-sudo systemctl restart cg-extra-library
-df -h /scratch2 | tail -1
-echo "the new disk is ready"`
+sudo chown -R ubuntu:ubuntu /scratch2`

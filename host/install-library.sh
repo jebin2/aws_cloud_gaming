@@ -12,6 +12,9 @@ CG_LOGIN="${4:-${CG_LOGIN:-use}}"
 # Space kept free on the game disk: the laptop's GAME_DISK_RESERVE_GB, so the
 # box and the laptop's picker refuse the same games.
 CG_RESERVE_GB="${5:-${CG_RESERVE_GB:-}}"
+# The games (appids, comma separated) the restore puts on the added disk at
+# /scratch2 instead of the machine's own drive; empty puts them all on the drive.
+CG_EXTRA_APPS="${6:-${CG_EXTRA_APPS:-}}"
 S5_VERSION="${S5_VERSION:-2.2.2}"
 
 # The AWS CLI can do this, but at roughly 80 MB/s single-threaded; s5cmd
@@ -54,6 +57,8 @@ CG_LIB_DIR=${CG_LIB_DIR:-/scratch/steam}
 CG_APPS=${CG_APPS:-all}
 CG_LOGIN=${CG_LOGIN:-use}
 CG_RESERVE_GB=${CG_RESERVE_GB}
+CG_EXTRA_APPS=${CG_EXTRA_APPS}
+CG_EXTRA_LIB=/scratch2/steam
 EOF
 chmod 644 /etc/cg-library.conf
 
@@ -77,12 +82,16 @@ install -d -o ubuntu -g ubuntu -m 755 /var/lib/cg-library
 install -m 644 cg-library-restore.service /etc/systemd/system/
 install -m 644 cg-library-shutdown.service /etc/systemd/system/
 install -m 755 cg-shutdown-push.sh /usr/local/bin/cg-shutdown-push
+# Tells Steam about the added disk once Steam has been closed, and again if Steam
+# drops it. Inert on a machine without /scratch2 (the unit waits for the mount).
+install -m 755 steam-add-extra-library /usr/local/bin/steam-add-extra-library
+install -m 644 cg-extra-library.service /etc/systemd/system/
 # Remove the periodic timer if an earlier build installed one.
 systemctl disable --now cg-library-push.timer >/dev/null 2>&1 || true
 rm -f /etc/systemd/system/cg-library-push.service \
       /etc/systemd/system/cg-library-push.timer
 systemctl daemon-reload
-systemctl enable cg-library-restore.service cg-library-shutdown.service >/dev/null
+systemctl enable cg-library-restore.service cg-library-shutdown.service cg-extra-library.service >/dev/null
 
 echo "library mirror installed: s3://$BUCKET/$PREFIX"
 

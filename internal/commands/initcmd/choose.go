@@ -128,14 +128,24 @@ func (c Chooser) gb(a library.App) float64 { return float64(a.Bytes) / gib }
 // archive's index; ok is false when the index could not be read, and then nothing
 // is sized on a guess.
 func (c Chooser) Need(ctx context.Context, sel string) (gb float64, ok bool) {
+	games, ok := c.Games(ctx, sel)
+	for _, g := range games {
+		gb += g.GB
+	}
+	return gb, ok
+}
+
+// Games is each game in sel and what it takes: the unit the machine's drive is
+// filled in, since a game is placed whole on the drive or on the added disk.
+func (c Chooser) Games(ctx context.Context, sel string) (games []provision.Sized, ok bool) {
 	if sel == "none" {
-		return 0, true
+		return nil, true
 	}
 	bucket := c.Lib.Bucket
 	if bucket == "" {
 		b, found := c.Lib.BucketName()
 		if !found {
-			return 0, false
+			return nil, false
 		}
 		bucket = b
 	}
@@ -145,10 +155,10 @@ func (c Chooser) Need(ctx context.Context, sel string) (gb float64, ok bool) {
 	}
 	apps, missing, err := c.Lib.IndexAt(ctx, bucket, region)
 	if missing {
-		return 0, true
+		return nil, true
 	}
 	if err != nil {
-		return 0, false
+		return nil, false
 	}
 	want := map[string]bool{}
 	for _, id := range strings.Split(sel, ",") {
@@ -156,10 +166,10 @@ func (c Chooser) Need(ctx context.Context, sel string) (gb float64, ok bool) {
 	}
 	for _, a := range apps {
 		if sel == "all" || want[library.IDString(a.AppID)] {
-			gb += c.gb(a)
+			games = append(games, provision.Sized{ID: library.IDString(a.AppID), GB: c.gb(a)})
 		}
 	}
-	return gb, true
+	return games, true
 }
 
 // fit truncates to n columns and pads to exactly n.
@@ -264,24 +274,36 @@ func (c Chooser) interactive(apps []library.App) (string, bool) {
 		}
 		var total float64
 		var names, ids []string
+		var sized []provision.Sized
 		for _, a := range sel {
 			total += c.gb(a)
 			names = append(names, a.Name)
 			ids = append(ids, library.IDString(a.AppID))
+			sized = append(sized, provision.Sized{ID: library.IDString(a.AppID), GB: c.gb(a)})
 		}
-		if c.AvailGB != nil && total > *c.AvailGB && provision.ExtraDiskGB(total, c.ReserveGB, *c.AvailGB+c.ReserveGB) <= provision.MaxExtraDiskGB {
+		// The machine's own drive first; the games that do not fit it need the added disk.
+		var overGB float64
+		var over []provision.Sized
+		extraGB := 0
+		if c.AvailGB != nil {
+			_, over = provision.PlaceGames(sized, *c.AvailGB)
+			extraGB = provision.ExtraDiskFor(over, c.ReserveGB)
+			for _, g := range over {
+				overGB += g.GB
+			}
+		}
+		if len(over) > 0 && extraGB <= provision.MaxExtraDiskGB {
 			// More than the machine's own drive holds is no longer a refusal: the
-			// build adds a disk for the games, and says what it costs.
-			gb := provision.ExtraDiskGB(total, c.ReserveGB, *c.AvailGB+c.ReserveGB)
+			// build adds a disk for those games, and says what it costs.
 			cost := ""
 			if c.INRPerGBHour > 0 {
-				cost = fmt.Sprintf(" (about Rs %.1f an hour more)", float64(gb)*c.INRPerGBHour)
+				cost = fmt.Sprintf(" (about Rs %.1f an hour more)", float64(extraGB)*c.INRPerGBHour)
 			}
-			c.say("  %.0f GB selected, more than this machine's own drive holds (%.0f GB). A %d GB disk will be added for the games%s. Restoring: %s\n\n",
-				total, *c.AvailGB+c.ReserveGB, gb, cost, strings.Join(names, ", "))
+			c.say("  %.0f GB selected; %.0f GB of it does not fit this machine's own drive (%.0f GB). A %d GB disk will be added for those games%s. Restoring: %s\n\n",
+				total, overGB, *c.AvailGB+c.ReserveGB, extraGB, cost, strings.Join(names, ", "))
 			return strings.Join(ids, ","), true
 		}
-		if c.AvailGB != nil && total > *c.AvailGB {
+		if len(over) > 0 {
 			// Past even that: refuse and explain, rather than silently picking a
 			// subset - which game to drop is not a decision a tool should make for you.
 			c.say("  %.0f GB selected, more than a game PC here can hold (%d GB).\n", total, provision.MaxExtraDiskGB)

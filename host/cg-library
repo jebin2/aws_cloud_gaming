@@ -315,24 +315,46 @@ for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.ge
   # skipped - and an archive larger than the disk would then fill /scratch
   # mid-restore, which fails in the least legible way possible: a half-restored
   # game that Steam reports as installed.
+  local lib0="$LIB" extra_lib="${CG_EXTRA_LIB:-/scratch2/steam}"
   local avail_kb avail
-  avail_kb=$(df --output=avail -k "$LIB" 2>/dev/null | tail -1 | tr -d ' ')
-  avail=$(( ${avail_kb:-0} * 1024 ))
   # CG_RESERVE_GB is the laptop's GAME_DISK_RESERVE_GB, written into the conf
   # at build; the free space is measured, never assumed for a type. 20 only on
   # a box built before the setting reached it. CG_DISK_BUDGET sets the ceiling
   # outright, which is how the tests exercise the skip path without a 300 GB
   # sandbox.
   local reserve=$(( ${CG_RESERVE_GB:-20} * 1024 * 1024 * 1024 ))
-  local budget=${CG_DISK_BUDGET:-$(( avail - reserve ))}
-  (( budget < 0 )) && budget=0
-  log "disk budget $(hb "$budget") ($(hb "$avail") free, $(hb "$reserve") reserved)"
+  # Each library has its own room. A game goes on the machine's own drive unless the
+  # laptop said it does not fit there (CG_EXTRA_APPS): then it goes on the disk
+  # added for it, at /scratch2, and never on the root disk.
+  local -A budget_of=() used_of=()
+  open_budget() { # open_budget <library>
+    avail_kb=$(df --output=avail -k "$1" 2>/dev/null | tail -1 | tr -d ' ')
+    avail=$(( ${avail_kb:-0} * 1024 ))
+    local b=${CG_DISK_BUDGET:-$(( avail - reserve ))}
+    (( b < 0 )) && b=0
+    budget_of[$1]=$b; used_of[$1]=0
+    log "disk budget $(hb "$b") at $1 ($(hb "$avail") free, $(hb "$reserve") reserved)"
+  }
+  open_budget "$lib0"
 
-  local t0 dt id dir name total=0 skipped=0 used=0 want_bytes incomplete=0
+  local t0 dt id dir name total=0 skipped=0 used=0 budget=0 want_bytes incomplete=0 prev_lib="" tlib
   t0=$(date +%s)
   while IFS=$'\t' read -r id dir name bytes; do
     [[ -n ${id:-} ]] || continue
     want_bytes=${bytes:-0}
+    [[ -n $prev_lib ]] && used_of[$prev_lib]=$used
+    tlib="$lib0"
+    if [[ -n ${CG_EXTRA_APPS:-} && ",$CG_EXTRA_APPS," == *",$id,"* ]]; then
+      tlib="$extra_lib"
+      if ! mountpoint -q "$(dirname "$tlib")"; then
+        log "SKIPPING $name ($id): it belongs on the added disk and that is not mounted - never the root disk"
+        skipped=$((skipped+1)); continue
+      fi
+      mkdir -p "$tlib/steamapps"
+      [[ -n ${budget_of[$tlib]+x} ]] || open_budget "$tlib"
+    fi
+    LIB="$tlib"; prev_lib="$tlib"
+    used=${used_of[$tlib]}; budget=${budget_of[$tlib]}
     # What is ALREADY here counts against what still has to be fetched.
     #
     # The bootstrap ends with a reboot, which kills the restore mid-transfer by
@@ -403,6 +425,7 @@ for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.ge
     total=$((total+1))
   done <<< "$chosen"
 
+  LIB="$lib0"
   # Shared, tiny, and needed for Steam to accept the folder as a library.
   "$S5" cp "$S3/steamapps/libraryfolder.vdf" "$LIB/steamapps/" >/dev/null 2>&1 || true
   dt=$(( $(date +%s) - t0 )); (( dt > 0 )) || dt=1

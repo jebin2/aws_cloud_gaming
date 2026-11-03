@@ -3289,6 +3289,23 @@ function diskInrPerGbHour() {
   return r.inr_per_usd && r.ebs_gb_month && r.month_hours ? r.ebs_gb_month * r.inr_per_usd / r.month_hours : null;
 }
 
+// Where each ticked game goes: on the machine's own drive when it still fits there,
+// on the added disk when it does not. Largest first, the same rule as
+// provision.PlaceGames, so the disk priced here is the disk the build makes.
+// driveGb null (not known): nothing is moved off the drive on a guess.
+function placeGames(games, driveGb) {
+  const sorted = [...games].sort((a, b) => b.gb - a.gb || (a.id < b.id ? -1 : 1));
+  const onDrive = [], onExtra = [];
+  let left = driveGb;
+  for (const g of sorted) {
+    if (driveGb == null || g.gb <= left) { onDrive.push(g); left -= g.gb; } else onExtra.push(g);
+  }
+  return { onDrive, onExtra };
+}
+function selectedGames() {
+  return (archive.games || []).filter(g => picked.has(g.appid)).map(g => ({ id: String(g.appid), gb: g.bytes / 1073741824 }));
+}
+
 function selectedGb() {
   return (archive.games || []).filter(g => picked.has(g.appid))
     .reduce((n, g) => n + g.bytes, 0) / 1073741824;
@@ -3303,36 +3320,42 @@ function paintFit() {
   // enforces the real limit at boot, which is where it must be enforced.
   const gb = selectedGb(), cap = archive.selectable_gb;
   const reserve = archive.reserve_gb ?? 20;
-  const auto = extraDiskGb(gb, reserve, cap == null ? null : cap + reserve);
+  // The machine's own drive first; what does not fit it needs the added disk.
+  const { onDrive, onExtra } = placeGames(selectedGames(), cap);
+  const onDriveGb = onDrive.reduce((n, g) => n + g.gb, 0), overGb = onExtra.reduce((n, g) => n + g.gb, 0);
+  const auto = onExtra.length ? Math.ceil((overGb + reserve) / EXTRA_DISK_STEP_GB) * EXTRA_DISK_STEP_GB : 0;
   const extra = Math.max(auto, extraPick);
   const over = extra > MAX_EXTRA_DISK_GB;
   // Whose disk: the machine the next build makes, as cg read it.
   $('b-fit').textContent = archive.disk_type ? `Disk space (${archive.disk_type})` : 'Disk space';
   $('b-fit').className = 'font-code-sm text-code-sm text-outline';
-  const room = extra ? extra - reserve : cap;
+  // All the room there is: the drive's, and the added disk's past what is kept free.
+  const room = cap == null ? null : cap + (extra ? extra - reserve : 0);
   const pct = room != null && room > 0 ? Math.min(100, (gb / room) * 100) : 0;
   $('b-fit-pct').textContent = over ? `${gb.toFixed(1)} GB is more than a game PC here can hold. Deselect a game.`
+    : extra && onExtra.length ? `${gb.toFixed(1)} GB · ${onDriveGb.toFixed(1)} GB on the drive, ${overGb.toFixed(1)} GB on a ${extra} GB disk`
     : extra ? `${gb.toFixed(1)} GB · a ${extra} GB disk will be added`
     : cap != null ? `${gb.toFixed(1)} of ${cap} GB`
     : picked.size ? `${gb.toFixed(1)} GB · capacity unknown` : '';
   $('b-fit-pct').className = 'font-code-sm text-code-sm ' + (over ? 'text-error' : 'text-on-surface-variant');
   $('b-bar').style.width = pct + '%';
   $('b-bar').className = 'h-full ' + (over ? 'bg-error' : 'bg-primary');
-  // The slider is the room for games, in GB: it starts at what the machine's own
-  // drive holds, can never be dragged under what the ticked games need (that end
-  // follows the games as they are ticked), and a bigger disk is added past the
-  // drive's size. Nothing is offered until the drive is known.
+  // The slider is the room for games, in GB: the machine's own drive plus the added
+  // disk. It starts at the drive's size, can never be dragged under what the ticked
+  // games need (that end follows them as they are ticked), and the disk past the
+  // drive is what is added. Nothing is offered until the drive is known.
   const slider = $('b-extra-pick');
-  const top = MAX_EXTRA_DISK_GB - reserve;
+  const top = cap == null ? 0 : cap + MAX_EXTRA_DISK_GB - reserve;
   slider.disabled = cap == null;
   if (cap != null) {
-    const floor = Math.min(auto ? auto - reserve : cap, top);
+    const floor = Math.min(cap + (auto ? auto - reserve : 0), top);
+    const at = Math.min(cap + (extra ? extra - reserve : 0), top);
     slider.min = String(floor);
     slider.max = String(top);
-    slider.value = String(extra ? Math.min(extra - reserve, top) : cap);
-    $('b-extra-lo').textContent = `${floor} GB${auto ? ' (your games)' : ' (the machine\'s own drive)'}`;
+    slider.value = String(at);
+    $('b-extra-lo').textContent = `${floor} GB${auto ? ' (what your games need)' : ' (the machine\'s own drive)'}`;
     $('b-extra-hi').textContent = `${top} GB`;
-    $('b-extra-val').textContent = `${extra ? extra - reserve : cap} GB`;
+    $('b-extra-val').textContent = `${at} GB`;
   } else {
     $('b-extra-lo').textContent = $('b-extra-hi').textContent = $('b-extra-val').textContent = '';
   }
@@ -3343,7 +3366,8 @@ function paintFit() {
   const add = extra && per != null ? extra * per : null;
   const base = statusNow ? machineFacts().price : null;
   note.textContent = !extra || over ? '' : [
-    extra > auto ? `You chose ${extra} GB of extra space for your games.` : `Your games need ${extra} GB of extra space.`,
+    extra > auto ? `You chose ${extra} GB of extra space for your games.`
+      : `Games that do not fit the machine's own drive go on a ${extra} GB extra disk.`,
     add != null && base != null ? `It adds ${rsh(add)} an hour, so this machine costs about ${rsh(base + add)} an hour while it runs.`
       : add != null ? `It adds ${rsh(add)} an hour.` : '',
   ].filter(Boolean).join(' ');
@@ -7062,14 +7086,15 @@ $('b-login-choice').onchange = async ev => {
 };
 
 // The disk asked for on the Build page: said in the line under the games.
-// A position on the slider is room for games; the disk asked for is that plus the
-// part Steam and the system keep. At or under the machine's own drive, or under what
-// the games need, it is no choice at all: the disk follows the games.
+// A position on the slider is the room for games, the machine's own drive included;
+// the disk asked for is what is past the drive, plus the part Steam and the system
+// keep. At or under the drive's size, or under what the games need, it is no choice
+// at all: the disk follows the games.
 $('b-extra-pick').oninput = ev => {
   const cap = archive.selectable_gb, reserve = archive.reserve_gb ?? 20;
   const room = Number(ev.target.value) || 0;
   extraPick = cap == null || room <= cap ? 0
-    : Math.min(MAX_EXTRA_DISK_GB, Math.ceil((room + reserve) / EXTRA_DISK_STEP_GB) * EXTRA_DISK_STEP_GB);
+    : Math.min(MAX_EXTRA_DISK_GB, Math.ceil((room - cap + reserve) / EXTRA_DISK_STEP_GB) * EXTRA_DISK_STEP_GB);
   paintFit();
 };
 

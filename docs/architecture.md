@@ -101,26 +101,30 @@ flowchart TB
 The root disk size is `GAME_DISK_GB`, 50 GB by default. The NVMe is
 wiped whenever the instance stops, which is why S3 holds the durable copy.
 
-**Games that do not fit the NVMe.** Some types have an NVMe of about 115 GB, some none. When the
-games chosen for a build (plus the `GAME_DISK_RESERVE_GB` kept free) take more than the machine's own
-drive holds, `cg init` adds a gp3 disk for them at launch: sized to the games, rounded up to 10 GB,
-at most 1000 GB, deleted with the box. The box mounts it at `/scratch` in place of the NVMe, so the
-library, the restore and the push work unchanged (`lib/bootstrap.d/12-scratch.sh`,
-`provision.ExtraDiskGB`). The Build page shows its size and price before the build, and a larger disk can
-be asked for there (`GAME_EXTRA_DISK_GB`, the larger of that and what the games need is made).
-It survives a stop, and costs $0.0912/GB-month while the box exists. Details:
-[game-library.md](game-library.md).
+**Games that do not fit the NVMe.** Some types have an NVMe of about 115 GB, some none. The machine's
+own drive is filled first: the games chosen for a build go on it largest first
+(`provision.PlaceGames`), each if it still fits what is left after the `GAME_DISK_RESERVE_GB` kept free,
+and the ones that do not fit are the overflow. `cg init` adds a gp3 disk for the overflow at launch
+(`provision.ExtraDiskFor`: their size plus the reserve, rounded up to 10 GB, at most 1000 GB, deleted
+with the box) and tells the box which games they are (`CG_EXTRA_APPS`). The same rule is in the app
+(`placeGames`), so the disk priced on the Build page is the one made; a larger disk can be asked for there
+(`GAME_EXTRA_DISK_GB`, the larger of that and the overflow is made). The NVMe stays at `/scratch`; the
+added disk is at `/scratch2` (`lib/bootstrap.d/12-scratch.sh`), and `cg-extra-library` keeps it in
+Steam's list of folders. Restore puts each game where it was told (`cmd_pull` in `host/cg-library`, with a
+budget per library, and never on the root disk if the added disk is not mounted). The added disk survives
+a stop, so its games are already there at the next start; the NVMe's are restored from the archive.
+It costs $0.0912/GB-month while the box exists. Details: [game-library.md](game-library.md).
 
 **Adding space to a running box** (`cg disk add <GB>`, the Add disk button on the Machine page). A box
-with a games disk has it made bigger: `ModifyVolume`, then `resize2fs` on the mounted disk, so the game,
-Steam and the archive carry on unaware. AWS allows one change per disk every 6 hours. A box whose games sit
-on its own NVMe, which cannot grow, gets a second disk at `/dev/sdg`, mounted at `/scratch2` by label
+with an added disk has it made bigger: `ModifyVolume`, then `resize2fs` on the mounted disk, so the game,
+Steam and the archive carry on unaware (the build's disk is `/dev/sdf` and the later one `/dev/sdg`; both are `/scratch2`). AWS allows one change per disk every 6 hours. A box whose games sit
+on its own NVMe only, which cannot grow, gets the added disk at `/dev/sdg`, mounted at `/scratch2` by label
 (`nofail`) with a `steam/steamapps` folder in it. Nothing is copied or closed. `steam-add-extra-library`
 waits for Steam to be closed (it rewrites its list of folders as it exits, so an entry added under a
 running Steam is thrown away) and then adds `/scratch2/steam` to `libraryfolders.vdf`; the person closes and
 reopens Steam to see it. Add disk after that grows the second disk. `cg disk --json` says which of the two
 will happen (`second`), the room left and the most that can be added. Games already on the NVMe stay
-there, and the archive's save and restore still use `/scratch/steam` only.
+there. Push, check and `cg games` look in every library on the box.
 
 ## Flow 1 - `cg init`: build a box
 

@@ -155,7 +155,7 @@ func TestAddDiskGrowsTheGamesDiskWhileItIsInUse(t *testing.T) {
 		t.Errorf("%s", got)
 	}
 	ssh := sshLines(r.r)
-	for _, want := range []string{"resize2fs", "blockdev --getsize64"} {
+	for _, want := range []string{"resize2fs", "blockdev --getsize64", "mnt=/scratch2"} {
 		if !strings.Contains(ssh, want) {
 			t.Errorf("lacks %q in\n%s", want, ssh)
 		}
@@ -200,7 +200,7 @@ func TestAddDiskOnTheMachinesOwnDriveAttachesASecondDiskAndMovesNothing(t *testi
 		t.Errorf("%s", got)
 	}
 	ssh := sshLines(r.r)
-	for _, want := range []string{"mkfs.ext4", "cgextra", "/scratch2", "steam-add-extra-library", "MOUNTPOINT"} {
+	for _, want := range []string{"mkfs.ext4", "cgextra", "/scratch2", "steam-add-extra-library", "cg-extra-library.service", "base64 -d", "MOUNTPOINT"} {
 		if !strings.Contains(ssh, want) {
 			t.Errorf("lacks %q in\n%s", want, ssh)
 		}

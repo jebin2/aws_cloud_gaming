@@ -168,7 +168,7 @@ func (d Deps) setup(ctx context.Context, args []string, out *output.Out) error {
 	// Copied as a file readable by root alone - it may carry the auth key - and
 	// deleted by the build as it starts.
 	script, err := render.Bootstrap(cg.Files, map[string]string{"TS_AUTHKEY": key, "TS_HOST": name, "HOST_TGZ_URL": "", "S3_BUCKET": "", "CG_APPS": "",
-		"CG_LOGIN": "", "CG_RESERVE_GB": "", "CG_DATA_GB": "0", "CG_TARGET": "host", "CG_USER": facts.Get("user"), "CG_FAMILY": fam})
+		"CG_LOGIN": "", "CG_RESERVE_GB": "", "CG_DATA_GB": "0", "CG_EXTRA_APPS": "", "CG_TARGET": "host", "CG_USER": facts.Get("user"), "CG_FAMILY": fam})
 	if err != nil {
 		return died("could not assemble the build: " + err.Error())
 	}

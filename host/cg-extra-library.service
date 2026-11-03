@@ -1,0 +1,15 @@
+[Unit]
+Description=Keep the extra game disk registered with Steam
+After=local-fs.target scratch-disk.service
+# Without the added disk there is nothing to register.
+ConditionPathIsMountPoint=/scratch2
+
+[Service]
+User=ubuntu
+Environment=HOME=/home/ubuntu
+ExecStart=/usr/local/bin/steam-add-extra-library
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

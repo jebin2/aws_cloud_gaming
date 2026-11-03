@@ -274,7 +274,8 @@ func (i *Init) provision(ctx context.Context, pre check.Result, ntfy string) (pr
 		if data.Asked {
 			i.cont("", fmt.Sprintf("==> a %d GB disk is added for your games, as you asked%s", data.GB, cost))
 		} else {
-			i.cont("", fmt.Sprintf("==> your games need %.0f GB and this machine's own drive holds %.0f GB, so a %d GB disk is added for them%s", data.NeedGB, data.StoreGB, data.GB, cost))
+			i.cont("", fmt.Sprintf("==> the games that do not fit this machine's own drive (%.0f GB) take %.0f GB, so a %d GB disk is added for them%s; the others go on the drive",
+				data.StoreGB, data.OverGB, data.GB, cost))
 		}
 	}
 	login := i.Env.Get("GAME_STEAM_LOGIN")
@@ -285,7 +286,7 @@ func (i *Init) provision(ctx context.Context, pre check.Result, ntfy string) (pr
 	if i.Prices != nil {
 		xr, inr = i.Prices(ctx, bucketRegion)
 	}
-	res, err := p.Run(ctx, provision.Params{XRegionUSD: xr, INR: inr, Host: host, Region: region, Type: pre.Type, DiskGB: i.diskGB(), DataGB: data.GB, Spot: pre.Spot, TagKey: config.TagKey,
+	res, err := p.Run(ctx, provision.Params{XRegionUSD: xr, INR: inr, Host: host, Region: region, Type: pre.Type, DiskGB: i.diskGB(), DataGB: data.GB, ExtraApps: strings.Join(data.ExtraApps, ","), Spot: pre.Spot, TagKey: config.TagKey,
 		AuthKey: pre.AuthKey, Apps: apps, Login: login, ReserveGB: i.Env.Setting("GAME_DISK_RESERVE_GB"),
 		Bucket: bucket, BucketRegion: bucketRegion, NtfyURL: ntfy, KeyFile: filepath.Join(home, ".ssh", host+".pem")})
 	if err != nil {
@@ -310,6 +311,11 @@ func (i *Init) provision(ctx context.Context, pre check.Result, ntfy string) (pr
 type GameDisk struct {
 	GB              int
 	NeedGB, StoreGB float64
+	// OverGB is what the games that do not fit the machine's own drive take, and
+	// ExtraApps which games they are: those go on the added disk, the rest on the
+	// drive.
+	OverGB    float64
+	ExtraApps []string
 	// Asked: the size was chosen by a person, not worked out from the games.
 	Asked   bool
 	INRHour float64

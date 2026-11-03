@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Keeps the disk added for the games (/scratch2/steam) in Steam's list of
+# folders. On duty for as long as the machine is up, not once: Steam rewrites its
+# list as it exits, so if it drops the entry, it is put back the next time Steam is
+# closed. Never touched while Steam runs - an edit under a running Steam is thrown
+# away when it exits.
+set -uo pipefail
+LIB="${CG_EXTRA_LIB:-/scratch2/steam}"
+
+# The client itself, by exact name. Matching "/ubuntu12_64/steam" as a pattern also
+# matched steamwebhelper and the other processes Steam leaves running for a while
+# after it closes, so the wait never ended.
+steam_running() {
+  pgrep -u "$(id -u)" -x steam >/dev/null 2>&1
+}
+say() { echo "$*"; }
+
+add_entry() {
+  ROOT=$(readlink -f "$HOME/.steam/steam" 2>/dev/null || echo "")
+  CONF="$ROOT/config/libraryfolders.vdf"
+  MARKER="$LIB/steamapps/libraryfolder.vdf"
+  mkdir -p "$LIB/steamapps/common"
+  CID=$(sed -n 's/.*"contentid"[[:space:]]*"\([0-9]*\)".*/\1/p' "$MARKER" 2>/dev/null | tail -1)
+  [[ -n $CID ]] || CID=$(python3 -c 'import random;print(random.getrandbits(63))')
+  printf '"libraryfolder"\n{\n\t"contentid"\t\t"%s"\n\t"label"\t\t""\n}\n' "$CID" > "$MARKER"
+  for F in "$CONF" "$ROOT/steamapps/libraryfolders.vdf"; do
+    [[ -f $F ]] || continue
+    grep -q "$LIB" "$F" && continue
+    python3 - "$F" "$CID" "$LIB" <<'PY'
+import re, sys
+p, cid, lib = sys.argv[1], sys.argv[2], sys.argv[3]
+s = open(p).read()
+n = max([int(x) for x in re.findall(r'^\t"(\d+)"\s*$', s, re.M)] + [0]) + 1
+entry = ('\t"%d"\n\t{\n\t\t"path"\t\t"%s"\n\t\t"label"\t\t""\n' % (n, lib)
+         + '\t\t"contentid"\t\t"' + cid + '"\n\t\t"totalsize"\t\t"0"\n'
+         '\t\t"update_clean_bytes_tally"\t\t"0"\n\t\t"time_last_update_verified"\t\t"0"\n'
+         '\t\t"apps"\n\t\t{\n\t\t}\n\t}\n')
+i = s.rstrip().rfind('}')
+open(p, 'w').write(s[:i] + entry + s[i:])
+PY
+  done
+  say "added $LIB to Steam's folders"
+}
+
+while true; do
+  # The client has no list of folders until it has been signed in once; nothing to
+  # add to yet.
+  ROOT=$(readlink -f "$HOME/.steam/steam" 2>/dev/null || echo "")
+  CONF="$ROOT/config/libraryfolders.vdf"
+  if ! steam_running && [[ -n $ROOT && -f $CONF ]] && ! grep -q "$LIB" "$CONF" 2>/dev/null; then
+    sleep 2
+    steam_running || add_entry
+  fi
+  sleep 2
+done

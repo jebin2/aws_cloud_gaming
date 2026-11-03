@@ -20,36 +20,44 @@ cat > /usr/local/bin/mount-scratch.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 DATA_GB=__CG_DATA_GB__
-DEV=""
+
+# The machine's own drive, at /scratch, always: it is the fast place, and games go
+# there first. A reboot keeps the instance store and its filesystem; only a stop
+# wipes it. So format only when there is nothing there - reformatting on every boot
+# would throw away a library that survived the build's own reboot.
+# -m 0: no blocks held back for root. ext4 keeps 5% by default so a full system
+# disk can still log in; this disk holds only games, and the 5% was 6 GB of a
+# g4dn.xlarge's 115 and 12 GB of a g6.xlarge's that no game could use.
+DEV=$(lsblk -dno NAME,MODEL | awk '/Instance Storage/{print "/dev/"$1; exit}')
+if [[ -n ${DEV:-} ]]; then
+  blkid "$DEV" >/dev/null 2>&1 || mkfs.ext4 -F -m 0 -L scratch "$DEV"
+  mkdir -p /scratch
+  mountpoint -q /scratch || mount -o discard,noatime "$DEV" /scratch
+  mkdir -p /scratch/tmp /scratch/downloads /scratch/steam/steamapps
+  chown -R ubuntu:ubuntu /scratch
+  chmod 1777 /scratch/tmp
+else
+  echo "no instance store present"
+fi
+
+# The disk cg added for the games that do not fit the drive, at /scratch2: the EBS
+# disk with nothing mounted on it (the root disk has its partitions mounted). It is
+# told apart from the root disk by that, because its device name depends on the
+# order the instance finds its disks in. Already mounted at /scratch2 counts too:
+# this runs again on every boot, and the disk keeps its games across a stop.
 if (( DATA_GB > 0 )); then
-  # The games do not fit the machine's own drive, so cg added a disk for them and
-  # this is it: an EBS disk with nothing mounted on it (the root disk has its
-  # partitions mounted). It is told apart from the root disk by that, because its
-  # device name depends on the order the instance finds its disks in. Already
-  # mounted at /scratch counts too: this runs again on every boot.
+  EXTRA=""
   for n in $(lsblk -dno NAME,MODEL | awk '/Elastic Block Store/{print $1}'); do
     mp=$(lsblk -no MOUNTPOINT "/dev/$n" | tr -d '[:space:]')
-    if [[ -z $mp || $mp == /scratch ]]; then DEV="/dev/$n"; break; fi
+    if [[ -z $mp || $mp == /scratch2 ]]; then EXTRA="/dev/$n"; break; fi
   done
-  [[ -n $DEV ]] || { echo "the disk added for the games is not attached"; exit 1; }
-else
-  DEV=$(lsblk -dno NAME,MODEL | awk '/Instance Storage/{print "/dev/"$1; exit}')
-  [[ -n ${DEV:-} ]] || { echo "no instance store present"; exit 0; }
+  [[ -n $EXTRA ]] || { echo "the disk added for the games is not attached"; exit 1; }
+  blkid "$EXTRA" >/dev/null 2>&1 || mkfs.ext4 -q -F -m 0 -L cgextra "$EXTRA"
+  mkdir -p /scratch2
+  mountpoint -q /scratch2 || mount -o noatime "$EXTRA" /scratch2
+  mkdir -p /scratch2/steam/steamapps/common
+  chown -R ubuntu:ubuntu /scratch2
 fi
-# A reboot keeps the instance store and its filesystem; only a stop wipes it.
-# So format only when there is nothing there - reformatting on every boot would
-# throw away a library that survived the build's own reboot.
-# -m 0: no blocks held back for root. ext4 keeps 5% by default so a full
-# system disk can still log in; this disk holds only games, and the 5% was
-# 6 GB of a g4dn.xlarge's 115 and 12 GB of a g6.xlarge's that no game could use.
-blkid "$DEV" >/dev/null 2>&1 || mkfs.ext4 -F -m 0 -L scratch "$DEV"
-mkdir -p /scratch
-mountpoint -q /scratch || mount -o discard,noatime "$DEV" /scratch
-mkdir -p /scratch/tmp /scratch/downloads /scratch/steam/steamapps
-
-chown -R ubuntu:ubuntu /scratch
-chmod 1777 /scratch/tmp
-
 EOF
 chmod 755 /usr/local/bin/mount-scratch.sh
 
@@ -91,4 +99,5 @@ systemctl start scratch-disk.service || true
 verify "scratch mount script installed" test -x /usr/local/bin/mount-scratch.sh
 verify "/scratch mounted on local NVMe" mountpoint -q /scratch
 verify "steam library dir on /scratch" test -d /scratch/steam/steamapps
+if (( __CG_DATA_GB__ > 0 )); then verify "/scratch2 mounted (the disk added for the games)" mountpoint -q /scratch2; fi
 fi

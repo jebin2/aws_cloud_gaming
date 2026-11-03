@@ -130,7 +130,7 @@ func TestMoreThanFitsAddsADiskAndSaysWhatItCosts(t *testing.T) {
 		t.Fatalf("all of it is 158 GB on a 170 GB drive with 20 GB kept free: it is chosen, not refused: %q\n%s", got, r.prompts)
 	}
 	p := r.prompts.String()
-	for _, want := range []string{"158 GB selected, more than this machine's own drive holds (170 GB).", "A 180 GB disk will be added for the games (about Rs 2.2 an hour more)."} {
+	for _, want := range []string{"158 GB selected; 8 GB of it does not fit this machine's own drive (170 GB).", "A 30 GB disk will be added for those games (about Rs 0.4 an hour more)."} {
 		if !strings.Contains(p, want) {
 			t.Errorf("lacks %q in:\n%s", want, p)
 		}

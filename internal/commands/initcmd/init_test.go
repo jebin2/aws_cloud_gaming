@@ -404,7 +404,7 @@ func TestGamesThatDoNotFitTheMachinesDriveGetADiskOfTheirOwn(t *testing.T) {
 
 	r = newRig(t)
 	r.i.ExtraDisk = func(_ context.Context, apps string) GameDisk {
-		return GameDisk{GB: 190, NeedGB: 170, StoreGB: 115, INRHour: 2.3}
+		return GameDisk{GB: 190, NeedGB: 170, StoreGB: 115, OverGB: 170, ExtraApps: []string{"7", "9"}, INRHour: 2.3}
 	}
 	if rc := r.i.Run(context.Background()); rc != 0 {
 		t.Fatalf("rc %d\n%s\n%s", rc, r.o, r.e)
@@ -413,7 +413,7 @@ func TestGamesThatDoNotFitTheMachinesDriveGetADiskOfTheirOwn(t *testing.T) {
 	if len(m) != 2 || *m[0].Ebs.VolumeSize != 50 || *m[1].Ebs.VolumeSize != 190 || *m[1].DeviceName != "/dev/sdf" {
 		t.Errorf("a 50 GB root disk and a 190 GB games disk: %+v", m)
 	}
-	if !strings.Contains(r.o.String(), "your games need 170 GB and this machine's own drive holds 115 GB, so a 190 GB disk is added for them (about Rs 2.3 an hour more)") {
+	if !strings.Contains(r.o.String(), "the games that do not fit this machine's own drive (115 GB) take 170 GB, so a 190 GB disk is added for them (about Rs 2.3 an hour more); the others go on the drive") {
 		t.Errorf("the cost is said before the launch:\n%s", r.o)
 	}
 }
