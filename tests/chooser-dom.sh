@@ -330,11 +330,15 @@ cat > "$T/r/probe.js" <<'PROBE'
   const kept = statusNow, cardEl = document.getElementById('b-machine-card');
   statusNow = null; readFailures.set('status', 'AWS did not answer.');
   paintMachineCards();
+  const det = document.getElementById('d-details');
+  const detUnread = det.hidden;
   out.push('UNREAD | ' + cardEl.textContent.replace(/\s+/g, ' ').trim() + ' | busy hidden=' + document.getElementById('b-busy').hidden);
   readFailures.delete('status');
   paintMachineCards();
   out.push('UNREAD CLEARED | ' + cardEl.dataset.state);
+  const detLoading = det.hidden;
   statusNow = kept; paintMachineCards();
+  out.push('DETAILS | unread hidden=' + detUnread + ' | loading hidden=' + detLoading + ' | read hidden=' + det.hidden);
   // The why-mark in a greyed cell, even on a greyed row, is not greyed itself.
   const marks = [...document.querySelectorAll('#s-chooser .reason')];
   const live = m => { const st = getComputedStyle(m), a = getComputedStyle(m.closest('label').querySelector('.amount'));
@@ -482,6 +486,7 @@ contains "the table and the card agree on the price" "$OUT" "SAMEPRICE | true"
 contains "  and the hourly rate, in rupees" "$(grep -m1 '^BWHERE ' <<<"$OUT")" "₹51/hour"
 contains "a card with no answer because the check failed says so" "$OUT" "Could not check AWS: AWS did not answer. Refresh tries again. | busy hidden=true"
 check    "  and goes back to loading when the failure is cleared" "$(grep -m1 '^UNREAD CLEARED' <<<"$OUT")" "UNREAD CLEARED | loading"
+check    "Details is not offered over a skeleton, only once there is something to look into" "$(grep -m1 '^DETAILS' <<<"$OUT")" "DETAILS | unread hidden=false | loading hidden=true | read hidden=false"
 
 echo "6. capacity is shown next to price, which is the whole point"
 contains "the good score is there" "$OUT" "9/10"
