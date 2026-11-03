@@ -42,6 +42,15 @@ unset passes no flag, leaving whatever Moonlight has saved:
 | `GAME_VIDEO_CODEC` | `--video-codec` | `h264`, `hevc` |
 | `GAME_PERF_OVERLAY=1` | `--performance-overlay` | - |
 
+## Copy and paste
+
+While Moonlight is open, `cg open` keeps the two clipboards the same: copy text on your computer and it is
+on the game PC a moment later, and the other way round. Only what is copied after the stream opens crosses.
+Text only, up to 1 MB. A Linux laptop needs `wl-clipboard` or `xclip`/`xsel`; macOS and Windows need
+nothing. `GAME_CLIPBOARD=off` turns it off. On GNOME's Wayland session `wl-paste` can only read while a
+window of this computer has focus, so copying from the game PC to the laptop may wait until Moonlight is
+focused; `cg clip send` and `cg clip get` do one copy by hand.
+
 ## One thing to turn off in Steam
 
 **Steam → Settings → Downloads → Shader Pre-Caching → turn off "Allow background processing of

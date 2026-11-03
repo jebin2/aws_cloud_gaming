@@ -3,8 +3,12 @@ package boxcmd
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"runtime"
+	"strings"
+	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/local"
@@ -91,8 +95,7 @@ func (d Deps) ClipSend(ctx context.Context) int {
 		return d.die("your clipboard holds something that is not text")
 	}
 	d.Out.SayID("clip.send", "Putting it on the game PC")
-	script := boxClipReady + boxClipEnv + `xclip -selection clipboard -i >/dev/null 2>&1`
-	if _, err := d.Box.SSH(ctx, remote("bash", "-c", script), bytes.NewReader(text)); err != nil {
+	if err := d.putBoxClip(ctx, text); err != nil {
 		return d.die("the game PC did not take it: " + firstErrorLine(err.Error()))
 	}
 	d.Out.SayID("clip.done", fmt.Sprintf("Done: %d characters are on the game PC's clipboard. Paste there with Ctrl+V", utf8.RuneCount(text)))
@@ -161,4 +164,120 @@ func (d Deps) writeLocalClip(ctx context.Context, text []byte) bool {
 		}
 	}
 	return false
+}
+
+// putBoxClip puts text on the game PC's clipboard.
+func (d Deps) putBoxClip(ctx context.Context, text []byte) error {
+	script := boxClipReady + boxClipEnv + `xclip -selection clipboard -i >/dev/null 2>&1`
+	_, err := d.Box.SSH(ctx, remote("bash", "-c", script), bytes.NewReader(text))
+	return err
+}
+
+// --- the two clipboards, kept the same while a stream is open -------------------
+//
+// Nothing to press: text copied on either side is on the other a moment later.
+// Moonlight itself only pastes into the game PC.
+
+// clipSync decides what crosses. last is the text most recently moved either way,
+// so a value that has just arrived is not sent straight back (which would go
+// round for ever), and the same text is never moved twice.
+type clipSync struct {
+	mu      sync.Mutex
+	last    string
+	toLocal func(string)
+	toBox   func(string)
+}
+
+func clipOK(t string) bool {
+	return strings.TrimSpace(t) != "" && len(t) <= clipMax && utf8.ValidString(t)
+}
+
+func (c *clipSync) fromBox(t string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !clipOK(t) || t == c.last {
+		return
+	}
+	c.last = t
+	c.toLocal(t)
+}
+
+func (c *clipSync) fromLocal(t string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !clipOK(t) || t == c.last {
+		return
+	}
+	c.last = t
+	c.toBox(t)
+}
+
+// boxClipWatch prints the game PC's clipboard, base64 on one line, each time it
+// changes. The first line is whatever is there already.
+const boxClipWatch = `last=x; while true; do cur=$(xclip -selection clipboard -o 2>/dev/null | base64 -w0); if [ "$cur" != "$last" ]; then last=$cur; echo "$cur"; fi; sleep 0.7; done`
+
+// linesTo is a writer that hands each complete line to f, however the bytes
+// arrive. A line longer than a clipboard can be is dropped, not kept for ever.
+type linesTo struct {
+	f   func(string)
+	buf []byte
+}
+
+func (w *linesTo) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		w.f(strings.TrimSpace(string(w.buf[:i])))
+		w.buf = w.buf[i+1:]
+	}
+	if len(w.buf) > 2*clipMax {
+		w.buf = nil
+	}
+	return len(p), nil
+}
+
+// ClipSync runs for as long as ctx lives (the stream). GAME_CLIPBOARD=off turns it
+// off. Whatever is on the clipboards when it starts is left alone: only what is
+// copied afterwards crosses.
+func (d Deps) ClipSync(ctx context.Context) {
+	if strings.EqualFold(d.Env.Get("GAME_CLIPBOARD"), "off") {
+		return
+	}
+	text, ok := d.readLocalClip(ctx)
+	if !ok {
+		d.Out.Log("copy and paste between this computer and the game PC is off: " + clipHint(d.goos()))
+		return
+	}
+	c := &clipSync{last: string(text)}
+	c.toLocal = func(t string) { d.writeLocalClip(ctx, []byte(t)) }
+	c.toBox = func(t string) { _ = d.putBoxClip(ctx, []byte(t)) }
+	d.Out.Log("copy and paste works both ways while you play")
+
+	go func() {
+		for ctx.Err() == nil {
+			first := true
+			w := &linesTo{f: func(line string) {
+				raw, err := base64.StdEncoding.DecodeString(line)
+				if err != nil {
+					return // not ours: an ssh warning
+				}
+				if first {
+					first = false
+					return
+				}
+				c.fromBox(string(raw))
+			}}
+			_ = d.Box.Stream(ctx, w, boxClipReady+boxClipEnv+boxClipWatch)
+			d.sleep(5 * time.Second)
+		}
+	}()
+	for ctx.Err() == nil {
+		d.sleep(800 * time.Millisecond)
+		if t, ok := d.readLocalClip(ctx); ok {
+			c.fromLocal(string(t))
+		}
+	}
 }

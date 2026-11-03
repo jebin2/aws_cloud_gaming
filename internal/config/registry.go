@@ -39,6 +39,7 @@ var Registry = []Setting{
 	{"TAILSCALE_API_KEY", "secret", "", "", "Tailscale API token. Prunes old nodes and turns off key expiry. Empty goes without.", "Tailscale API token", ""},
 	{"EMAIL_ALERTS", "email", "", "", "Where budget alerts are sent. Comma separated for several.", "billing alerts to", "Notifications"},
 	{"GAME_RES", "text", "", "", "Moonlight resolution, e.g. 1920x1080. Empty leaves Moonlight's own setting.", "stream resolution", "The stream"},
+	{"GAME_CLIPBOARD", "choice", "on", "on,off", "Copy and paste between this computer and the game PC while you play: text copied on either side shows up on the other.", "copy and paste", "The stream"},
 	{"GAME_FPS", "number", "60", "24", "Moonlight frame rate.", "stream fps", "The stream"},
 	{"GAME_BITRATE_KBPS", "number", "20000", "500", "Moonlight bitrate. Lower it to cut streaming egress proportionally.", "stream bitrate (kbps)", "The stream"},
 }

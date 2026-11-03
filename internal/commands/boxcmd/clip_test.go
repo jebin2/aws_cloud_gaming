@@ -120,3 +120,54 @@ func TestClipToolsPerSystem(t *testing.T) {
 		t.Errorf("Wayland and both X programs: %d", n)
 	}
 }
+
+func TestClipSyncMovesWhatIsCopiedAndNothingGoesRound(t *testing.T) {
+	var toLocal, toBox []string
+	c := &clipSync{last: "what was there when it started", toLocal: func(s string) { toLocal = append(toLocal, s) }, toBox: func(s string) { toBox = append(toBox, s) }}
+	c.fromLocal("what was there when it started")
+	c.fromBox("what was there when it started")
+	if len(toLocal)+len(toBox) != 0 {
+		t.Error("what was on the clipboards before it opened is left alone")
+	}
+	c.fromLocal("copied on the laptop")
+	c.fromBox("copied on the laptop") // the game PC reporting what was just put there
+	c.fromLocal("copied on the laptop")
+	if len(toBox) != 1 || len(toLocal) != 0 {
+		t.Errorf("sent once, and not sent back: box %v local %v", toBox, toLocal)
+	}
+	c.fromBox("copied in the game")
+	c.fromLocal("copied in the game") // the laptop reporting what was just put there
+	if len(toLocal) != 1 || len(toBox) != 1 {
+		t.Errorf("brought once, and not sent back: box %v local %v", toBox, toLocal)
+	}
+	c.fromBox("   ")
+	c.fromLocal("")
+	c.fromBox(strings.Repeat("x", clipMax+1))
+	c.fromLocal("bad \xff text")
+	if len(toLocal) != 1 || len(toBox) != 1 {
+		t.Errorf("nothing, too much, or not text, is carried: %v %v", toBox, toLocal)
+	}
+}
+
+func TestLinesToSplitsHoweverTheBytesArrive(t *testing.T) {
+	var got []string
+	w := &linesTo{f: func(s string) { got = append(got, s) }}
+	_, _ = w.Write([]byte("aGVs"))
+	_, _ = w.Write([]byte("bG8=\nsecond\r\nthi"))
+	_, _ = w.Write([]byte("rd\n"))
+	if strings.Join(got, "|") != "aGVsbG8=|second|third" {
+		t.Errorf("%q", got)
+	}
+}
+
+func TestClipSyncIsOffWhenAskedOrWhenThereIsNoProgram(t *testing.T) {
+	r := newRig(t, "")
+	r.d.GOOS = "linux"
+	r.r.Answers = map[string]string{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r.d.ClipSync(ctx)
+	if !strings.Contains(r.o.String()+r.w.String(), "is off") {
+		t.Errorf("no clipboard program is said, not silent: %s%s", r.o, r.w)
+	}
+}

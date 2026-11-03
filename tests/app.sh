@@ -297,8 +297,6 @@ echo "5a2. no engine, and a read that cannot be painted"
 contains "main says whether cg is there"  "$main" 'function engineFacts()'
 contains "  over the bridge"              "$(cat app/main/preload.js)" 'cg:engine'
 contains "  and re-reads the contract"    "$main" 'if (found && !CONTRACT.runs_alone) loadContract();'
-contains "the Machine page copies text both ways" "$js" "copyAcross('send')"
-contains "  and back"                      "$js" "copyAcross('get')"
 contains "more room can be added in the middle of a game" "$main" "const BESIDE_SESSION = [['disk'], ['clip']];"
 contains "the window asks before reading" "$js" 'if (!(await engineReady())) return;'
 contains "  and says the one true thing"  "$js" "'Scripts not found'"

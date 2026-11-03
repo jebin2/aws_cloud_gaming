@@ -220,7 +220,17 @@ func (d Deps) Open(ctx context.Context) int {
 	// file's.
 	app := d.Env.Get("GAME_APP")
 	d.Out.Stage("open.play", "playing")
+	// Copy and paste follows the stream: on while Moonlight is open, gone when it
+	// closes.
+	syncCtx, stopSync := context.WithCancel(ctx)
+	synced := make(chan struct{})
+	go func() { d.ClipSync(syncCtx); close(synced) }()
 	d.Player.Play(ctx, ip, app)
+	stopSync()
+	select {
+	case <-synced:
+	case <-time.After(3 * time.Second):
+	}
 
 	// Closing Moonlight ends the session and nothing else. The machine is kept for
 	// the next session; auto-stop ends it once it sits idle, and it can be deleted
