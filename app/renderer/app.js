@@ -7043,7 +7043,7 @@ $('b-login-choice').onchange = async ev => {
 // The disk asked for on the Build page: said in the line under the games.
 $('b-extra-pick').onchange = ev => { extraPick = Number(ev.target.value) || 0; paintFit(); };
 
-// Add disk, on the running machine. cg says what it will do (disk.move) and how
+// Add disk, on the running machine. cg says what it will do (second) and how
 // much room there is to add (max_add_gb); this only asks how much, says the
 // price, and runs it.
 const DISK_SIZES_GB = [50, 100, 200, 500];
@@ -7080,9 +7080,9 @@ async function openAddDisk() {
     $('diskdlg-price').textContent = picked >= 1 && per != null
       ? `+${rsh(picked * per)} an hour while the machine exists` : 'Billed by the hour while the machine exists.';
     $('diskdlg-warn').textContent = [
-      st.move ? 'Your games are moved onto the new disk. Steam closes while that happens, and so does any game you are playing. It can take several minutes.'
-              : 'Takes about a minute. Your game keeps running. If Steam does not show the new space, restart it.',
-      st.move ? '' : 'AWS lets a disk be made bigger once every 6 hours.',
+      st.second ? 'A second disk is added beside the one you have. Your games stay where they are and nothing closes. Close Steam and open it again to see the new space, then pick it when Steam asks where to put a game.'
+                : 'Takes about a minute. Your game keeps running. If Steam does not show the new space, close it and open it again.',
+      st.second ? '' : 'AWS lets a disk be made bigger once every 6 hours.',
       'The disk is deleted with the machine.',
     ].filter(Boolean).join('\n');
   };
@@ -7111,7 +7111,7 @@ async function openAddDisk() {
   yes.onclick = async () => {
     const gb = picked;
     if (!gb) return;
-    const done = await libraryRun(['disk', 'add', String(gb)], 'Adding space', null, null, () => 'Your games were not deleted.');
+    const done = await libraryRun(['disk', 'add', String(gb)], 'Adding space', null, null, () => 'Your games were not touched.');
     if (done) {
       $('refdlg').close();
       note(`Added ${gb} GB for your games`, 'text-primary');

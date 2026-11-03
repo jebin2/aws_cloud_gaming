@@ -17,6 +17,8 @@ import (
 type fakeDisk struct {
 	gamesVol    string // "" when the games live on the machine's own drive
 	gamesGB     int32
+	extraVol    string // the disk added beside the machine's own drive
+	extraGB     int32
 	calls       []string
 	modifyErr   error
 	modState    ec2types.VolumeModificationState
@@ -36,6 +38,9 @@ func (f *fakeDisk) DescribeInstances(context.Context, *ec2.DescribeInstancesInpu
 	if f.gamesVol != "" {
 		in.BlockDeviceMappings = append(in.BlockDeviceMappings, ec2types.InstanceBlockDeviceMapping{DeviceName: aws.String("/dev/sdf"), Ebs: &ec2types.EbsInstanceBlockDevice{VolumeId: aws.String(f.gamesVol)}})
 	}
+	if f.extraVol != "" {
+		in.BlockDeviceMappings = append(in.BlockDeviceMappings, ec2types.InstanceBlockDeviceMapping{DeviceName: aws.String("/dev/sdg"), Ebs: &ec2types.EbsInstanceBlockDevice{VolumeId: aws.String(f.extraVol)}})
+	}
 	return &ec2.DescribeInstancesOutput{Reservations: []ec2types.Reservation{{Instances: []ec2types.Instance{in}}}}, nil
 }
 func (f *fakeDisk) DescribeVolumes(_ context.Context, in *ec2.DescribeVolumesInput, _ ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
@@ -43,6 +48,8 @@ func (f *fakeDisk) DescribeVolumes(_ context.Context, in *ec2.DescribeVolumesInp
 	switch {
 	case id == f.gamesVol:
 		return &ec2.DescribeVolumesOutput{Volumes: []ec2types.Volume{{VolumeId: aws.String(id), Size: aws.Int32(f.gamesGB)}}}, nil
+	case f.extraVol != "" && id == f.extraVol:
+		return &ec2.DescribeVolumesOutput{Volumes: []ec2types.Volume{{VolumeId: aws.String(id), Size: aws.Int32(f.extraGB)}}}, nil
 	case id == f.newVol:
 		v := ec2types.Volume{VolumeId: aws.String(id), State: ec2types.VolumeState(f.newState)}
 		if f.newAttached {
@@ -107,12 +114,12 @@ func diskRig(t *testing.T) *rig {
 	return r
 }
 
-func TestDiskStatusSaysWhetherAddingGrowsOrMoves(t *testing.T) {
+func TestDiskStatusSaysWhetherAddingGrowsOrAddsASecondDisk(t *testing.T) {
 	for _, c := range []struct {
-		vol  string
-		gb   int32
-		move bool
-		max  int
+		vol    string
+		gb     int32
+		second bool
+		max    int
 	}{{"vol-games", 100, false, 900}, {"", 0, true, 1000}} {
 		r := diskRig(t)
 		f := &fakeDisk{gamesVol: c.vol, gamesGB: c.gb}
@@ -123,7 +130,7 @@ func TestDiskStatusSaysWhetherAddingGrowsOrMoves(t *testing.T) {
 		if err := json.Unmarshal(r.o.Bytes(), &st); err != nil {
 			t.Fatalf("%v\n%s", err, r.o)
 		}
-		if !st.Running || st.Move != c.move || st.MaxAddGB != c.max || st.Disk != int(c.gb) || st.StepGB != 10 {
+		if !st.Running || st.Second != c.second || st.MaxAddGB != c.max || st.Disk != int(c.gb) || st.StepGB != 10 {
 			t.Errorf("%+v", st)
 		}
 		if st.TotalGB != 250 || st.UsedGB != 186 || st.FreeGB != 64 {
@@ -182,29 +189,47 @@ func TestAddDiskRefusesWhatWouldPassTheMost(t *testing.T) {
 	}
 }
 
-func TestAddDiskOnTheMachinesOwnDriveMakesAttachesAndMoves(t *testing.T) {
+func TestAddDiskOnTheMachinesOwnDriveAttachesASecondDiskAndMovesNothing(t *testing.T) {
 	r := diskRig(t)
 	f := &fakeDisk{}
 	if rc := r.d.AddDisk(context.Background(), f, 120); rc != 0 {
 		t.Fatalf("%s%s", r.o, r.w)
 	}
-	want := []string{"create 120GB gp3 ap-south-1b Name=gamevps,cg:host=gamevps,", "attach vol-new /dev/sdf", "mark /dev/sdf vol-new delete-with-box=true"}
+	want := []string{"create 120GB gp3 ap-south-1b Name=gamevps,cg:host=gamevps,", "attach vol-new /dev/sdg", "mark /dev/sdg vol-new delete-with-box=true"}
 	if got := strings.Join(f.calls, ";"); got != strings.Join(want, ";") {
 		t.Errorf("%s", got)
 	}
 	ssh := sshLines(r.r)
-	for _, want := range []string{"mkfs.ext4", "rsync", "DATA_GB=", "mount-scratch.sh", "pkill -x steam"} {
+	for _, want := range []string{"mkfs.ext4", "cgextra", "/scratch2", "steam-add-extra-library", "MOUNTPOINT"} {
 		if !strings.Contains(ssh, want) {
 			t.Errorf("lacks %q in\n%s", want, ssh)
 		}
 	}
-	// The games must never be copied FROM the new disk or onto itself, and the
-	// disk that is formatted is only the one nothing is mounted on.
-	if !strings.Contains(ssh, `MOUNTPOINT`) {
-		t.Error("the new disk is the one with nothing mounted on it")
+	// The games stay where they are and Steam is not closed under a game.
+	for _, never := range []string{"rsync", "pkill", "umount", "DATA_GB="} {
+		if strings.Contains(ssh, never) {
+			t.Errorf("moved or closed something (%q):\n%s", never, ssh)
+		}
+	}
+	if !strings.Contains(r.o.String()+r.w.String(), "Close Steam and open it again") {
+		t.Errorf("it says what to do next: %s%s", r.o, r.w)
 	}
 	if len(f.deleted) != 0 {
 		t.Errorf("a disk in use was deleted: %v", f.deleted)
+	}
+}
+
+func TestAddDiskAgainMakesTheSecondDiskBigger(t *testing.T) {
+	r := diskRig(t)
+	f := &fakeDisk{extraVol: "vol-extra", extraGB: 100, modState: ec2types.VolumeModificationStateOptimizing}
+	if rc := r.d.AddDisk(context.Background(), f, 50); rc != 0 {
+		t.Fatalf("%s%s", r.o, r.w)
+	}
+	if got := strings.Join(f.calls, ";"); got != "modify vol-extra 150" {
+		t.Errorf("%s", got)
+	}
+	if ssh := sshLines(r.r); !strings.Contains(ssh, "mnt=/scratch2") || !strings.Contains(ssh, "resize2fs") {
+		t.Errorf("the second disk's own filesystem is grown:\n%s", ssh)
 	}
 }
 

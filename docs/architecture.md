@@ -114,10 +114,13 @@ It survives a stop, and costs $0.0912/GB-month while the box exists. Details:
 **Adding space to a running box** (`cg disk add <GB>`, the Add disk button on the Machine page). A box
 with a games disk has it made bigger: `ModifyVolume`, then `resize2fs` on the mounted disk, so the game,
 Steam and the archive carry on unaware. AWS allows one change per disk every 6 hours. A box whose games sit
-on its own NVMe, which cannot grow, gets a new disk at `/dev/sdf`: Steam is closed, the library is copied onto
-it, and `/scratch` is remounted from it with `DATA_GB` rewritten in `mount-scratch.sh` so every later boot
-mounts it too. `cg disk --json` says which of the two will happen (`move`), the room left and the most that can
-be added.
+on its own NVMe, which cannot grow, gets a second disk at `/dev/sdg`, mounted at `/scratch2` by label
+(`nofail`) with a `steam/steamapps` folder in it. Nothing is copied or closed. `steam-add-extra-library`
+waits for Steam to be closed (it rewrites its list of folders as it exits, so an entry added under a
+running Steam is thrown away) and then adds `/scratch2/steam` to `libraryfolders.vdf`; the person closes and
+reopens Steam to see it. Add disk after that grows the second disk. `cg disk --json` says which of the two
+will happen (`second`), the room left and the most that can be added. Games already on the NVMe stay
+there, and the archive's save and restore still use `/scratch/steam` only.
 
 ## Flow 1 - `cg init`: build a box
 

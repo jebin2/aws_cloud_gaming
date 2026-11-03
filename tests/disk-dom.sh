@@ -48,7 +48,7 @@ cat > "$T/r/probe.js" <<'PROBE'
   const out = [];
   const sleep = (ms = 0) => new Promise(r => setTimeout(r, ms));
   const status = o => Object.assign({ running: true, disk_gb: 100, total_gb: 100, used_gb: 86, free_gb: 14,
-                                      max_add_gb: 900, step_gb: 10, move: false }, o);
+                                      max_add_gb: 900, step_gb: 10, second: false }, o);
   // The id of the last command the window started: answered with its output.
   const answer = async (st) => {
     const id = window.__lastId;
@@ -88,10 +88,10 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('DONE | refdlg open=' + document.getElementById('refdlg').open);
     document.getElementById('diskdlg').close();
 
-    // A machine on its own drive: the games are moved, and Steam closes.
+    // A machine on its own drive: a second disk is added, and nothing closes.
     openAddDisk();
     await sleep(50);
-    await answer(status({ disk_gb: 0, total_gb: 232, used_gb: 186, free_gb: 46, max_add_gb: 1000, move: true }));
+    await answer(status({ disk_gb: 0, total_gb: 232, used_gb: 186, free_gb: 46, max_add_gb: 1000, second: true }));
     out.push('MOVE | ' + text('diskdlg-now'));
     out.push('MOVE WARN | ' + text('diskdlg-warn'));
     document.getElementById('diskdlg').close();
@@ -158,9 +158,10 @@ check    "it runs one command, with the size" "$(row RAN)" "RAN | disk add 50"
 contains "  under its own heading"         "$(row POPUP)" "Adding space"
 check    "  and the popup goes when it is done" "$(row DONE)" "DONE | refdlg open=false"
 
-echo "4. a machine on its own drive moves the games"
+echo "4. a machine on its own drive gets a second disk"
 contains "it says how much room"          "$(row MOVE)" "46 GB free"
-contains "  and that Steam closes"         "$(row 'MOVE WARN')" "Steam closes while that happens"
+contains "  and that nothing closes"       "$(row 'MOVE WARN')" "Your games stay where they are and nothing closes"
+contains "  and what to do next"           "$(row 'MOVE WARN')" "Close Steam and open it again"
 lacks    "  without the six-hour rule that does not apply" "$(row 'MOVE WARN')" "once every 6 hours"
 
 echo "5. what it will not do"

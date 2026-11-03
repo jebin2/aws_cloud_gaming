@@ -24,7 +24,7 @@ on files beside the binary. Build it with `go build -o cg ./cmd/cg`.
 | `cg snapshot --list` | What images exist and what they cost |
 | `cg snapshot --delete <id>` | Delete an image **and its backing snapshots** |
 | `cg clean` | Free space: apt caches, logs, `/scratch/tmp`. Games are not touched |
-| `cg disk [--json]`, `cg disk add <GB>` | The games' disk: how full it is, and more room for the games on a running box. With a games disk, `add` makes it bigger while the game keeps running (AWS allows this once every 6 hours per disk). Without one, it makes a new disk and moves the games onto it; Steam closes for that. Rounds up to 10 GB; at most 1000 GB of games disk |
+| `cg disk [--json]`, `cg disk add <GB>` | The games' disk: how full it is, and more room for the games on a running box. With a games disk, `add` makes it bigger while the game keeps running (AWS allows this once every 6 hours per disk). Without one, it adds a second disk beside the machine's own drive (nothing is moved or closed; Steam sees the folder once it is closed and opened again), and later adds grow that one. Rounds up to 10 GB; at most 1000 GB of games disk |
 | `cg pair` | Redo the Moonlight handshake - no rebuild needed |
 | `cg destroy` | Mirror the games to S3, then delete the box. **Refuses if the mirror fails**. Keeps the budget |
 | `cg destroy --force` | Destroy even if the mirror failed - **loses the games** |
