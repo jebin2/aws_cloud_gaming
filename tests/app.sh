@@ -151,8 +151,8 @@ done
 contains "the main process reads it"     "$main" "cg --contract"
 contains "  assuming the worst if it cannot" "$main" "every command will run alone"
 contains "  and skipping the flags first" "$main" "FLAG_TAKES_VALUE"
-contains "a write waits for everything"  "$main" "[...jobs.values()][0]"
-contains "  and a read waits only for a write" "$main" "find(j => !j.readOnly)"
+contains "a write waits for everything"  "$main" "[...jobs.values()].find(waitsFor)"
+contains "  and a read waits only for a write" "$main" "find(j => !j.readOnly && waitsFor(j))"
 # The renderer is TOLD the verdict rather than working it out again.
 contains "the verdict travels with the job" "$main" "write: !readOnly"
 contains "  and the renderer uses it"    "$js" "j.write"
@@ -297,6 +297,7 @@ echo "5a2. no engine, and a read that cannot be painted"
 contains "main says whether cg is there"  "$main" 'function engineFacts()'
 contains "  over the bridge"              "$(cat app/main/preload.js)" 'cg:engine'
 contains "  and re-reads the contract"    "$main" 'if (found && !CONTRACT.runs_alone) loadContract();'
+contains "more room can be added in the middle of a game" "$main" "const BESIDE_SESSION = [['disk']];"
 contains "the window asks before reading" "$js" 'if (!(await engineReady())) return;'
 contains "  and says the one true thing"  "$js" "'Scripts not found'"
 contains "  naming where it looked"       "$js" 'Expected at ${engineGone.cg}'

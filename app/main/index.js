@@ -83,13 +83,23 @@ const isReadOnly = raw => !runsAlone(raw);
 const jobs = new Map();          // id -> { id, args, child, readOnly }
 const anyMutating = () => [...jobs.values()].some(j => !j.readOnly);
 
+// Commands that make sense WHILE a game is being played, and so are not held up
+// by the session that runs alone: more room is wanted mid-game as often as
+// before it. A session only claims its own lock; these do not touch it.
+const BESIDE_SESSION = [['disk']];
+const beside = raw => {
+  const cmd = verb(raw);
+  return BESIDE_SESSION.some(p => p.every((w, i) => cmd[i] === w));
+};
+
 function startJob(args, env = {}) {
   const readOnly = isReadOnly(args);
+  const waitsFor = j => !(beside(args) && verb(j.args)[0] === 'open');
   // A mutating command waits for everything; a read-only one only waits for a
   // mutating command to finish.
   const blocker = readOnly
-    ? [...jobs.values()].find(j => !j.readOnly)
-    : [...jobs.values()][0];
+    ? [...jobs.values()].find(j => !j.readOnly && waitsFor(j))
+    : [...jobs.values()].find(waitsFor);
   if (blocker) return { ok: false, reason: 'busy', args: blocker.args };
 
   const id = nextId++;

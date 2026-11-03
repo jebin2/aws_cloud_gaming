@@ -7060,7 +7060,10 @@ async function openAddDisk() {
   let st = null;
   try { st = JSON.parse(await runCg(['disk', '--json'], { capture: true })); } catch { /* said below */ }
   if (!st || !st.running) {
+    // Turned away because something else runs alone is not the same as not
+    // being able to reach the game PC, and the person can wait for it.
     $('diskdlg-now').textContent = st ? 'Your game PC is not running, so its disk cannot be changed.'
+      : writing() ? `Add disk ${busyWhy()} Try again then.`
       : 'Could not look at your game PC. Check that it is running and try again.';
     return;
   }
