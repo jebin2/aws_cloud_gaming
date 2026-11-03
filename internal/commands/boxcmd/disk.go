@@ -380,19 +380,16 @@ sudo tee /usr/local/bin/steam-add-extra-library >/dev/null <<'EOS'
 #!/usr/bin/env bash
 set -uo pipefail
 LIB=/scratch2/steam
-ROOT=$(readlink -f "$HOME/.steam/steam" 2>/dev/null || echo "")
-[[ -n $ROOT && -d "$ROOT/config" ]] || exit 0
-CONF="$ROOT/config/libraryfolders.vdf"
 # The client itself, by exact name. Matching "/ubuntu12_64/steam" as a pattern also
 # matched steamwebhelper and the other processes Steam leaves running for a while
 # after it closes, so the wait never ended.
 steam_running() {
   pgrep -u "$(id -u)" -x steam >/dev/null 2>&1
 }
-for _ in $(seq 1 43200); do steam_running || break; sleep 1; done
-steam_running && exit 0
-sleep 2
-grep -q "$LIB" "$CONF" 2>/dev/null && exit 0
+say() { echo "$*"; }
+add_entry() {
+ROOT=$(readlink -f "$HOME/.steam/steam" 2>/dev/null || echo "")
+CONF="$ROOT/config/libraryfolders.vdf"
 MARKER="$LIB/steamapps/libraryfolder.vdf"
 CID=$(sed -n 's/.*"contentid"[[:space:]]*"\([0-9]*\)".*/\1/p' "$MARKER" 2>/dev/null | tail -1)
 [[ -n $CID ]] || CID=$(python3 -c 'import random;print(random.getrandbits(63))')
@@ -413,9 +410,41 @@ i = s.rstrip().rfind('}')
 open(p, 'w').write(s[:i] + entry + s[i:])
 PY
 done
+say "added $LIB to Steam's folders"
+}
+# On duty for as long as the machine is up, not once: Steam rewrites its list of
+# folders as it exits, so if it drops the entry, it is put back the next time Steam
+# is closed. Never touched while Steam runs.
+while true; do
+  # The client is not signed in on a fresh machine, and has no list of folders
+  # until it is; nothing to add to yet.
+  ROOT=$(readlink -f "$HOME/.steam/steam" 2>/dev/null || echo "")
+  CONF="$ROOT/config/libraryfolders.vdf"
+  if ! steam_running && [[ -n $ROOT && -f $CONF ]] && ! grep -q "$LIB" "$CONF" 2>/dev/null; then
+    sleep 2
+    steam_running || add_entry
+  fi
+  sleep 2
+done
 EOS
 sudo chmod 755 /usr/local/bin/steam-add-extra-library
-sudo systemctl reset-failed cg-extra-library 2>/dev/null || true
-sudo systemd-run --quiet --unit=cg-extra-library --uid=ubuntu --setenv=HOME=/home/ubuntu /usr/local/bin/steam-add-extra-library
+sudo tee /etc/systemd/system/cg-extra-library.service >/dev/null <<'EOU'
+[Unit]
+Description=Keep the extra game disk registered with Steam
+After=local-fs.target
+
+[Service]
+User=ubuntu
+Environment=HOME=/home/ubuntu
+ExecStart=/usr/local/bin/steam-add-extra-library
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOU
+sudo systemctl daemon-reload
+sudo systemctl enable cg-extra-library >/dev/null 2>&1
+sudo systemctl restart cg-extra-library
 df -h /scratch2 | tail -1
 echo "the new disk is ready"`

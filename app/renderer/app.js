@@ -39,6 +39,7 @@ const RUN_NAME = {
   'library move': 'the games change', 'library reset': 'the games change',
   'library keep-for': 'the games change', 'library account': 'the login change',
   'disk add': 'adding space',
+  'clip send': 'copying to the game PC', 'clip get': 'copying from the game PC',
 };
 const runName = cmd => byCommand(RUN_NAME, cmd) || cmd[0];
 
@@ -79,6 +80,8 @@ const CG_WORDS = {
   'library keep-for':        { name: 'changing how long games are kept' },
   'library account':         { name: 'changing the Steam login' },
   'disk add':                { name: 'adding space for your games' },
+  'clip send':               { name: 'copying to the game PC' },
+  'clip get':                { name: 'copying from the game PC' },
   'creds set':               { name: 'saving your AWS key' },
   // Longer than 'creds set', which is the AWS key: without this, saving a
   // Tailscale token was announced as saving an AWS one.
@@ -736,6 +739,8 @@ function mountMachineCard(box, p) {
     const q = btn('quality', 'btn', null, null, 'Stream quality');
     q.onclick = () => goSetting(settingEl('GAME_RES'));
     btn('adddisk', 'btn', null, null, 'Add disk').onclick = () => openAddDisk();
+    btn('clipsend', 'btn', null, null, 'Copy to game PC').onclick = () => copyAcross('send');
+    btn('clipget', 'btn', null, null, 'Copy from game PC').onclick = () => copyAcross('get');
   }
   // Home never shows it - Details does, as a machine of yours's tile does - but
   // its handler is the one every delete button calls.
@@ -769,7 +774,7 @@ function paintMachineCards() {
       card.textContent = '';
       const t = el('p', 'font-headline-lg text-headline-lg', 'AWS needs you'); t.dataset.f = 'title';
       card.append(t, el('p', 'font-body-md text-body-md text-on-surface-variant mt-space-xs', stuck.problem.title));
-      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk'] : [])]) $(`${p}-${b}`).hidden = true;
+      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk', 'clipsend', 'clipget'] : [])]) $(`${p}-${b}`).hidden = true;
       $(`${p}-busy`).hidden = true;
       continue;
     }
@@ -790,7 +795,7 @@ function paintMachineCards() {
                     ...(why ? [el('p', 'font-body-md text-body-md text-on-surface-variant mt-space-xs', why)]
                             : [el('span', 'skel mt-space-xs h-9 w-48'), el('span', 'skel mt-space-sm h-4 w-72')]));
       }
-      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk'] : [])]) $(`${p}-${b}`).hidden = true;
+      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk', 'clipsend', 'clipget'] : [])]) $(`${p}-${b}`).hidden = true;
       $(`${p}-busy`).hidden = !!why;
       // Nothing to look into yet: a Details button over a skeleton opens a page
       // that has nothing to say either. Once there is a reason, it is the way in.
@@ -811,6 +816,8 @@ function paintMachineCards() {
       // Always there while the machine is up: more room is wanted mid-game as
       // often as before the build.
       $('b-adddisk').hidden = !running || building;
+      // Text goes both ways while the machine is up, and mid-game most of all.
+      $('b-clipsend').hidden = $('b-clipget').hidden = !running || building;
       $('b-quality').disabled = !settingEl('GAME_RES');
       // Disconnecting deletes the machine too, but not from under a build.
       $('b-aws-remove').disabled = building;
@@ -7120,6 +7127,18 @@ async function openAddDisk() {
       note(`Added ${gb} GB for your games`, 'text-primary');
     }
   };
+}
+
+// Copy and paste between this computer and the game PC, one way per press:
+// Moonlight pastes into the game PC but cannot bring text back.
+async function copyAcross(way) {
+  const out = way === 'send';
+  const done = await libraryRun(['clip', way], out ? 'Copying to the game PC' : 'Copying from the game PC', null, null,
+    err => /Install wl-clipboard/.test(err) ? 'Install wl-clipboard or xclip on this computer, then try again.' : 'Nothing was changed.');
+  if (done) {
+    $('refdlg').close();
+    note(out ? 'Your clipboard is on the game PC. Paste there with Ctrl+V' : 'The game PC\'s clipboard is on yours', 'text-primary');
+  }
 }
 
 $('d-guards').onclick = () => goView('guards');

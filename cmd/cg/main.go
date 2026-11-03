@@ -264,6 +264,20 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			return d.AddDisk(ctx, c, gb)
 		}
 		return d.Disk(ctx, c, jsonFlag)
+	case "clip":
+		d, _, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
+		if err != nil {
+			out.Die(err.Error())
+			return 1
+		}
+		switch {
+		case len(args) > 0 && args[0] == "send":
+			return d.ClipSend(ctx)
+		case len(args) > 0 && args[0] == "get":
+			return d.ClipGet(ctx)
+		}
+		out.Die("usage: cg clip send | get")
+		return 1
 	case "pair":
 		d, _, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
 		if err != nil {

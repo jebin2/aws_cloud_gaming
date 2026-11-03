@@ -46,6 +46,7 @@ var Registry = []Command{
 	{Path: []string{"stop"}, Aliases: [][]string{{"down"}}, Summary: "mirror the game library, then stop the box (--force to stop without a mirror)"},
 	{Path: []string{"clean"}, Summary: "give the box back some root disk; installed games are never touched"},
 	{Path: []string{"disk"}, Summary: "the games' disk: how full it is; add <GB> gives the games more room on a running box", JSON: true},
+	{Path: []string{"clip"}, Summary: "copy and paste between this computer and the box: send puts this clipboard there, get brings the box's here"},
 	{Path: []string{"pair"}, Summary: "pair Moonlight with the box again, without rebuilding it"},
 	{Path: []string{"destroy"}, Summary: "delete the box and what it left; --all also removes everything of cg's from the AWS account", RunsAlone: true},
 	{Path: []string{"check"}, Summary: "the preflight: tools, AWS, region, quota, keys, settings. --fix installs and asks. Creates nothing, but can save settings and mint a Tailscale key"},

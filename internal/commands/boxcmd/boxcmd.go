@@ -36,6 +36,8 @@ type Deps struct {
 	Now         func() time.Time
 	Sleep       func(time.Duration)
 	Moonlight   bool
+	// GOOS is the system this runs on; empty is the real one. Tests set it.
+	GOOS string
 	// Takes is "the last one took 12 min", or "it takes a while".
 	Takes func() string
 	// MoonlightConf is Moonlight's config file.
