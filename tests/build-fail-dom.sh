@@ -117,6 +117,14 @@ cat > "$T/r/probe.js" <<'PROBE'
                      text: 'Delete it, then build again.', charging: 'other', code: 'MaxSpotInstanceCountExceeded', said: '' };
     for (const l of ['a spot machine in ap-south-1 is still there: i-0abc (running)']) buildFail(l);
     read('PLAINHELD');
+    // The problem can arrive AFTER a line that was already shown: a note about the
+    // archive's region came first and became the headline over AWS's real answer.
+    buildFailClear();
+    buildFail('!! the archive is in ap-south-2 but the box is in ap-south-1');
+    buildProblem = { t: 'problem', kind: 'no_capacity', title: 'AWS has no cheap game PCs free here right now',
+                     text: 'Try again in a few minutes.', charging: 'no', code: 'InsufficientInstanceCapacity', said: 'Insufficient capacity.' };
+    paintFail();
+    read('LATE');
     buildFailClear();
     out.push('PLAINCLEARED | ' + (buildProblem === null));
   } catch (e) { out.push('THREW | ' + e.message); }
@@ -194,6 +202,8 @@ contains "buttons follow the kind"         "$(row 'PLAIN ACTS')" "Pick another m
 contains "the details keep the full report" "$(row 'PLAIN KEPT')" "true"
 contains "an earlier game PC still charging says so" "$(row 'PLAINHELD WHY')" "a game PC from before is still charging"
 lacks    "  never 'no charge'"              "$(row 'PLAINHELD WHY')" "No charge"
+contains "a problem that arrives late still becomes the headline" "$(row 'LATE HEAD')" "AWS has no cheap game PCs free here right now"
+lacks    "  not the note that came first"   "$(row 'LATE HEAD')" "the archive is in"
 contains "clearing forgets the problem"    "$(row PLAINCLEARED)" "true"
 
 echo "5. clearing it clears all of it"

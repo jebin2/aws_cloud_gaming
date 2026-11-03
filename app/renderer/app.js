@@ -4496,6 +4496,15 @@ function buildFail(text) {
   // cg reads "cannot" in a line as a failure, and the box's own healthy
   // progress said "NvFBC cannot capture" - the driver step went red while the
   // build carried on installing Steam.
+  paintFail();
+}
+
+// The panel from what has been collected so far. Its own function because the
+// problem event can arrive AFTER the lines it explains: a note printed before the
+// refusal (the archive being in another region) was the first line, so it became
+// the headline, and AWS's real answer sat underneath it. Painted again when the
+// problem arrives, the title is the problem's.
+function paintFail() {
   const whole = buildFailures.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   $('b-error').textContent = whole;
   // The headline above the fold, the detail behind a disclosure, and the two or
@@ -4571,7 +4580,7 @@ window.cg.onEvent(({ id, event }) => {
     if (event.kind === 'fail') { buildFailing = true; buildFail(event.text); }
     else if (buildFailing && event.t === 'line') buildFail(event.text);
     if (event.t === 'step') buildFailing = false;
-    if (event.t === 'problem') buildProblem = event;
+    if (event.t === 'problem') { buildProblem = event; if (buildFailures.length) paintFail(); }
     if (event.t === 'error') buildFail(event.text);
     if (event.t === 'exit') {
       buildProgressDone(event.rc);
