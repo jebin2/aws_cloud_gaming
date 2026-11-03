@@ -81,8 +81,8 @@ func (f LaunchFailure) Plain() Problem {
 			p.Kind, p.Title = SpotSlotLeave, "Your last game PC is still shutting down"
 			p.Text = "AWS frees its place in a minute or two. Try again then."
 		default:
-			p.Kind, p.Title = LimitTooSmall, "AWS has not yet allowed you to run this game PC here"
-			p.Text = "Ask AWS for permission. It is free to ask, but AWS can take a while to answer."
+			p.Kind, p.Title = LimitTooSmall, "AWS has not yet allowed you to run this game PC here - ask for permission, or try again later"
+			p.Text = "Asking is free, but AWS can take a while to answer. If you only just deleted a game PC, trying again in a minute or two may be all it needs."
 		}
 	case "InvalidKeyPair.NotFound":
 		p.Kind, p.Title = KeyMissing, "This place is missing the key the app uses to set up your game PC"
