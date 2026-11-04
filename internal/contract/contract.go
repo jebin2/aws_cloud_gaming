@@ -48,7 +48,7 @@ var Registry = []Command{
 	{Path: []string{"disk"}, Summary: "the games' disk: how full it is; add <GB> gives the games more room on a running box", JSON: true},
 	{Path: []string{"clip"}, Summary: "copy and paste between this computer and the box: send puts this clipboard there, get brings the box's here"},
 	{Path: []string{"pair"}, Summary: "pair Moonlight with the box again, without rebuilding it"},
-	{Path: []string{"destroy"}, Summary: "delete the box and what it left; --all also removes everything of cg's from the AWS account", RunsAlone: true},
+	{Path: []string{"destroy"}, Summary: "delete the box and what it left, after saving its games; --force deletes even if that save failed (the games may be lost), --no-push leaves the archive as it is, --all also removes everything of cg's from the AWS account", RunsAlone: true},
 	{Path: []string{"check"}, Summary: "the preflight: tools, AWS, region, quota, keys, settings. --fix installs and asks. Creates nothing, but can save settings and mint a Tailscale key"},
 	{Path: []string{"deps"}, Aliases: [][]string{{"dependencies"}}, Summary: "the tools this computer needs, and what is missing", JSON: true},
 	{Path: []string{"creds"}, Aliases: [][]string{{"credentials"}}, Summary: "the AWS access key and the Tailscale token, and whether each works", JSON: true},
