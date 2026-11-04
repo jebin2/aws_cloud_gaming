@@ -11,6 +11,13 @@
 name: Steam client archive
 
 on:
+  # A change to the workflow or its scripts builds the archive and keeps it as a build
+  # artifact for a day, to see that it still works. Only a scheduled run, or a manual
+  # one with publish on, publishes anything.
+  push:
+    paths:
+      - '.github/workflows/steam-client.yml'
+      - '.github/scripts/steam-client-*.sh'
   schedule:
     # Scheduled runs only start from the default branch.
     - cron: '17 3 1 * *'
@@ -47,7 +54,7 @@ jobs:
           zstd -dc "$RUNNER_TEMP/out/steam-client.tar.zst" | tar -t | head -40
 
       - name: Keep it as a build artifact
-        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.publish }}
+        if: ${{ github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.publish) }}
         uses: actions/upload-artifact@v4
         with:
           name: steam-client
