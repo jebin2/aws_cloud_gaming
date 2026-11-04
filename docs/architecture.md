@@ -167,6 +167,18 @@ watchdog and the game restore at once, Steam's client update the moment Steam is
 package installs. The driver goes first because Steam installs its 32-bit NVIDIA library, and the last
 stage waits for everything, then reboots the machine into the desktop.
 
+**Steam's client comes from GitHub, not from Valve.** Valve's download of the client (2.5 GB) ran at
+about 5 MB/s from Mumbai and was the longest step of a build. The `Steam client archive` workflow
+(`.github/workflows/steam-client.yml`) installs Steam on a clean runner, lets it update itself, packs the client
+(`.github/scripts/steam-client-pack.sh`: its programs and update packages, nothing of a person's or a machine's -
+no login, config, logs, games or caches) and publishes it monthly as the assets of the `steam-client` release,
+with its sha256. A new box's `steam-client` stage fetches it at the very start (`host/steam-client-fetch`), checks
+the fingerprint and that nothing in it leaves its own folder, and unpacks it; Steam then only downloads what
+changed since. With no archive, or one that does not match, it says so and the box downloads from Valve as it
+always did, so a missing release costs time and never a build. The archive is Valve's software on a public
+release; that is the owner's call to make, and `workflow_dispatch` with `publish` off only keeps it as a build
+artifact. Scheduled runs only start once the workflow is on the default branch.
+
 `cg-build` is restart-resistant. It is a service that starts again if it dies and on every boot, and it
 keeps a record in `/var/lib/cg-build`: `state.json` (each stage pending, running, done, failed or blocked)
 and `events.jsonl` (every change, numbered). A stage is done only when it exited cleanly; one that was

@@ -29,4 +29,4 @@ if aws_box; then
 fi
 
 progress "installing base packages"
-pkg curl jq
+pkg curl jq zstd

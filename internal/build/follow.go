@@ -75,7 +75,7 @@ var parts = []struct {
 	{"display", regexp.MustCompile(`(?i)^configuring headless x`)},
 	{"autologin", regexp.MustCompile(`(?i)^configuring autologin`)},
 	{"steam", regexp.MustCompile(`(?i)^installing steam`)},
-	{"steam-update", regexp.MustCompile(`(?i)^updating the steam client`)},
+	{"steam-update", regexp.MustCompile(`(?i)^(updating the steam client|fetching the steam client archive|the steam client came from)`)},
 	{"firefox", regexp.MustCompile(`(?i)^installing firefox`)},
 	{"audio", regexp.MustCompile(`(?i)^installing audio`)},
 	{"sunshine", regexp.MustCompile(`(?i)^installing sunshine`)},

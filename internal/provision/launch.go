@@ -453,8 +453,14 @@ func (p Provisioner) userData(ctx context.Context, a Params) (UserData, error) {
 // and, in the environment file the user-data writes, for every stage and the prelude.
 func awsVars(a Params, url, apps, login, reserve string) map[string]string {
 	return map[string]string{"CG_DATA_GB": strconv.Itoa(a.DataGB), "CG_EXTRA_APPS": a.ExtraApps, "TS_AUTHKEY": a.AuthKey, "TS_HOST": a.Host, "HOST_TGZ_URL": url, "S3_BUCKET": a.Bucket,
-		"CG_APPS": apps, "CG_LOGIN": login, "CG_RESERVE_GB": reserve, "CG_TARGET": "aws", "CG_USER": "ubuntu", "CG_FAMILY": "ubuntu"}
+		"CG_APPS": apps, "CG_LOGIN": login, "CG_RESERVE_GB": reserve, "CG_TARGET": "aws", "CG_USER": "ubuntu", "CG_FAMILY": "ubuntu",
+		"CG_STEAM_CLIENT_URL": SteamClientURL}
 }
+
+// SteamClientURL is where the Steam client archive is published (the Steam client
+// archive workflow, .github/workflows/steam-client.yml): the assets of one release
+// of this repository.
+const SteamClientURL = "https://github.com/jebin2/aws_cloud_gaming/releases/download/steam-client"
 
 // repairProfile attaches the instance role to a reused instance that has none. A
 // box launched before the library moved to S3 has no instance profile, and without

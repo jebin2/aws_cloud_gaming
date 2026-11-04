@@ -97,7 +97,7 @@ func TestHostBundleMatchesTheBashStripOnTheRealFiles(t *testing.T) {
 
 func TestAssembleStaysUnderTheLimitForTheRealModules(t *testing.T) {
 	vars := map[string]string{"TS_AUTHKEY": "tskey-auth-" + strings.Repeat("x", 40), "TS_HOST": "gamevps", "HOST_TGZ_URL": "https://b.s3.ap-south-1.amazonaws.com/boot/host.tgz?" + strings.Repeat("a=b&", 90),
-		"S3_BUCKET": "cg-0123456789abcdef", "CG_APPS": "all", "CG_LOGIN": "use", "CG_RESERVE_GB": "20", "CG_DATA_GB": "0", "CG_EXTRA_APPS": "", "CG_TARGET": "aws", "CG_USER": "ubuntu", "CG_FAMILY": "ubuntu"}
+		"S3_BUCKET": "cg-0123456789abcdef", "CG_APPS": "all", "CG_LOGIN": "use", "CG_RESERVE_GB": "20", "CG_DATA_GB": "0", "CG_EXTRA_APPS": "", "CG_STEAM_CLIENT_URL": "", "CG_TARGET": "aws", "CG_USER": "ubuntu", "CG_FAMILY": "ubuntu"}
 	u, err := Assemble(os.DirFS("../.."), vars)
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestCrossRegionSaysWhatItCostsAndNotWhatItOnceDid(t *testing.T) {
 
 func TestTheBoxIsToldWhichGamesGoOnTheAddedDisk(t *testing.T) {
 	vars := map[string]string{"TS_AUTHKEY": "tskey-auth-" + strings.Repeat("x", 40), "TS_HOST": "gamevps", "HOST_TGZ_URL": "https://b.s3.ap-south-1.amazonaws.com/boot/host.tgz",
-		"S3_BUCKET": "cg-0123456789abcdef", "CG_APPS": "all", "CG_LOGIN": "use", "CG_RESERVE_GB": "20", "CG_DATA_GB": "190", "CG_EXTRA_APPS": "730,2344520", "CG_TARGET": "aws", "CG_USER": "ubuntu", "CG_FAMILY": "ubuntu"}
+		"S3_BUCKET": "cg-0123456789abcdef", "CG_APPS": "all", "CG_LOGIN": "use", "CG_RESERVE_GB": "20", "CG_DATA_GB": "190", "CG_EXTRA_APPS": "730,2344520", "CG_STEAM_CLIENT_URL": "https://example/steam-client", "CG_TARGET": "aws", "CG_USER": "ubuntu", "CG_FAMILY": "ubuntu"}
 	u, err := Assemble(os.DirFS("../.."), vars)
 	if err != nil {
 		t.Fatal(err)

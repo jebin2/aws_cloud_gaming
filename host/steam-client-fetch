@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Puts Steam's client on a new box from the archive the Steam client archive
+# workflow publishes, instead of downloading it from Valve (about 2.5 GB at 5 MB/s;
+# the archive is about 1 GB from a CDN that is much faster). steam-client-fetch <the
+# release's base URL> <the user's name>
+#
+# Never fatal to a build: with no archive, or one that does not match its
+# fingerprint, it says so and the box downloads the client from Valve as it always
+# did. Exits 0 when the client is there, 2 when there was no archive to use, 3 when
+# it did not match.
+set -uo pipefail
+url=${1:?usage: steam-client-fetch <base url> <user>}
+user=${2:?usage: steam-client-fetch <base url> <user>}
+# CG_FETCH_HOME: a test puts it somewhere that is not the real home.
+home=${CG_FETCH_HOME:-$(getent passwd "$user" | cut -d: -f6)}
+[ -n "$home" ] || { echo "no user $user"; exit 1; }
+dir=$home/.local/share/Steam
+as_user() { if [ "$(id -u)" = 0 ]; then sudo -u "$user" -H "$@"; else "$@"; fi; }
+
+if [ -d "$dir/ubuntu12_64" ]; then echo "the Steam client is already here"; exit 0; fi
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+chmod 755 "$tmp"
+
+get() { curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 900 -o "$tmp/$1" "$url/$1"; }
+get steam-client.sha256 || { echo "no Steam client archive to use ($url)"; exit 2; }
+get steam-client.tar.zst || { echo "no Steam client archive to use ($url)"; exit 2; }
+if ! ( cd "$tmp" && sha256sum -c steam-client.sha256 >/dev/null 2>&1 ); then
+  echo "the Steam client archive does not match its fingerprint - not used"
+  exit 3
+fi
+# Everything in it is under Steam/ and nowhere else: nothing absolute, nothing that
+# climbs out.
+if tar -I zstd -tf "$tmp/steam-client.tar.zst" | grep -vE '^Steam(/|$)' | grep . >/dev/null \
+   || tar -I zstd -tf "$tmp/steam-client.tar.zst" | grep -E '(^|/)\.\.(/|$)' | grep . >/dev/null; then
+  echo "the Steam client archive holds files outside its own folder - not used"
+  exit 3
+fi
+
+as_user mkdir -p "$home/.local/share" "$home/.steam"
+if ! as_user tar -I zstd -xf "$tmp/steam-client.tar.zst" -C "$home/.local/share"; then
+  rm -rf "$dir"
+  echo "the Steam client archive could not be unpacked - not used"
+  exit 3
+fi
+# What Steam makes the first time it runs, pointing at the folder.
+as_user ln -sfn "$dir" "$home/.steam/steam"
+as_user ln -sfn "$dir" "$home/.steam/root"
+echo "the Steam client is in place ($(du -sm "$dir" | cut -f1) MB)"

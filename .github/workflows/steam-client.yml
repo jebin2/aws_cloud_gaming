@@ -1,0 +1,66 @@
+# Makes the archive of Steam's client that a new box downloads from here instead of
+# from Valve (the client download is the longest step of a build: about 2.5 GB at
+# 5 MB/s). The archive is the client's own programs and update packages, with
+# nothing that belongs to a person or a machine in it (steam-client-pack.sh).
+#
+# It is rebuilt every month, because Steam updates itself and an old archive only
+# makes a new box download the difference. It is published as the assets of one
+# release, `steam-client`, which is overwritten each time and is not the app's
+# "latest" release. A box checks the archive against its fingerprint and uses
+# Valve's own download if the archive is missing or does not match.
+name: Steam client archive
+
+on:
+  schedule:
+    # Scheduled runs only start from the default branch.
+    - cron: '17 3 1 * *'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish it as the steam-client release (otherwise it is only kept as a build artifact for a day)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: steam-client
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    name: Build the archive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Install Steam and let it update itself
+        run: bash .github/scripts/steam-client-build.sh "$RUNNER_TEMP/out"
+
+      - name: Show what was made
+        run: |
+          ls -la "$RUNNER_TEMP/out"
+          cat "$RUNNER_TEMP/out/steam-client.json"
+          zstd -dc "$RUNNER_TEMP/out/steam-client.tar.zst" | tar -t | head -40
+
+      - name: Keep it as a build artifact
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.publish }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: steam-client
+          path: ${{ runner.temp }}/out/
+          retention-days: 1
+
+      - name: Publish it
+        if: ${{ github.event_name == 'schedule' || inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view steam-client >/dev/null 2>&1 || gh release create steam-client \
+            --title "Steam client archive" --prerelease --latest=false --target "$GITHUB_SHA" \
+            --notes "Steam's client, packed by the Steam client archive workflow, for a new box to download instead of fetching it from Valve (docs/architecture.md). Rebuilt monthly; overwritten each time. Nothing here belongs to a person or a machine."
+          gh release upload steam-client --clobber \
+            "$RUNNER_TEMP/out/steam-client.tar.zst" "$RUNNER_TEMP/out/steam-client.sha256" "$RUNNER_TEMP/out/steam-client.json"

@@ -40,7 +40,7 @@ lacks    "nothing starts it from the setup stage any more" "$mod" 'systemd-run'
 
 echo "4. the plan runs it beside the installs and waits for it before the reboot"
 plan=$(cat internal/provision/stages.go)
-contains "it starts once Steam is installed and set up" "$plan" '{Name: "steam-update", File: "73-steam-update.sh", Needs: []string{"steam-setup"}'
+contains "it starts once Steam is installed and set up" "$plan" '{Name: "steam-update", File: "73-steam-update.sh", Needs: []string{"steam-setup", "steam-client"}'
 contains "  and the last stage waits for it"      "$plan" '"library", "steam-update", "autologin"'
 
 echo; echo "steam-early: $pass passed, $fail failed"; (( fail == 0 ))
