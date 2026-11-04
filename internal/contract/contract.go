@@ -15,7 +15,7 @@ import "encoding/json"
 // Version 3 adds the problem event ({"t":"problem","kind","title","text","charging",
 // "code","said","region"}): a failure in words for a person, with a stable kind to
 // pick buttons by. Only a launch refused by AWS sends it so far.
-const EventsVersion = 3
+const EventsVersion = 4
 
 // Command is one entry in the registry: a path such as ["library", "push"]
 // and what the app needs to know about running it.

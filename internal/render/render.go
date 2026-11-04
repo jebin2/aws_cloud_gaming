@@ -42,6 +42,17 @@ func Bootstrap(fsys fs.FS, vars map[string]string) (string, error) {
 		return "", fmt.Errorf("no bootstrap modules found in %s/", Dir)
 	}
 	sort.Strings(names)
+	return assemble(fsys, names, vars)
+}
+
+// Select is Bootstrap for chosen files only (paths in fsys, in the order given):
+// what the AWS box gets as user-data, which joins the tailnet and hands the rest of
+// the build to the supervisor.
+func Select(fsys fs.FS, files []string, vars map[string]string) (string, error) {
+	return assemble(fsys, files, vars)
+}
+
+func assemble(fsys fs.FS, names []string, vars map[string]string) (string, error) {
 	var kept []string
 	for _, n := range names {
 		b, err := fs.ReadFile(fsys, n)
@@ -84,4 +95,72 @@ func Bootstrap(fsys fs.FS, vars map[string]string) (string, error) {
 		s = strings.ReplaceAll(s, "__"+t+"__", vars[t])
 	}
 	return s, nil
+}
+
+// Markers around the part of the header that is only functions and variables.
+const (
+	preludeBegin = "# cg:prelude-begin"
+	preludeEnd   = "# cg:prelude-end"
+)
+
+// Glue is added to the prelude of a supervised stage: the few values one stage
+// hands to a later one (a variable a module sets and another reads), kept in files
+// because each stage is a process of its own.
+const Glue = `
+CG_SUPERVISED=1
+cg_vars=${CG_BUILD_STATE:-/var/lib/cg-build}/vars
+for _v in "$cg_vars"/*; do [ -f "$_v" ] && export "$(basename "$_v")=$(cat "$_v")"; done
+cg_save_vars() { for _n in NVIDIA_ADDED DESKTOP_ADDED; do [ -n "${!_n:-}" ] && printf '%s' "${!_n}" > "$cg_vars/$_n"; done; return 0; }
+trap cg_save_vars EXIT
+# A package install that was cut off (a reboot, a kill) leaves the installer half-way
+# through, and refuses everything until it is finished. A stage that installs
+# packages starts by finishing it; there is nothing to finish the first time.
+if [ "${CG_STAGE_LOCK:-}" = apt ]; then dpkg --configure -a >/dev/null 2>&1 || true; fi
+`
+
+// Prelude is what every stage of a supervised build starts with: the header's
+// functions and variables (between its markers, so the one copy serves the single
+// script a machine of yours still gets) and the release helper. Placeholders are
+// left in; the box fills them from its own environment file.
+func Prelude(fsys fs.FS) (string, error) {
+	h, err := fs.ReadFile(fsys, Dir+"/00-header.sh")
+	if err != nil {
+		return "", err
+	}
+	text := string(h)
+	i, j := strings.Index(text, preludeBegin), strings.Index(text, preludeEnd)
+	if i < 0 || j < i {
+		return "", fmt.Errorf("%s/00-header.sh has no %q ... %q region", Dir, preludeBegin, preludeEnd)
+	}
+	rel, err := fs.ReadFile(fsys, Dir+"/01-release.sh")
+	if err != nil {
+		return "", err
+	}
+	return Strip(text[i+len(preludeBegin):j]+"\n"+string(rel)) + Glue, nil
+}
+
+// Strip removes whole-line comments, as Bootstrap does.
+func Strip(s string) string {
+	var out strings.Builder
+	for _, part := range strings.SplitAfter(s, "\n") {
+		if part == "" || comment.MatchString(strings.TrimSuffix(part, "\n")) {
+			continue
+		}
+		out.WriteString(part)
+	}
+	return out.String()
+}
+
+// Placeholders are the names left to fill in a text.
+func Placeholders(s string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range placeholder.FindAllStringSubmatch(s, -1) {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			out = append(out, m[1])
+		}
+	}
+	sort.Strings(out)
+	return out
 }

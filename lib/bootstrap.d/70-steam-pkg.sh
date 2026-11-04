@@ -81,6 +81,12 @@ if aws_box || ! steam_present; then
         echo "could not download steam_latest.deb"
       fi
 
+      # The AWS box updates the client on a virtual screen while the build goes on
+      # (73-steam-update.sh); the package for it goes in with the other installs.
+      # xset is in x11-xserver-utils: the update waits for its screen with it, and the
+      # desktop (which also brings it) is installed after this, not before.
+      if aws_box; then apt-get install -y xvfb x11-xserver-utils; fi
+
       # Valve's launcher runs `steamdeps` unconditionally on every start, and steamdeps
       # re-execs itself inside a terminal whenever DISPLAY is set - literally:
       #   gnome-terminal --wait -- sh -c '...; printf "Press return to continue: "; read'

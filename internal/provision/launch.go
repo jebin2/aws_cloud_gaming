@@ -396,7 +396,7 @@ func (p Provisioner) launch(ctx context.Context, a Params) (id string, restored 
 // user-data as base64. A presigned GET, valid two hours, so the box needs no
 // credentials at the point in the build where it has none.
 func (p Provisioner) userData(ctx context.Context, a Params) (UserData, error) {
-	bundle, err := HostBundle(p.Src, a.NtfyURL)
+	bundle, err := SupervisedBundle(p.Src, a.NtfyURL)
 	if err != nil {
 		return UserData{}, fmt.Errorf("could not bundle host/: %s", firstLine(err))
 	}
@@ -442,12 +442,18 @@ func (p Provisioner) userData(ctx context.Context, a Params) (UserData, error) {
 	if login == "" {
 		login = "use"
 	}
-	u, err := Assemble(p.Src, map[string]string{"CG_DATA_GB": strconv.Itoa(a.DataGB), "CG_EXTRA_APPS": a.ExtraApps, "TS_AUTHKEY": a.AuthKey, "TS_HOST": a.Host, "HOST_TGZ_URL": url, "S3_BUCKET": a.Bucket,
-		"CG_APPS": apps, "CG_LOGIN": login, "CG_RESERVE_GB": reserve, "CG_TARGET": "aws", "CG_USER": "ubuntu", "CG_FAMILY": "ubuntu"})
+	u, err := AssembleSupervised(p.Src, awsVars(a, url, apps, login, reserve))
 	if err != nil {
 		return u, fmt.Errorf("could not render user-data: %s", firstLine(err))
 	}
 	return u, nil
+}
+
+// awsVars are the values the AWS box's build is filled in with: in its user-data,
+// and, in the environment file the user-data writes, for every stage and the prelude.
+func awsVars(a Params, url, apps, login, reserve string) map[string]string {
+	return map[string]string{"CG_DATA_GB": strconv.Itoa(a.DataGB), "CG_EXTRA_APPS": a.ExtraApps, "TS_AUTHKEY": a.AuthKey, "TS_HOST": a.Host, "HOST_TGZ_URL": url, "S3_BUCKET": a.Bucket,
+		"CG_APPS": apps, "CG_LOGIN": login, "CG_RESERVE_GB": reserve, "CG_TARGET": "aws", "CG_USER": "ubuntu", "CG_FAMILY": "ubuntu"}
 }
 
 // repairProfile attaches the instance role to a reused instance that has none. A

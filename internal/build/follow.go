@@ -6,6 +6,7 @@ package build
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -74,10 +75,21 @@ var parts = []struct {
 	{"display", regexp.MustCompile(`(?i)^configuring headless x`)},
 	{"autologin", regexp.MustCompile(`(?i)^configuring autologin`)},
 	{"steam", regexp.MustCompile(`(?i)^installing steam`)},
+	{"steam-update", regexp.MustCompile(`(?i)^updating the steam client`)},
 	{"firefox", regexp.MustCompile(`(?i)^installing firefox`)},
 	{"audio", regexp.MustCompile(`(?i)^installing audio`)},
 	{"sunshine", regexp.MustCompile(`(?i)^installing sunshine`)},
 	{"finishing", regexp.MustCompile(`(?i)^finishing up`)},
+}
+
+// stageParts is the piece of the machine each supervised stage finishes, by the
+// stage's name in the plan (provision.Plan): a stage that is done ticks its piece,
+// so pieces that run together show together.
+var stageParts = map[string]string{
+	"base": "base", "scratch": "disk", "watchdog": "idle-watchdog", "library": "library",
+	"desktop": "desktop", "nvidia": "nvidia", "xorg": "display", "autologin": "autologin",
+	"steam": "steam", "steam-update": "steam-update", "firefox": "firefox", "audio": "audio",
+	"sunshine": "sunshine", "finish": "finishing",
 }
 
 // PartOf is the id of the piece a progress marker starts, "" for any other line.
@@ -98,11 +110,37 @@ type Follower struct {
 	Beat func(id, state, text string, secs, of int)
 	// Part is told which piece of the machine a marker started (PartOf); nil when
 	// nobody reads it.
-	Part  func(id string)
-	Sleep func(time.Duration)
+	Part func(id string)
+	// PartDone is told which piece a supervised stage has finished; nil when nobody
+	// reads it.
+	PartDone func(id string)
+	Sleep    func(time.Duration)
 	// Target and Key are only for the lines that tell a person how to look.
 	Target, Key string
 	Timeout     time.Duration // 40 minutes by default
+	// Supervised: the build is run by cg-build on the box, which keeps a numbered
+	// record of everything it does. It is read from where the last read stopped, so
+	// a dropped connection or a reboot loses nothing and repeats nothing. Until the
+	// box has one (its first minutes), and on a machine that never will, the build's
+	// log is read as it always was.
+	Supervised bool
+}
+
+// event is one line of the supervisor's record (cg-build events).
+type event struct {
+	Seq     int     `json:"seq"`
+	Kind    string  `json:"kind"`
+	Stage   string  `json:"stage"`
+	Text    string  `json:"text"`
+	Secs    float64 `json:"secs"`
+	Attempt int     `json:"attempt"`
+	Tail    string  `json:"tail"`
+}
+
+// notThere is whether a failed ssh command was "command not found".
+func notThere(err error) bool {
+	var ee interface{ ExitCode() int }
+	return errors.As(err, &ee) && ee.ExitCode() == 127
 }
 
 func (f Follower) beat(id, state, text string, waited, of time.Duration) {
@@ -143,9 +181,38 @@ func (f Follower) Stream(ctx context.Context) error {
 		timeout = 2400 * time.Second
 	}
 	seen, rebooted, failedSeen, last, stage := 0, false, false, "", "starting"
+	evSeq, evOnly := 0, false
 	for waited := time.Duration(0); waited < timeout; waited += 10 * time.Second {
-		out, err := f.R.SSH(ctx, fmt.Sprintf("tail -n +%d /var/log/cloud-gaming-bootstrap.log 2>/dev/null", seen+1))
+		var out []byte
+		var err error
+		fromEvents := false
+		if f.Supervised {
+			out, err = f.R.SSH(ctx, fmt.Sprintf("cg-build events --since %d", evSeq))
+			fromEvents = err == nil || !notThere(err)
+		}
+		if !fromEvents || (err == nil && !evOnly && strings.TrimSpace(string(out)) == "") {
+			// No record yet: the first minutes of the build, before the supervisor
+			// exists, are in the log.
+			var lerr error
+			out, lerr = f.R.SSH(ctx, fmt.Sprintf("tail -n +%d /var/log/cloud-gaming-bootstrap.log 2>/dev/null", seen+1))
+			if lerr == nil || !fromEvents {
+				err, fromEvents = lerr, false
+			}
+		}
 		switch {
+		case err == nil && fromEvents:
+			evOnly = evOnly || strings.TrimSpace(string(out)) != ""
+			done, stopped := f.readEvents(ctx, out, &evSeq, &stage, &last, &failedSeen, &rebooted)
+			if stopped {
+				f.stoppedLines(ctx, last)
+				return ErrStopped
+			}
+			_ = done
+			if _, err := f.R.SSH(ctx, "test -f /var/lib/cloud-gaming-ready"); err == nil {
+				f.Log(fmt.Sprintf("build complete after %dm", int(waited/time.Minute)))
+				f.beat("build.box", "done", stage, waited, timeout)
+				return nil
+			}
 		case err == nil:
 			if news := strings.TrimRight(string(out), "\n"); news != "" {
 				seen += strings.Count(news, "\n") + 1
@@ -269,4 +336,57 @@ func (f Follower) WaitSteam(ctx context.Context, timeout time.Duration) bool {
 	f.beat("build.steam", "timeout", last, timeout, timeout)
 	f.Log(fmt.Sprintf("steam did not finish within %dm - check ~/steam-prewarm.log on the box", int(timeout/time.Minute)))
 	return false
+}
+
+// readEvents shows what the supervisor has done since the last read, in the words
+// the log's markers always used, and says whether the build has ended in failure.
+func (f Follower) readEvents(ctx context.Context, out []byte, seq *int, stage, last *string, failedSeen, rebooted *bool) (done, stopped bool) {
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		var e event
+		if line == "" || json.Unmarshal([]byte(line), &e) != nil || e.Seq <= *seq {
+			continue
+		}
+		*seq = e.Seq
+		switch e.Kind {
+		case "marker":
+			*stage = e.Text
+			f.Log(e.Text)
+			if id := PartOf(e.Text); id != "" && f.Part != nil {
+				f.Part(id)
+			}
+		case "ok":
+			f.Log("  ok  " + e.Text)
+		case "check_failed":
+			*last, *failedSeen = e.Text, true
+			f.Log("FAILED: " + e.Text)
+		case "retry":
+			f.Log(fmt.Sprintf("%s did not finish (%s) - trying again", e.Stage, e.Text))
+		case "interrupted":
+			f.Log(fmt.Sprintf("%s was cut off - running it again", e.Stage))
+		case "fail":
+			*last, *failedSeen = e.Stage+" "+e.Text, true
+			f.Log(fmt.Sprintf("FAILED: %s %s", e.Stage, e.Text))
+			for _, l := range strings.Split(strings.TrimSpace(e.Tail), "\n") {
+				if l != "" {
+					f.Log("    " + l)
+				}
+			}
+		case "blocked":
+			f.Log(fmt.Sprintf("%s was not run: it %s", e.Stage, e.Text))
+		case "summary":
+			f.Log(e.Text)
+		case "reboot":
+			f.Log("host rebooting - reconnecting")
+			*rebooted = true
+		case "done":
+			if id := stageParts[e.Stage]; id != "" && f.PartDone != nil {
+				f.PartDone(id)
+			}
+		case "complete":
+			done = true
+		case "failed":
+			stopped = true
+		}
+	}
+	return done, stopped
 }

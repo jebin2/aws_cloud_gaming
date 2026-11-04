@@ -430,7 +430,7 @@ func (i *Init) finish(ctx context.Context, bx box.Box, pre check.Result, id, nod
 	}
 	remote := remoteBox{bx}
 	f := &build.Finisher{
-		Follow: build.Follower{R: remote, Log: i.Out.Log, Beat: i.Out.Wait, Part: func(id string) { i.Out.Event("part", "id", id) }, Sleep: i.Sleep, Target: "ubuntu@" + node, Key: bx.Key},
+		Follow: build.Follower{R: remote, Log: i.Out.Log, Beat: i.Out.Wait, Part: func(id string) { i.Out.Event("part", "id", id) }, PartDone: func(id string) { i.Out.Event("part", "id", id, "state", "done") }, Sleep: i.Sleep, Target: "ubuntu@" + node, Key: bx.Key, Supervised: true},
 		Sun:    i.Sun, Pair: i.Pair, Run: i.R, Login: login, Save: save, Name: "the box", Takes: i.takes(),
 		IP: ip, Say: i.Out.Say, SayID: i.Out.SayID, Log: i.Out.Log, Sleep: i.Sleep, HasMoonlight: i.Moonlight,
 	}

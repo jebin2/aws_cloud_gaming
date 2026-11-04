@@ -1,0 +1,564 @@
+#!/usr/bin/env python3
+"""cg-build: runs the build's stages on the box, in parallel where the plan allows.
+
+The build used to be one long script that cloud-init ran once, top to bottom: a
+failed step ended it, a reboot at the wrong moment ended it, and nothing could run
+beside anything else. This runs the same steps as separate stages, from a plan
+that says what each one needs, and keeps going whatever happens to it:
+
+  * it runs as a service that starts again if it dies and on every boot, and
+    picks up from the record it keeps, so a crash, a reboot or a closed laptop
+    costs the stage that was running and nothing before it;
+  * a stage is done only when it has run and exited cleanly; one that was running
+    when this stopped is run again, so every stage must be safe to run twice;
+  * a failed stage is retried a few times, then stops it and what waits on it -
+    the stages that do not need it carry on, and the build ends as failed;
+  * stages that take the same lock (the package installer) run one at a time, in
+    the plan's order; the rest run together.
+
+What it writes, for cg and for a person:
+  state.json    which stages are pending, running, done, failed or blocked
+  events.jsonl  every change, numbered, in order: `cg-build events --since N`
+                gives what is new, so a reader that was cut off resumes exactly
+  logs/<stage>.log   each stage's own output
+  and, so a reader that knows only the old single-script build still works, the
+  progress lines it printed in /var/log/cloud-gaming-bootstrap.log and its result
+  in /var/lib/cloud-gaming-bootstrap.rc.
+"""
+import argparse
+import fcntl
+import json
+import os
+import queue
+import re
+import signal
+import subprocess
+import sys
+import threading
+import time
+from datetime import datetime, timezone
+
+# Tests move the whole tree into a sandbox by setting this.
+ROOT = os.environ.get("CG_BUILD_ROOT", "")
+
+
+def at(p):
+    return ROOT + p
+
+
+STATE_DIR = at("/var/lib/cg-build")
+LOG_DIR = at("/var/log/cg-build")
+RUN_DIR = at("/run/cg-build")
+HOST_DIR = at("/opt/cloud-gaming-host")
+PLAN_FILE = os.environ.get("CG_BUILD_PLAN", HOST_DIR + "/plan.json")
+ENV_FILE = at("/etc/cg-build/env")
+COMPAT_LOG = at("/var/log/cloud-gaming-bootstrap.log")
+COMPAT_RC = at("/var/lib/cloud-gaming-bootstrap.rc")
+BASH = os.environ.get("CG_BUILD_BASH", "/bin/bash")
+REBOOT = os.environ.get("CG_BUILD_REBOOT", "systemctl reboot")
+BACKOFF = float(os.environ.get("CG_BUILD_BACKOFF", "10"))
+TICK = float(os.environ.get("CG_BUILD_TICK", "0.2"))
+# Lines of a stage's output that the old reader looked for: its own markers and
+# anything that reads as a failure. Anchored, as there: a bare /error/ matches
+# package names like libgpg-error0.
+COMPAT_LINE = re.compile(r"^>>> |^E: |^ERROR|[Ee]rror:|[Ff]ailed to |command not found|curl: \([0-9]+\)|No such file|^bootstrap complete")
+PLACEHOLDER = re.compile(r"__([A-Z0-9_]+)__")
+
+
+def now():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def boot_id():
+    if os.environ.get("CG_BUILD_BOOT_ID"):
+        return os.environ["CG_BUILD_BOOT_ID"]
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            return f.read().strip()
+    except OSError:
+        return "unknown"
+
+
+def write_atomic(path, text):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def append_line(path, line):
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    try:
+        os.write(fd, (line + "\n").encode("utf-8", "replace"))
+    finally:
+        os.close(fd)
+
+
+class PlanError(Exception):
+    pass
+
+
+def load_plan(path):
+    with open(path) as f:
+        plan = json.load(f)
+    stages = plan.get("stages", [])
+    names = [s["name"] for s in stages]
+    if len(set(names)) != len(names):
+        raise PlanError("two stages have the same name")
+    for s in stages:
+        s["needs"] = s.get("needs") or []
+        s["lock"] = s.get("lock") or ""
+        s.setdefault("lock", "")
+        s.setdefault("timeout", 900)
+        s.setdefault("retries", 0)
+        s.setdefault("reboot_after", False)
+        for n in s["needs"]:
+            if n not in names:
+                raise PlanError("%s needs %s, which is not a stage" % (s["name"], n))
+    # Loops: a stage that can never start would stall the build with no message.
+    done, remaining = set(), {s["name"]: set(s["needs"]) for s in stages}
+    while remaining:
+        ready = [n for n, d in remaining.items() if d <= done]
+        if not ready:
+            raise PlanError("the stages %s wait on each other" % ", ".join(sorted(remaining)))
+        for n in ready:
+            done.add(n)
+            del remaining[n]
+    plan["max_parallel"] = int(plan.get("max_parallel", 4))
+    return plan
+
+
+def load_env(path):
+    env = {}
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.rstrip("\n")
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    env[k] = v
+    except FileNotFoundError:
+        pass
+    return env
+
+
+def render(text, env, what):
+    """Fill in __NAME__ from the box's environment file. Literal, as on the laptop:
+    a presigned URL is full of &. A name with no value is an error, not an empty
+    string - it is a stage that would fail later, somewhere odd."""
+    missing = sorted({m for m in PLACEHOLDER.findall(text) if m not in env})
+    if missing:
+        raise PlanError("%s has no value for: %s" % (what, ", ".join(missing)))
+    return PLACEHOLDER.sub(lambda m: env[m.group(1)], text)
+
+
+class Events:
+    def __init__(self, path):
+        self.path = path
+        self.lock = threading.Lock()
+        self.seq = 0
+        try:
+            with open(path, "rb") as f:
+                for line in f:
+                    try:
+                        self.seq = max(self.seq, json.loads(line)["seq"])
+                    except (ValueError, KeyError):
+                        pass
+        except FileNotFoundError:
+            pass
+
+    def emit(self, kind, stage="", text="", **extra):
+        with self.lock:
+            self.seq += 1
+            rec = {"seq": self.seq, "t": now(), "kind": kind, "stage": stage, "text": text}
+            rec.update(extra)
+            append_line(self.path, json.dumps(rec, separators=(",", ":")))
+            return rec
+
+
+class State:
+    def __init__(self, path):
+        self.path = path
+        self.lock = threading.Lock()
+        self.data = {"stages": {}}
+        try:
+            with open(path) as f:
+                self.data = json.load(f)
+        except (FileNotFoundError, ValueError):
+            pass
+
+    def stage(self, name):
+        return self.data["stages"].setdefault(name, {"state": "pending", "attempts": 0})
+
+    def save(self):
+        with self.lock:
+            write_atomic(self.path, json.dumps(self.data, indent=1, sort_keys=True) + "\n")
+
+
+class Supervisor:
+    def __init__(self):
+        for d in (STATE_DIR, LOG_DIR, RUN_DIR, os.path.dirname(COMPAT_LOG), os.path.dirname(COMPAT_RC), STATE_DIR + "/vars"):
+            os.makedirs(d, exist_ok=True)
+        self.events = Events(STATE_DIR + "/events.jsonl")
+        self.state = State(STATE_DIR + "/state.json")
+        self.results = queue.Queue()
+        self.procs = {}
+
+    # -- the plan ------------------------------------------------------------
+    def compat(self, line):
+        append_line(COMPAT_LOG, line)
+
+    def prelude(self, env):
+        with open(HOST_DIR + "/prelude.sh") as f:
+            return render(f.read(), env, "the prelude")
+
+    def script_for(self, stage, env):
+        with open("%s/stages/%s" % (HOST_DIR, stage["file"])) as f:
+            body = render(f.read(), env, stage["file"])
+        return "#!/usr/bin/env bash\n" + self.prelude(env) + "\n" + body + "\n"
+
+    # -- one attempt, in its own thread --------------------------------------
+    def attempt(self, stage, env):
+        name = stage["name"]
+        log_path = "%s/%s.log" % (LOG_DIR, name)
+        try:
+            script = self.script_for(stage, env)
+        except (PlanError, OSError) as e:
+            self.results.put((name, 127, False, str(e)))
+            return
+        # The rendered script holds secrets (the tailnet key): in /run, root-only,
+        # and gone when the attempt is.
+        path = "%s/%s.sh" % (RUN_DIR, name)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o700)
+        with os.fdopen(fd, "w") as f:
+            f.write(script)
+        penv = dict(os.environ)
+        penv.update({
+            "DEBIAN_FRONTEND": "noninteractive",
+            "CG_SUPERVISED": "1",
+            "CG_STAGE": name,
+            "CG_STAGE_LOCK": stage["lock"],
+            "CG_BUILD_STATE": STATE_DIR,
+            "HOME": os.environ.get("CG_BUILD_HOME", "/root"),
+        })
+        started, timed_out = time.time(), False
+        try:
+            with open(log_path, "ab", buffering=0) as log:
+                log.write(("\n===== %s attempt %d =====\n" % (now(), self.state.stage(name)["attempts"])).encode())
+                p = subprocess.Popen([BASH, "-euxo", "pipefail", path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     stdin=subprocess.DEVNULL, cwd="/", env=penv, start_new_session=True)
+                self.procs[name] = p
+
+                def watchdog():
+                    nonlocal timed_out
+                    while p.poll() is None:
+                        if time.time() - started > stage["timeout"]:
+                            timed_out = True
+                            self.kill(p)
+                            return
+                        time.sleep(0.5)
+
+                threading.Thread(target=watchdog, daemon=True).start()
+                tail = []
+
+                def read():
+                    nonlocal tail
+                    for raw in iter(p.stdout.readline, b""):
+                        log.write(raw)
+                        line = raw.decode("utf-8", "replace").rstrip("\n")
+                        tail = (tail + [line])[-12:]
+                        self.line(name, line)
+
+                reader = threading.Thread(target=read, daemon=True)
+                reader.start()
+                rc = p.wait()
+                # A daemon the stage started can keep the pipe open for ever: the
+                # stage is over when its shell is, so what is left is given a moment.
+                reader.join(5)
+        except OSError as e:
+            self.results.put((name, 127, False, str(e)))
+            return
+        finally:
+            self.procs.pop(name, None)
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        self.results.put((name, rc, timed_out, "\n".join(l for l in tail if not l.startswith("+"))))
+
+    def line(self, name, line):
+        if COMPAT_LINE.search(line):
+            self.compat(line)
+        if line.startswith(">>> ok: "):
+            self.events.emit("ok", name, line[len(">>> ok: "):])
+        elif line.startswith(">>> FAILED: "):
+            self.events.emit("check_failed", name, line[len(">>> FAILED: "):])
+        elif line.startswith(">>> "):
+            self.events.emit("marker", name, line[4:])
+
+    @staticmethod
+    def kill(p):
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            return
+        for _ in range(20):
+            if p.poll() is not None:
+                return
+            time.sleep(0.5)
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    # -- the loop --------------------------------------------------------------
+    def run(self):
+        lock = open(STATE_DIR + "/supervisor.lock", "w")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            print("cg-build is already running", file=sys.stderr)
+            return 0
+        plan = load_plan(PLAN_FILE)
+        env = load_env(ENV_FILE)
+        stages = {s["name"]: s for s in plan["stages"]}
+        order = [s["name"] for s in plan["stages"]]
+        self.stages, self.order = stages, order
+        st = self.state
+        for n in order:
+            rec = st.stage(n)
+            if rec["state"] == "running":
+                # Cut off, not failed: it does not count against its retries.
+                rec["state"] = "pending"
+                rec["attempts"] = max(0, rec["attempts"] - 1)
+                self.events.emit("interrupted", n, "was running when the build stopped; running it again")
+            if rec["state"] == "blocked":
+                rec["state"] = "pending"
+        st.data["boot_id"] = boot_id()
+        st.save()
+        if st.data.get("complete"):
+            # A boot after a finished build: the stage with the reboot is done, and so
+            # is everything else. Nothing to run and nothing to say again.
+            self.events.emit("supervisor", "", "the build was finished before this boot", boot=boot_id())
+            return 0
+        self.events.emit("supervisor", "", "started", boot=boot_id())
+
+        def terminate(*_):
+            for p in list(self.procs.values()):
+                self.kill(p)
+            os._exit(143)
+
+        signal.signal(signal.SIGTERM, terminate)
+        signal.signal(signal.SIGINT, terminate)
+
+        running, locks = {}, {}
+        while True:
+            # Finished attempts first.
+            while True:
+                try:
+                    name, rc, timed_out, tail = self.results.get_nowait()
+                except queue.Empty:
+                    break
+                self.finish(stages[name], st.stage(name), rc, timed_out, tail, running, locks)
+            # Then what can start. Blocked ones are marked so the end can say why.
+            for n in order:
+                rec = st.stage(n)
+                if rec["state"] == "pending" and any(st.stage(d)["state"] in ("failed", "blocked") for d in stages[n]["needs"]):
+                    rec["state"] = "blocked"
+                    blocker = [d for d in stages[n]["needs"] if st.stage(d)["state"] in ("failed", "blocked")][0]
+                    self.events.emit("blocked", n, "waits on %s, which did not finish" % blocker)
+                    st.save()
+            for n in order:
+                if len(running) >= plan["max_parallel"]:
+                    break
+                s, rec = stages[n], st.stage(n)
+                if rec["state"] != "pending" or time.time() < rec.get("not_before", 0):
+                    continue
+                if not all(st.stage(d)["state"] == "done" for d in s["needs"]):
+                    continue
+                if s["lock"] and s["lock"] in locks:
+                    continue
+                if s["reboot_after"] and running:
+                    continue
+                rec["state"] = "running"
+                rec["attempts"] += 1
+                rec["started"] = time.time()
+                if s["lock"]:
+                    locks[s["lock"]] = n
+                running[n] = True
+                self.events.emit("start", n, "", attempt=rec["attempts"])
+                st.save()
+                threading.Thread(target=self.attempt, args=(s, env), daemon=True).start()
+            # Over when nothing runs, no result is waiting, and nothing is left to start
+            # (a stage waiting out its retry pause is still pending).
+            if not running and self.results.empty() and not any(st.stage(n)["state"] == "pending" for n in order):
+                break
+            time.sleep(TICK)
+        return self.end(stages, order)
+
+    def finish(self, s, rec, rc, timed_out, tail, running, locks):
+        name = s["name"]
+        running.pop(name, None)
+        if s["lock"]:
+            locks.pop(s["lock"], None)
+        secs = round(time.time() - rec.get("started", time.time()), 1)
+        rec["ended"] = time.time()
+        rec["secs"] = secs
+        rec["rc"] = rc
+        if rc == 0:
+            rec["state"] = "done"
+            rec["boot_id"] = boot_id()
+            self.events.emit("done", name, "", secs=secs, attempt=rec["attempts"])
+            self.state.save()
+            if s["reboot_after"]:
+                # The last stage: everything is done, so the build is said to be, before
+                # the machine goes down, not after it comes back.
+                if all(self.state.stage(n)["state"] == "done" for n in self.order):
+                    self.conclude()
+                self.reboot(name)
+            return
+        why = "timed out after %ds" % s["timeout"] if timed_out else "exited with %d" % rc
+        if rec["attempts"] <= s["retries"]:
+            rec["state"] = "pending"
+            rec["not_before"] = time.time() + BACKOFF * rec["attempts"]
+            self.events.emit("retry", name, why, rc=rc, attempt=rec["attempts"], tail=tail)
+            self.compat(">>> %s did not finish (%s) - trying again" % (name, why))
+        else:
+            rec["state"] = "failed"
+            self.events.emit("fail", name, why, rc=rc, attempt=rec["attempts"], tail=tail)
+        self.state.save()
+
+    def reboot(self, name):
+        self.events.emit("reboot", name, "rebooting into the desktop")
+        self.compat(">>> rebooting into the desktop")
+        # Done is on disk before the reboot; after it, this stage is not run again.
+        rc = subprocess.call(REBOOT, shell=True)
+        if rc != 0:
+            self.events.emit("fail", name, "the reboot command failed (%d)" % rc, rc=rc)
+            return
+        # systemd ends this when the machine goes down; waiting is the whole job.
+        while not os.environ.get("CG_BUILD_NO_WAIT"):
+            time.sleep(60)
+        sys.exit(0)
+
+    def conclude(self):
+        """The build is done: said once, in the record and for the old reader."""
+        if self.state.data.get("complete"):
+            return
+        self.state.data["complete"] = True
+        self.state.save()
+        self.summary(self.stages, self.order)
+        self.events.emit("complete", "", "every stage is done")
+        self.compat("bootstrap complete")
+        write_atomic(COMPAT_RC, "0\n")
+
+    def end(self, stages, order):
+        st = self.state
+        states = [st.stage(n)["state"] for n in order]
+        if all(s == "done" for s in states):
+            self.conclude()
+            return 0
+        failed = [n for n in order if st.stage(n)["state"] == "failed"]
+        blocked = [n for n in order if st.stage(n)["state"] == "blocked"]
+        # The same failure is said once, not again each time the service starts.
+        signature = "|".join("%s=%s" % (n, st.stage(n)["state"]) for n in order)
+        if st.data.get("reported") == signature:
+            return 0
+        st.data["reported"] = signature
+        st.save()
+        for n in failed:
+            rec = st.stage(n)
+            self.compat(">>> FAILED: %s %s (its log: /var/log/cg-build/%s.log)" % (n, "did not finish", n))
+            for l in (self.last_tail(n) or []):
+                self.compat("    " + l)
+        self.events.emit("failed", "", "failed: %s; not run: %s" % (", ".join(failed) or "-", ", ".join(blocked) or "-"))
+        write_atomic(COMPAT_RC, "1\n")
+        return 0
+
+    def last_tail(self, name):
+        try:
+            with open("%s/%s.log" % (LOG_DIR, name), "rb") as f:
+                lines = f.read().decode("utf-8", "replace").splitlines()
+        except OSError:
+            return []
+        return [l for l in lines if not l.startswith("+")][-6:]
+
+    def summary(self, stages, order):
+        st = self.state
+        parts = ["%s %ds" % (n, round(st.stage(n).get("secs", 0))) for n in order if st.stage(n).get("secs", 0) >= 15]
+        total = max((st.stage(n).get("ended", 0) for n in order), default=0) - min((st.stage(n).get("started", 0) for n in order if st.stage(n).get("started")), default=0)
+        text = "where the time went: %s (the whole build %ds)" % (", ".join(parts) or "nothing over 15s", round(total))
+        self.events.emit("summary", "", text)
+        self.compat(">>> " + text)
+
+
+# -- the commands cg and a person use --------------------------------------------
+def cmd_events(args):
+    path = STATE_DIR + "/events.jsonl"
+    try:
+        with open(path, "rb") as f:
+            for line in f:
+                try:
+                    if json.loads(line)["seq"] > args.since:
+                        sys.stdout.write(line.decode("utf-8", "replace"))
+                except (ValueError, KeyError):
+                    pass
+    except FileNotFoundError:
+        pass
+    return 0
+
+
+def cmd_status(_args):
+    try:
+        with open(STATE_DIR + "/state.json") as f:
+            sys.stdout.write(f.read())
+    except FileNotFoundError:
+        print("{}")
+    return 0
+
+
+def cmd_retry(args):
+    """Make the stages that failed (or the named ones) run again, and start the
+    supervisor if it has stopped."""
+    st = State(STATE_DIR + "/state.json")
+    for name, rec in st.data["stages"].items():
+        if (args.stages and name in args.stages) or (not args.stages and rec["state"] in ("failed", "blocked")):
+            rec.update({"state": "pending", "attempts": 0})
+            rec.pop("not_before", None)
+    st.data.pop("reported", None)
+    st.save()
+    if not os.environ.get("CG_BUILD_NO_SYSTEMD"):
+        subprocess.call(["systemctl", "restart", "cg-build.service"])
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="cg-build")
+    sub = ap.add_subparsers(dest="cmd")
+    sub.add_parser("run")
+    e = sub.add_parser("events")
+    e.add_argument("--since", type=int, default=0)
+    sub.add_parser("status")
+    r = sub.add_parser("retry")
+    r.add_argument("stages", nargs="*")
+    args = ap.parse_args()
+    if args.cmd in (None, "run"):
+        try:
+            return Supervisor().run()
+        except Exception as e:  # a bug here must not leave a build that says nothing
+            import traceback
+            msg = "".join(traceback.format_exception_only(type(e), e)).strip()
+            try:
+                Events(STATE_DIR + "/events.jsonl").emit("supervisor", "", "stopped by a fault in cg-build itself: " + msg)
+                append_line(COMPAT_LOG, ">>> FAILED: the build supervisor stopped: " + msg)
+            except OSError:
+                pass
+            traceback.print_exc()
+            return 1
+    return {"events": cmd_events, "status": cmd_status, "retry": cmd_retry}[args.cmd](args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,18 @@
+[Unit]
+Description=Run the build's stages (cg-build)
+# The build is not finished by one run of anything: this starts again if it dies,
+# and on every boot, and carries on from the record it keeps in /var/lib/cg-build.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/cg-build run
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=0
+# The stages are its children; when it is stopped they go too, and are run again.
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

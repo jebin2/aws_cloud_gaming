@@ -22,7 +22,10 @@ mkdir -p /opt/cloud-gaming-host
 # the hardest possible thing to debug. Carrying on costs layer 2 and leaves the
 # box reachable; the cloud watchdog and budget are armed before launch and bound the
 # spend. The verify lines below report the loss, and `cg init` streams them.
-if curl -fsSL --retry 5 --retry-delay 3 '__HOST_TGZ_URL__' -o /tmp/host.tgz; then
+# Already here when the supervisor started the build: it came in the same bundle.
+if [ -f /opt/cloud-gaming-host/install-watchdog.sh ]; then
+  :
+elif curl -fsSL --retry 5 --retry-delay 3 '__HOST_TGZ_URL__' -o /tmp/host.tgz; then
   tar -xz -C /opt/cloud-gaming-host -f /tmp/host.tgz
   rm -f /tmp/host.tgz
 else

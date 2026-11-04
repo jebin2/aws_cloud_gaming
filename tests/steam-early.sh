@@ -31,16 +31,16 @@ echo "3. the early run stops after the client is installed"
 check    "it leaves before the library, the dock and the marker" "$(( $(line '\[\[ -n \${CG_EARLY:-} \]\] && exit 0') < $(line 'phase "registering NVMe library"') ))" "1"
 check    "  and before the marker is written"  "$(( $(line 'CG_EARLY:-} \]\] && exit 0') < $(line 'touch "\$MARK"') ))" "1"
 contains "it uses a virtual screen"            "$mod" 'export DISPLAY="${CG_DISPLAY:-:0}"'
-contains "  started with the build, as the user" "$mod" 'systemd-run --quiet --unit=cg-steam-early --uid="$USER_NAME"'
 contains "  on its own screen"                  "$mod" 'CG_EARLY=1 CG_DISPLAY=:99'
+upd=$(cat lib/bootstrap.d/73-steam-update.sh)
+contains "its own stage runs it, as the user"  "$upd" 'sudo -u "$USER_NAME" -H /usr/local/bin/steam-prewarm-early.sh'
+contains "  and never fails the build over it"   "$upd" '|| echo "note: the Steam client update did not finish here'
+contains "  on the AWS box only"                 "$upd" 'if aws_box; then'
+lacks    "nothing starts it from the setup stage any more" "$mod" 'systemd-run'
 
-echo "4. the build waits for it before the reboot, and not for ever"
-fin=$(cat lib/bootstrap.d/99-finish.sh)
-contains "it is waited for"                    "$fin" 'systemctl is-active --quiet cg-steam-early.service'
-contains "  then stopped if it is still going"  "$fin" 'systemctl stop cg-steam-early.service'
-check    "  before the reboot"                 "$(( $(grep -n 'cg-steam-early.service' lib/bootstrap.d/99-finish.sh | head -1 | cut -d: -f1) < $(grep -n '^reboot' lib/bootstrap.d/99-finish.sh | cut -d: -f1) ))" "1"
+echo "4. the plan runs it beside the installs and waits for it before the reboot"
+plan=$(cat internal/provision/stages.go)
+contains "it starts once Steam is installed and set up" "$plan" '{Name: "steam-update", File: "73-steam-update.sh", Needs: []string{"steam-setup"}'
+contains "  and the last stage waits for it"      "$plan" '"library", "steam-update", "autologin"'
 
-echo "5. it is the AWS box's only"
-check    "a machine of yours is left alone" "$(( $(line 'pkg xvfb') > $(line '^if aws_box; then') && $(line 'pkg xvfb') < $(line '^else') ))" "1"
-
-echo; echo "steam-early: $pass passed, $fail failed"; [[ $fail -eq 0 ]]
+echo; echo "steam-early: $pass passed, $fail failed"; (( fail == 0 ))

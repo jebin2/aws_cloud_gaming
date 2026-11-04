@@ -23,6 +23,9 @@ fi
 if aws_box; then
   echo 'force-unsafe-io' > /etc/dpkg/dpkg.cfg.d/99-cg-build-unsafe-io
   echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/99-cg-build-no-translations
+  # The first boot has the image's own updater holding the package lock for a
+  # while; wait for it rather than fail.
+  echo 'DPkg::Lock::Timeout "900";' > /etc/apt/apt.conf.d/99-cg-build-lock-wait
 fi
 
 progress "installing base packages"

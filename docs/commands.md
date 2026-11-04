@@ -229,13 +229,15 @@ each have one job:
 | `line` | a detail line | `kind` (`ok`, `fail`, `warn`, `wait`, `kept`, `skip`, `info`, `cont`), `text`, `source` (`box` when it came from the instance) |
 | `step_end` | the step closes, including on exit or Ctrl+C | `rc`, `secs` |
 | `wait` | a wait is going on, or has ended | `id`, `state` (`waiting`, then once `done`, `timeout`, `interrupted` or `failed`), `text`, `secs` (so far), `of` (the limit; 0 for none) |
-| `part` | during a build, the box started a piece of the machine | `id` (`base`, `disk`, `idle-watchdog`, `tailscale`, `library`, `desktop`, `nvidia`, `display`, `autologin`, `steam`, `firefox`, `audio`, `sunshine`, `finishing`) |
+| `part` | during a build, the box started a piece of the machine - or, with `state` `done`, finished one (pieces run together on a supervised build) | `id` (`base`, `disk`, `idle-watchdog`, `tailscale`, `library`, `desktop`, `nvidia`, `display`, `autologin`, `steam`, `firefox`, `audio`, `sunshine`, `finishing`) |
 | `report` / `block` | a whole report or notice | `title`, `text` (newline-escaped) |
 | `ask` | a question. Answer with one line on stdin | `id`, `prompt`, `default`, `choices`, `secret` |
 | `problem` | a failure the screen should explain itself, sent just before the lines that report it | `kind`, `title`, `text` (words for a person), `charging` (`no`, or `other` when a game PC from before is still billing), `code` and `said` (what AWS answered, for the details), `region` |
 | `error` | `die` - the command then exits 1 | `text` |
 
-**Version 3** (`cg --version` prints `events 3`) only adds `problem`. Its kinds: `no_capacity`, `spot_slot_held`,
+**Version 4** (`cg --version` prints `events 4`) only adds the optional `state` on `part` (`done`), and the piece `steam-update`.
+
+**Version 3** only added `problem`. Its kinds: `no_capacity`, `spot_slot_held`,
 `spot_slot_leaving`, `limit`, `key_missing`, `not_allowed`, `not_enabled`, `sign_in_refused`, `account_blocked`, `unknown`.
 A screen picks its buttons by `kind`, never by the words.
 

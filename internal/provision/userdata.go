@@ -45,6 +45,10 @@ func stripComments(b []byte) []byte {
 // than riding along inside user-data. It used to: 9,572 bytes of 16,384 - 58% -
 // which left 68 bytes of headroom, not a budget but a tripwire.
 func HostBundle(fsys fs.FS, ntfyURL string) ([]byte, error) {
+	return hostBundle(fsys, ntfyURL, nil)
+}
+
+func hostBundle(fsys fs.FS, ntfyURL string, extra map[string][]byte) ([]byte, error) {
 	entries, err := fs.ReadDir(fsys, "host")
 	if err != nil {
 		return nil, err
@@ -84,6 +88,9 @@ func HostBundle(fsys fs.FS, ntfyURL string) ([]byte, error) {
 		if err := put("notify.url", 0o644, []byte(ntfyURL+"\n")); err != nil {
 			return nil, err
 		}
+	}
+	if err := tarEntries(tw, extra); err != nil {
+		return nil, err
 	}
 	if err := tw.Close(); err != nil {
 		return nil, err

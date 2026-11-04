@@ -3898,6 +3898,7 @@ const BUILD_PARTS = [
   ['Display', 'display'],
   ['Autologin', 'autologin'],
   ['Steam', 'steam'],
+  ['Steam update', 'steam-update'],
   ['Firefox', 'firefox'],
   ['Audio', 'audio'],
   ['Sunshine', 'sunshine'],
@@ -3906,8 +3907,14 @@ const BUILD_PARTS = [
 // done - because a later one has started, or the whole step has finished. cg
 // names each piece as the box starts it (a "part" event); `seen` is those ids in
 // the order they came.
-function partStates(seen, stepDone) {
+function partStates(seen, stepDone, finished = null) {
   const at = BUILD_PARTS.map(([, id]) => seen.indexOf(id));
+  // A supervised build says when each piece is done, and pieces run together: a
+  // piece that started and is not done is running, however many there are.
+  if (finished && finished.size) {
+    return BUILD_PARTS.map(([name, id], k) => [name,
+      stepDone || finished.has(id) ? 'done' : at[k] < 0 ? 'waiting' : 'running']);
+  }
   const latest = at.reduce((best, i, k) => (i > (best < 0 ? -1 : at[best]) ? k : best), -1);
   return BUILD_PARTS.map(([name], k) => [name,
     stepDone ? 'done' : at[k] < 0 ? 'waiting' : k === latest ? 'running' : 'done']);
@@ -3992,6 +3999,12 @@ function runStep(text, id) {
 }
 // The box started a piece of the machine (cg names it). The last piece, finishing
 // up, is the games step of its own.
+function runPartDone(id) {
+  if (!run || run.kind !== 'init' || !id) return;
+  if (!run.finished) run.finished = new Set();
+  run.finished.add(id);
+  if (!run.parts.includes(id)) run.parts.push(id);
+}
 function runPart(id) {
   if (!run || run.kind !== 'init' || !id) return;
   if (!run.parts.includes(id)) run.parts.push(id);
@@ -4290,7 +4303,7 @@ function paintRun() {
       const chips = document.createElement('div');
       chips.className = 'flex flex-wrap gap-space-xs mt-space-sm';
       chips.id = 'b-parts';
-      for (const [part, ps] of partStates(r.parts || [], false)) {
+      for (const [part, ps] of partStates(r.parts || [], false, r.finished)) {
         chips.append(Object.assign(document.createElement('span'), {
           className: 'pill ' + (ps === 'done' ? 'pill-ok' : ps === 'running' ? 'pill-warn' : ''),
           textContent: ({ done: '\u2713 ', running: '\u25cf ', waiting: '\u2026 ' })[ps] + part }));
@@ -4627,7 +4640,7 @@ window.cg.onEvent(({ id, event }) => {
   const ownSession = job.cmd[0] === 'host' && job.cmd[1] === 'open';
   if ((job.write && job.cmd[0] !== 'library' && !job.aside) || ownSession) {
     if (event.t === 'step') buildStep(event.text, event.id);
-    if (event.t === 'part') { runPart(event.id); paintRun(); }
+    if (event.t === 'part') { event.state === 'done' ? runPartDone(event.id) : runPart(event.id); paintRun(); }
     if (event.t === 'wait') { runWait(event); paintRun(); }
     if (event.t === 'step_end') buildStepEnd(event);
     if (event.t === 'line' || (event.t === 'raw' && event.stream === 'stdout')) buildLine(event);

@@ -366,13 +366,10 @@ WantedBy=graphical.target
 EOF
 systemctl enable steam-prewarm.service
 
-# Started NOW, during the build, on a virtual screen: the client's download and
-# unpack (about five minutes) has no need of the driver, the desktop or the games,
-# and used to start only after the reboot. It runs beside the rest of the build,
-# and the run after the reboot finds the client installed and goes on from there.
-# A run still going when the build ends is waited for (99-finish.sh) and, failing
-# that, stopped: the run after the reboot carries on from what was downloaded.
-pkg xvfb
+# The update of the client on a virtual screen, run by its own stage during the build
+# (73-steam-update.sh): its download and unpack (about five minutes) has no need of
+# the driver, the desktop or the games, and used to start only after the reboot. The
+# run after the reboot finds the client installed and goes on from there.
 cat > /usr/local/bin/steam-prewarm-early.sh <<'EOF'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -382,10 +379,6 @@ trap 'kill $XPID 2>/dev/null' EXIT
 CG_EARLY=1 CG_DISPLAY=:99 /usr/local/bin/steam-prewarm.sh
 EOF
 chmod 755 /usr/local/bin/steam-prewarm-early.sh
-systemctl reset-failed cg-steam-early.service 2>/dev/null || true
-systemd-run --quiet --unit=cg-steam-early --uid="$USER_NAME" --gid="$USER_NAME" \
-  --setenv=HOME="$USER_HOME" /usr/local/bin/steam-prewarm-early.sh \
-  || echo "note: the Steam client update could not be started early - it runs after the reboot instead"
 else
   install -o "$USER_NAME" -g "$USER_NAME" /dev/null "$USER_HOME/.steam-prewarmed"
 fi

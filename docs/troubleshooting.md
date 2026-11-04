@@ -134,6 +134,19 @@ your region.
 
 ## Building the box
 
+### Looking at a build that is stuck or failed
+
+The AWS box builds itself with `cg-build` (docs/architecture.md, Flow 1). On the box:
+
+    sudo cg-build status                       # each stage: pending, running, done, failed, blocked
+    sudo cg-build events --since 0 | tail      # the numbered record, what cg init reads
+    sudo tail -50 /var/log/cg-build/<stage>.log   # one stage's own output
+    sudo systemctl status cg-build             # the supervisor itself
+    sudo cg-build retry                        # run the failed stages again (or name them)
+
+A stage that failed is retried by itself first; `blocked` means a stage it needs failed. A reboot or a
+crash in the middle is not a failure: the stage that was running is run again.
+
 ### Install Tailscale first, not last
 
 Originally Tailscale was installed at the end of `bootstrap.sh`, after the driver and desktop.

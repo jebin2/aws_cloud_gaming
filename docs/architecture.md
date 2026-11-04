@@ -144,19 +144,41 @@ sequenceDiagram
   cg->>AWS: preflight - plan, GPU quota, region
   cg->>TS: prune offline nodes of earlier boxes
   cg->>AWS: budget, bucket and role, launch one-time spot with user-data
-  EC2->>EC2: install Tailscale, join the tailnet
+  EC2->>EC2: install Tailscale, join the tailnet, start cg-build
   cg->>TS: turn off key expiry for the new node
   EC2->>S3: start restoring games in the background
-  EC2->>EC2: desktop, NVIDIA driver, Xorg, Steam, Sunshine
+  EC2->>EC2: cg-build runs the stages: driver, Steam, desktop, Xorg, Sunshine - Steam's update beside them
   S3-->>EC2: games and Steam login land on the NVMe
   EC2->>EC2: reboot for the driver, restore resumes
-  cg->>EC2: follow the build log over ssh
+  cg->>EC2: follow cg-build's record over ssh
   cg->>EC2: create the Sunshine account, pair Moonlight
   cg-->>You: summary - box, games, Steam login, guards (10 to 20 min)
 ```
 
 The game restore runs **alongside** the build, so a 160 GB game is usually on disk by the time
 the desktop is. The box is only reported ready once the restore has finished.
+
+**The box builds itself, and keeps at it.** The user-data is small: it joins the tailnet (so the box can
+always be reached), fetches the bundle from S3 and starts `cg-build`, a service. Everything else is a
+**stage** in a plan that `cg init` writes (`provision.Plan`, checked before a box is paid for): what each
+needs, what lock it takes (the package installer lets one stage in at a time, in the plan's order),
+its timeout and its retries. Stages that need nothing from each other run together: the disks, the idle
+watchdog and the game restore at once, Steam's client update the moment Steam is installed, beside the
+package installs. The driver goes first because Steam installs its 32-bit NVIDIA library, and the last
+stage waits for everything, then reboots the machine into the desktop.
+
+`cg-build` is restart-resistant. It is a service that starts again if it dies and on every boot, and it
+keeps a record in `/var/lib/cg-build`: `state.json` (each stage pending, running, done, failed or blocked)
+and `events.jsonl` (every change, numbered). A stage is done only when it exited cleanly; one that was
+running when the machine or the supervisor was cut off is run again (so every stage is safe to run
+twice) without spending a retry. A failed stage is retried after a pause, then stops what needs it while
+the rest carry on; the build ends failed and says which stage and why. The laptop closing changes
+nothing: `cg init` only reads the record (`cg-build events --since N`, resuming where it stopped),
+and the app shows pieces running together. Each stage's own output is `/var/log/cg-build/<stage>.log`.
+`cg-build status` is the state, `cg-build retry [stage]` runs failed stages again. For anything that reads
+the older single log, the supervisor still writes its progress lines to
+`/var/log/cloud-gaming-bootstrap.log` and its result to `/var/lib/cloud-gaming-bootstrap.rc`. A machine
+of yours is not supervised: it gets the same modules as one script over ssh, as before.
 
 ## Flow 2 - `cg open`: play
 

@@ -10,16 +10,8 @@ aws_box && { chown -R "$USER_NAME:$USER_NAME" "$USER_HOME/.config" "$USER_HOME/.
 
 progress "finishing up"
 if aws_box; then
-# The Steam client update started early (72-steam-prewarm.sh): give it the time it
-# has left, up to five minutes, rather than cut it off; what it has not finished,
-# the run after the reboot does.
-for _ in $(seq 1 60); do systemctl is-active --quiet cg-steam-early.service 2>/dev/null || break; sleep 5; done
-systemctl stop cg-steam-early.service 2>/dev/null || true
 # Back to the safe setting for the machine that will run for hours (see 10-base.sh).
 rm -f /etc/dpkg/dpkg.cfg.d/99-cg-build-unsafe-io
-# Where the time went, from the markers: each step's seconds, those over 15 only.
-times=$(awk 'NR > 1 { d = $1 - prev; if (d >= 15) { printf "%s%s %ds", sep, name, d; sep = ", " } } { prev = $1; $1 = ""; name = substr($0, 2) }' /var/log/cg-build-times.log 2>/dev/null || true)
-[ -n "$times" ] && progress "where the time went: $times"
 cat > /etc/systemd/system/cloud-gaming-ready.service <<'EOF'
 [Unit]
 Description=Signal that the streaming desktop is up
@@ -40,7 +32,9 @@ EOF
 systemctl enable cloud-gaming-ready.service
 
 echo "bootstrap complete; rebooting into the desktop"
-reboot
+# The supervisor reboots after this stage is recorded done, so that it is not run
+# again after the boot; run on its own, this script does it itself.
+[ -n "${CG_SUPERVISED:-}" ] || reboot
 else
   # A machine of yours is ready now, and never rebooted by this build. A driver
   # added for an NVIDIA card loads at the next boot, which is yours to choose.
