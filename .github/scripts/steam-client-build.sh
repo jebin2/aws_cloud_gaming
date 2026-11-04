@@ -25,7 +25,8 @@ for _ in $(seq 1 30); do xset q >/dev/null 2>&1 && break; sleep 1; done
 steam +quit >/tmp/steam-run.log 2>&1 &
 
 root="$HOME/.local/share/Steam"
-size() { du -smL "$HOME/.steam" "$root" 2>/dev/null | awk '{t+=$1} END{print t+0}'; }
+# du fails while a folder is not there yet, and under pipefail that would end this.
+size() { local n; n=$(du -smL "$HOME/.steam" "$root" 2>/dev/null | awk '{t+=$1} END{print t+0}') || true; echo "${n:-0}"; }
 prev=-1; flat=0; waited=0
 # Finished when the client is unpacked and its size has stopped growing for a
 # minute: the same rule a box uses (lib/bootstrap.d/72-steam-prewarm.sh).
