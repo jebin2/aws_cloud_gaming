@@ -193,3 +193,21 @@ func TestProblemIsAnEventAndNothingInPlainOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestAPartIsAnEventForAScreenAndNothingInATerminal(t *testing.T) {
+	var o, e bytes.Buffer
+	plain := &Out{Stdout: &o, Stderr: &e}
+	plain.Part("nvidia", "")
+	plain.Part("nvidia", "done")
+	if o.Len()+e.Len() != 0 {
+		t.Errorf("raw JSON between the lines a person reads: %q %q", o.String(), e.String())
+	}
+	e.Reset()
+	js := &Out{Stdout: &o, Stderr: &e, JSON: true}
+	js.Part("nvidia", "")
+	js.Part("nvidia", "done")
+	got := e.String()
+	if !strings.Contains(got, `"t":"part"`) || !strings.Contains(got, `"id":"nvidia"`) || strings.Count(got, `"state":"done"`) != 1 {
+		t.Errorf("%q", got)
+	}
+}

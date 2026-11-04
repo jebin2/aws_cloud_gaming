@@ -130,6 +130,20 @@ func (o *Out) Wait(id, state, text string, secs, of int) {
 	}
 }
 
+// Part says a piece of the machine has started, or (state "done") finished, for a
+// screen to follow. Events only, like Problem: in a terminal it would be raw JSON
+// between the lines a person reads.
+func (o *Out) Part(id, state string) {
+	if !o.JSON {
+		return
+	}
+	if state == "" {
+		o.Event("part", "id", id)
+		return
+	}
+	o.Event("part", "id", id, "state", state)
+}
+
 // Problem states a failure for a screen: kind (stable), title and text (words for
 // a person), charging ("no", or "other" when an earlier game PC is still billing),
 // and the code and sentence AWS gave, for the details. Events only: the plain
