@@ -15,9 +15,35 @@ src=$(readlink -f "$src")
 mkdir -p "$out"
 parent=$(dirname "$src"); base=$(basename "$src")
 
+# The path from one folder to another, both absolute and inside this folder.
+relpath() {
+  local from=${1#/} to=${2#/} common=0 i out=
+  local -a f t
+  IFS=/ read -r -a f <<< "$from"
+  IFS=/ read -r -a t <<< "$to"
+  while [ "$common" -lt "${#f[@]}" ] && [ "$common" -lt "${#t[@]}" ] \
+        && [ "${f[$common]}" = "${t[$common]}" ]; do
+    common=$((common + 1))
+  done
+  for ((i = common; i < ${#f[@]}; i++)); do out+=../; done
+  for ((i = common; i < ${#t[@]}; i++)); do out+="${t[$i]}/"; done
+  [ -n "$out" ] || out=.
+  printf '%s\n' "${out%/}"
+}
+
 # A link that points back into this folder by its full path would point nowhere on
-# another machine. Steam's own are relative; if one is not, say so now.
-bad=$(find "$src" -type l -lname "$src*" | head -5 || true)
+# another machine. Steam's runtime makes several of its own that way
+# (steam-runtime/pinned_libs_*), so make every one of them relative: the link then
+# works wherever the archive is unpacked.
+fixed=0
+while IFS= read -r -d '' link; do
+  ln -snf "$(relpath "$(dirname "$link")" "$(readlink "$link")")" "$link"
+  fixed=$((fixed + 1))
+done < <(find "$src" -type l \( -lname "$src" -o -lname "$src/*" \) -print0)
+[ "$fixed" -eq 0 ] || echo "made $fixed link(s) inside the folder relative"
+
+# Anything still naming this folder by its full path would break elsewhere; say so now.
+bad=$(find "$src" -type l \( -lname "$src" -o -lname "$src/*" \) | head -5 || true)
 if [ -n "$bad" ]; then
   echo "absolute links into $src - they would break on another machine:"
   echo "$bad"

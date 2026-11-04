@@ -43,10 +43,13 @@ done
 check "the fingerprint is the archive's" "$(cd "$T/out" && sha256sum -c steam-client.sha256 >/dev/null 2>&1 && echo yes)" "yes"
 contains "the manifest has the client's version" "$(cat "$T/out/steam-client.json")" '"client_version":"1730000000"'
 
-echo "2. a link that points into the folder by its full path is refused"
-mk "$T/bad/Steam"; ln -s "$T/bad/Steam/ubuntu12_32" "$T/bad/Steam/abs"
-contains "it says so"        "$(bash .github/scripts/steam-client-pack.sh "$T/bad/Steam" "$T/badout" 2>&1; true)" "absolute links"
-check "  and makes nothing"   "$([[ -e $T/badout/steam-client.tar.zst ]] && echo made || echo none)" "none"
+echo "2. a link that names the folder by its full path is made relative"
+mk "$T/abs/Steam"; ln -s "$T/abs/Steam/ubuntu12_32" "$T/abs/Steam/abs"
+out=$(bash .github/scripts/steam-client-pack.sh "$T/abs/Steam" "$T/absout" 2>&1)
+contains "it says what it did" "$out" "made 1 link(s) inside the folder relative"
+check "  and makes the archive" "$([[ -e $T/absout/steam-client.tar.zst ]] && echo made || echo none)" "made"
+mkdir -p "$T/moved" && tar -I zstd -xf "$T/absout/steam-client.tar.zst" -C "$T/moved"
+check "  with a link that works anywhere" "$(readlink "$T/moved/Steam/abs")" "ubuntu12_32"
 
 echo "3. a new box uses a matching archive"
 mkdir -p "$T/web" && cp "$T/out"/steam-client.* "$T/web/"
