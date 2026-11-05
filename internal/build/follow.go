@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -182,7 +183,15 @@ func (f Follower) Stream(ctx context.Context) error {
 	}
 	seen, rebooted, failedSeen, last, stage := 0, false, false, "", "starting"
 	evSeq, evOnly := 0, false
+	// Which stages are running, and when a line was last shown: a long install
+	// prints nothing between its start and its end, and a screen with no new line
+	// for two minutes looks like a build that has stopped.
+	running := map[string]bool{}
+	var now, lastLine time.Duration
+	say := f.Log
+	f.Log = func(s string) { lastLine = now; say(s) }
 	for waited := time.Duration(0); waited < timeout; waited += 10 * time.Second {
+		now = waited
 		var out []byte
 		var err error
 		fromEvents := false
@@ -202,12 +211,15 @@ func (f Follower) Stream(ctx context.Context) error {
 		switch {
 		case err == nil && fromEvents:
 			evOnly = evOnly || strings.TrimSpace(string(out)) != ""
-			done, stopped := f.readEvents(ctx, out, &evSeq, &stage, &last, &failedSeen, &rebooted)
+			done, stopped := f.readEvents(ctx, out, &evSeq, &stage, &last, &failedSeen, &rebooted, running)
 			if stopped {
 				f.stoppedLines(ctx, last)
 				return ErrStopped
 			}
 			_ = done
+			if len(running) > 0 && waited-lastLine >= QuietBeat {
+				f.Log(Working(running, waited-lastLine))
+			}
 			if _, err := f.R.SSH(ctx, "test -f /var/lib/cloud-gaming-ready"); err == nil {
 				f.Log(fmt.Sprintf("build complete after %dm", int(waited/time.Minute)))
 				f.beat("build.box", "done", stage, waited, timeout)
@@ -340,7 +352,7 @@ func (f Follower) WaitSteam(ctx context.Context, timeout time.Duration) bool {
 
 // readEvents shows what the supervisor has done since the last read, in the words
 // the log's markers always used, and says whether the build has ended in failure.
-func (f Follower) readEvents(ctx context.Context, out []byte, seq *int, stage, last *string, failedSeen, rebooted *bool) (done, stopped bool) {
+func (f Follower) readEvents(ctx context.Context, out []byte, seq *int, stage, last *string, failedSeen, rebooted *bool, running map[string]bool) (done, stopped bool) {
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		var e event
 		if line == "" || json.Unmarshal([]byte(line), &e) != nil || e.Seq <= *seq {
@@ -354,6 +366,11 @@ func (f Follower) readEvents(ctx context.Context, out []byte, seq *int, stage, l
 			if id := PartOf(e.Text); id != "" && f.Part != nil {
 				f.Part(id)
 			}
+			// The client from the archive is in place long before the stage that
+			// would have updated it ends: its piece is done now, not minutes later.
+			if archiveCame.MatchString(e.Text) && f.PartDone != nil {
+				f.PartDone("steam-update")
+			}
 		case "ok":
 			f.Log("  ok  " + e.Text)
 		case "check_failed":
@@ -364,6 +381,7 @@ func (f Follower) readEvents(ctx context.Context, out []byte, seq *int, stage, l
 		case "interrupted":
 			f.Log(fmt.Sprintf("%s was cut off - running it again", e.Stage))
 		case "fail":
+			delete(running, e.Stage)
 			*last, *failedSeen = e.Stage+" "+e.Text, true
 			f.Log(fmt.Sprintf("FAILED: %s %s", e.Stage, e.Text))
 			for _, l := range strings.Split(strings.TrimSpace(e.Tail), "\n") {
@@ -378,7 +396,13 @@ func (f Follower) readEvents(ctx context.Context, out []byte, seq *int, stage, l
 		case "reboot":
 			f.Log("host rebooting - reconnecting")
 			*rebooted = true
+		case "start":
+			running[e.Stage] = true
 		case "done":
+			delete(running, e.Stage)
+			if e.Secs >= DoneLineMin.Seconds() {
+				f.Log(fmt.Sprintf("  done  %s (%ds)", StageLabel(e.Stage), int(e.Secs+0.5)))
+			}
 			if id := stageParts[e.Stage]; id != "" && f.PartDone != nil {
 				f.PartDone(id)
 			}
@@ -389,4 +413,43 @@ func (f Follower) readEvents(ctx context.Context, out []byte, seq *int, stage, l
 		}
 	}
 	return done, stopped
+}
+
+// archiveCame is the build's line for a Steam client that came from the archive.
+var archiveCame = regexp.MustCompile(`(?i)^the steam client came from the archive`)
+
+// QuietBeat is how long a build may print nothing before it says what it is doing.
+const QuietBeat = 30 * time.Second
+
+// DoneLineMin is how long a stage must have taken to get a line of its own when
+// it ends: the half-second ones are not news.
+const DoneLineMin = 5 * time.Second
+
+// stageLabels name each stage of the plan for a person.
+var stageLabels = map[string]string{
+	"base": "base packages", "scratch": "game disk", "watchdog": "auto-stop",
+	"library": "game library", "nvidia": "NVIDIA driver", "steam": "Steam",
+	"steam-client": "Steam client download", "steam-setup": "Steam setup",
+	"steam-update": "Steam client", "desktop": "desktop", "xorg": "display",
+	"autologin": "autologin", "firefox": "Firefox", "audio": "audio",
+	"sunshine": "Sunshine", "finish": "finishing up",
+}
+
+// StageLabel is a stage's name for a person; a stage it does not know is itself.
+func StageLabel(stage string) string {
+	if l := stageLabels[stage]; l != "" {
+		return l
+	}
+	return stage
+}
+
+// Working is the line for a build that has printed nothing for a while: which
+// stages are running, in a steady order, and for how long it has been quiet.
+func Working(running map[string]bool, quiet time.Duration) string {
+	var names []string
+	for st := range running {
+		names = append(names, StageLabel(st))
+	}
+	sort.Strings(names)
+	return fmt.Sprintf("  ...still working: %s (%ds since the last line)", strings.Join(names, ", "), int(quiet/time.Second))
 }
