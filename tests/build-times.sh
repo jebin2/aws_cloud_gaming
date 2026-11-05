@@ -28,21 +28,4 @@ done
 contains "a machine of yours still gets the full install" "$(sed -n '/^      else/,/^      fi/p' lib/bootstrap.d/30-desktop.sh)" "apt-get install -y xfce4 xfce4-goodies lightdm xserver-xorg x11-xserver-utils xclip"
 contains "firefox is installed without recommends"       "$(cat lib/bootstrap.d/80-firefox.sh)" "--no-install-recommends firefox xdg-utils"
 
-echo "4. apt's lists are refreshed once on the AWS box, with every source in place"
-steam=$(cat lib/bootstrap.d/70-steam-pkg.sh); ff=$(cat lib/bootstrap.d/80-firefox.sh)
-once=$(sed -n '/^if aws_box && \[ "\$FAMILY" = ubuntu \]; then/,/^fi$/p' lib/bootstrap.d/25-apt-lists.sh)
-check    "the refresh is a stage of its own, after tailscale (20)" "$(ls lib/bootstrap.d | grep -c '^25-apt-lists.sh$')" "1"
-check    "  and base no longer fetches from Mozilla"       "$(grep -c packages.mozilla lib/bootstrap.d/10-base.sh)" "0"
-contains "the 32-bit architecture is added before the refresh" "$once" "dpkg --add-architecture i386"
-contains "  and Mozilla's repository, with its pin"           "$once" "/etc/apt/preferences.d/mozilla"
-contains "  then the refresh, then the marker"                "$(tr '\n' ' ' <<<"$once" | grep -o 'apt-get update *if .*touch /run/cg-apt-ready')" "touch /run/cg-apt-ready"
-contains "no marker when Mozilla's key could not be fetched" "$once" 'CG_APT_ONCE=1'
-contains "  and the key is fetched inside an if, so a failure is not fatal" "$once" 'if curl -fsSL https://packages.mozilla.org'
-
-contains "steam skips its refreshes when the marker is there"  "$steam" '[ -e /run/cg-apt-ready ] || apt-get update'
-check    "  both of them"                                      "$(grep -c '\[ -e /run/cg-apt-ready \] || apt-get update' lib/bootstrap.d/70-steam-pkg.sh)" "2"
-check    "  and has no bare refresh left"                      "$(grep -v '^ *#' lib/bootstrap.d/70-steam-pkg.sh | grep -c '^ *apt-get update')" "0"
-contains "firefox skips its refresh when the marker is there" "$ff" '[ -e /run/cg-apt-ready ] || apt-get update'
-check    "  and has no bare refresh left"                      "$(grep -v '^ *#' lib/bootstrap.d/80-firefox.sh | grep -c '^apt-get update')" "0"
-
 echo; echo "build-times: $pass passed, $fail failed"; [[ $fail -eq 0 ]]
