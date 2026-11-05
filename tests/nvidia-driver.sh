@@ -94,7 +94,7 @@ check "  and before the verify" "$([[ ${ln_p:-0} -lt ${ln_v:-0} ]] && echo yes)"
 
 echo "6. the install still reaches for the newest, which is why the floor is a floor"
 contains "newest open driver is chosen" "$src" "sort -uV | tail -1"
-contains "  with ubuntu-drivers as fallback" "$src" "|| ubuntu-drivers install || ubuntu-drivers autoinstall"
+contains "  with ubuntu-drivers as fallback" "$src" "|| ubuntu_drivers install || ubuntu_drivers autoinstall"
 
 echo "7. this file's own needles are safe"
 # A needle containing ${...} or $(...) inside DOUBLE quotes is expanded by bash
