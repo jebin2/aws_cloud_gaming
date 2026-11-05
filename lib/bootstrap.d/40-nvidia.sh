@@ -54,7 +54,24 @@ if aws_box || { [[ -n $(nvidia_card) ]] && ! nvidia_driver_installed; }; then
         ubuntu-drivers install || ubuntu-drivers autoinstall
       elif [[ -n $NEWEST ]]; then
         progress "installing $NEWEST"
-        apt-get install -y "$NEWEST" || ubuntu-drivers install || ubuntu-drivers autoinstall
+        # The driver package wants a kernel module from either DKMS or Ubuntu's
+        # prebuilt set. DKMS compiles it on the box, which is most of this step -
+        # about three of its four minutes, with the download taking twelve seconds.
+        # The prebuilt module for the AWS kernel the box is running is named next
+        # to the driver, so apt takes it instead. Only when its meta-package is
+        # pinned to that very kernel: one pointing at a newer kernel would pull the
+        # kernel in too. Otherwise, or if that install fails, the plain install.
+        NV_VER=${NEWEST#nvidia-driver-}; NV_VER=${NV_VER%-open}
+        NV_PRE="linux-modules-nvidia-$NV_VER-open-$(uname -r)"
+        NV_META="linux-modules-nvidia-$NV_VER-open-aws"
+        if aws_box && apt-cache depends "$NV_META" 2>/dev/null | grep -qx "  Depends: $NV_PRE" \
+           && apt-cache show "$NV_PRE" >/dev/null 2>&1; then
+          progress "using Ubuntu's prebuilt kernel module for this kernel - nothing to compile"
+          apt-get install -y "$NEWEST" "$NV_PRE" "$NV_META" || apt-get install -y "$NEWEST" \
+            || ubuntu-drivers install || ubuntu-drivers autoinstall
+        else
+          apt-get install -y "$NEWEST" || ubuntu-drivers install || ubuntu-drivers autoinstall
+        fi
       else
         ubuntu-drivers install || ubuntu-drivers autoinstall
       fi
