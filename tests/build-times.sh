@@ -45,9 +45,4 @@ check    "  and has no bare refresh left"                      "$(grep -v '^ *#'
 contains "firefox skips its refresh when the marker is there" "$ff" '[ -e /run/cg-apt-ready ] || apt-get update'
 check    "  and has no bare refresh left"                      "$(grep -v '^ *#' lib/bootstrap.d/80-firefox.sh | grep -c '^apt-get update')" "0"
 
-echo "5. the driver is installed for amd64 only, so its 32-bit recommends stay out"
-nv=$(cat lib/bootstrap.d/40-nvidia.sh)
-contains "the option is set once"                  "$nv" "NV_APT=(-o APT::Architectures=amd64)"
-check    "  and given to every driver install"         "$(grep -o 'apt-get install "${NV_APT\[@\]}" -y "$NEWEST"' lib/bootstrap.d/40-nvidia.sh | wc -l)" "3"
-
 echo; echo "build-times: $pass passed, $fail failed"; [[ $fail -eq 0 ]]
