@@ -26,7 +26,7 @@ check "the last started runs, earlier ones are done" \
 echo "2. a supervised build: started and not finished means running, however many"
 check "two together" \
   "$(js "($states)(partStates(['nvidia','steam','steam-update','desktop'], false, new Set(['nvidia','steam']))).split(',').filter(s => /running|done/.test(s)).join(',')")" \
-  "Desktop:running,NVIDIA driver:done,Steam:done,Steam update:running"
+  "Desktop:running,NVIDIA driver:done,Steam:done,Steam client:running"
 check "one that has not started is waiting" \
   "$(js "($states)(partStates(['nvidia'], false, new Set(['base']))).split(',').find(s => s.startsWith('Firefox'))")" \
   "Firefox:waiting"

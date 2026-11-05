@@ -3898,7 +3898,7 @@ const BUILD_PARTS = [
   ['Display', 'display'],
   ['Autologin', 'autologin'],
   ['Steam', 'steam'],
-  ['Steam update', 'steam-update'],
+  ['Steam client', 'steam-update'],
   ['Firefox', 'firefox'],
   ['Audio', 'audio'],
   ['Sunshine', 'sunshine'],
