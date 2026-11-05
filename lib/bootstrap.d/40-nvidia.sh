@@ -64,7 +64,11 @@ if aws_box || { [[ -n $(nvidia_card) ]] && ! nvidia_driver_installed; }; then
         NV_VER=${NEWEST#nvidia-driver-}; NV_VER=${NV_VER%-open}
         NV_PRE="linux-modules-nvidia-$NV_VER-open-$(uname -r)"
         NV_META="linux-modules-nvidia-$NV_VER-open-aws"
-        if aws_box && apt-cache depends "$NV_META" 2>/dev/null | grep -qx "  Depends: $NV_PRE" \
+        # Read whole into a variable, not piped into grep -q: under pipefail a reader
+        # that stops at its first match kills apt-cache still writing (exit 141),
+        # and the condition then fails on a package that is there.
+        NV_DEPS=$(apt-cache depends "$NV_META" 2>/dev/null) || NV_DEPS=
+        if aws_box && grep -qx "  Depends: $NV_PRE" <<<"$NV_DEPS" \
            && apt-cache show "$NV_PRE" >/dev/null 2>&1; then
           progress "using Ubuntu's prebuilt kernel module for this kernel - nothing to compile"
           apt-get install -y "$NEWEST" "$NV_PRE" "$NV_META" || apt-get install -y "$NEWEST" \
