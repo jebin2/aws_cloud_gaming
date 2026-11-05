@@ -309,11 +309,18 @@ func (f Follower) Stream(ctx context.Context) error {
 // Steam is ready.
 func (f Follower) WaitSteam(ctx context.Context, timeout time.Duration) bool {
 	last, beat := "", time.Duration(0)
-	for waited := time.Duration(0); waited < timeout; waited += 15 * time.Second {
+	for waited := time.Duration(0); waited < timeout; waited += 3 * time.Second {
 		if _, err := f.R.SSH(ctx, "test -f ~/.steam-prewarmed"); err == nil {
 			f.Log(fmt.Sprintf("steam ready after %dm", int(waited/time.Minute)))
 			f.beat("build.steam", "done", "ready", waited, timeout)
 			return true
+		}
+		// The marker is asked about every few seconds - it is the end of the wait,
+		// and a quarter-minute step added up to fifteen seconds after Steam was
+		// ready - but the phase and size are a `du` over gigabytes: every fifteen.
+		if int(waited/time.Second)%15 != 0 {
+			f.Sleep(3 * time.Second)
+			continue
 		}
 		// Report the phase, not just the size: after the download the client stops
 		// growing while library adoption and the dock pin still run, which read as
@@ -343,7 +350,7 @@ func (f Follower) WaitSteam(ctx context.Context, timeout time.Duration) bool {
 			beat = waited
 		}
 		f.beat("build.steam", "waiting", cur, waited, timeout)
-		f.Sleep(15 * time.Second)
+		f.Sleep(3 * time.Second)
 	}
 	f.beat("build.steam", "timeout", last, timeout, timeout)
 	f.Log(fmt.Sprintf("steam did not finish within %dm - check ~/steam-prewarm.log on the box", int(timeout/time.Minute)))

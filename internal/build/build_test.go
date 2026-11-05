@@ -196,7 +196,7 @@ func TestRebootIsSaidOnceAfterFiveMinutesOfNoAnswer(t *testing.T) {
 }
 
 func TestSteamWaitReportsPhasesNotJustSizes(t *testing.T) {
-	r := &remote{steamAt: 6, phase: "downloading|300M\n"}
+	r := &remote{steamAt: 26, phase: "downloading|300M\n"} // asked every 3s: the 26th is 75s in
 	f, logs, _ := follower(r)
 	if !f.WaitSteam(context.Background(), 30*time.Minute) {
 		t.Fatal(*logs)
@@ -310,5 +310,18 @@ func TestEveryProgressLineOfTheBoxNamesAPiece(t *testing.T) {
 	}
 	if n < 10 {
 		t.Errorf("only %d progress lines found - the pattern no longer matches the modules", n)
+	}
+}
+
+func TestSteamBeingReadyIsNoticedWithinSecondsNotAQuarterMinute(t *testing.T) {
+	// Ready on the third ask: a quarter-minute step made it 30 seconds, on a wait
+	// that was otherwise over; asked every three seconds it is 6.
+	r := &remote{steamAt: 3, phase: "downloading|300M\n"}
+	f, logs, slept := follower(r)
+	if !f.WaitSteam(context.Background(), 30*time.Minute) {
+		t.Fatal(*logs)
+	}
+	if *slept != 6*time.Second {
+		t.Errorf("slept %v before noticing", *slept)
 	}
 }
