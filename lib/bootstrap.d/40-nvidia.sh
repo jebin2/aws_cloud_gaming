@@ -67,6 +67,11 @@ if aws_box || { [[ -n $(nvidia_card) ]] && ! nvidia_driver_installed; }; then
         # to the driver, so apt takes it instead. Only when its meta-package is
         # pinned to that very kernel: one pointing at a newer kernel would pull the
         # kernel in too. Otherwise, or if that install fails, the plain install.
+        # amd64 only for these installs: the driver recommends five 32-bit NVIDIA
+        # libraries (compute, decode, encode, fbc, gl), and once Steam's 32-bit
+        # architecture is added (25-apt-lists.sh) apt takes them all - 850 MB, none
+        # of it needed to stream. Steam's own install brings the one it uses.
+        NV_APT=(-o APT::Architectures=amd64)
         NV_VER=${NEWEST#nvidia-driver-}; NV_VER=${NV_VER%-open}
         NV_PRE="linux-modules-nvidia-$NV_VER-open-$(uname -r)"
         NV_META="linux-modules-nvidia-$NV_VER-open-aws"
@@ -77,10 +82,10 @@ if aws_box || { [[ -n $(nvidia_card) ]] && ! nvidia_driver_installed; }; then
         if aws_box && grep -qx "  Depends: $NV_PRE" <<<"$NV_DEPS" \
            && apt-cache show "$NV_PRE" >/dev/null 2>&1; then
           progress "using Ubuntu's prebuilt kernel module for this kernel - nothing to compile"
-          apt-get install -y "$NEWEST" "$NV_PRE" "$NV_META" || apt-get install -y "$NEWEST" \
+          apt-get install "${NV_APT[@]}" -y "$NEWEST" "$NV_PRE" "$NV_META" || apt-get install "${NV_APT[@]}" -y "$NEWEST" \
             || ubuntu_drivers install || ubuntu_drivers autoinstall
         else
-          apt-get install -y "$NEWEST" || ubuntu_drivers install || ubuntu_drivers autoinstall
+          apt-get install "${NV_APT[@]}" -y "$NEWEST" || ubuntu_drivers install || ubuntu_drivers autoinstall
         fi
       else
         ubuntu_drivers install || ubuntu_drivers autoinstall
