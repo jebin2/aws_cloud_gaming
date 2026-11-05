@@ -16,11 +16,18 @@ rm -f /etc/dpkg/dpkg.cfg.d/99-cg-build-unsafe-io
 # sort and sed, not cut short by head: under pipefail a reader that stops early
 # kills the writer (exit 141).
 if [ -s /var/log/cg-timings.log ]; then
-  awk '{ s=$1; e=$2; d=$3; t=e-s; lab=$4; for (i=5;i<=NF;i++) lab=lab" "$i
+  # Each install line is tab-separated: sort key, the timing, and what it brought in.
+  awk '$1 == "pkgs" { w[$2] = $3 " packages, " $4 " MB; largest:"; for (i=5;i<=NF;i++) w[$2] = w[$2] " " $i; next }
+       { s=$1; e=$2; d=$3; t=e-s; lab=$4; for (i=5;i<=NF;i++) lab=lab" "$i
          if (length(lab) > 72) lab=substr(lab,1,72) "..."
-         if (d != "-" && d >= s) printf "%06.1f %.0fs (fetch %.0fs, dpkg %.0fs) %s\n", t, t, d-s, e-d, lab
-         else printf "%06.1f %.0fs %s\n", t, t, lab }' /var/log/cg-timings.log \
-    | sort -rn | sed -n 1,10p | cut -d' ' -f2- | while IFS= read -r _l; do progress "timing: $_l"; done
+         if (d != "-" && d >= s) line=sprintf("%.0fs (fetch %.0fs, dpkg %.0fs) %s", t, d-s, e-d, lab)
+         else line=sprintf("%.0fs %s", t, lab)
+         L[s] = sprintf("%06.1f\t%s", t, line) }
+       END { for (k in L) { split(L[k], p, "\t"); printf "%s\t%s\t%s\n", p[1], p[2], (k in w) ? w[k] : "" } }' /var/log/cg-timings.log \
+    | sort -rn | sed -n 1,10p | { _i=0; while IFS=$'\t' read -r _k _l _w; do
+        _i=$((_i + 1)); progress "timing: $_l"
+        if [ "$_i" -le 3 ] && [ -n "$_w" ]; then progress "timing:   brought in $_w"; fi
+      done; }
 fi
 rm -f /etc/apt/apt.conf.d/99-cg-build-timing /usr/local/sbin/update-initramfs
 cat > /etc/systemd/system/cloud-gaming-ready.service <<'EOF'

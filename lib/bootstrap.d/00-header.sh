@@ -23,12 +23,29 @@ progress() { set +x; echo ">>> $*"; set -x; }
 # /var/log/cg-timings.log, "start end dpkg-start command"; 99-finish.sh prints the
 # slowest. A function, not a script on the PATH: it must not be what apt itself runs.
 apt-get() {
-  local s e d rc=0
+  local s e d rc=0 n=0
   s=$(date +%s.%N); rm -f /run/cg-dpkg-start
+  [ "${CG_TARGET:-}" = aws ] && n=$(wc -l < /var/log/dpkg.log 2>/dev/null || echo 0)
   command apt-get "$@" || rc=$?
   e=$(date +%s.%N); d=$(cat /run/cg-dpkg-start 2>/dev/null) || d=-
-  if [ "${CG_TARGET:-}" = aws ]; then echo "$s $e ${d:--} apt-get $*" >> /var/log/cg-timings.log; fi
+  if [ "${CG_TARGET:-}" = aws ]; then
+    echo "$s $e ${d:--} apt-get $*" >> /var/log/cg-timings.log
+    cg_weigh "$s" "$n" || true
+  fi
   return $rc
+}
+# What an install brought in: how many packages, how large they are unpacked, and
+# the three largest - read from what dpkg logged since line $2. A record of its own
+# ("pkgs <start> <count> <MB> name MB ..."), joined to the install's by its start.
+cg_weigh() {
+  local names
+  names=$(tail -n +$(( $2 + 1 )) /var/log/dpkg.log 2>/dev/null | awk '$3 == "install" { print $4 }') || return 0
+  [ -n "$names" ] || return 0
+  # shellcheck disable=SC2086
+  dpkg-query -W -f '${Package} ${Installed-Size}\n' $names 2>/dev/null \
+    | sort -k2 -rn \
+    | awk -v s="$1" '{ n++; kb += $2; if (n <= 3) top = top " " $1 " " int($2 / 1024) "MB" }
+                     END { printf "pkgs %s %d %d%s\n", s, n, kb / 1024, top }' >> /var/log/cg-timings.log
 }
 
 # Assert that a step achieved its effect, not merely that it ran. Nearly every

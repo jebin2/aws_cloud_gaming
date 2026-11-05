@@ -35,7 +35,13 @@ if aws_box || { [[ -n $(nvidia_card) ]] && ! nvidia_driver_installed; }; then
   case $FAMILY in
     ubuntu|debian)
       progress "installing nvidia driver (the slowest step, ~10 min)"
-      apt-get install -y ubuntu-drivers-common
+      # ubuntu-drivers is only the fallback (an older card of yours, or an install
+      # that failed): it is fetched when one is needed, not for every build - that
+      # was six seconds of the AWS box's critical path.
+      ubuntu_drivers() {
+        command -v ubuntu-drivers >/dev/null 2>&1 || apt-get install -y ubuntu-drivers-common
+        ubuntu-drivers "$@"
+      }
       # The desktop driver, not --gpgpu: we need the X11 display components, which
       # the headless compute build omits.
       # Sunshine's bundled ffmpeg needs NVENC API 13.1, which arrived in driver 610.
@@ -51,7 +57,7 @@ if aws_box || { [[ -n $(nvidia_card) ]] && ! nvidia_driver_installed; }; then
       # floor - the newest open driver does not run on it at all.
       if [[ -n $NVIDIA_OWN_OLD ]]; then
         progress "installing nvidia driver (the one Ubuntu recommends for this older card)"
-        ubuntu-drivers install || ubuntu-drivers autoinstall
+        ubuntu_drivers install || ubuntu_drivers autoinstall
       elif [[ -n $NEWEST ]]; then
         progress "installing $NEWEST"
         # The driver package wants a kernel module from either DKMS or Ubuntu's
@@ -72,12 +78,12 @@ if aws_box || { [[ -n $(nvidia_card) ]] && ! nvidia_driver_installed; }; then
            && apt-cache show "$NV_PRE" >/dev/null 2>&1; then
           progress "using Ubuntu's prebuilt kernel module for this kernel - nothing to compile"
           apt-get install -y "$NEWEST" "$NV_PRE" "$NV_META" || apt-get install -y "$NEWEST" \
-            || ubuntu-drivers install || ubuntu-drivers autoinstall
+            || ubuntu_drivers install || ubuntu_drivers autoinstall
         else
-          apt-get install -y "$NEWEST" || ubuntu-drivers install || ubuntu-drivers autoinstall
+          apt-get install -y "$NEWEST" || ubuntu_drivers install || ubuntu_drivers autoinstall
         fi
       else
-        ubuntu-drivers install || ubuntu-drivers autoinstall
+        ubuntu_drivers install || ubuntu_drivers autoinstall
       fi
 
       # The highest nvidia-driver-NNN actually installed, whatever its name. Asking
