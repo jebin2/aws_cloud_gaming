@@ -22,7 +22,7 @@ contains "the first boot has the image's own updater holding it" "$base" 'DPkg::
 echo "3. the AWS box's desktop and browser leave out what they do not use"
 aws_desk=$(sed -n '/^      if aws_box; then/,/^      else/p' lib/bootstrap.d/30-desktop.sh)
 contains "the desktop is installed without recommends"  "$aws_desk" "--no-install-recommends xfce4"
-for keep in xserver-xorg-legacy xfce4-notifyd thunar-volman tango-icon-theme policykit-1-gnome; do
+for keep in xserver-xorg-legacy xfce4-notifyd thunar-volman tango-icon-theme policykit-1-gnome greybird-gtk-theme elementary-xfce-icon-theme desktop-base librsvg2-common xdg-user-dirs tumbler gvfs; do
   contains "  and keeps $keep" "$aws_desk" "$keep"
 done
 contains "a machine of yours still gets the full install" "$(sed -n '/^      else/,/^      fi/p' lib/bootstrap.d/30-desktop.sh)" "apt-get install -y xfce4 xfce4-goodies lightdm xserver-xorg x11-xserver-utils xclip"
