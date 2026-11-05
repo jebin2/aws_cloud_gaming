@@ -19,7 +19,9 @@ if aws_box || ! steam_present; then
     ubuntu|debian)
       progress "installing steam"
       dpkg --add-architecture i386
-      apt-get update
+      # The AWS box refreshed apt's lists once, at the start of the build, with the
+      # 32-bit architecture and every source in place (10-base.sh).
+      [ -e /run/cg-apt-ready ] || apt-get update
       # multiverse is Ubuntu's; Debian, and an Ubuntu derivative with its own sources
       # list, get the runtime from the .deb's dependencies instead.
       if [ "$FAMILY" = ubuntu ]; then
@@ -28,7 +30,7 @@ if aws_box || ! steam_present; then
         # derivative of yours may manage its sources its own way.
         if aws_box; then add-apt-repository -y multiverse; else add-apt-repository -y multiverse || true; fi
       fi
-      apt-get update
+      [ -e /run/cg-apt-ready ] || apt-get update
 
       # Valve's own .deb, not Ubuntu's `steam-installer`. The Ubuntu/Debian package is
       # a stub: it ships no client, downloads the bootstrap on first run, and puts a

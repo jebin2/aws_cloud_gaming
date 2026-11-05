@@ -13,7 +13,8 @@ echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://package
 # Without the pin, Ubuntu's snap transitional package outranks the real .deb.
 printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' \
   > /etc/apt/preferences.d/mozilla
-apt-get update
+# Refreshed once for the whole build, with Mozilla's repository already added (10-base.sh).
+[ -e /run/cg-apt-ready ] || apt-get update
 # Without recommended packages: only the perl modules for xdg-utils' extras.
 apt-get install -y --no-install-recommends firefox xdg-utils
 update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/bin/firefox 200 || true

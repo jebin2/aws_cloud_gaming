@@ -41,6 +41,10 @@ const apt = "apt"
 //     stage, and the update then has little left to do. With no archive, the update
 //     downloads the client from Valve, starting the moment Steam is installed and
 //     running beside the installs: it needs only the network.
+//   - apt's lists are refreshed once, by a stage of its own, with the 32-bit
+//     architecture and Mozilla's repository already added; every stage that installs
+//     a package waits for it, and none refreshes for itself (three refreshes were
+//     thirty seconds of a build that is, apt lock and all, a queue of installs).
 //   - The disks, the idle watchdog and the game restore need no package at all and
 //     start at once; the restore then runs for as long as it takes.
 //   - Nothing graphical is configured before the driver and the desktop it needs.
@@ -51,17 +55,18 @@ func Plan() []Stage {
 		{Name: "scratch", File: "12-scratch.sh", Timeout: 300, Retries: 1},
 		{Name: "watchdog", File: "15-watchdog.sh", Timeout: 300, Retries: 1},
 		{Name: "library", File: "22-library.sh", Needs: []string{"scratch"}, Timeout: 900, Retries: 2},
-		{Name: "nvidia", File: "40-nvidia.sh", Needs: []string{"base"}, Lock: apt, Timeout: 2400, Retries: 2},
+		{Name: "apt-lists", File: "25-apt-lists.sh", Needs: []string{"base"}, Lock: apt, Timeout: 600, Retries: 2},
+		{Name: "nvidia", File: "40-nvidia.sh", Needs: []string{"apt-lists"}, Lock: apt, Timeout: 2400, Retries: 2},
 		{Name: "steam", File: "70-steam-pkg.sh", Needs: []string{"nvidia"}, Lock: apt, Timeout: 1200, Retries: 2},
 		{Name: "steam-client", File: "71-steam-client.sh", Needs: []string{"base"}, Timeout: 1200},
 		{Name: "steam-setup", File: "72-steam-prewarm.sh", Needs: []string{"steam"}, Timeout: 300, Retries: 1},
 		{Name: "steam-update", File: "73-steam-update.sh", Needs: []string{"steam-setup", "steam-client"}, Timeout: 1500},
-		{Name: "desktop", File: "30-desktop.sh", Needs: []string{"base"}, Lock: apt, Timeout: 1500, Retries: 2},
+		{Name: "desktop", File: "30-desktop.sh", Needs: []string{"apt-lists"}, Lock: apt, Timeout: 1500, Retries: 2},
 		{Name: "xorg", File: "50-xorg.sh", Needs: []string{"nvidia"}, Timeout: 300, Retries: 1},
 		{Name: "autologin", File: "60-autologin.sh", Needs: []string{"desktop", "xorg"}, Timeout: 300, Retries: 1},
-		{Name: "firefox", File: "80-firefox.sh", Needs: []string{"base"}, Lock: apt, Timeout: 600, Retries: 2},
-		{Name: "audio", File: "92-audio.sh", Needs: []string{"base"}, Lock: apt, Timeout: 600, Retries: 2},
-		{Name: "sunshine", File: "95-sunshine.sh", Needs: []string{"base"}, Lock: apt, Timeout: 900, Retries: 2},
+		{Name: "firefox", File: "80-firefox.sh", Needs: []string{"apt-lists"}, Lock: apt, Timeout: 600, Retries: 2},
+		{Name: "audio", File: "92-audio.sh", Needs: []string{"apt-lists"}, Lock: apt, Timeout: 600, Retries: 2},
+		{Name: "sunshine", File: "95-sunshine.sh", Needs: []string{"apt-lists"}, Lock: apt, Timeout: 900, Retries: 2},
 		{Name: "finish", File: "99-finish.sh", Needs: []string{
 			"scratch", "watchdog", "library", "steam-update", "autologin", "firefox", "audio", "sunshine"},
 			Timeout: 600, Retries: 1, RebootAfter: true},
