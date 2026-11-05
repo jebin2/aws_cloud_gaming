@@ -178,6 +178,10 @@ func (i *Init) Run(ctx context.Context) int {
 	if rc != 0 {
 		return rc
 	}
+	// The box installed Tailscale before the supervisor existed, so its piece never
+	// appears in the supervisor's record: it is done when the box has joined.
+	i.Out.Part("tailscale", "")
+	i.Out.Part("tailscale", "done")
 	// The AWS resources stay named after the host; only the tailnet name may differ,
 	// so record it separately rather than letting a suffix rename everything.
 	if node != host {

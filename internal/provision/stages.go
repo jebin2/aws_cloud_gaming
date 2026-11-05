@@ -186,6 +186,10 @@ func EnvLines(vars map[string]string) (string, error) {
 	return strings.TrimRight(b.String(), "\n"), nil
 }
 
+// headerRefresh is the header's own refresh of apt's lists, as it stands once the
+// comments are stripped.
+const headerRefresh = "  ubuntu|debian) apt-get update ;;\n"
+
 // AssembleSupervised is the user-data of a supervised build: the header, the
 // tailnet and the hand-over, and nothing else - the rest is in the bundle.
 func AssembleSupervised(fsys fs.FS, vars map[string]string) (UserData, error) {
@@ -202,6 +206,14 @@ func AssembleSupervised(fsys fs.FS, vars map[string]string) (UserData, error) {
 	if err != nil {
 		return UserData{}, err
 	}
+	// The header refreshes apt's lists, sixteen seconds before the box can join the
+	// tailnet - and Tailscale's own installer refreshes them again as it adds its
+	// repository. Here the second is enough: the base stage checks the lists are
+	// fresh before it installs from them (10-base.sh).
+	if !strings.Contains(s, headerRefresh) {
+		return UserData{}, fmt.Errorf("the header no longer refreshes apt's lists as expected (%q): update AssembleSupervised", headerRefresh)
+	}
+	s = strings.Replace(s, headerRefresh, "  ubuntu|debian) : ;;\n", 1)
 	var buf bytes.Buffer
 	gz, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
 	if _, err := gz.Write([]byte(s)); err != nil {

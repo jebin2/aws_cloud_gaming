@@ -268,3 +268,30 @@ func TestAStaleRequestFromAnInterruptedRunIsSkippedNotTrusted(t *testing.T) {
 		t.Errorf("%v", logs2)
 	}
 }
+
+func TestAMoonlightThatExitsAtOnceIsNotWaitedFor(t *testing.T) {
+	// A `moonlight pair` that cannot start (no display plugin, a missing library)
+	// has exited by the time it is asked about, and no request will come: the
+	// windowless attempt went straight to the one with a window, not after forty
+	// seconds of polling.
+	s, c := newServer(t)
+	s.user, s.pass, s.pin = "admin", "pw", "1234"                  // nothing is ever waiting
+	r := &fx.Runner{Installed: map[string]bool{"moonlight": true}} // not Hang: already gone
+	var logs []string
+	sleeps := 0
+	p := pairer(c, r)
+	p.Log = func(x string) { logs = append(logs, x) }
+	p.Sleep = func(time.Duration) { sleeps++ }
+	if p.Pair(context.Background(), "ip", "admin", "pw") {
+		t.Fatal("no request, no pairing")
+	}
+	if len(logs) != 2 || logs[0] != "no pairing request seen offscreen - retrying with a window" {
+		t.Errorf("%v", logs)
+	}
+	if sleeps > 1 {
+		t.Errorf("polled on for a program that had already exited: %d sleeps", sleeps)
+	}
+	if len(r.Ran) != 2 {
+		t.Errorf("and still tried again with a window: %v", r.Ran)
+	}
+}

@@ -75,10 +75,20 @@ func (p Pairer) clients(ctx context.Context, ip, user, pass string) []string {
 	return out
 }
 
-func (p Pairer) wait(ctx context.Context, ip, user, pass string, max int) []string {
+// wait watches for Moonlight's pairing request to reach Sunshine, for up to max
+// polls of two seconds. It stops at once when Moonlight (gone) has exited and no
+// request is there: a `moonlight pair` that cannot start - no display plugin, a
+// missing library - does not become one by waiting out the clock, and on the
+// windowless attempt that was forty seconds of nothing before the one that works.
+func (p Pairer) wait(ctx context.Context, ip, user, pass string, max int, gone <-chan struct{}) []string {
 	for i := 0; i < max; i++ {
 		if ids := p.pending(ctx, ip, user, pass); len(ids) > 0 {
 			return ids
+		}
+		select {
+		case <-gone:
+			return nil
+		default:
 		}
 		p.Sleep(2 * time.Second)
 	}
@@ -156,7 +166,7 @@ func (p Pairer) Pair(ctx context.Context, ip, user, pass string) bool {
 		p.Log("moonlight could not be started")
 		return false
 	}
-	ids := p.wait(ctx, ip, user, pass, tries)
+	ids := p.wait(ctx, ip, user, pass, tries, proc.Done())
 	if len(ids) == 0 {
 		proc.Kill()
 		p.Log("no pairing request seen offscreen - retrying with a window")
@@ -164,7 +174,7 @@ func (p Pairer) Pair(ctx context.Context, ip, user, pass string) bool {
 			p.Log("moonlight could not be started")
 			return false
 		}
-		ids = p.wait(ctx, ip, user, pass, tries)
+		ids = p.wait(ctx, ip, user, pass, tries, proc.Done())
 	}
 	if len(ids) == 0 {
 		proc.Kill()

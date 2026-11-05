@@ -353,3 +353,30 @@ func TestTheRealPlanRunsToTheEndUnderTheRealSupervisor(t *testing.T) {
 		t.Error("the reboot does not wait for it")
 	}
 }
+
+func TestTheFirstBootDoesNotRefreshAptTwiceBeforeTheBoxCanJoin(t *testing.T) {
+	// The header refreshed apt's lists (sixteen seconds), then Tailscale's installer
+	// did again on adding its repository. Only the second stays, in the supervised
+	// first boot; a machine of yours, set up in one script, keeps the header's.
+	u, err := AssembleSupervised(repoFS(), realEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(u.Raw), "apt-get update") {
+		t.Error("the supervised first boot still refreshes apt's lists itself")
+	}
+	if !strings.Contains(string(u.Raw), "tailscale.com/install.sh") {
+		t.Error("and the Tailscale installer, which refreshes them as it goes, must be there")
+	}
+	whole, err := Assemble(repoFS(), realEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(whole.Raw), "apt-get update") {
+		t.Error("the single script keeps its refresh")
+	}
+	base, _ := fs.ReadFile(repoFS(), "lib/bootstrap.d/10-base.sh")
+	if !strings.Contains(string(base), "update-success-stamp -mmin -30") {
+		t.Error("the base stage must check the lists are fresh before installing from them")
+	}
+}

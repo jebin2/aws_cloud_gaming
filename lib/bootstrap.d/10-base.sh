@@ -40,5 +40,12 @@ WRAP
   chmod 755 /usr/local/sbin/update-initramfs
 fi
 
+# The box's first-boot script no longer refreshes apt's lists (Tailscale's installer
+# does, on its way): install from them only if something has, in the last half hour.
+# apt stamps every successful refresh itself.
+if aws_box && [ "$FAMILY" = ubuntu ] && [ -z "$(find /var/lib/apt/periodic/update-success-stamp -mmin -30 2>/dev/null)" ]; then
+  apt-get update
+fi
+
 progress "installing base packages"
 pkg curl jq zstd
