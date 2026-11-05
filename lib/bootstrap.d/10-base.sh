@@ -26,6 +26,18 @@ if aws_box; then
   # The first boot has the image's own updater holding the package lock for a
   # while; wait for it rather than fail.
   echo 'DPkg::Lock::Timeout "900";' > /etc/apt/apt.conf.d/99-cg-build-lock-wait
+  # Timings (see apt-get in 00-header.sh): when dpkg starts, and how long the
+  # boot-image rebuilds it triggers take - update-initramfs is a script of its own
+  # first on root's PATH, since dpkg's triggers call it and no function reaches them.
+  printf '%s\n' 'DPkg::Pre-Install-Pkgs { "cat >/dev/null; date +%s.%N >/run/cg-dpkg-start"; };' \
+    > /etc/apt/apt.conf.d/99-cg-build-timing
+  cat > /usr/local/sbin/update-initramfs <<'WRAP'
+#!/bin/sh
+s=$(date +%s.%N); /usr/sbin/update-initramfs "$@"; rc=$?
+echo "$s $(date +%s.%N) - update-initramfs $*" >> /var/log/cg-timings.log
+exit $rc
+WRAP
+  chmod 755 /usr/local/sbin/update-initramfs
 fi
 
 progress "installing base packages"

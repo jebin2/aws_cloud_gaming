@@ -17,6 +17,20 @@ exec > >(tee /var/log/cloud-gaming-bootstrap.log) 2>&1
 # watch remotely, so these give cg init a clean line to stream instead.
 progress() { set +x; echo ">>> $*"; set -x; }
 
+# Where the install time goes, on the AWS box: every apt-get is timed, and with it
+# the moment dpkg began (the hook in 10-base.sh) - what came before is resolving and
+# downloading, what came after is unpacking and configuring. The record is
+# /var/log/cg-timings.log, "start end dpkg-start command"; 99-finish.sh prints the
+# slowest. A function, not a script on the PATH: it must not be what apt itself runs.
+apt-get() {
+  local s e d rc=0
+  s=$(date +%s.%N); rm -f /run/cg-dpkg-start
+  command apt-get "$@" || rc=$?
+  e=$(date +%s.%N); d=$(cat /run/cg-dpkg-start 2>/dev/null) || d=-
+  if [ "${CG_TARGET:-}" = aws ]; then echo "$s $e ${d:--} apt-get $*" >> /var/log/cg-timings.log; fi
+  return $rc
+}
+
 # Assert that a step achieved its effect, not merely that it ran. Nearly every
 # failure in this build has been something reporting success while broken - a
 # config file written but never loaded, a unit "active" but stuck, a symlink

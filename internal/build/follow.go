@@ -71,7 +71,7 @@ var parts = []struct {
 	{"tailscale", regexp.MustCompile(`(?i)^installing tailscale`)},
 	{"library", regexp.MustCompile(`(?i)^installing the s3 game library`)},
 	{"desktop", regexp.MustCompile(`(?i)^installing desktop`)},
-	{"nvidia", regexp.MustCompile(`(?i)nvidia driver|nvidia-driver|nvidia drm`)},
+	{"nvidia", regexp.MustCompile(`(?i)nvidia driver|nvidia-driver|nvidia drm|^using ubuntu.s prebuilt kernel module`)},
 	{"display", regexp.MustCompile(`(?i)^configuring headless x`)},
 	{"autologin", regexp.MustCompile(`(?i)^configuring autologin`)},
 	{"steam", regexp.MustCompile(`(?i)^installing steam`)},

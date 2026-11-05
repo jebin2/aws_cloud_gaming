@@ -192,6 +192,11 @@ the older single log, the supervisor still writes its progress lines to
 `/var/log/cloud-gaming-bootstrap.log` and its result to `/var/lib/cloud-gaming-bootstrap.rc`. A machine
 of yours is not supervised: it gets the same modules as one script over ssh, as before.
 
+Where the install time goes: on the AWS box every `apt-get` and every `update-initramfs` is timed into
+`/var/log/cg-timings.log` (`start end dpkg-start command`; the moment dpkg began comes from an apt hook, so
+a command's time splits into fetching and unpacking). The build's last lines print the ten slowest as
+`timing: 90s (fetch 15s, dpkg 75s) apt-get install ...`. The timers are taken out again before the box runs.
+
 ## Flow 2 - `cg open`: play
 
 ```mermaid

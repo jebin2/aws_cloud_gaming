@@ -12,6 +12,17 @@ progress "finishing up"
 if aws_box; then
 # Back to the safe setting for the machine that will run for hours (see 10-base.sh).
 rm -f /etc/dpkg/dpkg.cfg.d/99-cg-build-unsafe-io
+# The slowest commands of the build, and where each spent its time. Read whole by
+# sort and sed, not cut short by head: under pipefail a reader that stops early
+# kills the writer (exit 141).
+if [ -s /var/log/cg-timings.log ]; then
+  awk '{ s=$1; e=$2; d=$3; t=e-s; lab=$4; for (i=5;i<=NF;i++) lab=lab" "$i
+         if (length(lab) > 72) lab=substr(lab,1,72) "..."
+         if (d != "-" && d >= s) printf "%06.1f %.0fs (fetch %.0fs, dpkg %.0fs) %s\n", t, t, d-s, e-d, lab
+         else printf "%06.1f %.0fs %s\n", t, t, lab }' /var/log/cg-timings.log \
+    | sort -rn | sed -n 1,10p | cut -d' ' -f2- | while IFS= read -r _l; do progress "timing: $_l"; done
+fi
+rm -f /etc/apt/apt.conf.d/99-cg-build-timing /usr/local/sbin/update-initramfs
 cat > /etc/systemd/system/cloud-gaming-ready.service <<'EOF'
 [Unit]
 Description=Signal that the streaming desktop is up
