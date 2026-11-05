@@ -14,7 +14,8 @@ echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://package
 printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' \
   > /etc/apt/preferences.d/mozilla
 apt-get update
-apt-get install -y firefox xdg-utils
+# Without recommended packages: only the perl modules for xdg-utils' extras.
+apt-get install -y --no-install-recommends firefox xdg-utils
 update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/bin/firefox 200 || true
 # Downloads go to the NVMe too, so nothing large can fill the 50 GB root volume.
 # Written to both known policy locations because which one Mozilla's .deb reads
