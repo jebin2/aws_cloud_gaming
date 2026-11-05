@@ -7,7 +7,7 @@
 # the client from Valve as before. Never fails the build.
 if aws_box; then
 progress "fetching the Steam client archive"
-/opt/cloud-gaming-host/steam-client-fetch '__CG_STEAM_CLIENT_URL__' "$USER_NAME" \
+bash /opt/cloud-gaming-host/steam-client-fetch '__CG_STEAM_CLIENT_URL__' "$USER_NAME" \
   && progress "the Steam client came from the archive" \
   || echo "note: no Steam client archive was used - Steam downloads its client itself"
 fi

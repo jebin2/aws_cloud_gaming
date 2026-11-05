@@ -108,4 +108,7 @@ out=$(fetch "$T/box4")
 contains "it says there is none"      "$out" "no Steam client archive to use"
 contains "  with a code of its own"    "$out" "rc=2"
 
+echo "8. the stage runs the fetcher with bash - the bundle does not keep the executable bit"
+check "  no bare call of a host file" "$(grep -c '^/opt/cloud-gaming-host/steam-client-fetch' lib/bootstrap.d/71-steam-client.sh)" "0"
+
 echo; echo "steam-client: $pass passed, $fail failed"; [[ $fail -eq 0 ]]
