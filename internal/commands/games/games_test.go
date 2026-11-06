@@ -137,11 +137,19 @@ func TestJSONHasTheSameGamesAndTheNumbersTheWordsAreMadeFrom(t *testing.T) {
 			Bytes              int64
 			MinutesLeft        *float64 `json:"minutes_left"`
 			Incomplete         bool
+			TotalBytes         int64 `json:"total_bytes"`
+			LeftBytes          int64 `json:"left_bytes"`
 		}
 		Disk map[string]int64
 	}
 	if err := json.Unmarshal(raw, &d); err != nil {
 		t.Fatal(err)
+	}
+	// A download says its whole size and what is left of it (40 GB, 10 on disk), so
+	// the app can say how much room it still needs; a game that is not downloading
+	// says neither.
+	if d.Games[0].TotalBytes != 40<<30 || d.Games[0].LeftBytes != 30<<30 || d.Games[1].TotalBytes != 0 || d.Games[1].LeftBytes != 0 {
+		t.Errorf("total and left: %s", raw)
 	}
 	if len(d.Games) != 3 || d.Games[0].State != "downloading" || d.Games[0].MinutesLeft == nil || !d.Games[1].Incomplete || d.Games[2].State != "in S3 only" || d.Games[2].Bytes != 7<<30 || d.Disk["free_bytes"] != 95<<30 {
 		t.Errorf("%s", raw)

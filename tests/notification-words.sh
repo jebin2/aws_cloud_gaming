@@ -31,4 +31,8 @@ for f in host/idle-watchdog.sh host/cg-shutdown-push.sh; do
     echo "  FAIL $f"; fail=1
   else echo "  ok   $f"; fi
 done
+# The game-ready notice calls the notifier directly, not through notify().
+if grep -E '"\$NOTIFY" ' host/game-notify.sh | grep -E "$BAD"; then
+  echo "  FAIL host/game-notify.sh"; fail=1
+else echo "  ok   host/game-notify.sh"; fi
 exit $fail

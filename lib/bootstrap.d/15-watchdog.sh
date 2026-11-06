@@ -38,4 +38,5 @@ fi
 
 verify "idle watchdog armed" systemctl is-enabled idle-watchdog.timer
 verify "disk monitor armed" systemctl is-enabled disk-monitor.timer
+verify "game download notice armed" systemctl is-enabled game-notify.timer
 fi

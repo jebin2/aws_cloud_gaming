@@ -93,6 +93,9 @@ type row struct {
 	bytes      int64
 	pct, eta   float64
 	incomplete bool
+	// A download's whole size and what is still to come, for the app to say how
+	// much room it needs; 0 when nothing is downloading.
+	total, left int64
 }
 
 // rowsOf is what the table and the JSON are both made from: one row per game, on
@@ -118,6 +121,7 @@ func rowsOf(b Box, archived []library.App) []row {
 		st := State(a.Flags, a.Running)
 		extra := ""
 		pctN, etaN, incomplete := -1.0, 0.0, false
+		var totalN, leftN int64
 		var shown float64
 		if st == "downloading" && a.Stage > 0 {
 			// Steam's own BytesDownloaded lags badly - it read 0.6 GB with 67 GB on
@@ -132,6 +136,7 @@ func rowsOf(b Box, archived []library.App) []row {
 			left := max(0.0, float64(a.Stage)-onDisk)
 			extra = fmt.Sprintf("%.0f%% of %.0f GB", pct, float64(a.Stage)/gib)
 			pctN = pct
+			totalN, leftN = int64(a.Stage), int64(left)
 			if b.Rate > 1_000_000 {
 				extra += fmt.Sprintf(", ~%.0f min left", left/float64(b.Rate)/60)
 				etaN = left / float64(b.Rate) / 60
@@ -153,7 +158,8 @@ func rowsOf(b Box, archived []library.App) []row {
 			}
 		}
 		rows = append(rows, row{name: clip(a.Name, 28), state: st, gb: shown / gib, extra: extra,
-			full: a.Name, id: a.ID, bytes: int64(shown), pct: pctN, eta: etaN, incomplete: incomplete})
+			full: a.Name, id: a.ID, bytes: int64(shown), pct: pctN, eta: etaN, incomplete: incomplete,
+			total: totalN, left: leftN})
 		delete(arch, a.ID)
 	}
 	for _, id := range order {
@@ -202,10 +208,13 @@ func JSON(b Box, archived []library.App) ([]byte, error) {
 		MinutesLeft *float64 `json:"minutes_left,omitempty"` // when the link rate is known
 		Incomplete  bool     `json:"incomplete,omitempty"`
 		Note        string   `json:"note,omitempty"`
+		TotalBytes  int64    `json:"total_bytes,omitempty"` // a download: its whole size
+		LeftBytes   int64    `json:"left_bytes,omitempty"`  // and what is still to come
 	}
 	games := []game{}
 	for _, r := range rowsOf(b, archived) {
-		g := game{AppID: r.id, Name: r.full, State: r.state, Bytes: r.bytes, Incomplete: r.incomplete, Note: r.extra}
+		g := game{AppID: r.id, Name: r.full, State: r.state, Bytes: r.bytes, Incomplete: r.incomplete, Note: r.extra,
+			TotalBytes: r.total, LeftBytes: r.left}
 		if r.pct >= 0 {
 			p := r.pct
 			g.Percent = &p

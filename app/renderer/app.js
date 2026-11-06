@@ -1370,11 +1370,121 @@ function paintLibrary(d) {
 }
 let libNow = null;   // the last `cg library list`, for repainting when status lands
 
+// ── On your game PC ──────────────────────────────────────────────────────────
+// What the machine has right now and how far each download has got, on the Games
+// page. Read from the machine itself (cg games --json --box: no look at S3, so it
+// costs AWS nothing), every 15 s while something downloads and every minute while
+// nothing does, and only while that page is open and the machine runs. A read that
+// fails keeps the last answer on the screen, with the time it was given.
+// This is the app's one read on a timer: it asks the machine over SSH, never AWS,
+// so it bills nothing, and it stops when the page is left.
+const BOX_GAMES_FAST = 15000, BOX_GAMES_IDLE = 60000;
+let pcNow = null, pcAt = 0, pcFailed = false, pcReading = false, pcTimer = null;
+const gbWords = bytes => `${(bytes / 1073741824).toFixed(bytes < 10737418240 ? 1 : 0)} GB`;
+const minutesWords = m => m < 1 ? 'less than a minute'
+  : m < 60 ? `${Math.round(m)} min`
+  : `${Math.floor(m / 60)} h ${Math.round(m % 60)} min`;
+// The time of the answer, not how long ago: nothing ticks to keep an age true.
+const clockWords = at => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+function paintBoxGames() {
+  const card = $('lib-pc');
+  if (!card) return;
+  const box = liveBox();
+  card.hidden = !box;
+  if (!box) return;
+  const note = $('lib-pc-note'), rows = $('lib-pc-rows');
+  rows.textContent = '';
+  $('lib-pc-space').textContent = '';
+  $('lib-pc-need').hidden = true;
+  $('lib-pc-age').textContent = '';
+  const say = words => { note.textContent = words; note.hidden = !words; };
+  if (box.state !== 'running') {
+    say('Your game PC is not running. Downloads continue when it is.');
+    return;
+  }
+  if (!pcNow) {
+    say(pcFailed ? 'Could not read your game PC just now.' : 'Reading your game PC…');
+    return;
+  }
+  say(pcFailed ? 'Could not read your game PC just now. This is the last answer it gave.' : '');
+  $('lib-pc-age').textContent = `updated ${clockWords(pcAt)}`;
+  const games = (pcNow.games || []).filter(g => g.state !== 'in S3 only');
+  if (!games.length) say(pcFailed ? note.textContent : 'No games on your game PC yet.');
+  for (const g of games) {
+    const row = el('div', 'flex flex-col gap-space-xs');
+    const head = el('div', 'flex items-baseline justify-between gap-space-md');
+    head.append(el('span', 'font-body-md text-body-md text-on-surface truncate', g.name),
+                el('span', 'font-body-sm text-body-sm ' + (g.state === 'downloading' ? 'text-primary' : 'text-outline'), g.state));
+    row.append(head);
+    if (g.state === 'downloading' && g.percent != null) {
+      const track = el('div', 'h-2 w-full rounded-full bg-surface overflow-hidden');
+      const fill = el('div', 'h-full bg-primary');
+      fill.style.width = `${Math.min(100, g.percent)}%`;
+      track.append(fill);
+      const done = g.total_bytes ? gbWords(g.total_bytes - (g.left_bytes || 0)) + ' of ' + gbWords(g.total_bytes) : '';
+      const speed = pcNow.inbound_bytes_per_sec > 1e6 ? `${(pcNow.inbound_bytes_per_sec / 1e6).toFixed(0)} MB/s` : '';
+      const left = g.minutes_left ? `about ${minutesWords(g.minutes_left)} left` : '';
+      row.append(track, el('span', 'font-body-sm text-body-sm text-on-surface-variant',
+        [`${Math.round(g.percent)}%`, done, speed, left].filter(Boolean).join(' · ')));
+    } else if (g.incomplete) {
+      row.append(el('span', 'font-body-sm text-body-sm text-tertiary', g.note));
+    } else if (g.bytes) {
+      row.append(el('span', 'font-body-sm text-body-sm text-outline', gbWords(g.bytes)));
+    }
+    rows.append(row);
+  }
+  const disk = pcNow.disk;
+  if (disk) {
+    $('lib-pc-space').textContent = `Space: ${gbWords(disk.used_bytes)} used · ${gbWords(disk.free_bytes)} free`;
+    // The room the downloads still need, against the room there is.
+    const need = games.reduce((n, g) => n + (g.state === 'downloading' ? g.left_bytes || 0 : 0), 0);
+    if (need > disk.free_bytes) {
+      $('lib-pc-need-text').textContent = `The downloads need ${gbWords(need)} more and ${gbWords(disk.free_bytes)} is free.`;
+      $('lib-pc-need').hidden = false;
+    }
+  }
+}
+$('lib-pc-adddisk').onclick = () => openAddDisk();
+
+async function readBoxGames() {
+  const box = liveBox();
+  if (view !== 'library' || !box || box.state !== 'running' || pcReading) return paintBoxGames();
+  pcReading = true;
+  let d = null;
+  // Turned away because something else runs alone is not a read that failed: the
+  // last answer stays, and it is asked again on the next beat.
+  let turnedAway = false;
+  try {
+    const raw = await runCg(['games', '--json', '--box'], { capture: true });
+    if (raw === undefined) turnedAway = true; else d = JSON.parse(raw);
+  } catch { /* said below */ }
+  pcReading = false;
+  if (d && Array.isArray(d.games)) { pcNow = d; pcAt = Date.now(); pcFailed = false; } else if (!turnedAway) pcFailed = true;
+  paintBoxGames();
+  scheduleBoxGames();
+}
+function scheduleBoxGames() {
+  clearTimeout(pcTimer);
+  pcTimer = null;
+  const box = liveBox();
+  if (view !== 'library' || !box || box.state !== 'running') return;
+  const downloading = pcNow && (pcNow.games || []).some(g => g.state === 'downloading');
+  pcTimer = setTimeout(() => { pcTimer = null; readBoxGames(); }, downloading ? BOX_GAMES_FAST : BOX_GAMES_IDLE);
+}
+// Idempotent: the Games page starts it whenever it paints, and leaving the page
+// stops it.
+function boxGamesStart() {
+  paintBoxGames();
+  if (view === 'library' && !pcTimer && !pcReading) readBoxGames();
+}
+
 // The Library page: in rupees, in the words the rest of the app uses, and with
 // where the games are kept and for how long - which come from `cg status`, so
 // this repaints when either answer lands.
 function paintLibraryPage() {
   paintLoginTable();        // its other places arrive with the games' read
+  boxGamesStart();
   const d = libNow;
   if (!d || !$('lib-rows')) return;
   const e = elsewhereNow || {};
@@ -7370,6 +7480,8 @@ for (const link of document.querySelectorAll('.nav-item')) {
     updateHeader();
     // Reads run in parallel, so an open tab loads even while others are in flight.
     if (NEEDS[view] && !loaded.has(view)) refresh();
+    // Leaving the Games page stops its reads of the machine; opening it asks again.
+    if (view === 'library') boxGamesStart(); else { clearTimeout(pcTimer); pcTimer = null; }
   };
 }
 // ── A controller ────────────────────────────────────────────────────────────

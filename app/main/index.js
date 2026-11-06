@@ -86,7 +86,7 @@ const anyMutating = () => [...jobs.values()].some(j => !j.readOnly);
 // Commands that make sense WHILE a game is being played, and so are not held up
 // by the session that runs alone: more room is wanted mid-game as often as
 // before it. A session only claims its own lock; these do not touch it.
-const BESIDE_SESSION = [['disk'], ['clip']];
+const BESIDE_SESSION = [['disk'], ['clip'], ['games']];
 const beside = raw => {
   const cmd = verb(raw);
   return BESIDE_SESSION.some(p => p.every((w, i) => cmd[i] === w));

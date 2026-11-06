@@ -323,3 +323,16 @@ next `cg init` recreates it empty: Steam downloads the games fresh, and asks you
 because the saved login lived in the archive too. `GAME_ARCHIVE_EXPIRY_DAYS=0` in `.env` keeps it
 forever. `cg status` shows the countdown. How it decides, and why it errs towards keeping:
 [cost-guards.md](cost-guards.md#game-archive-expiry).
+
+## Watching a download
+
+The Games page has an **On your game PC** card above the saved games: each game the box has, and for a download
+the percentage, GB done of the whole, speed and minutes left, with a warning and an Add disk button when the
+downloads need more room than is free. It reads `cg games --json --box` (the box only: no look at S3, nothing
+asked of AWS), every 15 s while something downloads and every minute while nothing does, only while the Games
+page is open and the machine runs. It is the one read the app makes on a timer.
+
+When a download finishes, the phone is told once ("Game ready"): `game-notify.timer` on the box looks at the
+manifests every minute, remembers each game it saw downloading, and sends through `cg-notify` when that game
+is fully installed and neither paused nor waiting for an update. A game that was simply there says nothing.
+Off without `GAME_NTFY_URL`, like the box's other notifications.

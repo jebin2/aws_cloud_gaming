@@ -24,14 +24,20 @@ func Run(ctx context.Context, env *config.Env, args []string, out *output.Out) i
 	if len(args) > 0 && (args[0] == "--volume" || args[0] == "volume") {
 		return runVolume(ctx, env, args[1:], out)
 	}
-	asJSON := false
-	if len(args) == 1 && args[0] == "--json" {
-		asJSON, args = true, nil
-	}
-	if len(args) > 0 {
-		// `cg games --delete` has never existed: the volume's is --volume --delete.
-		out.Die("usage: cg games [--json] [--volume [--delete]]")
-		return 1
+	asJSON, boxOnly := false, false
+	for _, a := range args {
+		switch a {
+		case "--json":
+			asJSON = true
+		case "--box":
+			// Only what the machine has: no look at the saved copies in S3, so the
+			// app can ask every few seconds without a request to AWS each time.
+			boxOnly = true
+		default:
+			// `cg games --delete` has never existed: the volume's is --volume --delete.
+			out.Die("usage: cg games [--json] [--box] [--volume [--delete]]")
+			return 1
+		}
 	}
 	box := remote.New(env)
 	ip, err := box.SSHIP(ctx)
@@ -46,7 +52,7 @@ func Run(ctx context.Context, env *config.Env, args []string, out *output.Out) i
 	}
 	// No index: none of the games are saved.
 	var archived []library.App
-	if cfg, err := awscfg.New(ctx, env.Region()); err == nil {
+	if cfg, err := awscfg.New(ctx, env.Region()); err == nil && !boxOnly {
 		acct := ""
 		if id, err := sts.NewFromConfig(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err == nil {
 			acct = aws.ToString(id.Account)

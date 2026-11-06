@@ -183,9 +183,13 @@ done
 contains "quitting mid-run asks first"   "$main" "before-quit"
 contains "the cost refresh carries its price" "$(tr -s ' ' < app/renderer/index.html)" 'id="refresh-cost"'
 contains "  shown only on the cost screen" "$js" "refresh-cost').hidden = view !== 'cost'"
-# Nothing POLLS: a window that asked AWS something every so often would bill
-# for it without anyone touching the machine, and `cg cost` is $0.01 a call.
-check    "nothing repeats on a timer"        "$(grep -c 'setInterval' app/renderer/app.js)" "0"
+# Nothing POLLS AWS: a window that asked AWS something every so often would bill
+# for it without anyone touching the machine, and `cg cost` is $0.01 a call. The one
+# read on a timer asks the MACHINE (cg games --json --box, over SSH), only on the
+# Games page, and stops when it is left; the next check holds it to that.
+check    "nothing repeats on an interval"    "$(grep -c 'setInterval' app/renderer/app.js)" "0"
+contains "  the one timed read asks the machine, never AWS" "$js" "runCg(['games', '--json', '--box'], { capture: true })"
+contains "  only on the Games page"           "$js" "if (view !== 'library' || !box || box.state !== 'running' || pcReading) return paintBoxGames();"
 echo "5. the screens, and what each reads"
 for v in dashboard build library guards cost settings logs; do
   contains "a $v screen"                 "$html" "data-view=\"$v\""
@@ -273,12 +277,13 @@ contains "  and why one cannot be used"  "$js" "No GPU limit here yet"
 # The popup and the header line are gone, and nothing may bring them back.
 check "no popup is left"                 "$(grep -c \"id=.stage\" app/renderer/index.html)" "0"
 check "  nor the header's command line"  "$(grep -c 'job-line' app/renderer/index.html app/renderer/app.js | grep -vc ':0')" "0"
-# Nothing polls: a window that asked AWS something every so often would bill
+# Nothing polls AWS: a window that asked AWS something every so often would bill
 # for it without anyone touching the machine.
-check "nothing repeats on a timer"       "$(grep -c 'setInterval' app/renderer/app.js)" "0"
-# One delay, and it starts no command: the finished steps are held on screen
-# for a beat so you see them finish, instead of six ticks flashing for 200ms.
-check "  and one delay, which it is"     "$(grep -c 'setTimeout' app/renderer/app.js)" "1"
+check "nothing repeats on an interval"   "$(grep -c 'setInterval' app/renderer/app.js)" "0"
+# Two delays. One starts no command: the finished steps are held on screen for a
+# beat so you see them finish, instead of six ticks flashing for 200ms. The other
+# is the Games page's read of the machine (above), which asks no one but the box.
+check "  and two delays, which they are" "$(grep -c 'setTimeout' app/renderer/app.js)" "2"
 contains "  the handover beat"           "$js" 'function afterBeat(then, ms = ONB_HANDOVER_MS) { return setTimeout(then, ms); }'
 contains "  after which it closes on the card" "$js" "note('AWS added', 'text-primary'); closeAdd();"
 # Home is never hidden: with no machine it asks the one question instead.
@@ -297,7 +302,7 @@ echo "5a2. no engine, and a read that cannot be painted"
 contains "main says whether cg is there"  "$main" 'function engineFacts()'
 contains "  over the bridge"              "$(cat app/main/preload.js)" 'cg:engine'
 contains "  and re-reads the contract"    "$main" 'if (found && !CONTRACT.runs_alone) loadContract();'
-contains "more room can be added in the middle of a game" "$main" "const BESIDE_SESSION = [['disk'], ['clip']];"
+contains "more room can be added in the middle of a game" "$main" "const BESIDE_SESSION = [['disk'], ['clip'], ['games']];"
 contains "the window asks before reading" "$js" 'if (!(await engineReady())) return;'
 contains "  and says the one true thing"  "$js" "'Scripts not found'"
 contains "  naming where it looked"       "$js" 'Expected at ${engineGone.cg}'

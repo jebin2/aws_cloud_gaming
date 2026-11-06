@@ -332,6 +332,22 @@
     <div class="flex flex-col gap-gutter-desktop">
       <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-gutter-desktop items-start">
         <div class="flex flex-col gap-space-sm min-w-0">
+          <!-- What is on the game PC right now, and how far each download has got:
+               read from the machine itself (cg games --json --box), every 15 s while
+               something downloads. Not there when there is no machine. -->
+          <div class="p-space-lg rounded-xl bg-surface-container-low mb-space-md" id="lib-pc" hidden>
+            <div class="flex flex-wrap items-baseline justify-between gap-x-space-md">
+              <p class="section-label mb-0">On your game PC</p>
+              <p class="font-body-sm text-body-sm text-outline" id="lib-pc-age"></p>
+            </div>
+            <p class="font-body-sm text-body-sm text-on-surface-variant mt-space-sm" id="lib-pc-note" hidden></p>
+            <div class="flex flex-col gap-space-md mt-space-sm" id="lib-pc-rows"></div>
+            <p class="font-body-sm text-body-sm text-outline mt-space-sm" id="lib-pc-space"></p>
+            <div class="flex flex-wrap items-center gap-space-sm mt-space-xs" id="lib-pc-need" hidden>
+              <p class="font-body-sm text-body-sm text-tertiary" id="lib-pc-need-text"></p>
+              <button class="btn" id="lib-pc-adddisk">Add disk</button>
+            </div>
+          </div>
           <div class="flex flex-wrap items-baseline justify-between gap-x-space-md mb-space-xs">
             <p class="section-label mb-0">Saved games</p>
             <!-- How many, how big, what they cost a month: the total. -->
