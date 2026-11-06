@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -196,71 +197,99 @@ func (g *Gatherer) Gather(ctx context.Context) Facts {
 	out.ExpiryDays = g.ExpiryDays
 	out.authKey = g.AuthKey
 
-	id, err := g.STS.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
-	if err != nil {
-		out.AccountID = ""
-		out.ErrorCause, out.ErrorMessage = "rejected", "AWS rejected this access key."
-		if strings.Contains(err.Error(), "failed to refresh cached credentials") || strings.Contains(err.Error(), "NoCredentialProviders") {
-			out.ErrorCause, out.ErrorMessage = "no-key", "No AWS access key was found on this computer."
-		}
-	} else {
-		out.AccountID = aws.ToString(id.Account)
+	// The reads are independent but for three: the budget needs the account, and
+	// the stranded check and the readiness probe need the machine. They ran one
+	// after another - twenty round trips to AWS, five to fifteen seconds before
+	// the Home card could say anything - so they run together, each writing only
+	// its own fields, and the three wait for what they need.
+	var wg sync.WaitGroup
+	run := func(fn func()) {
+		wg.Add(1)
+		go func() { defer wg.Done(); fn() }()
 	}
+	idDone, boxDone := make(chan struct{}), make(chan struct{})
+
+	run(func() {
+		defer close(idDone)
+		id, err := g.STS.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+		if err != nil {
+			out.AccountID = ""
+			out.ErrorCause, out.ErrorMessage = "rejected", "AWS rejected this access key."
+			if strings.Contains(err.Error(), "failed to refresh cached credentials") || strings.Contains(err.Error(), "NoCredentialProviders") {
+				out.ErrorCause, out.ErrorMessage = "no-key", "No AWS access key was found on this computer."
+			}
+		} else {
+			out.AccountID = aws.ToString(id.Account)
+		}
+	})
 	out.Plan, out.Credits = "?", "?"
-	if p, err := g.FreeTier.GetAccountPlanState(ctx, &freetier.GetAccountPlanStateInput{}); err == nil {
-		out.Plan = string(p.AccountPlanType)
-		if p.AccountPlanRemainingCredits != nil {
-			out.Credits = strconv.FormatFloat(p.AccountPlanRemainingCredits.Amount, 'f', -1, 64)
+	run(func() {
+		if p, err := g.FreeTier.GetAccountPlanState(ctx, &freetier.GetAccountPlanStateInput{}); err == nil {
+			out.Plan = string(p.AccountPlanType)
+			if p.AccountPlanRemainingCredits != nil {
+				out.Credits = strconv.FormatFloat(p.AccountPlanRemainingCredits.Amount, 'f', -1, 64)
+			}
 		}
-	}
+	})
 
 	// One call answers the quota question and describes the machine the Build
 	// screen shows - vCPU, memory, GPU - so nothing about the type is hardcoded.
-	if r, err := g.EC2.DescribeInstanceTypes(ctx, &ec2.DescribeInstanceTypesInput{
-		InstanceTypes: []ec2types.InstanceType{ec2types.InstanceType(g.Type)}}); err == nil && len(r.InstanceTypes) > 0 {
-		t := r.InstanceTypes[0]
-		if t.VCpuInfo != nil && t.VCpuInfo.DefaultVCpus != nil {
-			out.Spec.VCPUs = ok(int(*t.VCpuInfo.DefaultVCpus))
-		}
-		if t.MemoryInfo != nil && t.MemoryInfo.SizeInMiB != nil {
-			out.Spec.MemoryMiB = ok(int(*t.MemoryInfo.SizeInMiB))
-		}
-		if t.GpuInfo != nil && len(t.GpuInfo.Gpus) > 0 {
-			out.Spec.GPU = aws.ToString(t.GpuInfo.Gpus[0].Name)
-			if m := t.GpuInfo.Gpus[0].MemoryInfo; m != nil && m.SizeInMiB != nil {
-				out.Spec.GPUMemoryMiB = ok(int(*m.SizeInMiB))
+	run(func() {
+		if r, err := g.EC2.DescribeInstanceTypes(ctx, &ec2.DescribeInstanceTypesInput{
+			InstanceTypes: []ec2types.InstanceType{ec2types.InstanceType(g.Type)}}); err == nil && len(r.InstanceTypes) > 0 {
+			t := r.InstanceTypes[0]
+			if t.VCpuInfo != nil && t.VCpuInfo.DefaultVCpus != nil {
+				out.Spec.VCPUs = ok(int(*t.VCpuInfo.DefaultVCpus))
+			}
+			if t.MemoryInfo != nil && t.MemoryInfo.SizeInMiB != nil {
+				out.Spec.MemoryMiB = ok(int(*t.MemoryInfo.SizeInMiB))
+			}
+			if t.GpuInfo != nil && len(t.GpuInfo.Gpus) > 0 {
+				out.Spec.GPU = aws.ToString(t.GpuInfo.Gpus[0].Name)
+				if m := t.GpuInfo.Gpus[0].MemoryInfo; m != nil && m.SizeInMiB != nil {
+					out.Spec.GPUMemoryMiB = ok(int(*m.SizeInMiB))
+				}
 			}
 		}
-	}
-	out.QuotaOnDemand = g.quota(ctx, "L-DB2E81BA")
-	out.QuotaSpot = g.quota(ctx, "L-3819A6DF")
+	})
+	run(func() { out.QuotaOnDemand = g.quota(ctx, "L-DB2E81BA") })
+	run(func() { out.QuotaSpot = g.quota(ctx, "L-3819A6DF") })
 
-	out.Box = g.box(ctx)
-	out.Volumes = g.volumesGB(ctx)
-	out.Snapshots, out.SnapGB = g.snapshots(ctx)
-	out.Images = g.images(ctx)
-	if r, err := g.EC2.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{}); err == nil {
-		out.EIPs = ok(len(r.Addresses))
-	}
-	out.KeyPair = g.keyPair(ctx)
-	out.SecGroup, out.Inbound = g.securityGroup(ctx)
-	out.Legacy = g.legacy(ctx)
-	out.Archive = g.archive(ctx)
-	out.Decision = watchdog.ArchiveDecision(ctx, g.Logs, g.Host, g.ExpiryDays, g.Now())
-	g.budget(ctx, out.AccountID, &out)
-	out.RoleBox = g.role(ctx, g.Host+"-box")
-	out.RoleWatchdog = g.role(ctx, watchdog.Name(g.Host))
-	if in := out.Box.V; out.Box.OK && in != nil {
-		out.Stranded = g.stranded(ctx, in)
-	}
+	run(func() { defer close(boxDone); out.Box = g.box(ctx) })
+	run(func() { out.Volumes = g.volumesGB(ctx) })
+	run(func() { out.Snapshots, out.SnapGB = g.snapshots(ctx) })
+	run(func() { out.Images = g.images(ctx) })
+	run(func() {
+		if r, err := g.EC2.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{}); err == nil {
+			out.EIPs = ok(len(r.Addresses))
+		}
+	})
+	run(func() { out.KeyPair = g.keyPair(ctx) })
+	run(func() { out.SecGroup, out.Inbound = g.securityGroup(ctx) })
+	run(func() { out.Legacy = g.legacy(ctx) })
+	run(func() { out.Archive = g.archive(ctx) })
+	run(func() { out.Decision = watchdog.ArchiveDecision(ctx, g.Logs, g.Host, g.ExpiryDays, g.Now()) })
+	run(func() { <-idDone; g.budget(ctx, out.AccountID, &out) })
+	run(func() { out.RoleBox = g.role(ctx, g.Host+"-box") })
+	run(func() { out.RoleWatchdog = g.role(ctx, watchdog.Name(g.Host)) })
+	run(func() {
+		<-boxDone
+		if in := out.Box.V; out.Box.OK && in != nil {
+			out.Stranded = g.stranded(ctx, in)
+		}
+	})
 
-	if l, held := session.Running(g.LockFile, g.Probe); held {
-		out.Session = ok(l)
-	}
-	g.localFacts(ctx, &out)
-	if out.Box.OK && out.Box.V != nil && out.Box.V.State == "running" {
-		g.ready(ctx, out.Box.V, out.Node.Found && out.Node.Online, out.Node.IP)
-	}
+	run(func() {
+		if l, held := session.Running(g.LockFile, g.Probe); held {
+			out.Session = ok(l)
+		}
+		g.localFacts(ctx, &out)
+		<-boxDone
+		if out.Box.OK && out.Box.V != nil && out.Box.V.State == "running" {
+			g.ready(ctx, out.Box.V, out.Node.Found && out.Node.Online, out.Node.IP)
+		}
+	})
+	wg.Wait()
 	return out
 }
 
