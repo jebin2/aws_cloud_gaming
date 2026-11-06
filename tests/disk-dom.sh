@@ -94,7 +94,44 @@ cat > "$T/r/probe.js" <<'PROBE'
     await answer(status({ disk_gb: 0, total_gb: 232, used_gb: 186, free_gb: 46, max_add_gb: 1000, second: true }));
     out.push('MOVE | ' + text('diskdlg-now'));
     out.push('MOVE WARN | ' + text('diskdlg-warn'));
-    document.getElementById('diskdlg').close();
+    // Adding it: the window comes back with the one step left, and stays until Done.
+    const dlg = document.getElementById('diskdlg'), $ = id => document.getElementById(id);
+    $('diskdlg-yes').click();
+    await sleep(50);
+    window.__emit(window.__lastId, { t: 'exit', rc: 0 });
+    await sleep(150);
+    out.push('STEP | open=' + dlg.open + ' | ' + text('diskdlg-title') + ' | ' + text('diskdlg-steam'));
+    out.push('STEP BUTTONS | done hidden=' + $('diskdlg-done').hidden + ' cancel hidden=' + $('diskdlg-no').hidden
+      + ' add hidden=' + $('diskdlg-yes').hidden + ' sizes hidden=' + $('diskdlg-sizes').hidden);
+    // Esc does nothing: stopped at the key, and a cancel is refused too.
+    const key = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    dlg.dispatchEvent(key);
+    const esc = new Event('cancel', { cancelable: true });
+    dlg.dispatchEvent(esc);
+    out.push('STEP ESC | key prevented=' + key.defaultPrevented + ' cancel prevented=' + esc.defaultPrevented + ' open=' + dlg.open);
+    // Done asks the machine; Steam without the drive keeps the window.
+    $('diskdlg-done').click();
+    await sleep(50);
+    out.push('CHECKING | ' + window.__ran[window.__ran.length - 1] + ' | ' + text('diskdlg-steam-msg'));
+    await answer(status({ disk_gb: 100, second: false, extra_in_steam: false }));
+    out.push('NOT YET | open=' + dlg.open + ' | ' + text('diskdlg-steam-msg') + ' | anyway hidden=' + $('diskdlg-anyway').hidden);
+    // Steam with the drive closes it.
+    $('diskdlg-done').click();
+    await sleep(50);
+    await answer(status({ disk_gb: 100, second: false, extra_in_steam: true }));
+    await sleep(400);
+    out.push('LISTED | open=' + dlg.open + ' | step=' + (dlg.dataset.step || 'none'));
+    // A machine that cannot be reached is not a dead end: Close anyway.
+    openAddDisk(); await sleep(50);
+    await answer(status({ disk_gb: 0, total_gb: 232, used_gb: 186, free_gb: 46, max_add_gb: 1000, second: true }));
+    $('diskdlg-yes').click(); await sleep(50);
+    window.__emit(window.__lastId, { t: 'exit', rc: 0 }); await sleep(150);
+    $('diskdlg-done').click(); await sleep(50);
+    window.__emit(window.__lastId, { t: 'exit', rc: 1 }); await sleep(100);
+    out.push('UNREACHABLE | open=' + dlg.open + ' | ' + text('diskdlg-steam-msg') + ' | anyway hidden=' + $('diskdlg-anyway').hidden);
+    $('diskdlg-anyway').click();
+    await sleep(400);
+    out.push('ANYWAY | open=' + dlg.open);
 
     // Not running: nothing to add to.
     openAddDisk();
@@ -161,8 +198,22 @@ check    "  and the popup goes when it is done" "$(row DONE)" "DONE | refdlg ope
 echo "4. a machine on its own drive gets a second disk"
 contains "it says how much room"          "$(row MOVE)" "46 GB free"
 contains "  and that nothing closes"       "$(row 'MOVE WARN')" "Your games stay where they are and nothing closes"
-contains "  and what to do next"           "$(row 'MOVE WARN')" "Close Steam and open it again"
+contains "  and that the next window says how to use it in Steam" "$(row 'MOVE WARN')" "Steam's storage settings"
 lacks    "  without the six-hour rule that does not apply" "$(row 'MOVE WARN')" "once every 6 hours"
+
+echo "4b. the one step left, in Steam"
+contains "the window comes back, saying the disk is added" "$(row STEP)" "open=true | Disk added: 100 GB"
+contains "  and where to click"            "$(row STEP)" "Settings > Storage"
+contains "  and which drive to pick"       "$(row STEP)" "/scratch2/steam"
+check    "  only Done is left to press"    "$(row 'STEP BUTTONS')" "STEP BUTTONS | done hidden=false cancel hidden=true add hidden=true sizes hidden=true"
+check    "Esc does nothing"               "$(row 'STEP ESC')" "STEP ESC | key prevented=true cancel prevented=true open=true"
+contains "Done asks the machine"          "$(row CHECKING)" "CHECKING | disk --json"
+contains "  a Steam without the drive keeps the window" "$(row 'NOT YET')" "open=true | Steam does not list the drive yet"
+contains "  and offers Close anyway"       "$(row 'NOT YET')" "anyway hidden=false"
+check    "a Steam with the drive closes it" "$(row LISTED)" "LISTED | open=false | step=none"
+contains "a machine that cannot be reached is said" "$(row UNREACHABLE)" "Could not check Steam"
+contains "  and is not a dead end"         "$(row UNREACHABLE)" "anyway hidden=false"
+check    "  Close anyway closes it"        "$(row ANYWAY)" "ANYWAY | open=false"
 
 echo "5. what it will not do"
 contains "a stopped machine cannot be changed" "$(row STOPPED)" "is not running"

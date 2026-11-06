@@ -62,6 +62,10 @@ type DiskStatus struct {
 	// moved or closed; Steam sees the new folder once it has been closed and
 	// opened again.
 	Second bool `json:"second"`
+	// ExtraInSteam: Steam's own list of folders has the added disk in it, so a game
+	// can be put there. The app asks for it when the person says they added the
+	// disk in Steam's storage settings, and says so when it is not there yet.
+	ExtraInSteam bool `json:"extra_in_steam"`
 }
 
 // addedVolume is the id of the disk added for the games, "" when the machine has
@@ -122,6 +126,13 @@ func (d Deps) df(ctx context.Context) (total, used float64, ok bool) {
 	return total, used, ok
 }
 
+// extraInSteam is whether Steam's list of folders, as the machine has it, holds
+// the disk added beside the machine's own drive.
+func (d Deps) extraInSteam(ctx context.Context) bool {
+	out, err := d.Box.SSH(ctx, `grep -qs '"path"[[:space:]]*"`+extraMount+`/steam"' /home/ubuntu/.local/share/Steam/config/libraryfolders.vdf && echo yes`, nil)
+	return err == nil && strings.TrimSpace(string(out)) == "yes"
+}
+
 // Disk is `cg disk`.
 func (d Deps) Disk(ctx context.Context, c DiskAPI, asJSON bool) int {
 	if d.Box.ID == "" {
@@ -146,6 +157,7 @@ func (d Deps) Disk(ctx context.Context, c DiskAPI, asJSON bool) int {
 			}
 		}
 		st.Second = vol == ""
+		st.ExtraInSteam = d.extraInSteam(ctx)
 		st.MaxAddGB = provision.MaxExtraDiskGB - st.Disk
 		if t, u, ok := d.df(ctx); ok {
 			st.TotalGB, st.UsedGB, st.FreeGB = t, u, t-u
@@ -326,7 +338,7 @@ func (d Deps) addSecondDisk(ctx context.Context, c DiskAPI, zone string, gb int)
 		d.said(err)
 		return d.die("the new disk could not be set up. Your games are untouched; the new disk bills until the machine goes. Try again.")
 	}
-	d.Out.SayID("disk.done", fmt.Sprintf("Done: %d GB added. Close Steam and open it again to see the new space", gb))
+	d.Out.SayID("disk.done", fmt.Sprintf("Done: %d GB added. In Steam: Settings > Storage > Add Drive > %s/steam", gb, extraMount))
 	return 0
 }
 

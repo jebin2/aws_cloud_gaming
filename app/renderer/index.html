@@ -643,14 +643,29 @@
      cg disk --json. -->
 <dialog id="diskdlg" class="dlg min-w-[460px] max-w-[560px]">
   <form method="dialog">
-    <p class="dlg-title">Add disk</p>
+    <p class="dlg-title" id="diskdlg-title">Add disk</p>
     <p class="dlg-sub" id="diskdlg-now">Looking at your game PC&hellip;</p>
     <div class="mt-space-md flex flex-col gap-space-xs" id="diskdlg-sizes"></div>
     <p class="mt-space-md font-code-sm text-code-sm text-on-surface" id="diskdlg-price"></p>
     <p class="mt-space-sm font-code-sm text-code-sm text-on-surface-variant whitespace-pre-line" id="diskdlg-warn"></p>
+    <!-- After a second disk is added: Steam has to be told, and the window stays
+         until the person says they did (Done) - no Esc, no Cancel. -->
+    <div id="diskdlg-steam" class="mt-space-md" hidden>
+      <p class="font-body-md text-body-md text-on-surface">One more step, in Steam on your game PC:</p>
+      <ol class="mt-space-sm list-decimal pl-space-lg font-body-md text-body-md text-on-surface">
+        <li>Open Steam &gt; Settings &gt; Storage</li>
+        <li>Open the drive menu and press Add Drive</li>
+        <li>Pick <span class="font-code-sm text-code-sm" id="diskdlg-steam-path">/scratch2/steam</span></li>
+        <li>Come back here and press Done</li>
+      </ol>
+      <p class="mt-space-sm font-code-sm text-code-sm text-on-surface-variant">Steam does not need to be restarted. Games you install after this can go on the new drive.</p>
+      <p class="mt-space-sm font-code-sm text-code-sm text-on-surface whitespace-pre-line" id="diskdlg-steam-msg"></p>
+    </div>
     <menu class="dlg-actions">
       <button value="no" class="btn" id="diskdlg-no">Cancel</button>
       <button value="yes" class="btn btn-primary" id="diskdlg-yes" disabled>Add disk</button>
+      <button type="button" class="btn" id="diskdlg-anyway" hidden>Close anyway</button>
+      <button type="button" class="btn btn-primary" id="diskdlg-done" hidden>Done</button>
     </menu>
   </form>
 </dialog>

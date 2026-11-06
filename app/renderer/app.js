@@ -7120,9 +7120,47 @@ $('b-extra-pick').oninput = ev => {
 // much room there is to add (max_add_gb); this only asks how much, says the
 // price, and runs it.
 const DISK_SIZES_GB = [50, 100, 200, 500];
+// A second disk has to be added in Steam's own storage settings. The window stays
+// until the person says they did (Done), and Done asks the machine whether Steam
+// lists it: not Esc, not Cancel, and a Steam that is slow to write its list or a
+// machine that cannot be reached never leaves the window stuck (Close anyway).
+const diskdlgSteam = (on) => {
+  const dlg = $('diskdlg');
+  dlg.dataset.step = on ? 'steam' : '';
+  for (const id of ['diskdlg-now', 'diskdlg-sizes', 'diskdlg-price', 'diskdlg-warn', 'diskdlg-no', 'diskdlg-yes']) $(id).hidden = on;
+  $('diskdlg-steam').hidden = !on;
+  $('diskdlg-done').hidden = !on;
+  $('diskdlg-anyway').hidden = true;
+  $('diskdlg-steam-msg').textContent = '';
+  $('diskdlg-done').disabled = false;
+};
+// Esc is stopped at the key, as for the add and run windows: a cancel event the
+// dialog has already been sent is not reliably stoppable.
+$('diskdlg').addEventListener('keydown', e => { if (e.key === 'Escape' && $('diskdlg').dataset.step === 'steam') e.preventDefault(); });
+$('diskdlg').addEventListener('cancel', e => { if ($('diskdlg').dataset.step === 'steam') e.preventDefault(); });
+const diskdlgFinish = (words) => {
+  diskdlgSteam(false);
+  closeDialog($('diskdlg'));
+  if (words) note(words, 'text-primary');
+};
+$('diskdlg-anyway').onclick = () => diskdlgFinish('Disk added. Add it in Steam > Settings > Storage when you want games on it');
+$('diskdlg-done').onclick = async () => {
+  const done = $('diskdlg-done'), msg = $('diskdlg-steam-msg');
+  done.disabled = true;
+  msg.textContent = 'Checking Steam…';
+  let st = null;
+  try { st = JSON.parse(await runCg(['disk', '--json'], { capture: true })); } catch { /* said below */ }
+  if (st && st.extra_in_steam) return diskdlgFinish('Steam is using the new disk');
+  msg.textContent = st ? 'Steam does not list the drive yet. Add it in Settings > Storage, then press Done again.'
+    : 'Could not check Steam on your game PC. If you added the drive, you can close this.';
+  $('diskdlg-anyway').hidden = false;
+  done.disabled = false;
+};
 async function openAddDisk() {
   const dlg = $('diskdlg'), yes = $('diskdlg-yes');
   const sizes = $('diskdlg-sizes');
+  diskdlgSteam(false);
+  $('diskdlg-title').textContent = 'Add disk';
   sizes.textContent = '';
   yes.disabled = true;
   yes.onclick = null;
@@ -7156,7 +7194,7 @@ async function openAddDisk() {
     $('diskdlg-price').textContent = picked >= 1 && per != null
       ? `+${rsh(picked * per)} an hour while the machine exists` : 'Billed by the hour while the machine exists.';
     $('diskdlg-warn').textContent = [
-      st.second ? 'A second disk is added beside the one you have. Your games stay where they are and nothing closes. Close Steam and open it again to see the new space, then pick it when Steam asks where to put a game.'
+      st.second ? 'A second disk is added beside the one you have. Your games stay where they are and nothing closes. When it is added, you add it in Steam\'s storage settings: the next window shows how.'
                 : 'Takes about a minute. Your game keeps running. If Steam does not show the new space, close it and open it again.',
       st.second ? '' : 'AWS lets a disk be made bigger once every 6 hours.',
       'The disk is deleted with the machine.',
@@ -7190,7 +7228,14 @@ async function openAddDisk() {
     const done = await libraryRun(['disk', 'add', String(gb)], 'Adding space', null, null, () => 'Your games were not touched.');
     if (done) {
       $('refdlg').close();
-      note(`Added ${gb} GB for your games`, 'text-primary');
+      if (st.second) {
+        // Steam still has to be told about the new drive: stay until it is.
+        diskdlgSteam(true);
+        $('diskdlg-title').textContent = `Disk added: ${gb} GB`;
+        $('diskdlg').showModal();
+      } else {
+        note(`Added ${gb} GB for your games`, 'text-primary');
+      }
     }
   };
 }

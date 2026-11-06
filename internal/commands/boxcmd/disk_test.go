@@ -144,6 +144,35 @@ func TestDiskStatusSaysWhetherAddingGrowsOrAddsASecondDisk(t *testing.T) {
 	}
 }
 
+func TestDiskStatusSaysWhetherSteamListsTheAddedDisk(t *testing.T) {
+	for _, listed := range []bool{false, true} {
+		r := diskRig(t)
+		inner := r.r.Hook
+		r.r.Hook = func(line string) (bool, string, error) {
+			if strings.Contains(line, "libraryfolders.vdf") {
+				if !strings.Contains(line, "/scratch2/steam") {
+					t.Errorf("it looks for the added disk's folder: %s", line)
+				}
+				if listed {
+					return true, "yes\n", nil
+				}
+				return true, "", fmt.Errorf("exit status 1")
+			}
+			return inner(line)
+		}
+		if rc := r.d.Disk(context.Background(), &fakeDisk{gamesVol: "vol-games", gamesGB: 100}, true); rc != 0 {
+			t.Fatalf("%s%s", r.o, r.w)
+		}
+		var st DiskStatus
+		if err := json.Unmarshal(r.o.Bytes(), &st); err != nil {
+			t.Fatalf("%v\n%s", err, r.o)
+		}
+		if st.ExtraInSteam != listed {
+			t.Errorf("Steam lists the disk = %v, status says %v", listed, st.ExtraInSteam)
+		}
+	}
+}
+
 func TestAddDiskGrowsTheGamesDiskWhileItIsInUse(t *testing.T) {
 	r := diskRig(t)
 	f := &fakeDisk{gamesVol: "vol-games", gamesGB: 100, modState: ec2types.VolumeModificationStateOptimizing}
@@ -211,7 +240,7 @@ func TestAddDiskOnTheMachinesOwnDriveAttachesASecondDiskAndMovesNothing(t *testi
 			t.Errorf("moved or closed something (%q):\n%s", never, ssh)
 		}
 	}
-	if !strings.Contains(r.o.String()+r.w.String(), "Close Steam and open it again") {
+	if !strings.Contains(r.o.String()+r.w.String(), "Settings > Storage > Add Drive > /scratch2/steam") {
 		t.Errorf("it says what to do next: %s%s", r.o, r.w)
 	}
 	if len(f.deleted) != 0 {
