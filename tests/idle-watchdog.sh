@@ -44,7 +44,7 @@ run() { # run <idle-start> [PUSH_RC]
   LOG="$T/log" PATH="$T/bin:$PATH" PUSH_RC="${2:-0}" \
   THRESHOLD=999999999999999 RX_THRESHOLD=999999999999999 \
   CG_NOTIFY_BIN="$PWD/host/cg-notify" UPLOAD_POLL_SEC=0.1 UPLOAD_WARN_SEC="${UPLOAD_WARN_SEC:-3600}" \
-  STATE="$T/state" IDLE_LIMIT=3 BOOT_GRACE=0 IFACE=lo \
+  STATE="$T/state" IDLE_LIMIT=3 BOOT_GRACE=0 IFACE=lo STEAM_LIBS="$T/lib" \
   CG_LIBRARY_BIN="$T/bin/cg-library" SHUTDOWN_BIN="$T/bin/shutdown" \
     bash "$SRC" >/dev/null 2>&1
   grep -oE 'PUSH|SHUTDOWN' "$T/log" 2>/dev/null | tr '\n' ' '
@@ -107,5 +107,24 @@ CG_NTFY_URL=https://ntfy.sh/t run 3 >/dev/null
 check "a quick upload says nothing of the kind" "$(grep -c 'Still saving' "$T/log" || true)" "0"
 PUSH_SLEEP=2 UPLOAD_WARN_SEC=1 run 3 >/dev/null
 check "no URL: no request, however long"  "$(grep -c '^CURL' "$T/log" || true)" "0"
+
+echo "7. Steam still putting a game in place keeps the box up - only while files are being written"
+# After the last byte arrives Steam writes and moves files with next to no network;
+# a 200 GB game can take longer than the idle limit, and the box went down before
+# the game was installed.
+LIB="$T/lib"; mkdir -p "$LIB/steamapps/downloading/632470" "$LIB/steamapps/common/Game"
+manifest() { printf '"AppState"\n{\n\t"appid"\t\t"632470"\n\t"StateFlags"\t\t"%s"\n}\n' "$1" > "$LIB/steamapps/appmanifest_632470.acf"; }
+manifest 1026; touch "$LIB/steamapps/downloading/632470/chunk"
+check "downloading and writing: no shutdown"      "$(run 3)" ""
+check "  and the idle count starts again"         "$(cat "$T/state/idle")" "0"
+check "  the log says why"                        "$(grep -c 'installing=1' "$T/log")" "1"
+touch -d '30 minutes ago' "$LIB/steamapps/downloading/632470/chunk" "$LIB/steamapps/downloading/632470" "$LIB/steamapps/downloading" "$LIB/steamapps/common/Game" "$LIB/steamapps/common"
+check "a flag left behind with nothing written for 30 min: shuts down" "$(run 3)" "PUSH SHUTDOWN "
+manifest 512; touch "$LIB/steamapps/downloading/632470/chunk"
+check "paused (no downloading flag): shuts down"  "$(run 3)" "PUSH SHUTDOWN "
+manifest 4; touch "$LIB/steamapps/downloading/632470/chunk"
+check "installed: shuts down"                     "$(run 3)" "PUSH SHUTDOWN "
+rm -rf "$LIB"
+check "no Steam at all: shuts down"               "$(run 3)" "PUSH SHUTDOWN "
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

@@ -6,6 +6,7 @@
 # busy here:
 #   - streaming  -> outbound bytes on the tailnet interface
 #   - downloading -> inbound bytes on the public interface
+#   - installing -> Steam has a game marked downloading and is still writing files
 # Watching only the first shuts the box down mid-download, and since games live
 # on ephemeral storage that download is lost rather than resumed.
 set -euo pipefail
@@ -28,6 +29,31 @@ CG_NOTIFY_BIN="${CG_NOTIFY_BIN:-/usr/local/bin/cg-notify}"
 # this long, and every hour after that, it sends a notification.
 UPLOAD_WARN_SEC="${UPLOAD_WARN_SEC:-3600}"
 UPLOAD_POLL_SEC="${UPLOAD_POLL_SEC:-10}"
+
+# A third way to be busy: Steam is putting a game in place. After the last byte
+# arrives it spends minutes writing and moving files with next to no network, and a
+# 200 GB game can take longer than IDLE_LIMIT - the traffic looked idle and the box
+# went down before the game was installed. A manifest that says "downloading"
+# (StateFlags 1024) counts only while files are actually being written (anything
+# in the download folder or the game's folder changed in the last STEAM_QUIET
+# minutes), so a flag left behind by a stuck or paused download cannot keep the
+# box up and billing for ever.
+STEAM_LIBS="${STEAM_LIBS:-/scratch/steam /scratch2/steam /home/ubuntu/.local/share/Steam}"
+STEAM_QUIET="${STEAM_QUIET:-10}"
+steam_working() {
+  local lib f flags
+  for lib in $STEAM_LIBS; do
+    for f in "$lib"/steamapps/appmanifest_*.acf; do
+      [[ -f $f ]] || continue
+      flags=$(sed -n 's/.*"StateFlags"[[:space:]]*"\([0-9]*\)".*/\1/p' "$f" | head -n 1)
+      (( ${flags:-0} & 1024 )) || continue
+      if [[ -n $(find "$lib/steamapps/downloading" "$lib/steamapps/common" -mmin "-$STEAM_QUIET" -print -quit 2>/dev/null) ]]; then
+        return 0
+      fi
+    done
+  done
+  return 1
+}
 
 # Best effort, never fatal: nothing about a notification may stop a shutdown.
 notify() { # notify <title> <message>
@@ -65,13 +91,14 @@ rx_delta=$(delta_since rx "$(counter "$WAN" rx)")
 
 streaming=0;  (( tx_delta >= THRESHOLD ))    && streaming=1
 downloading=0; (( rx_delta >= RX_THRESHOLD )) && downloading=1
+installing=0;  steam_working && installing=1
 
 idle=$(cat "$STATE/idle" 2>/dev/null || echo 0)
-if (( streaming || downloading )); then idle=0; else idle=$(( idle + 1 )); fi
+if (( streaming || downloading || installing )); then idle=0; else idle=$(( idle + 1 )); fi
 echo "$idle" > "$STATE/idle"
 
 logger -t idle-watchdog \
-  "tx=${tx_delta}B rx=${rx_delta}B streaming=${streaming} downloading=${downloading} idle=${idle}/${IDLE_LIMIT}"
+  "tx=${tx_delta}B rx=${rx_delta}B streaming=${streaming} downloading=${downloading} installing=${installing} idle=${idle}/${IDLE_LIMIT}"
 
 if (( idle >= IDLE_LIMIT )); then
   # Mirror BEFORE shutting down, not on the way out.

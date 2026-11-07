@@ -12,7 +12,7 @@ to take down.
 | # | Mechanism | Dies with | Catches | Reaction |
 |---|-----------|-----------|---------|----------|
 | 1 | `cg open` | your laptop, your network | normal use | on Moonlight exit |
-| 2 | on-host watchdog | the box it protects | forgotten disconnect, client crash | 15 min idle |
+| 2 | on-host watchdog | the box it protects | forgotten disconnect, client crash | 15 min with no stream, no download and no game being put in place |
 | 3 | cloud watchdog (Lambda) | a deleted or disabled schedule | a wedged box, a box left running outside a session, a box stuck going down | 30 min idle; forced after 1 h stuck |
 
 The **AWS budget is not in that list**, because it stops nothing - it emails you. It is the
@@ -247,3 +247,13 @@ the same function; it ignores every state that is not an end. The box cannot rep
 A shutdown's notices are recorded as tags on the instance, stamped with when that shutdown began,
 so each is sent once and an earlier shutdown's never counts. None of this adds a cost: EC2's own
 events, the extra invocations, the tags and the requests all fall inside AWS's free allowances.
+
+**What counts as busy on the box (layer 2).** Three things reset the 15 minutes: stream traffic on the tailnet
+(200 KB a minute or more), inbound traffic on the public interface (10 MB a minute or more: a download), and
+Steam putting a game in place. The third is a manifest that says "downloading" (`StateFlags` 1024) while
+files in `steamapps/downloading` or `steamapps/common` changed in the last 10 minutes. It exists because
+Steam, once the last byte has arrived, writes and moves files with next to no network, and a very large game can
+take longer than 15 minutes: the box went down before the game was installed. The write check is what stops a
+flag left behind by a stuck download from keeping the box up and billing. The cloud watchdog (layer 3) still
+looks only at network bytes over 30 minutes, so a gap with no network and no stream longer than that is still
+ended by it.
