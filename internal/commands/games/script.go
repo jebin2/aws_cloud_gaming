@@ -30,19 +30,23 @@ const remoteScript = `
       # Steam.s own BytesDownloaded lags badly - it read 0.6 GB with 67 GB on
       # disk - so progress comes from the DISK: what is committed plus what is
       # staged in downloading/, against BytesToStage.
-      done_b=$(du -sb "$L/steamapps/common/$dir" 2>/dev/null | cut -f1)
+      # Space actually USED, not apparent size: Steam reserves a file's whole size
+      # before it has the bytes, so apparent size ran 7-10 points ahead of Steam's
+      # own window, and allocated blocks matched it to a point.
+      done_b=$(du -s --block-size=1 "$L/steamapps/common/$dir" 2>/dev/null | cut -f1)
       # Steam keeps each download's own files in downloading/<appid>, so what a
       # game has staged is read from its own folder: the one folder's total is
       # shared, and several apps download at once (Proton, the runtime and the
       # redistributables ride along with every game).
-      staged=$(du -sb "$L/steamapps/downloading/$id" 2>/dev/null | cut -f1)
-      # What Steam itself says it has downloaded of what it has to download (the
-      # bytes over the wire, the figure its own window shows): the last field.
+      staged=$(du -s --block-size=1 "$L/steamapps/downloading/$id" 2>/dev/null | cut -f1)
+      # What Steam's manifest says it has downloaded of what it has to download:
+      # the last field. It is written in bursts (it stood still for 40 s with
+      # 350 MB arriving), so it is only for a download that has nothing staged.
       printf "APP\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$id" "$name" "${flags:-0}" "${size:-0}" "${done_b:-0}" "${want:-0}" "$on" "${stage:-0}" "${staged:-0}" "${got:-0}"
     done
     done
     printf "DISK\t%s\n" "$(df -B1 --output=used,avail /scratch | tail -1 | tr -s " " "\t" | sed "s/^\t//")"
-    printf "DL\t%s\n" "$(for L in $libs; do du -sb "$L/steamapps/downloading" 2>/dev/null | cut -f1; done | awk "{t+=\$1} END{print t+0}")"
+    printf "DL\t%s\n" "$(for L in $libs; do du -s --block-size=1 "$L/steamapps/downloading" 2>/dev/null | cut -f1; done | awk "{t+=\$1} END{print t+0}")"
     # Two samples three seconds apart: a rate averaged over the whole boot is
     # not the rate right now, and "right now" is what an ETA needs.
     w=$(ip route show default 2>/dev/null | awk "{print \$5; exit}")

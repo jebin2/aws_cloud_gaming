@@ -143,36 +143,17 @@ func rowsOf(b Box, archived []library.App) []row {
 		pctN, etaN, incomplete := -1.0, 0.0, false
 		var totalN, leftN, roomN int64
 		var shown float64
-		if st == "downloading" && a.Want > 0 && a.GotKnown {
-			// Steam's own figures: what it has downloaded of what it has to download,
-			// over the wire. Measuring the files on disk read 19% where Steam's window
-			// said 6%, because Steam reserves a file's whole size before it has
-			// the bytes - and the same reserved space is why a game once showed 67 GB
-			// on disk with 0.6 GB downloaded. The link's rate is in the same bytes, so
-			// the time left agrees with the percentage.
-			got := min(float64(a.Got), float64(a.Want))
-			pct := 100.0 * got / float64(a.Want)
-			left := float64(a.Want) - got
-			extra = fmt.Sprintf("%.0f%% of %.0f GB", pct, float64(a.Want)/gib)
-			pctN = pct
-			totalN, leftN = a.Want, int64(left)
-			if a.Stage > 0 {
-				roomN = max(0, a.Stage-a.Done-a.Staged)
-			}
-			if b.Rate > 1_000_000 {
-				extra += fmt.Sprintf(", ~%.0f min left", left/float64(b.Rate)/60)
-				etaN = left / float64(b.Rate) / 60
-			}
-			shown = got
-		} else if st == "downloading" && a.Stage > 0 {
-			// Steam's own BytesDownloaded lags badly - it read 0.6 GB with 67 GB on
-			// disk - so progress comes from the DISK: what is committed plus what is
-			// staged in downloading/, against BytesToStage. downloading/<appid> is the
-			// game's own, so it is credited to it whatever else downloads (Steam
-			// fetches Proton, its runtime and the redistributables beside every game).
-			// A box that did not say what is staged per game gets the one shared total,
-			// credited only when a single game downloads: it cannot be told apart
-			// otherwise.
+		if st == "downloading" && a.Stage > 0 {
+			// Progress comes from the DISK, as space actually used: what is committed
+			// plus what is staged in downloading/<appid>, against BytesToStage. At the
+			// same moment Steam's window said 61%, this said 62%; apparent size said
+			// 69% (Steam reserves a file's whole size before it has the bytes) and
+			// Steam's manifest said 50% (it is written in bursts and stood still for
+			// 40 s while 350 MB arrived). downloading/<appid> is the game's own, so it
+			// is credited to it whatever else downloads (Steam fetches Proton, its
+			// runtime and the redistributables beside every game). A box that did not
+			// say what is staged per game gets the one shared total, credited only
+			// when a single game downloads: it cannot be told apart otherwise.
 			onDisk := float64(a.Done)
 			if a.StagedKnown {
 				onDisk += float64(a.Staged)
@@ -185,10 +166,30 @@ func rowsOf(b Box, archived []library.App) []row {
 			pctN = pct
 			totalN, leftN, roomN = int64(a.Stage), int64(left), int64(left)
 			if b.Rate > 1_000_000 {
+				// The link's rate is in compressed bytes over the wire, the install
+				// in bytes on disk: the time left scales one to the other when Steam
+				// says how many of each there are.
+				wire := left
+				if a.Want > 0 {
+					wire = left * float64(a.Want) / float64(a.Stage)
+				}
+				extra += fmt.Sprintf(", ~%.0f min left", wire/float64(b.Rate)/60)
+				etaN = wire / float64(b.Rate) / 60
+			}
+			shown = onDisk
+		} else if st == "downloading" && a.Want > 0 && a.GotKnown {
+			// Nothing staged to measure: Steam's own downloaded-of-to-download.
+			got := min(float64(a.Got), float64(a.Want))
+			pct := 100.0 * got / float64(a.Want)
+			left := float64(a.Want) - got
+			extra = fmt.Sprintf("%.0f%% of %.0f GB", pct, float64(a.Want)/gib)
+			pctN = pct
+			totalN, leftN, roomN = a.Want, int64(left), int64(left)
+			if b.Rate > 1_000_000 {
 				extra += fmt.Sprintf(", ~%.0f min left", left/float64(b.Rate)/60)
 				etaN = left / float64(b.Rate) / 60
 			}
-			shown = onDisk
+			shown = got
 		} else {
 			shown = float64(a.Size)
 			if a.Size == 0 {

@@ -121,33 +121,38 @@ func TestEachGetsItsOwnStagedBytesWhateverElseDownloads(t *testing.T) {
 	}
 }
 
-// The disk read 19% where Steam's window said 6%: Steam reserves a file's whole
-// size before it has the bytes. Steam's own downloaded-of-to-download is the
-// progress, and the disk is only for a manifest that has no such numbers.
-func TestProgressIsWhatSteamSaysItHasDownloaded(t *testing.T) {
+// Measured on a live box: at one moment Steam's window said 61%, the space used
+// on disk said 62%, the apparent size 69% (Steam reserves a file's whole size
+// before it has the bytes) and Steam's manifest 50% (it is written in bursts and
+// stood still for 40 s). The disk, as space used, is the progress; the manifest is
+// only for a download with nothing staged.
+func TestProgressIsTheSpaceUsedOnDiskNotSteamsLaggingManifest(t *testing.T) {
 	line := func(want, got, stage, staged, done int64) string {
 		return strings.Join([]string{"APP", "632470", "Disco Elysium", "1024", "0", itoa(done), itoa(want), "0", itoa(stage), itoa(staged), itoa(got)}, "\t") + "\n"
 	}
-	// 12 GB to download, 0.72 GB downloaded: Steam says 6%. The disk holds 40 GB
-	// of reserved files against a 100 GB stage, which would read 40%.
-	b := ParseBox(line(12*GB, 72*GB/100, 100*GB, 0, 40*GB) + "RATE\t10000000\n")
+	stage := int64(10287338728)
+	want := int64(9342155632)
+	b := ParseBox(line(want, 4665553296, stage, stage*62/100, 0) + "RATE\t10000000\n")
 	rows := rowsOf(b, nil)
-	if len(rows) != 1 || rows[0].pct < 5.9 || rows[0].pct > 6.1 {
-		t.Fatalf("Steam's 6%%, not the disk's: %+v", rows)
+	if len(rows) != 1 || rows[0].pct < 61.9 || rows[0].pct > 62.1 {
+		t.Fatalf("the disk's 62%%, not the manifest's 50%%: %+v", rows)
 	}
-	if rows[0].total != 12*GB || rows[0].left < 11*GB || rows[0].left > 12*GB {
-		t.Errorf("the whole and what is left are in the same bytes: %+v", rows[0])
+	if rows[0].total != stage {
+		t.Errorf("the whole is the install size: %+v", rows[0])
 	}
-	if rows[0].eta <= 0 {
-		t.Errorf("the link's rate is in the same bytes, so there is a time left: %+v", rows[0])
+	// The rate is in compressed bytes over the wire: the time left scales to them.
+	left := float64(stage) * 0.38
+	wire := left * float64(want) / float64(stage)
+	wantMin := wire / 10000000 / 60
+	if rows[0].eta < wantMin*0.99 || rows[0].eta > wantMin*1.01 {
+		t.Errorf("time left %.1f min, want %.1f (wire bytes)", rows[0].eta, wantMin)
 	}
-	// Steam can be a little ahead of itself: never past the whole.
-	if r := rowsOf(ParseBox(line(12*GB, 13*GB, 100*GB, 0, 0)), nil); r[0].pct != 100 {
+	// Nothing staged to measure: Steam's own figures are used, clamped to the whole.
+	if r := rowsOf(ParseBox(line(12*GB, 72*GB/100, 0, 0, 0)), nil); len(r) != 1 || r[0].pct < 5.9 || r[0].pct > 6.1 {
+		t.Errorf("the manifest is the fallback: %+v", r)
+	}
+	if r := rowsOf(ParseBox(line(12*GB, 13*GB, 0, 0, 0)), nil); r[0].pct != 100 {
 		t.Errorf("clamped: %v", r[0].pct)
-	}
-	// Nothing to download in the manifest: the disk is used, as before.
-	if r := rowsOf(ParseBox(line(0, 0, 100*GB, 25*GB, 0)), nil); r[0].pct < 24 || r[0].pct > 26 {
-		t.Errorf("the disk is the fallback: %v", r[0].pct)
 	}
 }
 
