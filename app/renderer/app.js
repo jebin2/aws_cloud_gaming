@@ -1409,8 +1409,13 @@ function paintBoxGames() {
   }
   say(pcFailed ? 'Could not read your game PC just now. This is the last answer it gave.' : '');
   $('lib-pc-age').textContent = `updated ${clockWords(pcAt)}`;
-  const games = (pcNow.games || []).filter(g => g.state !== 'in S3 only');
-  if (!games.length) say(pcFailed ? note.textContent : 'No games on your game PC yet.');
+  const all = (pcNow.games || []).filter(g => g.state !== 'in S3 only');
+  // Steam fetches Proton, its runtime and its redistributables beside every game.
+  // They are not games: one quiet line says so, instead of a row each.
+  const isTool = g => /^(Proton|Steam Linux Runtime|Steamworks Common Redistributables)/i.test(g.name || '');
+  const games = all.filter(g => !isTool(g));
+  const toolsBusy = all.some(g => isTool(g) && g.state === 'downloading');
+  if (!games.length) say(pcFailed ? note.textContent : toolsBusy ? '' : 'No games on your game PC yet.');
   for (const g of games) {
     const row = el('div', 'flex flex-col gap-space-xs');
     const head = el('div', 'flex items-baseline justify-between gap-space-md');
@@ -1434,11 +1439,12 @@ function paintBoxGames() {
     }
     rows.append(row);
   }
+  if (toolsBusy) rows.append(el('span', 'font-body-sm text-body-sm text-outline', 'Steam is also fetching its own tools (Proton and the game runtime).'));
   const disk = pcNow.disk;
   if (disk) {
     $('lib-pc-space').textContent = `Space: ${gbWords(disk.used_bytes)} used · ${gbWords(disk.free_bytes)} free`;
     // The room the downloads still need, against the room there is.
-    const need = games.reduce((n, g) => n + (g.state === 'downloading' ? g.left_bytes || 0 : 0), 0);
+    const need = all.reduce((n, g) => n + (g.state === 'downloading' ? g.left_bytes || 0 : 0), 0);
     if (need > disk.free_bytes) {
       $('lib-pc-need-text').textContent = `The downloads need ${gbWords(need)} more and ${gbWords(disk.free_bytes)} is free.`;
       $('lib-pc-need').hidden = false;

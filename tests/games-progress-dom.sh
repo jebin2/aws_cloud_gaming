@@ -63,6 +63,8 @@ cat > "$T/r/probe.js" <<'PROBE'
       { appid: '1', name: 'Red Dead Redemption 2', state: 'downloading', bytes: 76 * GB, percent: 38,
         minutes_left: 125, total_bytes: 200 * GB, left_bytes: 124 * GB },
       { appid: '2', name: 'Hades', state: 'installed', bytes: 14 * GB },
+      { appid: '1493710', name: 'Proton Experimental', state: 'downloading', bytes: GB, percent: 40, total_bytes: GB, left_bytes: 0 },
+      { appid: '228980', name: 'Steamworks Common Redistributables', state: 'downloading', bytes: 0 },
     ],
     disk: { used_bytes: 112 * GB, free_bytes: 48 * GB }, inbound_bytes_per_sec: 14e6 }, o);
   const card = () => document.getElementById('lib-pc');
@@ -85,6 +87,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('READING | ' + text('lib-pc-note'));
     await answer(downloading({}));
     out.push('ROWS | ' + [...document.querySelectorAll('#lib-pc-rows > div')].map(r => [...r.querySelectorAll('span')].map(s => s.textContent).join(' ')).join(' || '));
+    out.push('TOOLS | ' + text('lib-pc-rows'));
     out.push('BAR | ' + document.querySelector('#lib-pc-rows .bg-primary').style.width);
     out.push('SPACE | ' + text('lib-pc-space'));
     out.push('NEED | hidden=' + document.getElementById('lib-pc-need').hidden + ' | ' + text('lib-pc-need-text'));
@@ -152,6 +155,8 @@ echo "2. a download in progress"
 contains "the game and its state"         "$(row ROWS)" "Red Dead Redemption 2 downloading"
 contains "  how far, how much, how fast, how long" "$(row ROWS)" "38% · 76 GB of 200 GB · 14 MB/s · about 2 h 5 min left"
 check    "  the bar is that full"          "$(row BAR)" "BAR | 38%"
+check    "Steam's own tools are not rows of their own" "$(grep -c 'Proton Experimental' <<<"$(row ROWS)")" "0"
+contains "  one quiet line says they are being fetched" "$(row TOOLS)" "Steam is also fetching its own tools"
 contains "the games that are done are listed too" "$(row ROWS)" "Hades installed 14 GB"
 contains "the room is said"               "$(row SPACE)" "Space: 112 GB used · 48 GB free"
 contains "more than there is free says so" "$(row NEED)" "hidden=false | The downloads need 124 GB more and 48 GB is free."

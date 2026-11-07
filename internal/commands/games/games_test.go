@@ -87,6 +87,40 @@ func TestADownloadComesFromTheDisk(t *testing.T) {
 	}
 }
 
+// Steam fetches Proton, its runtime and the redistributables beside every game,
+// so several apps are "downloading" at once. downloading/ is one folder with a
+// folder per app in it: each game is credited its own, not nothing because
+// something else was downloading too.
+func TestEachGetsItsOwnStagedBytesWhateverElseDownloads(t *testing.T) {
+	line := func(id, name string, stage, staged int64) string {
+		return strings.Join([]string{"APP", id, name, "1024", "0", "0", "0", "0", itoa(stage), itoa(staged)}, "\t") + "\n"
+	}
+	raw := line("1493710", "Proton Experimental", 1*GB, 1*GB) + line("228980", "Steamworks Common Redistributables", 100<<20, 50<<20) +
+		line("632470", "Disco Elysium", 12*GB, 3*GB) + "DL\t" + itoa(4*GB+50<<20) + "\nRATE\t10000000\n"
+	b := ParseBox(raw)
+	rows := rowsOf(b, nil)
+	got := map[string]float64{}
+	for _, r := range rows {
+		got[r.full] = r.pct
+	}
+	if got["Disco Elysium"] < 24.9 || got["Disco Elysium"] > 25.1 {
+		t.Errorf("Disco Elysium has 3 of 12 GB staged: %v", got)
+	}
+	if got["Proton Experimental"] < 99.9 {
+		t.Errorf("Proton has all of its 1 GB staged: %v", got)
+	}
+	if got["Steamworks Common Redistributables"] < 49 || got["Steamworks Common Redistributables"] > 51 {
+		t.Errorf("the redistributables have half: %v", got)
+	}
+	// A box that cannot say per game (an older script) keeps the shared rule.
+	old := app("632470", "Disco Elysium", 1024, 0, 0, 0, 0, 12*GB) + app("1493710", "Proton Experimental", 1024, 0, 0, 0, 0, 1*GB) + "DL\t" + itoa(3*GB) + "\n"
+	for _, r := range rowsOf(ParseBox(old), nil) {
+		if r.full == "Disco Elysium" && r.pct != 0 {
+			t.Errorf("two download and nothing says whose it is: %v", r.pct)
+		}
+	}
+}
+
 func TestNothingAtAll(t *testing.T) {
 	if got := Render(ParseBox(""), nil); got != "  no games installed, and nothing archived\n" {
 		t.Errorf("%q", got)

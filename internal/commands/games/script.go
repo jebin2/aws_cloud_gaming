@@ -31,7 +31,12 @@ const remoteScript = `
       # disk - so progress comes from the DISK: what is committed plus what is
       # staged in downloading/, against BytesToStage.
       done_b=$(du -sb "$L/steamapps/common/$dir" 2>/dev/null | cut -f1)
-      printf "APP\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$id" "$name" "${flags:-0}" "${size:-0}" "${done_b:-0}" "${want:-0}" "$on" "${stage:-0}"
+      # Steam keeps each download's own files in downloading/<appid>, so what a
+      # game has staged is read from its own folder: the one folder's total is
+      # shared, and several apps download at once (Proton, the runtime and the
+      # redistributables ride along with every game).
+      staged=$(du -sb "$L/steamapps/downloading/$id" 2>/dev/null | cut -f1)
+      printf "APP\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$id" "$name" "${flags:-0}" "${size:-0}" "${done_b:-0}" "${want:-0}" "$on" "${stage:-0}" "${staged:-0}"
     done
     done
     printf "DISK\t%s\n" "$(df -B1 --output=used,avail /scratch | tail -1 | tr -s " " "\t" | sed "s/^\t//")"

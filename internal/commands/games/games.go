@@ -24,6 +24,10 @@ type App struct {
 	Flags, Size, Done, Want int64
 	Running                 bool
 	Stage                   int64
+	// Staged is what the game has in steamapps/downloading/<appid> - its own, so
+	// it is credited to it however many apps download at once. -1 when the box
+	// did not say (an older script): the one shared total is used then.
+	Staged int64
 }
 
 // Box is what the remote script printed.
@@ -48,7 +52,11 @@ func ParseBox(raw string) Box {
 		f := strings.Split(line, "\t")
 		switch {
 		case f[0] == "APP" && len(f) >= 9:
-			b.Apps = append(b.Apps, App{ID: f[1], Name: f[2], Flags: atoi(f[3]), Size: atoi(f[4]), Done: atoi(f[5]), Want: atoi(f[6]), Running: f[7] == "1", Stage: atoi(f[8])})
+			a := App{ID: f[1], Name: f[2], Flags: atoi(f[3]), Size: atoi(f[4]), Done: atoi(f[5]), Want: atoi(f[6]), Running: f[7] == "1", Stage: atoi(f[8]), Staged: -1}
+			if len(f) >= 10 {
+				a.Staged = atoi(f[9])
+			}
+			b.Apps = append(b.Apps, a)
 		case f[0] == "DISK" && len(f) >= 3:
 			b.Used, b.Avail, b.HasDisk = atoi(f[1]), atoi(f[2]), true
 		case f[0] == "DL" && len(f) >= 2:
@@ -126,10 +134,16 @@ func rowsOf(b Box, archived []library.App) []row {
 		if st == "downloading" && a.Stage > 0 {
 			// Steam's own BytesDownloaded lags badly - it read 0.6 GB with 67 GB on
 			// disk - so progress comes from the DISK: what is committed plus what is
-			// staged in downloading/, against BytesToStage. downloading/ is shared,
-			// so only attribute it when one game is using it.
+			// staged in downloading/, against BytesToStage. downloading/<appid> is the
+			// game's own, so it is credited to it whatever else downloads (Steam
+			// fetches Proton, its runtime and the redistributables beside every game).
+			// A box that did not say what is staged per game gets the one shared total,
+			// credited only when a single game downloads: it cannot be told apart
+			// otherwise.
 			onDisk := float64(a.Done)
-			if downloading == 1 {
+			if a.Staged >= 0 {
+				onDisk += float64(a.Staged)
+			} else if downloading == 1 {
 				onDisk += float64(b.Staging)
 			}
 			pct := min(100.0, 100.0*onDisk/float64(a.Stage))
