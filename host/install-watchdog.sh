@@ -26,3 +26,15 @@ systemctl enable --now game-notify.timer
 systemctl list-timers idle-watchdog.timer disk-monitor.timer game-notify.timer --no-pager
 echo "watchdog armed.     follow with: journalctl -t idle-watchdog -f"
 echo "disk monitor armed. follow with: journalctl -t disk-monitor -f"
+# The desktop's help picture: the picture, and the autostart entry that puts it on
+# the desktop the first time someone logs in. Last, and in a subshell that never
+# fails the script: a picture that could not be installed must not stop the
+# watchdog above it from being armed. Not every bundle carries the picture.
+(
+  set +e
+  [[ -f gamepc-help.png ]] || exit 0
+  install -D -m 644 gamepc-help.png /usr/share/backgrounds/gamepc-help.png \
+    && install -m 755 cg-wallpaper.sh /usr/local/bin/cg-wallpaper.sh \
+    && install -D -m 644 cg-wallpaper.desktop /etc/xdg/autostart/cg-wallpaper.desktop \
+    || echo "the desktop help picture was not installed (the watchdog is unaffected)"
+)

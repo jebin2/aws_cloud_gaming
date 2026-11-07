@@ -8,5 +8,5 @@ import "embed"
 
 // Files is the lambda, the box's bootstrap modules and the host scripts.
 //
-//go:embed lambda/cloud_watchdog.py lib/bootstrap.d lib/supervised host
+//go:embed lambda/cloud_watchdog.py lib/bootstrap.d lib/supervised lib/assets host
 var Files embed.FS

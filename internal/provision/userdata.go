@@ -84,6 +84,16 @@ func hostBundle(fsys fs.FS, ntfyURL string, extra map[string][]byte) ([]byte, er
 			return nil, err
 		}
 	}
+	// The desktop help picture rides in the bundle as it is: a picture is not a
+	// script, and stripping its "comment" lines would break it. It is not in host/
+	// for the same reason (everything there is stripped).
+	if pic, err := fs.ReadFile(fsys, "lib/assets/gamepc-help.png"); err == nil {
+		withPic := map[string][]byte{"gamepc-help.png": pic}
+		for k, v := range extra {
+			withPic[k] = v
+		}
+		extra = withPic
+	}
 	if ntfyURL != "" {
 		if err := put("notify.url", 0o644, []byte(ntfyURL+"\n")); err != nil {
 			return nil, err

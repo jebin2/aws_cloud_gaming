@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Game PC help picture
+Comment=Puts the help picture on the desktop the first time you log in
+Exec=/usr/local/bin/cg-wallpaper.sh
+OnlyShowIn=XFCE;
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

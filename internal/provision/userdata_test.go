@@ -62,6 +62,38 @@ func TestHostBundleStripsCommentsKeepsShebangsAndAddsTheNotifyAddress(t *testing
 	}
 }
 
+// A picture is not a script: stripping its "comment" lines would break it. It rides
+// in the bundle byte for byte, from lib/assets, beside the scripts.
+func TestHostBundleCarriesTheHelpPictureUntouched(t *testing.T) {
+	pic := []byte("\x89PNG\r\n\x1a\n#not a comment\n# nor this\nIEND")
+	fsys := fstest.MapFS{
+		"host/a.sh":                  {Data: []byte("#!/bin/bash\necho hi\n")},
+		"lib/assets/gamepc-help.png": {Data: pic},
+	}
+	b, err := HostBundle(fsys, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := untar(t, b)["gamepc-help.png"]; got != string(pic) {
+		t.Errorf("the picture was changed: %q", got)
+	}
+	// And a bundle with no picture is just the scripts.
+	b, _ = HostBundle(fstest.MapFS{"host/a.sh": {Data: []byte("#!/bin/bash\n")}}, "")
+	if _, ok := untar(t, b)["gamepc-help.png"]; ok {
+		t.Error("no picture to carry")
+	}
+	// The real one is there, and is the real picture.
+	b, err = HostBundle(os.DirFS("../.."), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	real := untar(t, b)["gamepc-help.png"]
+	want, _ := os.ReadFile("../../lib/assets/gamepc-help.png")
+	if len(want) < 1000 || real != string(want) || !strings.HasPrefix(real, "\x89PNG") {
+		t.Errorf("the real picture: %d bytes in the bundle, %d on disk", len(real), len(want))
+	}
+}
+
 // The Bash strip is the oracle for what the box is sent.
 func TestHostBundleMatchesTheBashStripOnTheRealFiles(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
