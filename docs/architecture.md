@@ -122,9 +122,11 @@ on its own NVMe only, which cannot grow, gets the added disk at `/dev/sdg`, moun
 (`nofail`) with a `steam/steamapps` folder in it. Nothing is copied or closed. `steam-add-extra-library`
 waits for Steam to be closed (it rewrites its list of folders as it exits, so an entry added under a
 running Steam is thrown away) and then adds `/scratch2/steam` to `libraryfolders.vdf`. A running Steam does not
-need to be closed: the person can add `/scratch2/steam` in Steam's Settings > Storage. The app's window stays
+need to be closed: the person can add the drive in Steam's Settings > Storage. Steam's Add Drive lists drives by their disk label (`cgextra`) and
+creates its own folder on the one picked (`/scratch2/SteamLibrary`), not the folder cg made, so the check, the
+idle guard, the game-ready notice and the archive all read the libraries Steam lists in `libraryfolders.vdf`. The app's window stays
 until they press Done (no Esc), and Done asks `cg disk --json` whether Steam lists the folder
-(`extra_in_steam`); a Steam that does not yet, or a box that cannot be reached, offers Close anyway. Add disk
+(`extra_in_steam`: any library on `/scratch2`); a Steam that does not yet, or a box that cannot be reached, offers Close anyway. Add disk
 after that grows the second disk. `cg disk --json` says which of the two
 will happen (`second`), the room left and the most that can be added. Games already on the NVMe stay
 there. Push, check and `cg games` look in every library on the box.

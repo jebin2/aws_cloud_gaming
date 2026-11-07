@@ -127,4 +127,15 @@ check "installed: shuts down"                     "$(run 3)" "PUSH SHUTDOWN "
 rm -rf "$LIB"
 check "no Steam at all: shuts down"               "$(run 3)" "PUSH SHUTDOWN "
 
+echo "7b. a game on a library Steam lists itself (its Add Drive makes /scratch2/SteamLibrary) counts too"
+L2="$T/SteamLibrary"; mkdir -p "$L2/steamapps/downloading/9" "$L2/steamapps/common/G"
+printf '"libraryfolders"\n{\n\t"1"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}\n' "$L2" > "$T/libraryfolders.vdf"
+printf '"AppState"\n{\n\t"StateFlags"\t\t"1026"\n}\n' > "$L2/steamapps/appmanifest_9.acf"; touch "$L2/steamapps/downloading/9/chunk"
+rm -f "$T/log"; echo 3 > "$T/state/idle"
+LOG="$T/log" PATH="$T/bin:$PATH" THRESHOLD=999999999999999 RX_THRESHOLD=999999999999999 \
+  CG_NOTIFY_BIN="$PWD/host/cg-notify" UPLOAD_POLL_SEC=0.1 STATE="$T/state" IDLE_LIMIT=3 BOOT_GRACE=0 IFACE=lo \
+  STEAM_VDFS="$T/libraryfolders.vdf" CG_LIBRARY_BIN="$T/bin/cg-library" SHUTDOWN_BIN="$T/bin/shutdown" \
+  bash "$SRC" >/dev/null 2>&1
+check "downloading there: no shutdown" "$(grep -oE 'PUSH|SHUTDOWN' "$T/log" 2>/dev/null | tr '\n' ' ')" ""
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

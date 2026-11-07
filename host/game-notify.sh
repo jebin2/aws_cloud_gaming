@@ -12,11 +12,25 @@
 set -uo pipefail
 
 STATE="${GAME_NOTIFY_STATE:-/var/lib/cg-game-notify}"
-LIBS="${GAME_NOTIFY_LIBS:-/scratch/steam /scratch2/steam /home/ubuntu/.local/share/Steam}"
+VDFS="${GAME_NOTIFY_VDFS:-/home/*/.local/share/Steam/config/libraryfolders.vdf}"
 NOTIFY="${GAME_NOTIFY_CMD:-/usr/local/bin/cg-notify}"
 mkdir -p "$STATE"
 
-for lib in $LIBS; do
+# Every library on the box: the archive's, the added disk's, and each folder Steam
+# lists itself - Steam's Add Drive makes its own (/scratch2/SteamLibrary), not the
+# one cg named, and a game installed there must be seen.
+libs() {
+  if [[ -n ${GAME_NOTIFY_LIBS+x} ]]; then echo "$GAME_NOTIFY_LIBS"; return; fi
+  {
+    echo /scratch/steam; echo /scratch2/steam
+    for v in $VDFS; do
+      [[ -f $v ]] && sed -n 's/.*"path"[[:space:]]*"\(.*\)".*/\1/p' "$v"
+    done
+    for r in /home/*/.local/share/Steam; do [[ -d $r ]] && echo "$r"; done
+  } | awk '!seen[$0]++'
+}
+
+for lib in $(libs); do
   for f in "$lib"/steamapps/appmanifest_*.acf; do
     [[ -f $f ]] || continue
     id=$(basename "$f" .acf); id=${id#appmanifest_}

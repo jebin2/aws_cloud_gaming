@@ -56,7 +56,7 @@ line("this PC; press Z to use your own. on a Mac: Command + Option.", DIM, 21, 2
 y += 12
 
 head("added a disk?")
-line("Steam > Settings > Storage > Add Drive > /scratch2/steam")
+line("Steam > Settings > Storage > Add Drive > pick the drive named cgextra")
 y += 10
 
 head("before you delete this machine")

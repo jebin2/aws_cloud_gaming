@@ -126,10 +126,13 @@ func (d Deps) df(ctx context.Context) (total, used float64, ok bool) {
 	return total, used, ok
 }
 
-// extraInSteam is whether Steam's list of folders, as the machine has it, holds
-// the disk added beside the machine's own drive.
+// extraInSteam is whether Steam's list of folders, as the machine has it, holds a
+// library on the disk added beside the machine's own drive.
 func (d Deps) extraInSteam(ctx context.Context) bool {
-	out, err := d.Box.SSH(ctx, `grep -qs '"path"[[:space:]]*"`+extraMount+`/steam"' /home/ubuntu/.local/share/Steam/config/libraryfolders.vdf && echo yes`, nil)
+	// Steam's Add Drive does not use the folder cg made: it lists the drives and
+	// creates its own folder on the one picked (/scratch2/SteamLibrary), so any
+	// library on the added disk counts, wherever Steam put it.
+	out, err := d.Box.SSH(ctx, `grep -qsE '"path"[[:space:]]*"`+extraMount+`(/[^"]*)?"' /home/ubuntu/.local/share/Steam/config/libraryfolders.vdf && echo yes`, nil)
 	return err == nil && strings.TrimSpace(string(out)) == "yes"
 }
 
@@ -338,7 +341,7 @@ func (d Deps) addSecondDisk(ctx context.Context, c DiskAPI, zone string, gb int)
 		d.said(err)
 		return d.die("the new disk could not be set up. Your games are untouched; the new disk bills until the machine goes. Try again.")
 	}
-	d.Out.SayID("disk.done", fmt.Sprintf("Done: %d GB added. In Steam: Settings > Storage > Add Drive > %s/steam", gb, extraMount))
+	d.Out.SayID("disk.done", fmt.Sprintf("Done: %d GB added. In Steam: Settings > Storage > Add Drive > pick the drive named cgextra", gb))
 	return 0
 }
 

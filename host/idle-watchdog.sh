@@ -38,11 +38,24 @@ UPLOAD_POLL_SEC="${UPLOAD_POLL_SEC:-10}"
 # in the download folder or the game's folder changed in the last STEAM_QUIET
 # minutes), so a flag left behind by a stuck or paused download cannot keep the
 # box up and billing for ever.
-STEAM_LIBS="${STEAM_LIBS:-/scratch/steam /scratch2/steam /home/ubuntu/.local/share/Steam}"
+STEAM_VDFS="${STEAM_VDFS:-/home/*/.local/share/Steam/config/libraryfolders.vdf}"
 STEAM_QUIET="${STEAM_QUIET:-10}"
+# Every library on the box: the archive's, the added disk's, and each folder Steam
+# lists itself (Steam's Add Drive makes its own, /scratch2/SteamLibrary).
+steam_libs() {
+  if [[ -n ${STEAM_LIBS+x} ]]; then echo "$STEAM_LIBS"; return; fi
+  {
+    echo /scratch/steam; echo /scratch2/steam
+    local v
+    for v in $STEAM_VDFS; do
+      [[ -f $v ]] && sed -n 's/.*"path"[[:space:]]*"\(.*\)".*/\1/p' "$v"
+    done
+    for v in /home/*/.local/share/Steam; do [[ -d $v ]] && echo "$v"; done
+  } | awk '!seen[$0]++'
+}
 steam_working() {
   local lib f flags
-  for lib in $STEAM_LIBS; do
+  for lib in $(steam_libs); do
     for f in "$lib"/steamapps/appmanifest_*.acf; do
       [[ -f $f ]] || continue
       flags=$(sed -n 's/.*"StateFlags"[[:space:]]*"\([0-9]*\)".*/\1/p' "$f" | head -n 1)

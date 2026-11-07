@@ -150,8 +150,8 @@ func TestDiskStatusSaysWhetherSteamListsTheAddedDisk(t *testing.T) {
 		inner := r.r.Hook
 		r.r.Hook = func(line string) (bool, string, error) {
 			if strings.Contains(line, "libraryfolders.vdf") {
-				if !strings.Contains(line, "/scratch2/steam") {
-					t.Errorf("it looks for the added disk's folder: %s", line)
+				if !strings.Contains(line, "/scratch2") || strings.Contains(line, "/scratch2/steam") {
+					t.Errorf("it looks for any library on the added disk, not one folder: %s", line)
 				}
 				if listed {
 					return true, "yes\n", nil
@@ -240,7 +240,7 @@ func TestAddDiskOnTheMachinesOwnDriveAttachesASecondDiskAndMovesNothing(t *testi
 			t.Errorf("moved or closed something (%q):\n%s", never, ssh)
 		}
 	}
-	if !strings.Contains(r.o.String()+r.w.String(), "Settings > Storage > Add Drive > /scratch2/steam") {
+	if !strings.Contains(r.o.String()+r.w.String(), "Settings > Storage > Add Drive > pick the drive named cgextra") {
 		t.Errorf("it says what to do next: %s%s", r.o, r.w)
 	}
 	if len(f.deleted) != 0 {

@@ -48,6 +48,16 @@ manifest 100 "Hades" 4
 run
 check "it is told when done"          "$(grep -c 'Hades finished' "$T/sent")" "1"
 
+echo "4b. a game on a library Steam lists itself (its Add Drive makes /scratch2/SteamLibrary)"
+L2="$T/SteamLibrary"; mkdir -p "$L2/steamapps"
+printf '"libraryfolders"\n{\n\t"1"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}\n' "$L2" > "$T/libraryfolders.vdf"
+m2() { printf '"AppState"\n{\n\t"appid"\t\t"7"\n\t"name"\t\t"Big Game"\n\t"StateFlags"\t\t"%s"\n}\n' "$1" > "$L2/steamapps/appmanifest_7.acf"; }
+run2() { env -u GAME_NOTIFY_LIBS GAME_NOTIFY_STATE="$T/state2" GAME_NOTIFY_VDFS="$T/libraryfolders.vdf" GAME_NOTIFY_CMD="$T/notify" bash host/game-notify.sh; }
+before=$(sent)
+m2 1026; run2; m2 4; run2
+check "it is told when the game there is done" "$(grep -c 'Big Game finished' "$T/sent")" "1"
+check "  once" "$(( $(sent) - before ))" "1"
+
 echo "5. the pieces are in place"
 check "the installer puts the timer on" "$(grep -c 'enable --now game-notify.timer' host/install-watchdog.sh)" "1"
 check "  and the build checks it"       "$(grep -c 'game-notify.timer' lib/bootstrap.d/15-watchdog.sh)" "1"
