@@ -25,9 +25,14 @@ type App struct {
 	Running                 bool
 	Stage                   int64
 	// Staged is what the game has in steamapps/downloading/<appid> - its own, so
-	// it is credited to it however many apps download at once. -1 when the box
-	// did not say (an older script): the one shared total is used then.
-	Staged int64
+	// it is credited to it however many apps download at once. Only when the box
+	// said (StagedKnown): an older script gets the one shared total instead.
+	Staged      int64
+	StagedKnown bool
+	// Got is Steam's own BytesDownloaded, against Want (BytesToDownload): bytes
+	// over the wire, the figure its window shows. Only when the box said.
+	Got      int64
+	GotKnown bool
 }
 
 // Box is what the remote script printed.
@@ -52,9 +57,12 @@ func ParseBox(raw string) Box {
 		f := strings.Split(line, "\t")
 		switch {
 		case f[0] == "APP" && len(f) >= 9:
-			a := App{ID: f[1], Name: f[2], Flags: atoi(f[3]), Size: atoi(f[4]), Done: atoi(f[5]), Want: atoi(f[6]), Running: f[7] == "1", Stage: atoi(f[8]), Staged: -1}
+			a := App{ID: f[1], Name: f[2], Flags: atoi(f[3]), Size: atoi(f[4]), Done: atoi(f[5]), Want: atoi(f[6]), Running: f[7] == "1", Stage: atoi(f[8])}
 			if len(f) >= 10 {
-				a.Staged = atoi(f[9])
+				a.Staged, a.StagedKnown = atoi(f[9]), true
+			}
+			if len(f) >= 11 {
+				a.Got, a.GotKnown = atoi(f[10]), true
 			}
 			b.Apps = append(b.Apps, a)
 		case f[0] == "DISK" && len(f) >= 3:
@@ -104,6 +112,10 @@ type row struct {
 	// A download's whole size and what is still to come, for the app to say how
 	// much room it needs; 0 when nothing is downloading.
 	total, left int64
+	// room is the space the install still has to take on disk (its install size
+	// less what the disk already holds for it); the download's own bytes are the
+	// wire's, which are smaller. 0 when nothing says.
+	room int64
 }
 
 // rowsOf is what the table and the JSON are both made from: one row per game, on
@@ -129,9 +141,30 @@ func rowsOf(b Box, archived []library.App) []row {
 		st := State(a.Flags, a.Running)
 		extra := ""
 		pctN, etaN, incomplete := -1.0, 0.0, false
-		var totalN, leftN int64
+		var totalN, leftN, roomN int64
 		var shown float64
-		if st == "downloading" && a.Stage > 0 {
+		if st == "downloading" && a.Want > 0 && a.GotKnown {
+			// Steam's own figures: what it has downloaded of what it has to download,
+			// over the wire. Measuring the files on disk read 19% where Steam's window
+			// said 6%, because Steam reserves a file's whole size before it has
+			// the bytes - and the same reserved space is why a game once showed 67 GB
+			// on disk with 0.6 GB downloaded. The link's rate is in the same bytes, so
+			// the time left agrees with the percentage.
+			got := min(float64(a.Got), float64(a.Want))
+			pct := 100.0 * got / float64(a.Want)
+			left := float64(a.Want) - got
+			extra = fmt.Sprintf("%.0f%% of %.0f GB", pct, float64(a.Want)/gib)
+			pctN = pct
+			totalN, leftN = a.Want, int64(left)
+			if a.Stage > 0 {
+				roomN = max(0, a.Stage-a.Done-a.Staged)
+			}
+			if b.Rate > 1_000_000 {
+				extra += fmt.Sprintf(", ~%.0f min left", left/float64(b.Rate)/60)
+				etaN = left / float64(b.Rate) / 60
+			}
+			shown = got
+		} else if st == "downloading" && a.Stage > 0 {
 			// Steam's own BytesDownloaded lags badly - it read 0.6 GB with 67 GB on
 			// disk - so progress comes from the DISK: what is committed plus what is
 			// staged in downloading/, against BytesToStage. downloading/<appid> is the
@@ -141,7 +174,7 @@ func rowsOf(b Box, archived []library.App) []row {
 			// credited only when a single game downloads: it cannot be told apart
 			// otherwise.
 			onDisk := float64(a.Done)
-			if a.Staged >= 0 {
+			if a.StagedKnown {
 				onDisk += float64(a.Staged)
 			} else if downloading == 1 {
 				onDisk += float64(b.Staging)
@@ -150,7 +183,7 @@ func rowsOf(b Box, archived []library.App) []row {
 			left := max(0.0, float64(a.Stage)-onDisk)
 			extra = fmt.Sprintf("%.0f%% of %.0f GB", pct, float64(a.Stage)/gib)
 			pctN = pct
-			totalN, leftN = int64(a.Stage), int64(left)
+			totalN, leftN, roomN = int64(a.Stage), int64(left), int64(left)
 			if b.Rate > 1_000_000 {
 				extra += fmt.Sprintf(", ~%.0f min left", left/float64(b.Rate)/60)
 				etaN = left / float64(b.Rate) / 60
@@ -173,7 +206,7 @@ func rowsOf(b Box, archived []library.App) []row {
 		}
 		rows = append(rows, row{name: clip(a.Name, 28), state: st, gb: shown / gib, extra: extra,
 			full: a.Name, id: a.ID, bytes: int64(shown), pct: pctN, eta: etaN, incomplete: incomplete,
-			total: totalN, left: leftN})
+			total: totalN, left: leftN, room: roomN})
 		delete(arch, a.ID)
 	}
 	for _, id := range order {
@@ -224,11 +257,12 @@ func JSON(b Box, archived []library.App) ([]byte, error) {
 		Note        string   `json:"note,omitempty"`
 		TotalBytes  int64    `json:"total_bytes,omitempty"` // a download: its whole size
 		LeftBytes   int64    `json:"left_bytes,omitempty"`  // and what is still to come
+		RoomBytes   int64    `json:"room_bytes,omitempty"`  // the disk space the install still has to take
 	}
 	games := []game{}
 	for _, r := range rowsOf(b, archived) {
 		g := game{AppID: r.id, Name: r.full, State: r.state, Bytes: r.bytes, Incomplete: r.incomplete, Note: r.extra,
-			TotalBytes: r.total, LeftBytes: r.left}
+			TotalBytes: r.total, LeftBytes: r.left, RoomBytes: r.room}
 		if r.pct >= 0 {
 			p := r.pct
 			g.Percent = &p

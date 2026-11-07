@@ -36,7 +36,9 @@ const remoteScript = `
       # shared, and several apps download at once (Proton, the runtime and the
       # redistributables ride along with every game).
       staged=$(du -sb "$L/steamapps/downloading/$id" 2>/dev/null | cut -f1)
-      printf "APP\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$id" "$name" "${flags:-0}" "${size:-0}" "${done_b:-0}" "${want:-0}" "$on" "${stage:-0}" "${staged:-0}"
+      # What Steam itself says it has downloaded of what it has to download (the
+      # bytes over the wire, the figure its own window shows): the last field.
+      printf "APP\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$id" "$name" "${flags:-0}" "${size:-0}" "${done_b:-0}" "${want:-0}" "$on" "${stage:-0}" "${staged:-0}" "${got:-0}"
     done
     done
     printf "DISK\t%s\n" "$(df -B1 --output=used,avail /scratch | tail -1 | tr -s " " "\t" | sed "s/^\t//")"

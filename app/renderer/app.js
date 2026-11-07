@@ -1444,7 +1444,7 @@ function paintBoxGames() {
   if (disk) {
     $('lib-pc-space').textContent = `Space: ${gbWords(disk.used_bytes)} used · ${gbWords(disk.free_bytes)} free`;
     // The room the downloads still need, against the room there is.
-    const need = all.reduce((n, g) => n + (g.state === 'downloading' ? g.left_bytes || 0 : 0), 0);
+    const need = all.reduce((n, g) => n + (g.state === 'downloading' ? g.room_bytes ?? g.left_bytes ?? 0 : 0), 0);
     if (need > disk.free_bytes) {
       $('lib-pc-need-text').textContent = `The downloads need ${gbWords(need)} more and ${gbWords(disk.free_bytes)} is free.`;
       $('lib-pc-need').hidden = false;
