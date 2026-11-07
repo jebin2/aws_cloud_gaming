@@ -7165,10 +7165,14 @@ async function chooseMachine(row, spot) {
   if (moving) await runCg(['config', 'set', 'GAME_REGION', row.region]);
   // machines is per-region, so a move makes the old answer wrong; and the
   // games that fit depend on the machine's disk, so the library is read again.
+  // Both halves of it: the library is a bucket per region, so after a move the
+  // bucket that was "somewhere else" is the machine's own, and a stale list of
+  // other places drew the same game twice, with a second login, until Refresh.
   await Promise.all([runCg(['config', '--json'], { json: 'config' }),
                      runCg(['machines', '--json'], { json: 'machines' }),
                      runCg(['status', '--json'], { json: 'status' }),
-                     runCg(['library', 'list', '--json'], { json: 'library' })]);
+                     runCg(['library', 'list', '--json'], { json: 'library' }),
+                     runCg(['library', 'elsewhere', '--json'], { json: 'elsewhere' })]);
   saved = currentPick().type === row.type && currentPick().region === row.region;
   } finally {
     choosing = false;

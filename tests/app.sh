@@ -190,6 +190,9 @@ contains "  shown only on the cost screen" "$js" "refresh-cost').hidden = view !
 check    "nothing repeats on an interval"    "$(grep -c 'setInterval' app/renderer/app.js)" "0"
 contains "  the one timed read asks the machine, never AWS" "$js" "runCg(['games', '--json', '--box'], { capture: true })"
 contains "  only on the Games page"           "$js" "if (view !== 'library' || !box || box.state !== 'running' || pcReading) return paintBoxGames();"
+# A machine moved to another region re-reads BOTH halves of the library: the old
+# list of other places still held the bucket that is now the machine's own.
+contains "a move re-reads the other places too" "$js" "runCg(['library', 'elsewhere', '--json'], { json: 'elsewhere' })]);"
 echo "5. the screens, and what each reads"
 for v in dashboard build library guards cost settings logs; do
   contains "a $v screen"                 "$html" "data-view=\"$v\""
