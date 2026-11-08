@@ -648,7 +648,7 @@ function renderMachineCard(card) {
     title = box.state === 'stopped' ? 'Machine stopped' : `Machine ${box.state}`;
     sub = box.state === 'pending' ? 'Starting.' : box.state === 'stopping' || box.state === 'shutting-down'
       ? 'Shutting down.'
-      : box.state === 'stopped' ? 'Your games and setup are kept. Only the disk is billed.' : 'Not running.';
+      : box.state === 'stopped' ? 'Your setup is kept; games come back from Saved games on start. Only the disk is billed.' : 'Not running.';
   } else {
     title = 'No machine running';
   }
@@ -7459,7 +7459,7 @@ $('d-destroy').onclick = async () => {
         + 'Games are saved first; nothing is deleted if saving fails.\n\n'
         + 'The machine and its disk are deleted.'
         + (statusNow && statusNow.box && statusNow.box.state === 'stopped'
-           ? '\n\nIt is only stopped: Start and play brings it back with your games, and only the disk is billed meanwhile. Delete it to stop that charge too.' : '')
+           ? '\n\nIt is only stopped: Start and play brings it back with your setup (games return from Saved games), and only the disk is billed meanwhile. Delete it to stop that charge too.' : '')
         + (((statusNow || {}).build || {}).last_min != null
            ? ` The last build took ${statusNow.build.last_min} min.` : ''),
     yes: 'Delete machine', danger: true,

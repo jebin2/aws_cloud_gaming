@@ -284,7 +284,7 @@ BOXS='{"id": "i-1", "state": "stopped", "type": "g4dn.xlarge", "lifecycle": "nor
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st "$BOXS" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "stopped: says so"               "$(row AFTER)" "title=Machine stopped | word=Stopped"
-contains "  and what is kept"             "$(row AFTER)" "Your games and setup are kept. Only the disk is billed."
+contains "  and what is kept"             "$(row AFTER)" "Your setup is kept; games come back from Saved games on start. Only the disk is billed."
 contains "  Play starts it"               "$(row AFTER)" "Start and play | acts=b-open"
 contains "  and Delete is still there"    "$(row AFTER)" "acts=b-open,b-destroy"
 BOXD='{"id": "i-1", "state": "shutting-down", "type": "g4dn.xlarge", "lifecycle": "spot", "launched": "2026-01-01T00:00:00Z"}'
