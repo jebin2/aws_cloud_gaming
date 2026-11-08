@@ -7973,6 +7973,10 @@ async function askKeepGames(kind, untick = []) {
       } else if (goes && !saved.has(id(g))) {
         n.className = 'pl-[1.6rem] font-code-sm text-code-sm text-error';
         n.textContent = '⚠ Not saved. Gone with the games disk.';
+      } else if (goes && saved.has(id(g))) {
+        // Unticked, in Saved games, on a disk that goes: both copies go.
+        n.className = 'pl-[1.6rem] font-code-sm text-code-sm text-error';
+        n.textContent = '⚠ Deleted from Saved games, and gone with the games disk. Cannot be undone.';
       } else if (!can) {
         n.className = 'pl-[1.6rem] font-code-sm text-code-sm text-on-surface-variant';
         n.textContent = saved.has(id(g)) ? 'Still downloading: not saved. The copy in Saved games stays as it was.'
@@ -8193,8 +8197,11 @@ async function keepFlow(kind, untick) {
   } else {
     keepUi.run.fail(why);
     $('keepdlg-title').textContent = `${stop ? 'Stopping' : 'Deleting'} the machine - not done`;
+    // The reason is cg's, above: most often Saved games has no complete save from
+    // this run (a game still downloading anywhere makes the save incomplete), and
+    // then Remove games disk would refuse just the same until there is one.
     $('keepdlg-run-note').textContent = keepUi.failedAt === 'disk'
-      ? 'The machine is stopped; the games disk is still there and billing. Remove games disk on the card deletes it.'
+      ? 'The machine is stopped; the games disk was kept, so nothing on it is lost. It still bills until it is removed; the reason it was kept is above.'
       : 'The machine is still running and billing. Anything already deleted from Saved games stays deleted.';
     keepMode('failed');
     $('keepdlg-close').onclick = () => { $('keepdlg').onclose = null; $('keepdlg').close(); };

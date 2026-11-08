@@ -603,6 +603,31 @@ contains "  the stop leaves the game out, then the disk is removed" "$(row AFTER
 contains "  and the window closes"                     "$(row AFTER)" "closed=true"
 ENGINE=""
 
+echo "7e5d. the games disk going, with a saved game on it unticked: both copies go, and it says so"
+B5S2="window.__after = async () => {
+  for (let i = 0; i < 120 && !statusNow; i++) await new Promise(r => setTimeout(r, 20));
+  await new Promise(r => setTimeout(r, 300));
+  document.querySelector('.nav-item[data-view=build]').click();
+  await new Promise(r => setTimeout(r, 60));
+  document.getElementById('b-stopmachine').click();
+  const dlg = document.getElementById('keepdlg');
+  for (let i = 0; i < 100 && !dlg.querySelector('#keepdlg-games input'); i++) await new Promise(r => setTimeout(r, 30));
+  const boxes = [...dlg.querySelectorAll('#keepdlg-games input')];
+  boxes[0].click();
+  const notes = [...dlg.querySelectorAll('#keepdlg-games p.pl-\\\\[1\\\\.6rem\\\\]')].filter(n => !n.hidden).map(n => n.textContent).join(' / ');
+  return 'disk=' + (boxes[boxes.length - 1].checked ? 'x' : '-') + (boxes[boxes.length - 1].disabled ? 'L' : '') + ' | notes=' + notes
+    + ' | yes=' + document.getElementById('keepdlg-yes').textContent;
+};"
+ENGINE="$B5S2"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"disk --json\": {\"state\": \"running\", \"extra_gb\": 160},
+  \"library list --json\": {\"games\": [{\"appid\": 777, \"name\": \"Saved On Disk\", \"bytes\": 1073741824}], \"bucket\": \"b\", \"total_bytes\": 1073741824, \"selectable_gb\": 60, \"reserve_gb\": 20},
+  \"games --json --box\": {\"games\": [{\"appid\": \"777\", \"name\": \"Saved On Disk\", \"state\": \"installed\", \"bytes\": 1073741824, \"disk\": \"extra\"}], \"disk\": null},
+  \"status --json\": $(st "$BOXR" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "unticked, saved, on a disk that goes: both copies go" "$(row AFTER)" "disk=xL | notes=⚠ Deleted from Saved games, and gone with the games disk. Cannot be undone."
+contains "  and the button says both"            "$(row AFTER)" "yes=Delete 1 game, stop and delete disk"
+ENGINE=""
+
 echo "7e5b. a stop that fails says what finished, what did not, and offers Try again"
 B5F="window.__broken = ['stop --yes'];
 window.__after = async () => {

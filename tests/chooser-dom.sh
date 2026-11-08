@@ -291,63 +291,10 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('PAINTED | status/spec | ' + document.querySelector('#b-machine-card [data-f=what]').textContent.trim());
   out.push('PAINTED | config | ' + document.querySelectorAll('#s-groups .row').length);
   out.push('PAINTED | guards | ' + document.getElementById('g-nets').children.length);
-  out.push('PAINTED | library | ' + document.getElementById('b-fit').textContent.trim());
-  // The same payload with the box's disk left out, which is what a failed or
-  // older read gives. Nothing here may invent a number: the app used to fill in
-  // 209 GB, which reads exactly like an answer.
-  const noCap = { ...DATA.library, selectable_gb: null,
-                  games: [{ appid: '1', name: 'A game', bytes: 53687091200,
-                            usd_month: 1.25, pushed: '2026-10-01T00:00:00Z' }],
-                  total_bytes: 53687091200 };
-  paintLibrary(noCap);
-  document.querySelector('#b-games input[type=checkbox]').click();
-  out.push('NOCAP | fit | ' + document.getElementById('b-fit').textContent.trim());
-  out.push('NOCAP | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
-  out.push('NOCAP | build | ' + (document.getElementById('b-build').disabled ? 'OFF' : 'on'));
-  // A g4dn.xlarge's drive, and a game bigger than all of it: offered all the
-  // same, because cg adds a disk for it - and the price of that is said. Only a
-  // game too big for even that is refused.
-  const small = { ...DATA.library, disk_type: 'g4dn.xlarge', disk_gb: 116, selectable_gb: 96, reserve_gb: 20,
-                  games: [{ appid: '9', name: 'Big game', bytes: 175 * 1073741824, usd_month: 4.4, pushed: '2026-10-01T00:00:00Z' },
-                          { appid: '8', name: 'Small game', bytes: 3 * 1073741824, usd_month: 0.1, pushed: '2026-10-01T00:00:00Z' }],
-                  total_bytes: 178 * 1073741824 };
-  paintLibrary(small);
-  const boxes = [...document.querySelectorAll('#b-games input[type=checkbox]')];
-  out.push('SMALL | fit | ' + document.getElementById('b-fit').textContent.trim());
-  out.push('SMALL | big | ' + (boxes[0].disabled ? 'off' : 'on') + ' | ' + boxes[0].closest('tr').textContent.replace(/\s+/g, ' ').trim());
-  out.push('SMALL | small | ' + (boxes[1].disabled ? 'off' : 'on'));
-  boxes[0].closest('tr').click();
-  out.push('SMALL | clicked | ' + boxes[0].checked);
-  out.push('SMALL | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
-  out.push('SLIDER | follows the game | min=' + document.getElementById('b-extra-pick').min + ' value=' + document.getElementById('b-extra-pick').value);
-  out.push('SMALL | extra | ' + document.getElementById('b-extra').textContent.trim() + ' | hidden=' + document.getElementById('b-extra').hidden);
-  out.push('SMALL | build | ' + (document.getElementById('b-build').disabled ? 'OFF' : 'on'));
-  // One that fits the drive beside one that does not: the small one stays on the drive.
-  boxes[1].closest('tr').click();
-  out.push('MIX | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
-  boxes[0].closest('tr').click();
-  out.push('FITS | pct | ' + document.getElementById('b-fit-pct').textContent.trim() + ' | extra hidden=' + document.getElementById('b-extra').hidden);
-  boxes[1].closest('tr').click();
-  boxes[0].closest('tr').click();
-  boxes[0].closest('tr').click();
-  out.push('SMALL | unticked | extra hidden=' + document.getElementById('b-extra').hidden);
-  // A disk can be asked for with nothing ticked, and the choice is said as one.
-  const pick = document.getElementById('b-extra-pick');
-  out.push('SLIDER | start | min=' + pick.min + ' max=' + pick.max + ' value=' + pick.value + ' disabled=' + pick.disabled);
-  pick.value = '376'; pick.dispatchEvent(new Event('input'));
-  out.push('SLIDER | pulled | value=' + pick.value + ' | ' + document.getElementById('b-extra-val').textContent);
-  out.push('PICK | extra | ' + document.getElementById('b-extra').textContent.trim() + ' | hidden=' + document.getElementById('b-extra').hidden);
-  out.push('PICK | pct | ' + document.getElementById('b-fit-pct').textContent.trim());
-  pick.value = '96'; pick.dispatchEvent(new Event('input'));
-  out.push('PICK | cleared | extra hidden=' + document.getElementById('b-extra').hidden);
-  const huge = { ...small, games: [{ appid: '7', name: 'Huge game', bytes: 990 * 1073741824, usd_month: 9, pushed: '2026-10-01T00:00:00Z' }],
-                 total_bytes: 990 * 1073741824 };
-  paintLibrary(huge);
-  const hb = document.querySelector('#b-games input[type=checkbox]');
-  out.push('HUGE | box | ' + (hb.disabled ? 'off' : 'on') + ' | ' + hb.closest('tr').textContent.replace(/\s+/g, ' ').trim());
+  // The Build page has no game picker any more: games are chosen at Play, and
+  // that popup's sizing is tested in startup-gate-build (7e4).
   out.push('EXTRADISK | ' + [extraDiskGb(121, 20, 232), extraDiskGb(212, 20, 232), extraDiskGb(213, 20, 232), extraDiskGb(140, 20, 115),
                               extraDiskGb(170, 20, 115), extraDiskGb(50, 20, 0), extraDiskGb(0, 20, 115), extraDiskGb(140, 20, null)].join(','));
-  paintLibrary(DATA.library);
   if (window.__errs.length) out.push('ERRORS: ' + window.__errs.join(' | '));
   const card = f => (document.querySelector('#b-machine-card [data-f=' + f + ']') || {}).textContent || '';
   out.push('BPICK | ' + card('what'));
@@ -456,36 +403,8 @@ contains "the machine is one line"         "$OUT" "PAINTED | status/spec | g4dn.
 # model are the chooser's, and nothing else repeats them.
 contains "paintConfig drew Settings' own rows" "$OUT" "PAINTED | config | 1"
 contains "paintGuards drew a net"           "$OUT" "PAINTED | guards | 1"
-contains "paintLibrary sized the disk"      "$OUT" "PAINTED | library | "
-
-echo "1b. a disk size cg did not give is not guessed"
-contains "the meter is labelled plainly"   "$OUT" "NOCAP | fit | Disk space"
-contains "  and counts what is picked, with no fraction of an unknown" \
-         "$OUT" "NOCAP | pct | 50.0 GB · capacity unknown"
-# The box checks the real limit at boot. Refusing the build here on a number
-# nobody has would be guessing in the other direction.
-contains "  and Build is still allowed"    "$OUT" "NOCAP | build | on"
 check    "number headings are right-aligned, over their numbers" "$(grep '^HEADALIGN' <<<"$OUT")" "HEADALIGN | right,right"
 contains "the machine card says how much room it has" "$(grep '^BPICK' <<<"$OUT")" " GB"
-contains "the meter names the machine"     "$OUT" "SMALL | fit | Disk space (g4dn.xlarge)"
-contains "a game bigger than the machine's drive is still offered" "$OUT" "SMALL | big | on"
-contains "  a game that fits is too"        "$OUT" "SMALL | small | on"
-contains "  and ticking the big one works"  "$OUT" "SMALL | clicked | true"
-contains "  and says a disk will be added"  "$OUT" "SMALL | pct | 175.0 GB · 0.0 GB on the drive, 175.0 GB on a 200 GB disk"
-contains "  with what it is, before the build" "$OUT" "SMALL | extra | Games that do not fit the machine's own drive go on a 200 GB extra disk."
-lacks    "  not hidden"                    "$OUT" "SMALL | extra | hidden=true"
-contains "  Build stays allowed"            "$OUT" "SMALL | build | on"
-contains "  and the note goes when the game does" "$OUT" "SMALL | unticked | extra hidden=true"
-contains "the slider starts at the machine's own drive and reaches the most a machine can hold" "$OUT" "SLIDER | start | min=96 max=1076 value=96 disabled=false"
-contains "  and its low end follows the games ticked" "$OUT" "SLIDER | follows the game | min=276 value=276"
-contains "  pulled further by hand it says the room" "$OUT" "SLIDER | pulled | value=376 | 376 GB"
-contains "a game that fits the drive stays on it beside one that does not" "$OUT" "MIX | pct | 178.0 GB · 3.0 GB on the drive, 175.0 GB on a 200 GB disk"
-contains "  and with only that one, no disk at all" "$OUT" "FITS | pct | 3.0 of 96 GB | extra hidden=true"
-contains "a disk can be asked for with no game ticked" "$OUT" "PICK | extra | You chose 300 GB of extra space for your games."
-contains "  and the meter says it will be added" "$OUT" "PICK | pct | 0.0 GB · a 300 GB disk will be added"
-contains "  and choosing none takes it away" "$OUT" "PICK | cleared | extra hidden=true"
-contains "a game too big for any added disk is not offered" "$OUT" "HUGE | box | off"
-contains "  and says why"                  "$OUT" "More than a game PC here can hold (1000 GB)."
 # The same numbers as provision's ExtraDiskGB test: one rule, two places.
 contains "the app and cg size the disk alike" "$OUT" "EXTRADISK | 0,0,240,160,190,70,0,0"
 
