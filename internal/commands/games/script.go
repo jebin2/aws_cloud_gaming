@@ -16,6 +16,10 @@ const remoteScript = `
               for r in /home/*/.local/share/Steam; do [ -d "$r" ] && echo "$r"; done
             } | while read -r p; do p=$(readlink -f "$p" 2>/dev/null) && [ -d "$p/steamapps" ] && echo "$p"; done | awk "!s[\$0]++" )
     for L in $libs; do
+    # Which disk this library is on: the machine's own fast drive is mounted at
+    # /scratch, the added disk at /scratch2, and anything else is the root disk.
+    tgt=$(df --output=target "$L" 2>/dev/null | tail -1 | tr -d " ")
+    case "$tgt" in /scratch) where=nvme ;; /scratch2) where=extra ;; *) where=root ;; esac
     for f in "$L"/steamapps/appmanifest_*.acf; do
       [ -f "$f" ] || continue
       id=$(basename "$f" .acf); id=${id#appmanifest_}
@@ -42,7 +46,7 @@ const remoteScript = `
       # What Steam's manifest says it has downloaded of what it has to download:
       # the last field. It is written in bursts (it stood still for 40 s with
       # 350 MB arriving), so it is only for a download that has nothing staged.
-      printf "APP\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$id" "$name" "${flags:-0}" "${size:-0}" "${done_b:-0}" "${want:-0}" "$on" "${stage:-0}" "${staged:-0}" "${got:-0}"
+      printf "APP\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$id" "$name" "${flags:-0}" "${size:-0}" "${done_b:-0}" "${want:-0}" "$on" "${stage:-0}" "${staged:-0}" "${got:-0}" "$where"
     done
     done
     printf "DISK\t%s\n" "$(df -B1 --output=used,avail /scratch | tail -1 | tr -s " " "\t" | sed "s/^\t//")"

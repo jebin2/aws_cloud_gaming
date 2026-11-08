@@ -41,7 +41,7 @@ func (o *Out) ts() string { return o.now().Format("2006-01-02T15:04:05-07:00") }
 
 var ansi = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
-var numeric = map[string]bool{"rc": true, "secs": true, "of": true, "secret": true}
+var numeric = map[string]bool{"rc": true, "secs": true, "of": true, "secret": true, "got": true}
 
 // Event writes one event line to stderr: {"t":..., "at":..., k:v...}. kv is
 // alternating keys and values; a number field with no value is 0.
@@ -127,6 +127,24 @@ func (o *Out) Stage(id, text string) {
 func (o *Out) Wait(id, state, text string, secs, of int) {
 	if o.JSON {
 		o.Event("wait", "id", id, "state", state, "text", text, "secs", fmt.Sprint(secs), "of", fmt.Sprint(of))
+	}
+}
+
+// Restore says how far one game is on its way from Saved games onto the
+// machine: state waiting, copying, done or failed, bytes there (got) of bytes
+// expected (of; 0 when not known). Events only, like Wait: the plain output has
+// its own lines.
+func (o *Out) Restore(id, state string, got, of int64) {
+	if o.JSON {
+		o.Event("restore", "id", id, "state", state, "got", fmt.Sprint(got), "of", fmt.Sprint(of))
+	}
+}
+
+// Save says how far the games are on their way into Saved games: text is what is
+// being saved, got bytes there of of bytes to copy. Events only, like Restore.
+func (o *Out) Save(id, text string, got, of int64) {
+	if o.JSON {
+		o.Event("save", "id", id, "text", text, "got", fmt.Sprint(got), "of", fmt.Sprint(of))
 	}
 }
 

@@ -15,7 +15,14 @@ import "encoding/json"
 // Version 3 adds the problem event ({"t":"problem","kind","title","text","charging",
 // "code","said","region"}): a failure in words for a person, with a stable kind to
 // pick buttons by. Only a launch refused by AWS sends it so far.
-const EventsVersion = 4
+//
+// Version 5 adds the restore event ({"t":"restore","id","state","got","of"}): how
+// far one game is on its way from Saved games onto the machine, while cg open
+// waits for it.
+//
+// Version 6 adds the save event ({"t":"save","id","text","got","of"}): how far one
+// game set is on its way into Saved games, while cg stop or cg destroy copies it.
+const EventsVersion = 6
 
 // Command is one entry in the registry: a path such as ["library", "push"]
 // and what the app needs to know about running it.

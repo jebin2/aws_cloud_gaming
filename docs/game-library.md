@@ -9,12 +9,15 @@ On **local NVMe** (`/scratch/steam`), mirrored to **S3**. The instance store is 
 on the box and costs nothing, and it is wiped on every *stop* - so the S3 archive is the durable
 copy, and the box restores from it at boot.
 
-**Where each game goes at build.** The machine's own NVMe first, then the disk added for what does not
-fit it. The ticked games are placed largest first, each on the NVMe if it still fits what is left (less the
-20 GB kept free), otherwise on the added disk at `/scratch2/steam`; the disk is sized from the overflow only,
-so a selection that fits the NVMe adds no disk. The laptop works this out and hands the box the list
-(`CG_EXTRA_APPS` in `/etc/cg-library.conf`); restore follows it. Games on the added disk survive a stop, so
-they are not restored again; games on the NVMe are, every start.
+**Where each game goes: chosen at Play, not at build.** A machine is built with no games (`GAME_APPS=none`);
+the Steam login is still restored. Pressing Play lists the saved games; the ticked ones are placed largest
+first, each on the NVMe if it still fits what is left (less room kept free for later downloads: a fifth of
+the games, at least 30 GB), otherwise on a disk added for the purpose at `/scratch2/steam`. The disk is sized
+from the overflow only, so a selection that fits adds no disk, and the size can be changed before Play. The
+app hands `cg open` the list (`--games id:bytes,…`, `--extra-gb N`, `--extra-apps ids` for the ones on the
+added disk); `cg open` copies them and reports each one's progress (`restore` events) before the stream
+starts. Games on the added disk survive a stop, so they are not copied again; games on the NVMe are, every
+start. Pushing never deletes a game that is not on the machine: leaving one unticked keeps its saved copy.
 
 Games are not always in that one place. A disk added later is `/scratch2/steam`, and a game installed
 from Steam's own default folder lands on the root disk. **Push, check and `cg games` look in every library

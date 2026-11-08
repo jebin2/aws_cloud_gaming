@@ -12,6 +12,8 @@
 set -euo pipefail
 
 IFACE="${IFACE:-tailscale0}"          # the tunnel: streaming shows up here
+# The idle minutes chosen in the app (GAME_IDLE_MIN), written here by cg open.
+if [[ -r /etc/cg-idle.conf ]]; then . /etc/cg-idle.conf; fi
 IDLE_LIMIT="${IDLE_LIMIT:-15}"        # consecutive idle minutes before shutdown
 THRESHOLD="${THRESHOLD:-204800}"      # bytes/min of stream traffic below which we call it idle (200 KB)
 RX_THRESHOLD="${RX_THRESHOLD:-10485760}"  # bytes/min inbound that counts as a real download (10 MB)

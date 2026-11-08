@@ -117,6 +117,23 @@ func TestReportAndRelayInEvents(t *testing.T) {
 	}
 }
 
+// How far the games are on their way into Saved games, for a screen's bar. Events
+// only: a terminal has the "mirroring" line and needs no number every few seconds.
+func TestSaveIsAnEventOnly(t *testing.T) {
+	o, e := out(true)
+	o.Save("all", "Saving your games", 1073741824, 11811160064)
+	ev := events(t, e)
+	if len(ev) != 1 || ev[0]["t"] != "save" || ev[0]["id"] != "all" || ev[0]["got"] != float64(1073741824) ||
+		ev[0]["of"] != float64(11811160064) || ev[0]["text"] != "Saving your games" {
+		t.Errorf("save %v", ev)
+	}
+	o, e = out(false)
+	o.Save("all", "x", 1, 2)
+	if e.Len() != 0 || o.Stdout.(*bytes.Buffer).Len() != 0 {
+		t.Error("plain output carries no progress")
+	}
+}
+
 func TestEventsAreNotHTMLEscaped(t *testing.T) {
 	o, e := out(true)
 	o.Log("a <b> & c")

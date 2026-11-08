@@ -53,6 +53,9 @@ func (f *fakeDisk) DescribeInstances(context.Context, *ec2.DescribeInstancesInpu
 	}
 	if f.extraVol != "" {
 		in.BlockDeviceMappings = append(in.BlockDeviceMappings, ec2types.InstanceBlockDeviceMapping{DeviceName: aws.String("/dev/sdg"), Ebs: &ec2types.EbsInstanceBlockDevice{VolumeId: aws.String(f.extraVol)}})
+	} else if f.newAttached {
+		// The disk this fake just made and connected, as AWS would then list it.
+		in.BlockDeviceMappings = append(in.BlockDeviceMappings, ec2types.InstanceBlockDeviceMapping{DeviceName: aws.String("/dev/sdg"), Ebs: &ec2types.EbsInstanceBlockDevice{VolumeId: aws.String("vol-new")}})
 	}
 	return &ec2.DescribeInstancesOutput{Reservations: []ec2types.Reservation{{Instances: []ec2types.Instance{in}}}}, nil
 }
@@ -253,7 +256,7 @@ func TestAddDiskOnTheMachinesOwnDriveAttachesASecondDiskAndMovesNothing(t *testi
 			t.Errorf("moved or closed something (%q):\n%s", never, ssh)
 		}
 	}
-	if !strings.Contains(r.o.String()+r.w.String(), "Settings > Storage > Add Drive > pick the drive named cgextra") {
+	if !strings.Contains(r.o.String()+r.w.String(), "Settings > Storage > Add Drive > pick the drive at /scratch2 (named cgextra)") {
 		t.Errorf("it says what to do next: %s%s", r.o, r.w)
 	}
 	if len(f.deleted) != 0 {
@@ -343,6 +346,16 @@ func TestStoppedDiskSaysWhetherItMayBeRemoved(t *testing.T) {
 	}
 }
 
+// Chosen at Stop machine with the loss shown (a download no save can hold): the
+// disk goes although Saved games has no complete save, and the log says so.
+func TestRemoveDiskUnsavedOKIsTheChosenLoss(t *testing.T) {
+	r, f := stoppedRig(t, func(context.Context) (time.Time, bool, error) { return time.Time{}, false, nil })
+	r.d.UnsavedOK = true
+	if rc := r.d.RemoveDisk(context.Background(), f); rc != 0 || len(f.deleted) != 1 || !strings.Contains(r.o.String()+r.w.String(), "chosen at Stop machine") {
+		t.Errorf("rc %d deleted %v\n%s%s", rc, f.deleted, r.o, r.w)
+	}
+}
+
 func TestRemoveDiskDeletesOnlyAfterACompleteSave(t *testing.T) {
 	launch := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
 	r, f := stoppedRig(t, func(context.Context) (time.Time, bool, error) { return launch.Add(time.Hour), true, nil })
@@ -370,6 +383,28 @@ func TestRemoveDiskDeletesOnlyAfterACompleteSave(t *testing.T) {
 	f.extraVol = ""
 	if rc := r.d.RemoveDisk(context.Background(), f); rc == 0 {
 		t.Errorf("no disk to remove must say so: %s", r.o)
+	}
+}
+
+// Play with a disk on a machine that is ALREADY running: the disk is made and
+// connected then. It used to fail with "the games disk is not connected", because
+// only a stopped machine went through the step that makes it.
+func TestPlayOnARunningMachineMakesTheDiskToo(t *testing.T) {
+	r := diskRig(t)
+	r.e.state = "running"
+	f := &fakeDisk{}
+	r.d.DiskAWS, r.d.ExtraGB = f, 30
+	if rc := r.d.extraAfterStart(context.Background()); rc != 0 {
+		t.Fatalf("rc %d\n%s%s", rc, r.o, r.w)
+	}
+	want := []string{"create 30GB gp3 ap-south-1b Name=", "attach vol-new /dev/sdg"}
+	for i, w := range want {
+		if i >= len(f.calls) || !strings.HasPrefix(f.calls[i], w) {
+			t.Errorf("call %d: want %q, calls %v", i, w, f.calls)
+		}
+	}
+	if strings.Contains(r.w.String(), "not connected") {
+		t.Errorf("it said not connected: %s", r.w)
 	}
 }
 

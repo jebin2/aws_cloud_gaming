@@ -102,13 +102,12 @@ The root disk size is `GAME_DISK_GB`, 50 GB by default. The NVMe is
 wiped whenever the instance stops, which is why S3 holds the durable copy.
 
 **Games that do not fit the NVMe.** Some types have an NVMe of about 115 GB, some none. The machine's
-own drive is filled first: the games chosen for a build go on it largest first
+own drive is filled first: the games chosen at Play (nothing is chosen at build) go on it largest first
 (`provision.PlaceGames`), each if it still fits what is left after the `GAME_DISK_RESERVE_GB` kept free,
-and the ones that do not fit are the overflow. `cg init` adds a gp3 disk for the overflow at launch
-(`provision.ExtraDiskFor`: their size plus the reserve, rounded up to 10 GB, at most 1000 GB, deleted
-with the box) and tells the box which games they are (`CG_EXTRA_APPS`). The same rule is in the app
-(`placeGames`), so the disk priced on the Build page is the one made; a larger disk can be asked for there
-(`GAME_EXTRA_DISK_GB`, the larger of that and the overflow is made). The NVMe stays at `/scratch`; the
+and the ones that do not fit are the overflow. `cg open --extra-gb N --extra-apps ids` adds a gp3 disk for the overflow (the app sizes it: their size plus
+room for later downloads, rounded up to 10 GB, at most 1000 GB, deleted with the box) and `--games` names
+what to copy; the app's `placeGames` sets the split, and the Play popup shows the disk and its price,
+which can be made larger. The NVMe stays at `/scratch`; the
 added disk is at `/scratch2` (`lib/bootstrap.d/12-scratch.sh`), and `cg-extra-library` keeps it in
 Steam's list of folders. Restore puts each game where it was told (`cmd_pull` in `host/cg-library`, with a
 budget per library, and never on the root disk if the added disk is not mounted). The added disk survives

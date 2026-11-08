@@ -136,18 +136,24 @@ func (d Deps) sessionEndFirst(x DestroyDeps) {
 // DestroyBox is `cg destroy [--force] [--no-push]`.
 func (d Deps) DestroyBox(ctx context.Context, x DestroyDeps, args []string) int {
 	var all, force, nopush bool
-	for _, a := range args {
-		switch a {
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; a {
 		case "--all":
 			all = true
 		case "--force":
 			force = true
 		case "--no-push":
 			nopush = true
+		case "--skip":
+			if i+1 >= len(args) || !appids.MatchString(args[i+1]) {
+				return d.die("--skip takes the appids not to save, comma-separated: --skip 730,1057090")
+			}
+			i++
+			d.Skip = args[i]
 		// Refuse anything else rather than ignore it: a typo like --everything
 		// must not quietly behave as a plain destroy and leave the volume billing.
 		default:
-			return d.die(fmt.Sprintf("unknown option '%s' for destroy (--all, --force, --no-push)", a))
+			return d.die(fmt.Sprintf("unknown option '%s' for destroy (--all, --force, --no-push, --skip)", a))
 		}
 	}
 	// --no-push with --all would be a promise to leave the archive exactly as it is
@@ -211,7 +217,12 @@ func (d Deps) DestroyBox(ctx context.Context, x DestroyDeps, args []string) int 
 		st = "unknown"
 	}
 	if st == "running" {
-		if !d.Push(ctx, "", "box is not reachable - no push", "mirroring the game library to S3 before the box goes away") {
+		if code := d.leaveOut(ctx); code != 0 {
+			return code
+		}
+	}
+	if st == "running" {
+		if !d.Push(ctx, "", "box is not reachable - no push", d.saveWords()) {
 			if !force {
 				d.block("The push from here failed",
 					"",

@@ -228,3 +228,55 @@ func TestJSONHasTheSameGamesAndTheNumbersTheWordsAreMadeFrom(t *testing.T) {
 		t.Error("table")
 	}
 }
+
+func TestWhereEachGameIsInstalled(t *testing.T) {
+	line := func(id, disk string) string {
+		f := []string{"APP", id, "G" + id, "4", "100", "100", "0", "0", "0", "0", "0"}
+		if disk != "" {
+			f = append(f, disk)
+		}
+		return strings.Join(f, "\t") + "\n"
+	}
+	b := ParseBox(line("1", "nvme") + line("2", "extra") + line("3", "root") + line("4", ""))
+	var got []string
+	for _, a := range b.Apps {
+		got = append(got, a.Disk)
+	}
+	if strings.Join(got, ",") != "nvme,extra,root," {
+		t.Fatalf("disks %v", got)
+	}
+	out, err := JSON(b, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, w := range []string{`"disk":"nvme"`, `"disk":"extra"`, `"disk":"root"`} {
+		if !strings.Contains(s, w) {
+			t.Errorf("JSON lacks %s: %s", w, s)
+		}
+	}
+	// An older box does not say: the field is left out, not guessed.
+	if strings.Count(s, `"disk":"`) != 3 {
+		t.Errorf("a game of unknown place got one: %s", s)
+	}
+}
+
+// Steam's own tools are never saved, so they are named as tools; games are not.
+func TestSteamToolsAreToldApart(t *testing.T) {
+	for _, c := range []struct {
+		id, name string
+		want     bool
+	}{
+		{"1493710", "Proton Experimental", true},
+		{"2348590", "Proton 9.0", true},
+		{"1628350", "Steam Linux Runtime 3.0 (sniper)", true},
+		{"228980", "Steamworks Common Redistributables", true},
+		{"1826330", "Proton EasyAntiCheat Runtime", true},
+		{"9", "ProtonHunter", false},
+		{"2863680", "ZERO PARADES: Director's Cut", false},
+	} {
+		if got := IsSteamTool(c.id, c.name); got != c.want {
+			t.Errorf("%s %q: %v", c.id, c.name, got)
+		}
+	}
+}

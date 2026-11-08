@@ -62,7 +62,7 @@ func TestDestroyMirrorsThenRemovesThenForgetsTheBoxButNotTheRegion(t *testing.T)
 		t.Fatalf("rc %d\n%s%s", rc, r.o, r.w)
 	}
 	got := r.o.String()
-	for _, want := range []string{"==> mirroring the game library to S3 before the box goes away", "This permanently deletes the box and everything listed here:", "instances       i-0abc",
+	for _, want := range []string{"==> Saving your games and Steam login to Saved games", "This permanently deletes the box and everything listed here:", "instances       i-0abc",
 		"keeping the budget gamevps-monthly - it guards the account, not the box", "==> box deleted - security group, key pair and tailnet node kept for cg init"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
@@ -175,7 +175,7 @@ func TestNoPushLocksTheArchiveBeforeAndUnlocksAfter(t *testing.T) {
 
 func TestDestroyRefusesWhatItDoesNotKnow(t *testing.T) {
 	r, x, _, _ := destroyRig(t, "")
-	if rc := r.d.DestroyBox(context.Background(), x, []string{"--everything"}); rc != 1 || !strings.Contains(r.w.String(), "unknown option '--everything' for destroy (--all, --force, --no-push)") || len(r.e.calls) != 0 {
+	if rc := r.d.DestroyBox(context.Background(), x, []string{"--everything"}); rc != 1 || !strings.Contains(r.w.String(), "unknown option '--everything' for destroy (--all, --force, --no-push, --skip)") || len(r.e.calls) != 0 {
 		t.Errorf("a typo must not quietly behave as a plain destroy: %s", r.w)
 	}
 }

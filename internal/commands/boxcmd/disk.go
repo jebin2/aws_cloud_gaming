@@ -252,9 +252,9 @@ func (d Deps) Disk(ctx context.Context, c DiskAPI, asJSON bool) int {
 	}
 	d.Out.Log(fmt.Sprintf("game space: %.0f of %.0f GB used, %.0f GB free", st.UsedGB, st.TotalGB, st.FreeGB))
 	if st.Second {
-		d.Out.Log("adding space puts a second disk beside the machine's own drive; nothing is moved or closed")
+		d.Out.Log("adding space adds a games disk beside the machine's fast drive; nothing is moved or closed")
 	} else {
-		d.Out.Log(fmt.Sprintf("adding space makes the %d GB of added disk bigger; the game keeps running", st.Disk))
+		d.Out.Log(fmt.Sprintf("adding space makes the %d GB games disk bigger; the game keeps running", st.Disk))
 	}
 	return 0
 }
@@ -294,7 +294,7 @@ func (d Deps) AddDisk(ctx context.Context, c DiskAPI, gb int) int {
 		}
 	}
 	if have+gb > provision.MaxExtraDiskGB {
-		return d.die(fmt.Sprintf("that is more than a game PC here can hold (%d GB of added disk at most; this one has %d GB)", provision.MaxExtraDiskGB, have))
+		return d.die(fmt.Sprintf("that is more than a game PC here can hold (%d GB of games disk at most; this one has %d GB)", provision.MaxExtraDiskGB, have))
 	}
 	if vol != "" {
 		return d.growDisk(ctx, c, vol, extraMount, have+gb)
@@ -320,7 +320,7 @@ func (d Deps) growDisk(ctx context.Context, c DiskAPI, vol, mount string, target
 		d.said(err)
 		return d.die("the disk is bigger, but the game PC did not take up the new space. Try again.")
 	}
-	d.Out.SayID("disk.done", fmt.Sprintf("Done: the game disk is now %d GB", target))
+	d.Out.SayID("disk.done", fmt.Sprintf("Done: the games disk is now %d GB", target))
 	return 0
 }
 
@@ -437,7 +437,7 @@ func (d Deps) setUpExtra(ctx context.Context, c DiskAPI, vol string, gb int) int
 		d.said(err)
 		return d.die("the new disk could not be set up. Your games are untouched; the new disk bills until the machine goes. Try again.")
 	}
-	d.Out.SayID("disk.done", fmt.Sprintf("Done: %d GB added. In Steam: Settings > Storage > Add Drive > pick the drive named cgextra", gb))
+	d.Out.SayID("disk.done", fmt.Sprintf("Done: %d GB added. In Steam: Settings > Storage > Add Drive > pick the drive at /scratch2 (named cgextra)", gb))
 	return 0
 }
 
@@ -526,10 +526,15 @@ func (d Deps) RemoveDisk(ctx context.Context, c DiskAPI) int {
 		return d.die(firstErrorLine(err.Error()))
 	}
 	if vol == "" {
-		return d.die("this game PC has no added disk")
+		return d.die("this game PC has no games disk")
 	}
 	if ok, why := d.removable(ctx, launched); !ok {
-		return d.die("not removing the disk: " + why)
+		if !d.UnsavedOK {
+			return d.die("not removing the disk: " + why)
+		}
+		// Chosen with that loss shown: a game still downloading, say, which no save
+		// can hold. Said, and done.
+		d.Out.Log("removing the disk although not everything on it is saved (" + why + ") - chosen at Stop machine")
 	}
 	d.Out.SayID("disk.remove", "Disconnecting the disk")
 	if _, err := c.DetachVolume(ctx, &ec2.DetachVolumeInput{VolumeId: aws.String(vol), InstanceId: aws.String(d.Box.ID)}); err != nil {

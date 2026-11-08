@@ -39,6 +39,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 TS_HOST = os.environ.get("CG_TS_HOST", "gamevps")
@@ -67,6 +68,11 @@ SPOT_EVENT = "EC2 Spot Instance Interruption Warning"
 
 # Archive expiry, in days with no box. 0 turns it off.
 BUCKET = os.environ.get("CG_BUCKET", "")
+# Where cg-library keeps the archive inside the bucket: its "everything is saved"
+# marker is <PREFIX>/pushed.json.
+PREFIX = os.environ.get("CG_PREFIX", "steam")
+# The games disk cg adds beside the machine's own drive.
+GAMES_DISK_DEVICE = "/dev/sdg"
 # The account, so this host's OTHER buckets can be recognised by name: a region
 # move leaves games in a bucket nothing points at, billing until someone looks.
 # Unset, only BUCKET is ever touched - which is how it worked before.
@@ -137,14 +143,14 @@ def handler(event, context):
     # else runs for these: they answer "is the box really gone", not "is it idle".
     if isinstance(event, dict) and event.get("detail-type") in (STATE_EVENT, SPOT_EVENT):
         return state_changed(boto3.client("ec2"), event, boto3.client("cloudwatch"),
-                             datetime.now(timezone.utc), boto3.client("ssm"))
+                             datetime.now(timezone.utc), boto3.client("ssm"), boto3.client("s3"))
     dry = isinstance(event, dict) and bool(event.get("dry_run"))
     return run_all(boto3.client("ec2"), boto3.client("cloudwatch"), boto3.client("s3"),
                    boto3.client("ssm"), boto3.client("cloudtrail"), datetime.now(timezone.utc), dry,
                    s3_for)
 
 
-def state_changed(ec2, event, cw=None, now=None, ssm=None):
+def state_changed(ec2, event, cw=None, now=None, ssm=None, s3=None, sleep=None):
     """An instance finished stopping or terminating. The box cannot report its own
     end - by then it is gone - so this is the notification that says it really is,
     however it ended: a watchdog, cg destroy, a spot interruption, the console.
@@ -179,12 +185,67 @@ def state_changed(ec2, event, cw=None, now=None, ssm=None):
         notify("Game PC removed",
                "The charge for the PC has stopped.%s" % archive_words(look, now), "low", "white_check_mark")
     else:
+        inst = (resp.get("Reservations") or [{}])[0].get("Instances", [{}])[0]
+        drop_games_disk(ec2, s3, inst, sleep)
         look = archive_look(cw, now)
         say("%s stopped - compute no longer bills, its disk still does.%s" % (iid, archive_note(look, now)))
         notify("Game PC is off",
                "The charge for the PC has stopped. A small storage charge continues until you start it "
                "again or delete it.%s" % archive_words(look, now), "low", "white_check_mark")
     return {"state": state, "instance": iid}
+
+
+def drop_games_disk(ec2, s3, inst, sleep=None):
+    """After the machine stopped ITSELF - the idle watchdog's shutdown - its games
+    disk goes too, once the games are saved: an idle stop otherwise left the disk
+    billing every month with nobody deciding anything. Only then:
+
+      - the stop was the machine's own ("InstanceInitiatedShutdown"), not a person's
+        Stop machine, whose own choice about the disk stands;
+      - the machine has a games disk;
+      - Saved games holds a complete save made after this machine last started -
+        the marker cg-library writes only when it saved everything. No marker, or
+        an older one, and the disk is kept: something on it may not be saved.
+    """
+    sleep = sleep or time.sleep
+    iid = inst.get("InstanceId", "")
+    if "InstanceInitiatedShutdown" not in (inst.get("StateTransitionReason") or ""):
+        return "not-an-idle-stop"
+    vol = next((m.get("Ebs", {}).get("VolumeId") for m in inst.get("BlockDeviceMappings", [])
+                if m.get("DeviceName") == GAMES_DISK_DEVICE and m.get("Ebs")), None)
+    if not vol:
+        return "no-games-disk"
+    if s3 is None or not BUCKET:
+        say("%s stopped by itself; its games disk %s is kept - Saved games cannot be checked here" % (iid, vol))
+        return "unchecked"
+    try:
+        marker = s3.head_object(Bucket=BUCKET, Key=PREFIX + "/pushed.json")
+    except Exception as exc:
+        say("%s stopped by itself; its games disk %s is kept - no complete save in Saved games (%s)" % (iid, vol, error_code(exc) or exc))
+        return "not-saved"
+    launched, saved = inst.get("LaunchTime"), marker.get("LastModified")
+    if not launched or not saved or saved < launched:
+        say("%s stopped by itself; its games disk %s is kept - the last complete save is older than this run" % (iid, vol))
+        return "not-saved"
+    try:
+        ec2.detach_volume(VolumeId=vol, InstanceId=iid)
+        for _ in range(40):
+            v = ec2.describe_volumes(VolumeIds=[vol]).get("Volumes", [{}])[0]
+            if v.get("State") == "available":
+                break
+            sleep(3)
+        else:
+            say("%s: games disk %s did not come free - kept" % (iid, vol))
+            return "kept"
+        ec2.delete_volume(VolumeId=vol)
+    except Exception as exc:
+        say("%s: could not delete the games disk %s - kept: %s" % (iid, vol, exc))
+        return "kept"
+    say("%s stopped by itself after its games were saved; games disk %s deleted" % (iid, vol))
+    notify("Games disk deleted",
+           "Your game PC stopped after being idle and its games were saved, so the games disk "
+           "was deleted to stop its charge. Play brings your games back.", "low", "white_check_mark")
+    return "deleted"
 
 
 def run_all(ec2, cw, s3, ssm, trail, now, dry=False, s3_for=None):

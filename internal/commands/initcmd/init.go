@@ -409,7 +409,7 @@ func orID(id string) string {
 }
 
 func (i *Init) ping(ctx context.Context, node string, count int, timeout string) bool {
-	_, err := i.R.Run(ctx, local.Cmd{Name: "tailscale", Args: []string{"ping", "-c", fmt.Sprint(count), "--timeout", timeout, node}})
+	_, err := i.R.Run(ctx, local.Cmd{Name: "tailscale", Args: []string{"ping", "-c", fmt.Sprint(count), "--timeout", timeout, "--until-direct=false", node}})
 	return err == nil
 }
 

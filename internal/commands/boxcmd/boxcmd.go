@@ -46,6 +46,16 @@ type Deps struct {
 	Destroy func(ctx context.Context) int
 	// Force is --force.
 	Force bool
+	// Sure is --yes on stop: the caller (the app) has already asked, so cg does not ask again.
+	Sure bool
+	// Skip is --skip on stop: the games (appids, comma-separated) not to save.
+	Skip string
+	// UnsavedOK is `cg disk remove --unsaved-ok`: delete the games disk even when
+	// Saved games has no complete save, because the person chose that loss.
+	UnsavedOK bool
+	// Reach opens a TCP connection to the machine over Tailscale, for the wait that
+	// checks it can be reached; nil is the real one. Tests set it.
+	Reach func(addr string, timeout time.Duration) error
 	// Pushed is when the archive last had everything saved (the marker the box
 	// writes after a clean push); nil reads nothing, which is a "no".
 	Pushed func(ctx context.Context) (at time.Time, found bool, err error)
@@ -53,6 +63,10 @@ type Deps struct {
 	// these games (appids, comma separated) onto it. Zero and "" make none.
 	ExtraGB   int
 	ExtraApps string
+	// Games are the games cg open brings onto the machine before the stream
+	// starts, "appid:bytes,appid:bytes" (bytes as Saved games holds them). The
+	// ones in ExtraApps go on the added disk, the rest on the machine's own drive.
+	Games string
 	// DiskAWS is AWS's disks, for the play that makes one; nil makes none.
 	DiskAWS DiskAPI
 	// Dial checks a TCP port; nil really dials.
@@ -188,5 +202,8 @@ func (d Deps) Push(ctx context.Context, extra, unreachable, say string) bool {
 	if extra != "" {
 		command = remote(cgLibrary, "push", extra)
 	}
-	return d.relay(ctx, command) == nil
+	stop := d.watchSave(ctx)
+	err := d.relay(ctx, command)
+	stop()
+	return err == nil
 }

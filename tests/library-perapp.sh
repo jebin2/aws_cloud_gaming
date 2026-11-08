@@ -101,6 +101,42 @@ contains "marker taken down first"    "$(cat "$T/s5.log")" "rm s3://b/steam/push
 contains "and written once all is saved" "$(cat "$T/s5.log")" "cp "
 check    "marker written exactly once" "$(grep -c 'pushed.json' "$T/s5.log" | tr -d ' ')" "2"
 
+# Unticked at Stop machine: left out of this boot's saves, and only this boot's.
+echo "boot-aaaa 730" > "$T/state/skip"
+out=$(run push)
+contains "an unticked game is not saved"     "$out" "not saving Counter-Strike 2 (730): unticked at Stop machine"
+lacks    "  and nothing of it is uploaded"   "$(cat "$T/s5.log")" "common/CS2/"
+echo "boot-older 730" > "$T/state/skip"
+out=$(run push)
+contains "a choice from an earlier boot no longer holds" "$out" "pushing Counter-Strike 2"
+rm -f "$T/state/skip"
+out=$(run push)
+
+# On the way down: a clean save of this boot minutes ago and nothing changed since
+# is not done again. A file written since, or an older save, and it is.
+cat > "$T/bin/systemctl" <<'SC'
+#!/usr/bin/env bash
+[[ $1 == is-system-running ]] && echo "${FAKE_SYSSTATE:-running}"
+SC
+chmod +x "$T/bin/systemctl"
+rm -f "$T/state/skip"
+out=$(run push)                                   # a clean save: leaves its mark
+contains "a clean save leaves its mark"       "$(cat "$T/state/pushed-clean" 2>/dev/null)" "boot-aaaa "
+out=$(FAKE_SYSSTATE=stopping run push)
+contains "on the way down, nothing changed: not saved again" "$out" "not saving again on the way down"
+lacks    "  and nothing is uploaded"          "$(cat "$T/s5.log")" "common/CS2/"
+touch "$T/scratch/steam/steamapps/common/CS2/newfile"
+out=$(FAKE_SYSSTATE=stopping run push)
+contains "a game file written since: saved as always" "$out" "pushing Counter-Strike 2"
+out=$(run push)
+printf 'boot-aaaa %s\n' "$(( $(date +%s) - 3600 ))" > "$T/state/pushed-clean"
+out=$(FAKE_SYSSTATE=stopping run push)
+contains "a save an hour old: saved as always" "$out" "pushing Counter-Strike 2"
+printf 'boot-older %s\n' "$(date +%s)" > "$T/state/pushed-clean"
+out=$(FAKE_SYSSTATE=stopping run push)
+contains "a save from another boot: saved as always" "$out" "pushing Counter-Strike 2"
+out=$(run push)
+
 echo "2. and issues NOTHING that could reach the archived games"
 # The whole point. Diablo and Wukong are in the archive and not on this disk.
 lacks "no Diablo path at all"         "$(cat "$T/s5.log")" "2344520"

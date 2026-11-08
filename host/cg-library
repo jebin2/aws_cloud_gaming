@@ -95,6 +95,16 @@ restored() {
   [[ -f "$STATE/restored" ]] || return 1
   [[ "$(cat "$STATE/restored" 2>/dev/null)" == "$(boot_id)" ]]
 }
+# Games not to save: unticked at Stop machine on the laptop, which writes
+# "<boot id> <appid,appid>" to $STATE/skip. Every push of THIS boot leaves them out
+# - the one cg asks for and the one on the way down - and the next boot saves
+# everything again, so a choice made once is never a choice forever.
+skipped() { # skipped <appid>
+  local b="" ids=""
+  [[ -f "$STATE/skip" ]] || return 1
+  read -r b ids < "$STATE/skip" || true
+  [[ $b == "$(boot_id)" && ",$ids," == *",$1,"* ]]
+}
 
 # --- what is installed here --------------------------------------------------
 # appid<TAB>installdir<TAB>name, one per line, from the manifests on disk.
@@ -593,6 +603,25 @@ mark_pushed() {
   rm -f "$t"
 }
 
+# fresh_push: a clean save of this boot, at most FRESH_SEC ago, and no game file
+# (folder, Proton prefix, shader cache, manifest) in any library written since.
+FRESH_SEC="${CG_FRESH_SEC:-900}"
+fresh_push() {
+  local f="$STATE/pushed-clean" b="" t="" L
+  [[ -f $f ]] || return 1
+  read -r b t < "$f" || true
+  [[ $b == "$(boot_id)" && $t =~ ^[0-9]+$ ]] || return 1
+  (( $(date +%s) - t <= FRESH_SEC )) || return 1
+  for L in $(all_libs); do
+    [[ -d $L/steamapps ]] || continue
+    if find "$L/steamapps" -newer "$f" \( -path '*/common/*' -o -path '*/compatdata/*' -o -path '*/shadercache/*' -o -name 'appmanifest_*' \) \
+         -not -path '*/downloading/*' -not -path '*/temp/*' -print -quit 2>/dev/null | grep -q .; then
+      return 1
+    fi
+  done
+  return 0
+}
+
 cmd_push() {
   local force=0 verify=0 a
   for a in "$@"; do
@@ -603,6 +632,16 @@ cmd_push() {
     esac
   done
   push_lock
+  # On the way down (systemd is stopping): if a save of THIS boot finished clean a
+  # few minutes ago and no game file has changed since, there is nothing to save -
+  # and checking every file against the archive again took minutes of every Stop
+  # machine. Any doubt and it saves as always: a different boot, an older save, a
+  # file written since, or a save that did not finish clean (it writes no mark).
+  if [[ $(systemctl is-system-running 2>/dev/null) == stopping ]] && fresh_push; then
+    log "nothing has changed since the save at $(date -d "@$(cut -d' ' -f2 "$STATE/pushed-clean")" +%H:%M:%S) - not saving again on the way down"
+    return 0
+  fi
+  rm -f "$STATE/pushed-clean"
   [[ -d $LIB ]] || die "$LIB does not exist - nothing to push"
   mountpoint -q "$(dirname "$LIB")" || die "$(dirname "$LIB") is not a mountpoint - refusing to push"
 
@@ -643,6 +682,10 @@ cmd_push() {
       [[ -n ${id:-} ]] || continue
       case $pushed_ids in *" $id "*) continue ;; esac
       pushed_ids="$pushed_ids$id "
+      if skipped "$id"; then
+        log "not saving $name ($id): unticked at Stop machine"
+        continue
+      fi
       if ! app_is_whole "${flags:-0}"; then
         log "SKIPPING $name ($id): Steam says StateFlags=$flags - downloading, validating"
         log "  or needing repair. Pushing it would overwrite a complete archive with"
@@ -712,7 +755,12 @@ print(next((a.get("bytes",0) for a in apps if str(a.get("appid"))==appid), 0))' 
   fi
 
   date -Iseconds > "$STATE/last-push"
-  if (( bad == 0 )); then mark_pushed; else log "$bad game(s) were not saved - the archive does not yet hold everything"; fi
+  if (( bad == 0 )); then
+    mark_pushed
+    # This boot, this moment, everything saved: the save on the way down may stand
+    # on it (fresh_push) rather than check every file again.
+    printf '%s %s\n' "$(boot_id)" "$(date +%s)" > "$STATE/pushed-clean"
+  else log "$bad game(s) were not saved - the archive does not yet hold everything"; fi
   log "pushed $n game(s) in $(( $(date +%s) - t0 ))s"
 }
 

@@ -539,14 +539,14 @@ contains "  logged" "$r" "i-a terminated - compute no longer bills."
 r=$(state_ 'mode = "handler"')
 # The handler uses the real clock, so the mark's value is not asserted here.
 contains "the handler routes it, and runs no idle or archive check" "$(field 2 "$r")" "describe:i-a,last-seen="
-contains "  with its clients" "$(field 2 "$r")" "notify:Game PC removed,clients:ec2+cloudwatch+ssm"
+contains "  with its clients" "$(field 2 "$r")" "notify:Game PC removed,clients:ec2+cloudwatch+ssm+s3"
 
 r=$(state_ 'ev = spot()')
 check "a spot interruption warning: notified" "$(field 1 "$r")|$(field 2 "$r")" "interruption|describe:i-a,notify:AWS is taking your game PC back"
 r=$(state_ 'ev = spot(); ec2 = EC2(name="someone-else")')
 check "another instance's warning: silent" "$(field 1 "$r")|$(field 2 "$r")" "not-ours|describe:i-a"
 r=$(state_ 'ev = spot(); mode = "handler"')
-check "the handler routes a warning too" "$(field 2 "$r")" "describe:i-a,notify:AWS is taking your game PC back,clients:ec2+cloudwatch+ssm"
+check "the handler routes a warning too" "$(field 2 "$r")" "describe:i-a,notify:AWS is taking your game PC back,clients:ec2+cloudwatch+ssm+s3"
 
 echo "37c. the archive countdown starts when the box really ended"
 r=$(state_ '')
@@ -826,5 +826,49 @@ check    "kept forever (0 days): nothing" "$(field 1 "$r") | $(field 2 "$r")" "-
 r=$(stopped_ 'ec2 = EC2([box(stopped=days(15))]); NOW = NOW.replace(minute=30)')
 check    "hourly, as the archive check: not at half past" "$(field 1 "$r") | $(field 2 "$r")" "- | -"
 contains "it runs with the other checks" "$(cat lambda/cloud_watchdog.py)" 'result["stopped"] = expire_stopped(ec2, now, dry)'
+
+# --- the games disk after an idle stop ------------------------------------------
+# The machine stopped itself (idle) and its games are saved: the disk goes. A
+# person's own Stop, no complete save, or a save older than this run: it stays.
+disk_() {
+  PYTHONDONTWRITEBYTECODE=1 python3 - "$1" <<'PY3' 2>&1
+import sys
+from datetime import datetime, timezone
+sys.path.insert(0, "lambda")
+import cloud_watchdog as w
+w.BUCKET, w.PREFIX, w.NTFY_URL = "b", "steam", ""
+calls = []
+LAUNCH = datetime(2026, 11, 9, 10, 0, tzinfo=timezone.utc)
+class EC2:
+    def detach_volume(s, **k): calls.append("detach:" + k["VolumeId"])
+    def describe_volumes(s, **k): return {"Volumes": [{"State": "available"}]}
+    def delete_volume(s, **k): calls.append("delete:" + k["VolumeId"])
+class S3:
+    def __init__(s, at): s.at = at
+    def head_object(s, **k):
+        calls.append("head:" + k["Key"])
+        if s.at is None: raise Exception("NoSuchKey")
+        return {"LastModified": s.at}
+def inst(reason="Client.InstanceInitiatedShutdown: Instance initiated shutdown", disk=True):
+    m = [{"DeviceName": "/dev/sda1", "Ebs": {"VolumeId": "vol-root"}}]
+    if disk: m.append({"DeviceName": "/dev/sdg", "Ebs": {"VolumeId": "vol-games"}})
+    return {"InstanceId": "i-1", "StateTransitionReason": reason, "LaunchTime": LAUNCH, "BlockDeviceMappings": m}
+saved_after = datetime(2026, 11, 9, 11, 0, tzinfo=timezone.utc)
+saved_before = datetime(2026, 11, 8, 11, 0, tzinfo=timezone.utc)
+case = sys.argv[1]
+args = {"idle":       (inst(), S3(saved_after)),
+        "user":       (inst(reason="User initiated (2026-11-09 11:30:00 GMT)"), S3(saved_after)),
+        "nosave":     (inst(), S3(None)),
+        "oldsave":    (inst(), S3(saved_before)),
+        "nodisk":     (inst(disk=False), S3(saved_after))}[case]
+r = w.drop_games_disk(EC2(), args[1], args[0], sleep=lambda s: None)
+print(r + " | " + (",".join(calls) or "-"))
+PY3
+}
+check "idle stop, games saved after it started: the games disk is deleted" "$(disk_ idle | tail -1)" "deleted | head:steam/pushed.json,detach:vol-games,delete:vol-games"
+check "a person's own Stop machine: the disk is theirs to decide" "$(disk_ user | tail -1)" "not-an-idle-stop | -"
+check "no complete save: kept"                 "$(disk_ nosave | tail -1)"  "not-saved | head:steam/pushed.json"
+check "a save older than this run: kept"       "$(disk_ oldsave | tail -1)" "not-saved | head:steam/pushed.json"
+check "no games disk: nothing to do"           "$(disk_ nodisk | tail -1)"  "no-games-disk | -"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

@@ -100,7 +100,7 @@ func (s Settings) Fingerprint(roleARN string) string {
 // in another. What scopes it is the account and the parameter path.
 func (s Settings) Policy(region string) map[string]any {
 	stmts := []any{
-		map[string]any{"Sid": "Look", "Effect": "Allow", "Action": []string{"ec2:DescribeInstances", "cloudwatch:GetMetricStatistics"}, "Resource": "*"},
+		map[string]any{"Sid": "Look", "Effect": "Allow", "Action": []string{"ec2:DescribeInstances", "ec2:DescribeVolumes", "cloudwatch:GetMetricStatistics"}, "Resource": "*"},
 		map[string]any{"Sid": "EndOnlyTheTaggedBox", "Effect": "Allow", "Action": []string{"ec2:StopInstances", "ec2:TerminateInstances"},
 			"Resource":  fmt.Sprintf("arn:aws:ec2:%s:%s:instance/*", region, s.Account),
 			"Condition": map[string]any{"StringEquals": map[string]any{"ec2:ResourceTag/Name": s.Host}}},
@@ -110,8 +110,19 @@ func (s Settings) Policy(region string) map[string]any {
 				"StringEquals": map[string]any{"ec2:ResourceTag/Name": s.Host},
 				"ForAllValues:StringEquals": map[string]any{"aws:TagKeys": []string{
 					"cg-going-down-since", "cg-slow-noted", "cg-forced", "cg-stopped-since", "cg-stopped-warned"}}}},
+		// After the machine stops ITSELF (idle) with its games saved, its games disk
+		// goes too: detach and delete, only for the volume and instance tagged as
+		// this host's - never any other disk in the account.
+		map[string]any{"Sid": "DropTheGamesDiskAfterAnIdleStop", "Effect": "Allow", "Action": []string{"ec2:DetachVolume", "ec2:DeleteVolume"},
+			"Resource":  []string{fmt.Sprintf("arn:aws:ec2:%s:%s:volume/*", region, s.Account), fmt.Sprintf("arn:aws:ec2:%s:%s:instance/*", region, s.Account)},
+			"Condition": map[string]any{"StringEquals": map[string]any{"ec2:ResourceTag/Name": s.Host}}},
 		map[string]any{"Sid": "OwnLogs", "Effect": "Allow", "Action": []string{"logs:CreateLogStream", "logs:PutLogEvents"},
 			"Resource": fmt.Sprintf("arn:aws:logs:%s:%s:log-group:%s:*", region, s.Account, LogGroup(s.Host))},
+	}
+	// The one object it reads to know the games are saved: cg-library's marker.
+	if s.Bucket != "" {
+		stmts = append(stmts, map[string]any{"Sid": "ReadTheSavedMarker", "Effect": "Allow", "Action": "s3:GetObject",
+			"Resource": fmt.Sprintf("arn:aws:s3:::%s/*pushed.json", s.Bucket)})
 	}
 	if s.ExpiryDays > 0 {
 		stmts = append(stmts,

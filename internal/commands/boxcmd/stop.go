@@ -1,8 +1,12 @@
 package boxcmd
 
 import (
+	"bytes"
 	"context"
+	"regexp"
+
 	"fmt"
+	cg "github.com/jebin2/aws_cloud_gaming"
 	"strings"
 	"time"
 )
@@ -43,11 +47,21 @@ func (d Deps) steamShutdown(ctx context.Context) {
 // and no pre-shutdown hook, so if this does not run, the games are gone. Which is
 // why a failure stops the stop rather than printing a note next to it.
 func (d Deps) Stop(ctx context.Context, args []string) int {
-	for _, a := range args {
-		if a != "--force" {
-			return d.die(fmt.Sprintf("unknown option '%s' for stop (only --force is accepted)", a))
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; a {
+		case "--force":
+			d.Force = true
+		case "--yes":
+			d.Sure = true
+		case "--skip":
+			if i+1 >= len(args) || !appids.MatchString(args[i+1]) {
+				return d.die("--skip takes the appids not to save, comma-separated: --skip 730,1057090")
+			}
+			i++
+			d.Skip = args[i]
+		default:
+			return d.die(fmt.Sprintf("unknown option '%s' for stop (only --force, --yes and --skip are accepted)", a))
 		}
-		d.Force = true
 	}
 	d.steamShutdown(ctx)
 	return d.endSession(ctx)
@@ -82,7 +96,7 @@ func (d Deps) endSession(ctx context.Context) int {
 		d.Out.Echo("left running - it is STILL BILLING by the hour")
 		return 0
 	}
-	if d.Ask.Confirm("stop-box", "stop instance now? [Y/n] ", "Y") {
+	if d.Sure || d.Ask.Confirm("stop-box", "stop instance now? [Y/n] ", "Y") {
 		return d.down(ctx)
 	}
 	return 0
@@ -96,7 +110,10 @@ func (d Deps) down(ctx context.Context) int {
 		d.Out.Echo("already stopped")
 		return 0
 	}
-	if !d.Push(ctx, "", "box is not reachable over the tailnet - cannot mirror the library", "mirroring the game library to S3 (the instance store is wiped on stop)") {
+	if code := d.leaveOut(ctx); code != 0 {
+		return code
+	}
+	if !d.Push(ctx, "", "box is not reachable over the tailnet - cannot mirror the library", d.saveWords()) {
 		if !d.Force {
 			d.block("The push from here failed",
 				"",
@@ -109,12 +126,99 @@ func (d Deps) down(ctx context.Context) int {
 		}
 		d.Out.Log("WARNING: stopping without a mirror (--force) - games will be re-downloaded")
 	}
+	// The save is over; what is left is AWS stopping the machine, a minute or more
+	// during which the last thing on screen used to be the save.
+	d.Out.Say("Stopping the machine at AWS (billing ends once it has stopped)")
 	if err := d.Box.Stop(ctx); err != nil {
 		return d.die(err.Error())
 	}
-	if !d.Box.WaitState(ctx, "stopped", 600*time.Second) {
+	// AWS stops it only once the machine has shut down - and on the way down it
+	// saves the games once more itself. A wait of minutes said nothing; what the
+	// machine prints meanwhile is in its console, which AWS keeps.
+	quiet := d.watchConsole(ctx)
+	stopped := d.Box.WaitState(ctx, "stopped", 600*time.Second)
+	quiet()
+	if !stopped {
 		return d.die("the box was asked to stop but is not confirmed stopped - it may still be billing; check: cg status")
 	}
 	d.Out.Log("billing has ended")
 	return 0
+}
+
+var appids = regexp.MustCompile(`^[0-9]+(,[0-9]+)*$`)
+
+// leaveOut tells the machine which games not to save on this boot: the saving
+// script as this cg knows it (a machine built earlier has one that cannot skip),
+// then the list, marked with the boot it is for. Both the save from here and the
+// one the machine makes on its way down read it. If either cannot be written the
+// stop does not go ahead: the games would be saved after all, and a game just
+// deleted from Saved games would be put straight back.
+func (d Deps) leaveOut(ctx context.Context) int {
+	// The script goes on every time, games unticked or not: it is also what lets
+	// the save on the way down stand on this one rather than check every file again.
+	if d.Skip != "" {
+		d.Out.Say("Leaving out the games you unticked")
+	}
+	script, err := cg.Files.ReadFile("host/cg-library")
+	if err != nil {
+		return d.die("the saving script is missing from this cg: " + err.Error())
+	}
+	if _, err := d.Box.SSH(ctx, "sudo tee "+cgLibrary+" >/dev/null && sudo chmod 755 "+cgLibrary, bytes.NewReader(script)); err != nil {
+		// With games to leave out, the old script would save them anyway: stop here.
+		// Without, the old one saves everything as it always did - only slower.
+		if d.Skip == "" {
+			d.Out.Log("  the saving script on the machine was not updated; it saves as before: " + firstErrorLine(err.Error()))
+			return 0
+		}
+		d.said(err)
+		return d.die("could not update the saving script on the machine - nothing was stopped")
+	}
+	if d.Skip == "" {
+		return 0
+	}
+	if _, err := d.Box.SSH(ctx, "printf '%s %s\\n' \"$(cat /proc/sys/kernel/random/boot_id)\" "+quote(d.Skip)+" > /var/lib/cg-library/skip", nil); err != nil {
+		d.said(err)
+		return d.die("could not tell the machine which games to leave out - nothing was stopped")
+	}
+	return 0
+}
+
+// saveWords is what the save before a stop or a delete is called on screen. With
+// games unticked it still runs: it saves the Steam login (so the next machine is
+// signed in) and whatever games were kept - possibly none.
+func (d Deps) saveWords() string {
+	if d.Skip != "" {
+		return "Saving your Steam login and the games you kept to Saved games"
+	}
+	return "Saving your games and Steam login to Saved games"
+}
+
+// watchConsole logs, every 20 s or so until the returned function is called, the
+// machine's newest console lines not logged before - for a screen that would
+// otherwise show only "stopping" for minutes. Events only: a terminal has
+// WaitState's own lines.
+func (d Deps) watchConsole(ctx context.Context) func() {
+	if !d.Out.JSON {
+		return func() {}
+	}
+	wctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		seen := map[string]bool{}
+		for {
+			select {
+			case <-wctx.Done():
+				return
+			case <-time.After(20 * time.Second):
+			}
+			for _, l := range d.consoleLines(wctx, 3) {
+				if !seen[l] {
+					seen[l] = true
+					d.Out.Log("  machine: " + l)
+				}
+			}
+		}
+	}()
+	return func() { cancel(); <-done }
 }

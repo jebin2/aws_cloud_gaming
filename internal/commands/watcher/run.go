@@ -65,7 +65,7 @@ func Run(ctx context.Context, env *config.Env, opts Options, out *output.Out) in
 	w := &Watcher{
 		EC2: ec2.NewFromConfig(cfg), Budgets: budgets.NewFromConfig(us), STS: sts.NewFromConfig(cfg), Reader: reader,
 		Runner: local.Exec{}, Host: host, Node: node, InstanceID: env.Get("GAME_INSTANCE_ID"), Home: home,
-		HostIdleLimit: HostIdleLimit(script), IdleMin: env.Int("GAME_WATCHDOG_IDLE_MIN"),
+		HostIdleLimit: hostIdle(env.Int("GAME_IDLE_MIN"), script), IdleMin: max(env.Int("GAME_WATCHDOG_IDLE_MIN"), env.Int("GAME_IDLE_MIN")+15),
 		StuckMin: env.Int("GAME_WATCHDOG_STUCK_MIN"), ExpiryDays: env.Int("GAME_ARCHIVE_EXPIRY_DAYS"),
 	}
 	if opts.Watch {
@@ -93,4 +93,13 @@ func Run(ctx context.Context, env *config.Env, opts Options, out *output.Out) in
 	}
 	w.Render(f, out)
 	return 0
+}
+
+// hostIdle is the machine's idle minutes: the setting when it is set (cg open puts
+// it on the machine), else what the on-host script defaults to.
+func hostIdle(setting int, script []byte) int {
+	if setting > 0 {
+		return setting
+	}
+	return HostIdleLimit(script)
 }

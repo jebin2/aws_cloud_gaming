@@ -72,7 +72,9 @@ func SettingsFor(env *config.Env, rates pricing.Rates, account string) wd.Settin
 		b = bucket.Name(account, host, region)
 	}
 	s := wd.Settings{Host: host, Account: account, Bucket: b,
-		IdleMinutes: env.Int("GAME_WATCHDOG_IDLE_MIN"), StuckMinutes: env.Int("GAME_WATCHDOG_STUCK_MIN"),
+		// The cloud watchdog is the backstop: it must never end a machine that its own
+		// idle stop - which saves the games first - is still entitled to wait for.
+		IdleMinutes: max(env.Int("GAME_WATCHDOG_IDLE_MIN"), env.Int("GAME_IDLE_MIN")+15), StuckMinutes: env.Int("GAME_WATCHDOG_STUCK_MIN"),
 		ExpiryDays: env.Int("GAME_ARCHIVE_EXPIRY_DAYS"), NtfyURL: config.NtfyURL(env.Get("GAME_NTFY_URL"))}
 	if rates.S3GBMonth != nil {
 		s.S3GBMonth = fmt.Sprintf("%.6g", *rates.S3GBMonth)

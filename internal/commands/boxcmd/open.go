@@ -1,7 +1,10 @@
 package boxcmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -9,6 +12,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+
+	cg "github.com/jebin2/aws_cloud_gaming"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/format"
 	"github.com/jebin2/aws_cloud_gaming/internal/local"
@@ -24,33 +31,38 @@ func (d Deps) waitFor(ctx context.Context, id, desc string, tries int, ok func()
 	if dots {
 		fmt.Fprint(d.Out.Stdout, desc)
 	}
-	limit := tries * 2
+	// Seconds as they really passed, not tries x 2: a try can itself take seconds
+	// (a ping with a 5 s timeout), and "10 s" said over 40 real ones read as wrong.
+	// No limit is given: in time it depends on how long each try takes.
+	start := time.Now()
+	since := func() int { return int(time.Since(start).Seconds()) }
+	limit := 0
 	for i := 0; i < tries; i++ {
 		// Ctrl-C and SIGTERM cancel ctx; without this the loop ran to its end.
 		if ctx.Err() != nil {
 			if dots {
 				fmt.Fprint(d.Out.Stdout, " interrupted\n")
 			}
-			d.Out.Wait(id, "interrupted", desc, i*2, limit)
+			d.Out.Wait(id, "interrupted", desc, since(), limit)
 			return false
 		}
 		if ok() {
 			if dots {
 				fmt.Fprint(d.Out.Stdout, " ok\n")
 			}
-			d.Out.Wait(id, "done", desc, i*2, limit)
+			d.Out.Wait(id, "done", desc, since(), limit)
 			return true
 		}
 		if dots {
 			fmt.Fprint(d.Out.Stdout, ".")
 		}
-		d.Out.Wait(id, "waiting", desc, i*2, limit)
+		d.Out.Wait(id, "waiting", desc, since(), limit)
 		d.sleep(2 * time.Second)
 	}
 	if dots {
 		fmt.Fprint(d.Out.Stdout, " TIMEOUT\n")
 	}
-	d.Out.Wait(id, "timeout", desc, limit, limit)
+	d.Out.Wait(id, "timeout", desc, since(), limit)
 	return false
 }
 
@@ -198,9 +210,42 @@ func (d Deps) Open(ctx context.Context) int {
 
 	node := d.Box.Node
 	d.Out.Stage("open.tailscale", "connecting over Tailscale")
+	polls := 0
 	if !d.waitFor(ctx, "open.tailscale", "waiting for tailscale", 60, func() bool {
-		_, err := d.R.Run(ctx, local.Cmd{Name: "tailscale", Args: []string{"ping", "-c", "1", "--timeout", "5s", node}})
-		return err == nil
+		// --until-direct=false: an answer through Tailscale's relay is an answer.
+		// Left at its default, tailscale ping exits 1 ("direct connection not
+		// established") when the one pong came by relay - so a laptop that could
+		// only reach the machine by relay waited out the whole limit, with the
+		// machine answering every ping. The path is judged on its own just below.
+		out, err := d.R.Run(ctx, local.Cmd{Name: "tailscale", Args: []string{"ping", "-c", "1", "--timeout", "5s", "--until-direct=false", node}})
+		if err == nil {
+			return true
+		}
+		// A real connection as well: the machine's ssh port, over its tailnet address.
+		// A laptop's Tailscale may not set the machine up for traffic until traffic
+		// asks for it - seen as in_engine=false and no handshake, with every ping
+		// timing out for minutes on a machine that had booted in 8 s, while Play
+		// pressed again (which opens an ssh connection first) got through at once.
+		// This is that connection, made here, every try.
+		if ip, ok := d.Box.IP(ctx); ok && d.reach(net.JoinHostPort(ip, "22"), 3*time.Second) {
+			d.Out.Log("  reached the machine over Tailscale (its ssh port answered)")
+			return true
+		}
+		// Why it has not answered, in the log: the first time and then about every
+		// ten seconds. "waiting for tailscale" alone said nothing about whether the
+		// machine was still booting, missing from the tailnet, or this laptop's own
+		// Tailscale was down.
+		polls++
+		// Every half minute or so, what the machine itself is printing as it boots -
+		// AWS keeps it, it costs nothing to read, and it is the one view of a machine
+		// that does not answer yet. Before the summary, so the summary is said last.
+		if polls%15 == 0 {
+			d.bootLog(ctx)
+		}
+		if polls == 1 || polls%5 == 0 {
+			d.tailscaleWhy(ctx, node, out, err)
+		}
+		return false
 	}) {
 		if ctx.Err() != nil {
 			return 1
@@ -222,7 +267,14 @@ func (d Deps) Open(ctx context.Context) int {
 	// once it is reachable. Best effort: nothing about this may fail a play.
 	_ = d.relay(ctx, "sudo sh -c 'echo 0 > /var/lib/idle-watchdog/idle' 2>/dev/null || true")
 
+	d.syncIdle(ctx)
+	if code := d.settleBootRestore(ctx); code != 0 {
+		return code
+	}
 	if code := d.extraAfterStart(ctx); code != 0 {
+		return code
+	}
+	if code := d.restoreGames(ctx); code != 0 {
 		return code
 	}
 
@@ -362,20 +414,30 @@ func (d Deps) extraBeforeStart(ctx context.Context) int {
 	}
 	gb := (d.ExtraGB + 9) / 10 * 10
 	if gb > provision.MaxExtraDiskGB {
-		return d.die(fmt.Sprintf("that is more than a game PC here can hold (%d GB of added disk at most)", provision.MaxExtraDiskGB))
+		return d.die(fmt.Sprintf("that is more than a game PC here can hold (%d GB of games disk at most)", provision.MaxExtraDiskGB))
 	}
 	_, code := d.makeAndAttach(ctx, d.DiskAWS, zone, gb)
 	return code
 }
 
-// extraAfterStart mounts the disk if it is not mounted yet, then starts bringing
-// the chosen games back onto it IN THE BACKGROUND on the machine, so the stream
-// does not wait for a long download. A game restores whole or not at all.
+// extraAfterStart mounts the games disk if it is not mounted yet. Bringing the
+// games onto it is restoreGames, which the stream waits for.
 func (d Deps) extraAfterStart(ctx context.Context) int {
 	if !d.wantsExtra() {
 		return 0
 	}
 	vol, _, _, _, err := diskFacts(ctx, d.DiskAWS, d.Box.ID)
+	// A machine that was already running when Play was pressed was never through
+	// extraBeforeStart, so its disk was never made: Play then failed here with
+	// "not connected". It is made and connected now - AWS connects a disk to a
+	// running machine as readily as to a stopped one.
+	if err == nil && vol == "" {
+		d.Out.SayID("open.disk", "Adding the games disk")
+		if code := d.extraBeforeStart(ctx); code != 0 {
+			return code
+		}
+		vol, _, _, _, err = diskFacts(ctx, d.DiskAWS, d.Box.ID)
+	}
 	if err != nil || vol == "" {
 		return d.die("the games disk is not connected to the machine")
 	}
@@ -385,18 +447,231 @@ func (d Deps) extraAfterStart(ctx context.Context) int {
 			return code
 		}
 	}
-	if d.ExtraApps == "" {
+	return 0
+}
+
+// tailscaleWhy logs what is known while the machine does not answer over Tailscale:
+// what the ping said, the machine's state at AWS, and this laptop's own line for it.
+func (d Deps) tailscaleWhy(ctx context.Context, node string, out []byte, err error) {
+	said := strings.TrimSpace(string(out))
+	if i := strings.LastIndex(said, "\n"); i >= 0 {
+		said = strings.TrimSpace(said[i+1:])
+	}
+	if said == "" && err != nil {
+		said = err.Error()
+	}
+	d.Out.Log("  tailscale ping " + node + ": " + said)
+	st, _ := d.Box.State(ctx)
+	if st != "" {
+		d.Out.Log("  machine state at AWS: " + st)
+	}
+	var peer peerState
+	// The control server's view and this laptop's link to it, in detail: online or
+	// not, which relay, a direct address if there is one, and when the last
+	// WireGuard handshake was. "Connected" in the admin console with pings timing
+	// out is exactly the case these tell apart.
+	if js, e := d.R.Run(ctx, local.Cmd{Name: "tailscale", Args: []string{"status", "--json"}}); e == nil {
+		if p, ok := peerFacts(js, node); ok {
+			d.Out.Log("  tailscale peer: " + p.line)
+			peer = p
+		}
+	}
+	if list, e := d.R.Run(ctx, local.Cmd{Name: "tailscale", Args: []string{"status"}}); e == nil || len(list) > 0 {
+		found := false
+		for _, l := range strings.Split(string(list), "\n") {
+			if strings.Contains(l, node) {
+				d.Out.Log("  this laptop's tailscale: " + strings.Join(strings.Fields(l), " "))
+				found = true
+			}
+		}
+		if !found {
+			d.Out.Log("  this laptop's tailscale does not list " + node + " (yet)")
+		}
+	} else {
+		d.Out.Log("  tailscale status failed: " + e.Error())
+	}
+	// Last, in words: the line a screen shows under the wait.
+	d.Out.Log(tailscaleWords(st, peer))
+}
+
+// tailscaleWords says where the connection is, from the machine's state at AWS
+// and this laptop's view of it.
+func tailscaleWords(state string, p peerState) string {
+	switch {
+	case state != "" && state != "running":
+		return "The machine is still starting at AWS (" + state + ")."
+	case !p.known || !p.online:
+		return "The machine is booting. It is not on your tailnet yet; this usually takes a minute or two."
+	case !p.handshake:
+		return "The machine is on your tailnet. Your laptop is making the connection to it."
+	default:
+		return "Connected, but the machine is not answering yet."
+	}
+}
+
+// settleBootRestore deals with a machine built before games were chosen at Play.
+// Its config still says which games to bring back, and the restore service copies
+// ALL of them from Saved games at every boot, whatever was ticked - which is why
+// a Play with one game ticked could spend minutes copying every game, and why it
+// ran beside the wait for Tailscale with nothing in the log saying so.
+//
+// Two things: the config is set to restore nothing from now on (this is the last
+// boot that copies everything), and a copy that is still running is waited for and
+// said so, in words, rather than raced by the games just chosen. It is not killed:
+// stopped half-way it leaves a game with its manifest and part of its files, which
+// Steam would call installed.
+func (d Deps) settleBootRestore(ctx context.Context) int {
+	_ = d.relay(ctx, "sudo sed -i 's/^CG_APPS=.*/CG_APPS=none/' /etc/cg-library.conf 2>/dev/null || true")
+	active := func() bool {
+		out, _ := d.Box.SSH(ctx, "systemctl is-active cg-library-restore.service", nil)
+		return strings.TrimSpace(string(out)) == "activating"
+	}
+	if !active() {
 		return 0
 	}
-	d.Out.SayID("open.restore", "Bringing your games back from Saved games")
-	cmd := "set -a; . /etc/cg-library.conf; set +a; export CG_EXTRA_APPS=" + d.ExtraApps +
-		"; exec /usr/local/bin/cg-library pull --apps " + d.ExtraApps
-	run := remote("sudo", "systemd-run", "--quiet", "--unit=cg-restore-extra-"+strconv.FormatInt(d.Now().Unix(), 10),
-		"--uid=ubuntu", "--gid=ubuntu", "/bin/bash", "-c", cmd)
-	if err := d.relay(ctx, run); err != nil {
-		d.said(err)
-		return d.die("could not start bringing the games back. The disk is ready; run it again to retry")
+	msg := "This machine was set up before games were chosen at Play, so it is first finishing a copy of every game. It happens once"
+	if d.Games != "" {
+		d.Out.SayID("open.restore", msg)
+	} else {
+		d.Out.Say(msg)
 	}
-	d.Out.Echo("the games are coming back in the background; each one shows in Games when it is whole")
-	return 0
+	for i := 0; i < 720; i++ {
+		if ctx.Err() != nil {
+			return 1
+		}
+		d.sleep(5 * time.Second)
+		if !active() {
+			d.Out.Log("  the machine's own copy of every game has finished")
+			return 0
+		}
+		if i%6 == 5 {
+			out, _ := d.Box.SSH(ctx, "du -sb --exclude=downloading --exclude=temp /scratch/steam/steamapps/common 2>/dev/null | cut -f1", nil)
+			if n, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64); err == nil {
+				d.Out.Log(fmt.Sprintf("  still copying every game: %.1f GB on the machine so far", float64(n)/(1<<30)))
+			}
+		}
+	}
+	return d.die("the machine is still copying every game after an hour - try again later")
+}
+
+// consoleReader is the part of the EC2 client that reads a machine's console: the
+// real client has it; the fakes in tests need not.
+type consoleReader interface {
+	GetConsoleOutput(context.Context, *ec2.GetConsoleOutputInput, ...func(*ec2.Options)) (*ec2.GetConsoleOutputOutput, error)
+}
+
+// bootLog logs the last lines the machine printed to its console: how far its boot
+// has got while it does not answer over Tailscale. AWS updates it every minute or
+// so; a read that fails is said and nothing more.
+func (d Deps) bootLog(ctx context.Context) {
+	for _, l := range d.consoleLines(ctx, 6) {
+		d.Out.Log("  machine console: " + l)
+	}
+}
+
+// consoleLines is the last n lines the machine printed to its console, as AWS
+// keeps them (refreshed every minute or so, and on a change of state). Nothing
+// when it cannot be read: a read that fails is said once and nothing more.
+func (d Deps) consoleLines(ctx context.Context, n int) []string {
+	c, ok := d.Box.EC2.(consoleReader)
+	if !ok || d.Box.ID == "" {
+		return nil
+	}
+	latest := true
+	o, err := c.GetConsoleOutput(ctx, &ec2.GetConsoleOutputInput{InstanceId: &d.Box.ID, Latest: &latest})
+	if err != nil || o.Output == nil {
+		if err != nil && ctx.Err() == nil {
+			d.Out.Log("  the machine's console could not be read: " + firstErrorLine(err.Error()))
+		}
+		return nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(*o.Output)
+	if err != nil {
+		return nil
+	}
+	var lines []string
+	for _, l := range strings.Split(strings.ReplaceAll(string(raw), "\r", ""), "\n") {
+		if l = strings.TrimSpace(ansiCodes.ReplaceAllString(l, "")); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines
+}
+
+var ansiCodes = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
+
+// peerState is this laptop's view of the node, from `tailscale status --json`.
+type peerState struct {
+	line                     string
+	known, online, handshake bool
+}
+
+// peerFacts is one line about the node from `tailscale status --json`.
+func peerFacts(js []byte, node string) (peerState, bool) {
+	var st struct {
+		Peer map[string]struct {
+			HostName, DNSName, Relay, CurAddr string
+			Online, Active, InEngine          bool
+			LastHandshake, LastSeen           time.Time
+		}
+	}
+	if json.Unmarshal(js, &st) != nil {
+		return peerState{}, false
+	}
+	for _, p := range st.Peer {
+		if p.HostName != node && !strings.HasPrefix(p.DNSName, node+".") {
+			continue
+		}
+		hs, shook := "never", false
+		if !p.LastHandshake.IsZero() && p.LastHandshake.Year() > 2000 {
+			hs, shook = time.Since(p.LastHandshake).Round(time.Second).String()+" ago", true
+		}
+		direct := p.CurAddr
+		if direct == "" {
+			direct = "none"
+		}
+		return peerState{line: fmt.Sprintf("online=%v active=%v in_engine=%v relay=%s direct=%s last_handshake=%s", p.Online, p.Active, p.InEngine, p.Relay, direct, hs),
+			known: true, online: p.Online, handshake: shook}, true
+	}
+	return peerState{}, false
+}
+
+// reach is whether a TCP connection to addr opens within timeout. Tests replace it
+// through Reach; Dial is the stream port's own, and stays separate.
+func (d Deps) reach(addr string, timeout time.Duration) bool {
+	if d.Reach != nil {
+		return d.Reach(addr, timeout) == nil
+	}
+	c, err := net.DialTimeout("tcp", addr, timeout)
+	if err == nil {
+		c.Close()
+	}
+	return err == nil
+}
+
+// syncIdle puts the idle minutes chosen in the app (GAME_IDLE_MIN) on the machine,
+// with the watchdog script that reads them - a machine built earlier has one that
+// does not. Every Play, so a changed setting takes effect at the next one. Best
+// effort: a machine that keeps its old minutes still stops itself.
+func (d Deps) syncIdle(ctx context.Context) {
+	min := d.Env.Int("GAME_IDLE_MIN")
+	if min <= 0 {
+		return
+	}
+	script, err := cg.Files.ReadFile("host/idle-watchdog.sh")
+	if err != nil {
+		return
+	}
+	if _, err := d.Box.SSH(ctx, "sudo tee /usr/local/bin/idle-watchdog.sh >/dev/null && sudo chmod 755 /usr/local/bin/idle-watchdog.sh", bytes.NewReader(script)); err != nil {
+		d.Out.Log("  the idle setting was not put on the machine; it keeps its own: " + firstErrorLine(err.Error()))
+		return
+	}
+	if _, err := d.Box.SSH(ctx, fmt.Sprintf("echo IDLE_LIMIT=%d | sudo tee /etc/cg-idle.conf >/dev/null", min), nil); err != nil {
+		d.Out.Log("  the idle setting was not put on the machine: " + firstErrorLine(err.Error()))
+		return
+	}
+	d.Out.Log(fmt.Sprintf("  auto-stop when idle: %d min", min))
 }

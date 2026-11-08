@@ -55,8 +55,8 @@ line("while the stream has focus, Super and Windows shortcuts go to", DIM, 21, 2
 line("this PC; press Z to use your own. on a Mac: Command + Option.", DIM, 21, 28)
 y += 12
 
-head("added a disk?")
-line("Steam > Settings > Storage > Add Drive > pick the drive named cgextra")
+head("added a games disk?")
+line("Steam > Settings > Storage > Add Drive > the drive at /scratch2 (cgextra)")
 y += 10
 
 head("before you delete this machine")

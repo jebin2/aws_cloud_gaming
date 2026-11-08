@@ -60,7 +60,7 @@ func (d Deps) Read(ctx context.Context, name string) State {
 		return s
 	}
 	pctx, cancel := context.WithTimeout(ctx, 6*time.Second)
-	_, err := d.Runner.Run(pctx, local.Cmd{Name: "tailscale", Args: []string{"ping", "-c", "1", "--timeout", "3s", ip}})
+	_, err := d.Runner.Run(pctx, local.Cmd{Name: "tailscale", Args: []string{"ping", "-c", "1", "--timeout", "3s", "--until-direct=false", ip}})
 	cancel()
 	s.Online = err == nil
 	if !d.Sun.Answers(ctx, ip) {

@@ -207,6 +207,9 @@ func newRig(t *testing.T, input string) *rig {
 		Now: func() time.Time { return time.Unix(1700000000, 0) }, Sleep: func(d time.Duration) { rg.slept += d }, Moonlight: true,
 		Takes: func() string { return "the last one took 12 min" },
 		Dial:  func(string, time.Duration) error { return nil },
+		// No real connections from a test: the machine's ssh port does not answer
+		// unless a case says it does.
+		Reach: func(string, time.Duration) error { return errors.New("refused") },
 		Player: stream.Player{R: r, Get: env.Get, CacheDir: dir, Root: dir, Echo: out.Echo, Log: out.Log, Warn: out.Log,
 			Now: func() time.Time { return time.Unix(1700000000, 0) }},
 		Destroy: func(context.Context) int { rg.destroyed++; return 0 },
@@ -276,7 +279,7 @@ func TestStopMirrorsThenStopsAndSaysBillingEnded(t *testing.T) {
 		t.Fatalf("%s%s", r.o, r.w)
 	}
 	got := r.o.String()
-	for _, want := range []string{"==> mirroring the game library to S3 (the instance store is wiped on stop)", "stopped after ", "billing has ended"} {
+	for _, want := range []string{"==> Saving your games and Steam login to Saved games", "stopped after ", "billing has ended"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}
@@ -294,6 +297,63 @@ func TestStopMirrorsThenStopsAndSaysBillingEnded(t *testing.T) {
 	_ = stop
 	if push < 0 {
 		t.Error("no mirror")
+	}
+}
+
+// Unticked at Stop machine: the machine gets the script that can skip, and the
+// list for this boot, before anything is saved.
+func TestStopSkipTellsTheMachineFirst(t *testing.T) {
+	r := newRig(t, "")
+	var order []string
+	prev := r.r.Hook
+	r.r.Hook = func(line string) (bool, string, error) {
+		switch {
+		case strings.Contains(line, "tee /usr/local/bin/cg-library"):
+			order = append(order, "script")
+		case strings.Contains(line, "/var/lib/cg-library/skip"):
+			order = append(order, "skip")
+			if !strings.Contains(line, "730,1057090") {
+				t.Errorf("the list is not written: %s", line)
+			}
+		case strings.Contains(line, "cg-library push"):
+			order = append(order, "push")
+		}
+		return prev(line)
+	}
+	if rc := r.d.Stop(context.Background(), []string{"--yes", "--skip", "730,1057090"}); rc != 0 {
+		t.Fatalf("rc %d\n%s%s", rc, r.o, r.w)
+	}
+	if got := strings.Join(order, ","); got != "script,skip,push" {
+		t.Errorf("order %s", got)
+	}
+	if rc := newRig(t, "").d.Stop(context.Background(), []string{"--skip", "730;rm -rf /"}); rc != 1 {
+		t.Error("a list that is not appids is refused")
+	}
+}
+
+// If the machine cannot be told, nothing is stopped: the games would be saved after all.
+func TestStopSkipThatCannotBeWrittenStopsNothing(t *testing.T) {
+	r := newRig(t, "")
+	prev := r.r.Hook
+	r.r.Hook = func(line string) (bool, string, error) {
+		if strings.Contains(line, "/var/lib/cg-library/skip") {
+			return true, "", errors.New("exit 1")
+		}
+		return prev(line)
+	}
+	if rc := r.d.Stop(context.Background(), []string{"--yes", "--skip", "730"}); rc != 1 || len(r.e.calls) != 0 {
+		t.Errorf("rc %d calls %v", rc, r.e.calls)
+	}
+}
+
+// The app asks before it stops a machine; cg must not ask a second time.
+func TestStopYesDoesNotAskAgain(t *testing.T) {
+	r := newRig(t, "")
+	if rc := r.d.Stop(context.Background(), []string{"--yes"}); rc != 0 || strings.Join(r.e.calls, ",") != "stop" {
+		t.Fatalf("rc %d %v\n%s", rc, r.e.calls, r.o)
+	}
+	if strings.Contains(r.w.String()+r.o.String(), "stop instance now?") {
+		t.Error("it asked anyway")
 	}
 }
 
@@ -765,6 +825,81 @@ func TestOpenStopsWhenTheBoxNeverAnswersOverTailscale(t *testing.T) {
 	}
 }
 
+// A machine built before games were chosen at Play copies every game at boot.
+// Open says so, waits for it rather than racing it, and sets the config so the
+// next boot copies nothing.
+func TestOpenWaitsForTheBootCopyOfEveryGameAndSetsItToNothing(t *testing.T) {
+	r := newRig(t, "")
+	prev := r.r.Hook
+	polls, sed := 0, false
+	r.r.Hook = func(line string) (bool, string, error) {
+		switch {
+		case strings.Contains(line, "systemctl is-active cg-library-restore.service"):
+			polls++
+			if polls <= 3 {
+				return true, "activating\n", nil
+			}
+			return true, "active\n", nil
+		case strings.Contains(line, "CG_APPS=none"):
+			sed = true
+			return true, "", nil
+		}
+		return prev(line)
+	}
+	r.d.Open(context.Background())
+	out := r.o.String() + r.w.String()
+	if !sed {
+		t.Error("the config was not set to restore nothing")
+	}
+	for _, want := range []string{"first finishing a copy of every game", "the machine's own copy of every game has finished"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q in\n%s", want, out)
+		}
+	}
+}
+
+// A laptop whose pings get nothing still gets through by a real connection: the
+// machine's ssh port, which is what made Play pressed a second time work.
+func TestTailscaleWaitGetsThroughByARealConnection(t *testing.T) {
+	r := newRig(t, "")
+	prev := r.r.Hook
+	r.r.Hook = func(line string) (bool, string, error) {
+		if strings.HasPrefix(line, "tailscale ping -c 1 --timeout") {
+			return true, "ping timed out", errors.New("exit 1")
+		}
+		return prev(line)
+	}
+	var tried []string
+	r.d.Reach = func(addr string, _ time.Duration) error { tried = append(tried, addr); return nil }
+	r.d.Open(context.Background())
+	if len(tried) == 0 || tried[0] != "100.64.0.7:22" || !strings.Contains(r.o.String()+r.w.String(), "its ssh port answered") || !strings.Contains(r.o.String(), "waiting for sunshine") {
+		t.Errorf("tried %v\n%s%s", tried, r.o, r.w)
+	}
+}
+
+// A wait that goes on says why: what the ping answered, the machine's state, and
+// this laptop's own line for it - not "waiting for tailscale" and nothing else.
+func TestAWaitingTailscaleSaysWhy(t *testing.T) {
+	r := newRig(t, "")
+	prev := r.r.Hook
+	r.r.Hook = func(line string) (bool, string, error) {
+		switch {
+		case strings.HasPrefix(line, "tailscale ping -c 1 --timeout"):
+			return true, "ping \"gamevps\" timed out\n", errors.New("exit 1")
+		case line == "tailscale status":
+			return true, "100.64.0.7  gamevps  jebin@  linux  offline\n", nil
+		}
+		return prev(line)
+	}
+	r.d.Open(context.Background())
+	out := r.o.String() + r.w.String()
+	for _, want := range []string{"tailscale ping gamevps: ping \"gamevps\" timed out", "machine state at AWS: running", "this laptop's tailscale: 100.64.0.7 gamevps jebin@ linux offline"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q in\n%s", want, out)
+		}
+	}
+}
+
 // Under the app a wait is events, not dots: raw dots on stdout are not an event, and
 // the screen saw nothing until the wait was over.
 func TestAWaitIsEventsInTheAppAndDotsOnATerminal(t *testing.T) {
@@ -787,8 +922,10 @@ func TestAWaitIsEventsInTheAppAndDotsOnATerminal(t *testing.T) {
 			t.Fatalf("not a wait event: %q", l)
 		}
 		states = append(states, e.State)
-		if e.Of != 120 {
-			t.Errorf("the limit is 60 tries of 2s: %q", l)
+		// No limit in seconds: a try can take longer than its 2 s pause, so the
+		// seconds are the real ones and the limit is not guessed at.
+		if e.Of != 0 {
+			t.Errorf("no made-up limit: %q", l)
 		}
 	}
 	if strings.Join(states, ",") != "waiting,waiting,done" {
@@ -821,5 +958,80 @@ func TestWaitStateReportsEveryPollAndHowItEnded(t *testing.T) {
 	rg.e.state = "running"
 	if !rg.d.Box.WaitState(context.Background(), "running", 60*time.Second) || strings.Join(got, "|") != "box.running done running 0/60" {
 		t.Errorf("%v", got)
+	}
+}
+
+// The wait for Tailscale ends each look with one line in words, for the screen.
+func TestTailscaleWordsSayWhereTheConnectionIs(t *testing.T) {
+	for _, c := range []struct {
+		state string
+		p     peerState
+		want  string
+	}{
+		{"pending", peerState{}, "still starting at AWS (pending)"},
+		{"running", peerState{}, "It is not on your tailnet yet"},
+		{"running", peerState{known: true}, "It is not on your tailnet yet"},
+		{"running", peerState{known: true, online: true}, "Your laptop is making the connection"},
+		{"running", peerState{known: true, online: true, handshake: true}, "not answering yet"},
+	} {
+		if got := tailscaleWords(c.state, c.p); !strings.Contains(got, c.want) {
+			t.Errorf("%s %+v: %q", c.state, c.p, got)
+		}
+	}
+	js := []byte(`{"Peer":{"k":{"HostName":"gamevps","DNSName":"gamevps.x.ts.net.","Online":true,"Relay":"bom","LastHandshake":"0001-01-01T00:00:00Z"}}}`)
+	if p, ok := peerFacts(js, "gamevps"); !ok || !p.online || p.handshake || !strings.Contains(p.line, "last_handshake=never") {
+		t.Errorf("%+v %v", p, ok)
+	}
+}
+
+// Play puts the chosen idle minutes on the machine, with the script that reads them.
+func TestPlaySyncsTheIdleMinutes(t *testing.T) {
+	r := newRig(t, "")
+	var put []string
+	prev := r.r.Hook
+	r.r.Hook = func(line string) (bool, string, error) {
+		if strings.Contains(line, "idle-watchdog.sh") || strings.Contains(line, "cg-idle.conf") {
+			put = append(put, line)
+		}
+		return prev(line)
+	}
+	r.d.Open(context.Background())
+	all := strings.Join(put, "\n")
+	if !strings.Contains(all, "tee /usr/local/bin/idle-watchdog.sh") || !strings.Contains(all, "IDLE_LIMIT=15 | sudo tee /etc/cg-idle.conf") {
+		t.Errorf("not synced:\n%s", all)
+	}
+}
+
+// Every Stop puts the current saving script on the machine before saving, games
+// unticked or not: it is what lets the save on the way down skip itself when
+// nothing has changed. A plain stop goes on if that fails.
+func TestEveryStopRefreshesTheSavingScript(t *testing.T) {
+	r := newRig(t, "")
+	var order []string
+	prev := r.r.Hook
+	r.r.Hook = func(line string) (bool, string, error) {
+		switch {
+		case strings.Contains(line, "tee /usr/local/bin/cg-library"):
+			order = append(order, "script")
+		case strings.Contains(line, "/var/lib/cg-library/skip"):
+			order = append(order, "skip")
+		case strings.Contains(line, "cg-library push"):
+			order = append(order, "push")
+		}
+		return prev(line)
+	}
+	if rc := r.d.Stop(context.Background(), []string{"--yes"}); rc != 0 || strings.Join(order, ",") != "script,push" {
+		t.Errorf("rc %d order %v", rc, order)
+	}
+	r = newRig(t, "")
+	prev = r.r.Hook
+	r.r.Hook = func(line string) (bool, string, error) {
+		if strings.Contains(line, "tee /usr/local/bin/cg-library") {
+			return true, "", errors.New("exit 1")
+		}
+		return prev(line)
+	}
+	if rc := r.d.Stop(context.Background(), []string{"--yes"}); rc != 0 || strings.Join(r.e.calls, ",") != "stop" {
+		t.Errorf("a plain stop goes on without the new script: rc %d calls %v", rc, r.e.calls)
 	}
 }

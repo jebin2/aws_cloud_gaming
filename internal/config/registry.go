@@ -33,6 +33,7 @@ var Registry = []Setting{
 	{"GAME_SPOT", "choice", "auto", "auto,1,0", "Purchase model: spot, on demand, or spot whenever the quota allows.", "purchase model", "The box"},
 	{"GAME_STEAM_LOGIN", "choice", "use", "use,fresh", "Whether a new box restores the archived Steam login, or asks you to sign in.", "Steam sign-in", "The box"},
 	{"GAME_BUDGET_INR", "number", "5000", "100", "Monthly budget. It emails you; it stops nothing.", "monthly budget (INR)", "The guards"},
+	{"GAME_IDLE_MIN", "number", "15", "5", "Minutes with no stream, download or install before the machine saves your games and stops itself. Takes effect the next time you press Play.", "auto-stop when idle (min)", "The guards"},
 	{"GAME_WATCHDOG_IDLE_MIN", "number", "30", "10", "Minutes of quiet before the cloud watchdog ends the box.", "cloud watchdog idle (min)", "The guards"},
 	{"GAME_WATCHDOG_STUCK_MIN", "number", "60", "40", "Minutes before a stuck shutdown is forced. Never inside the push's 30.", "stuck shutdown forced after (min)", "The guards"},
 	{"GAME_NTFY_URL", "ntfy", "", "", "Phone notifications: an ntfy topic or full URL. Empty turns them off.", "phone notifications", "Notifications"},

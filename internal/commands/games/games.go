@@ -33,6 +33,9 @@ type App struct {
 	// over the wire, the figure its window shows. Only when the box said.
 	Got      int64
 	GotKnown bool
+	// Disk is where the game is installed: "nvme" (the machine's own fast drive),
+	// "extra" (the added games disk) or "root". Empty when the box did not say.
+	Disk string
 }
 
 // Box is what the remote script printed.
@@ -63,6 +66,9 @@ func ParseBox(raw string) Box {
 			}
 			if len(f) >= 11 {
 				a.Got, a.GotKnown = atoi(f[10]), true
+			}
+			if len(f) >= 12 {
+				a.Disk = strings.TrimSpace(f[11])
 			}
 			b.Apps = append(b.Apps, a)
 		case f[0] == "DISK" && len(f) >= 3:
@@ -116,6 +122,8 @@ type row struct {
 	// less what the disk already holds for it); the download's own bytes are the
 	// wire's, which are smaller. 0 when nothing says.
 	room int64
+	// disk is where the game is installed: nvme, extra or root; "" when not known.
+	disk string
 }
 
 // rowsOf is what the table and the JSON are both made from: one row per game, on
@@ -207,7 +215,7 @@ func rowsOf(b Box, archived []library.App) []row {
 		}
 		rows = append(rows, row{name: clip(a.Name, 28), state: st, gb: shown / gib, extra: extra,
 			full: a.Name, id: a.ID, bytes: int64(shown), pct: pctN, eta: etaN, incomplete: incomplete,
-			total: totalN, left: leftN, room: roomN})
+			total: totalN, left: leftN, room: roomN, disk: a.Disk})
 		delete(arch, a.ID)
 	}
 	for _, id := range order {
@@ -259,11 +267,13 @@ func JSON(b Box, archived []library.App) ([]byte, error) {
 		TotalBytes  int64    `json:"total_bytes,omitempty"` // a download: its whole size
 		LeftBytes   int64    `json:"left_bytes,omitempty"`  // and what is still to come
 		RoomBytes   int64    `json:"room_bytes,omitempty"`  // the disk space the install still has to take
+		Disk        string   `json:"disk,omitempty"`        // nvme, extra or root: where it is installed
+		Tool        bool     `json:"tool,omitempty"`        // Proton, the runtime: Steam's, never saved
 	}
 	games := []game{}
 	for _, r := range rowsOf(b, archived) {
 		g := game{AppID: r.id, Name: r.full, State: r.state, Bytes: r.bytes, Incomplete: r.incomplete, Note: r.extra,
-			TotalBytes: r.total, LeftBytes: r.left, RoomBytes: r.room}
+			TotalBytes: r.total, LeftBytes: r.left, RoomBytes: r.room, Disk: r.disk, Tool: IsSteamTool(r.id, r.full)}
 		if r.pct >= 0 {
 			p := r.pct
 			g.Percent = &p
@@ -339,4 +349,16 @@ func ShowVolume(v *Volume, ebs, inr *float64) string {
 	b.WriteString("           the library is in S3: cg library\n")
 	b.WriteString("  delete   cg games --volume --delete   (permanent; anything left on it goes too)\n")
 	return b.String()
+}
+
+// IsSteamTool is the rule cg-library's is_steam_tool applies, by what the machine
+// reports here (the name, not the folder): Proton and Steam's Linux runtime, and
+// the redistributables. They are never saved - Steam fetches them again in under
+// a minute - so nothing offers to save or delete them.
+func IsSteamTool(id, name string) bool {
+	switch id {
+	case "228980", "1826330", "1161040":
+		return true
+	}
+	return name == "Proton" || strings.HasPrefix(name, "Proton ") || strings.HasPrefix(name, "Steam Linux Runtime")
 }

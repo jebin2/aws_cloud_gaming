@@ -228,6 +228,8 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 				d.ExtraGB, _ = strconv.Atoi(args[i+1])
 			case "--extra-apps":
 				d.ExtraApps = args[i+1]
+			case "--games":
+				d.Games = args[i+1]
 			}
 		}
 		if d.ExtraGB > 0 {
@@ -275,6 +277,13 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			}
 		}
 		if len(args) > 0 && args[0] == "remove" {
+			// --unsaved-ok: the app's Stop machine has shown what is on the disk and
+			// not saved, and the person chose to lose it with the disk.
+			for _, a := range args[1:] {
+				if a == "--unsaved-ok" {
+					d.UnsavedOK = true
+				}
+			}
 			return d.RemoveDisk(ctx, c)
 		}
 		if len(args) > 0 && args[0] == "add" {

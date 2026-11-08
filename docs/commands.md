@@ -10,7 +10,7 @@ on files beside the binary. Build it with `go build -o cg ./cmd/cg`.
 |---|---|
 | `cg init` | Build everything; reuses an existing box. Straight after a destroy it waits (up to 6 minutes) for AWS to release the spot allowance. **Costs money** |
 | `cg open` | Start, stream, and on exit offer to end the box. **Costs money** |
-| `cg stop` | Mirror the games to S3, then end the box - destroy on spot (a spot box cannot be stopped), stop on demand |
+| `cg stop` | Mirror the games to S3, then end the box - destroy on spot (a spot box cannot be stopped), stop on demand. `--yes` skips the "stop instance now?" question (the app has asked already) `--skip 730,1057090` leaves those games out of this save (and the one the machine makes on its way down); the next boot saves everything again. `cg destroy --skip` is the same. `cg disk remove --unsaved-ok` deletes the games disk even without a complete save in Saved games (Stop machine, when what is lost has been shown) |
 | `cg status` | Instance, disks, guards, tailnet, game library, local tools |
 | `cg status --json` | The same facts as data, for a program - see [app-design.md](app-design.md) |
 | `cg library` | What is on the box vs in S3, and what the archive costs |
@@ -237,7 +237,11 @@ each have one job:
 | `problem` | a failure the screen should explain itself, sent just before the lines that report it | `kind`, `title`, `text` (words for a person), `charging` (`no`, or `other` when a game PC from before is still billing), `code` and `said` (what AWS answered, for the details), `region` |
 | `error` | `die` - the command then exits 1 | `text` |
 
-**Version 4** (`cg --version` prints `events 4`) only adds the optional `state` on `part` (`done`), and the piece `steam-update`.
+**Version 6** only adds `save`: while the games are being copied into Saved games (`cg stop`, `cg destroy`), about every five seconds, `id` (`all`), `text`, `got` (bytes of the games on the machine that are in Saved games) and `of` (their size). cg measures it from outside the machine, so a machine of any age has it.
+
+**Version 5** (`cg --version` prints `events 5`) only adds `restore`: while `cg open --games id:bytes,…` waits for the chosen games to come back from Saved games, one per game and about every four seconds, `id` (the appid), `state` (`waiting`, `copying`, `done`, `failed`, or `there` for a game already installed on the machine and not copied), `got` (bytes on the machine) and `of` (bytes in Saved games, 0 when not known). `--extra-gb N --extra-apps ids` makes the added disk and names the games that go on it; the rest go on the machine's own drive.
+
+**Version 4** only adds the optional `state` on `part` (`done`), and the piece `steam-update`.
 
 **Version 3** only added `problem`. Its kinds: `no_capacity`, `spot_slot_held`,
 `spot_slot_leaving`, `limit`, `key_missing`, `not_allowed`, `not_enabled`, `sign_in_refused`, `account_blocked`, `unknown`.
