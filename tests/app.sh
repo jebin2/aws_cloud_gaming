@@ -210,7 +210,9 @@ contains "stop belongs to the screen that started the run" "$js" "j.view === vie
 # alone, disables anything elsewhere.
 contains "only a write blocks a read"    "$js" "jobs.size > 0"
 contains "  refresh waits for a write only" "$js" 'refresh'"'"').disabled = busy'
-contains "  writes wait for everything"  "$js" '$(b).disabled = jobs.size > 0'
+contains "  writes wait for a write, not a read"  "$js" '$(b).disabled = writing()'
+contains "  Play opens its popup at once, reading" "$js" "Looking at your machine and your saved games…"
+contains "  and the progress window before the run, copying or not" "$js" "  restoreShow(pick);"
 # Single quotes: a needle in double quotes runs $(...) as a command, which made
 # this assertion pass against nothing at all.
 contains "  and takes refresh's place while it runs" "$js" "|| mine.some(j => !hostRun(j))"
@@ -286,7 +288,8 @@ check "nothing repeats on an interval"   "$(grep -c 'setInterval' app/renderer/a
 # Two delays. One starts no command: the finished steps are held on screen for a
 # beat so you see them finish, instead of six ticks flashing for 200ms. The other
 # is the Games page's read of the machine (above), which asks no one but the box.
-check "  and two delays, which they are" "$(grep -c 'setTimeout' app/renderer/app.js)" "2"
+# The third is Stop machine waiting, 20 seconds at most, for the session to end.
+check "  and three delays, which they are" "$(grep -c 'setTimeout' app/renderer/app.js)" "3"
 contains "  the handover beat"           "$js" 'function afterBeat(then, ms = ONB_HANDOVER_MS) { return setTimeout(then, ms); }'
 contains "  after which it closes on the card" "$js" "note('AWS added', 'text-primary'); closeAdd();"
 # Home is never hidden: with no machine it asks the one question instead.
@@ -324,13 +327,22 @@ contains "  and an old cg still works"    "$js" "title: 'AWS rejected this acces
 echo "5b. the build screen, as the design draws it"
 # The archive table, the allocation bar and the machine strip are the parts the
 # mockup has; each is fed by a field from cg, never by a number typed in here.
-contains "an archive table"              "$html" 'id="b-games"'
+lacks    "no games are picked on the Build page" "$html" 'id="b-games"'
 lacks    "  by name, not by Steam's id"   "$js" 'appid ${g.appid}'
 contains "  and when each is deleted"    "$js" "deleteOn(g, days, seen, marks)"
-contains "the allocation bar"            "$html" 'id="b-bar"'
-contains "  says what is left, plainly"  "$js" "is more than a game PC here can hold. Deselect a game."
-contains "  and the extra disk is said"   "$js" "a \${extra} GB disk will be added"
-contains "  with its price beside it"      "$html" 'id="b-extra"'
+lacks    "  nor a disk to size there"      "$html" 'id="b-bar"'
+lacks    "  nor a slider for one"          "$html" 'id="b-extra-pick"'
+contains "Play lists the saved games to tick" "$html" 'id="playdlg-games"'
+contains "  and says what does not fit the machine's free space" "$js" 'more than the machine has free, so at least'
+contains "  with the disk's size to change" "$html" 'id="playdlg-gb"'
+contains "  and its price before it is spent" "$js" 'About ${rs(month)} a month.'
+contains "  headroom for what is downloaded later" "$js" "const headroomGb = gamesGb"
+contains "  the first time, only what fits is ticked" "$js" "First time: the games that fit the fast drive"
+contains "each game has its own progress" "$js" "function restoreGame(e)"
+contains "  the window closes when Moonlight is starting" "$js" "if (event.id === 'open.play') { if (!restoreUi.failed) restoreEnd(0); }"
+contains "  a game that failed can be tried again" "$html" 'id="restoredlg-retry"'
+contains "  the games are asked for by id and size" "$js" "'--games', pick.games.map"
+contains "  the steps list has the restore only when games were asked for" "$js" "d.id !== 'open.restore' || (r && r.restore)"
 contains "the machine comes from cg"     "$js" "const spec = s.spec || {}"
 check    "  with no type hardcoded"      "$(grep -c 'g6\.xlarge\|L4\|16 GiB' app/renderer/app.js)" "0"
 lacks    "no build time, no second rate line" "$js" "from the moment it starts"
@@ -343,7 +355,7 @@ contains "  the live line shows in the strip" "$js" "\$('b-prog-step').textConte
 # screen offers what you can actually do with it instead.
 contains "a machine replaces the build button" "$js" '$(`${p}-build`).hidden = !!box'
 contains "  with play and delete"        "$js" '$(`${p}-destroy`).hidden = !box'
-contains "  and the picker goes read-only" "$js" "box.disabled = up"
+lacks    "  and no picker to make read-only" "$js" "box.disabled = up"
 contains "  build re-reads the box state" "$js" "build:     [[['library', 'list', '--json'], 'library'], [['status', '--json'], 'status'],"
 # The panel sits in a content-sized grid row, so flex-1 had no height to divide
 # and the log grew forever instead of scrolling. It is bounded.
@@ -463,7 +475,7 @@ contains "  ending on its own"            "$js" "animationend"
 contains "  with the animation defined"   "$(cat app/renderer/src.css)" "@keyframes flash-attn"
 check    "  and the card it points at exists"          "$(grep -c 'id="s-machine-card"' app/renderer/index.html)" "1"
 # The summary must sit above the button that spends the money, not below it.
-contains "the summary is above Build"    "$js" 'box.append(body, busy, row);'
+contains "the summary is above Build"    "$js" 'box.append(body, unf, busy, row);'
 contains "  and says why"                 "$js" "Delete the running machine before changing type"
 contains "  the unpinned zone is priced too" "$js" "usd_hour_spot_max"
 check    "  and still no machine is named here" \
@@ -482,7 +494,7 @@ contains "  the Steam login is a card of its own" "$html" 'id="lib-login-box"'
 # print 209 GB of box disk and a rupee rate of 88 when cg had told it neither.
 check    "no disk size is guessed"        "$(grep -c '|| 209' app/renderer/app.js)" "0"
 check    "  nor a starting value for one"  "$(grep -c 'selectable_gb: 209' app/renderer/app.js)" "0"
-contains "  it says it does not know"     "$js" "capacity unknown"
+contains "  no disk is sized on a guess"  "$js" "unknown: true"
 check    "no exchange rate is guessed"    "$(grep -c 'inr_per_usd || 88' app/renderer/app.js)" "0"
 contains "cost projects the month"       "$js" "m.projected_usd"
 contains "  against the budget you set, in rupees" "$js" "Number(setting('GAME_BUDGET_INR', NaN))"
@@ -510,7 +522,7 @@ echo "5e. one panel for every long run"
 contains "a run opens the panel it reports in" "$js" "function startRun(args, opts = {})"
 contains "  which is the build screen"   "$js" "goView('build')"
 contains "  titled for what is running"  "$js" "running: 'Deleting the machine'"
-contains "  with what is running, by name" "$js" '$('"'"'b-log-title'"'"').textContent = `${CgName(args)} · log`;'
+contains "  the log there is the build's only" "$js" "const buildLogged = () => !!(run && run.kind === 'init');"
 # Billing counts from a machine that exists: the rental has to have finished.
 contains "  and the bill from when it was rented" "$js" "if (!run.billFrom && at > rent && run.steps[rent])"
 contains "destroy runs through it"       "$js" "startRun(['destroy'])"
@@ -731,9 +743,10 @@ echo "6. the actions that spend money ask first"
 # window.confirm draws a native alert that belongs to no design.
 check    "no native alert boxes"         "$(grep -cE '(^|[^a-zA-Z.])confirm\(' app/renderer/app.js)" "0"
 contains "  the app asks in its own dialog" "$html" 'id="confirm-title"'
-contains "  and says the disk it adds, with what it costs" "$js" 'An extra ${extra} GB disk is added'
-contains "  and what the hour comes to in all" "$js" 'Billed about ${rsh(base + add)}/hour while running'
-contains "a build confirms, with its rate" "$js" 'Billed ${rate != null ? `${rate}/hour` : '"'"'hourly'"'"'} while running.'
+contains "  and says only what it costs" "$js" "from now until you stop or delete it."
+lacks    "  not how games used to be chosen" "$js" 'No games are put on it.'
+contains "  and builds with none, and no disk" "$js" "await buildWith('none', 0, 0)"
+contains "a build confirms, with its rate" "$js" 'Billed ${rate != null ? `${rate}/hour` : '"'"'hourly'"'"'} from now until you stop or delete it.'
 contains "  and passes the chosen games" "$js" "GAME_APPS: apps"
 contains "a delete confirms"             "$js" "Delete the machine?"
 contains "only GAME_APPS may cross"      "$(cat app/main/index.js)" "['GAME_APPS']"
@@ -750,5 +763,25 @@ contains "  and confirming a clear"      "$js" "will not be asked for again"
 contains "a choice is shown in words"    "$js" "'1': 'Spot', '0': 'On-demand'"
 contains "a secret can be revealed"      "$js" "runCg(['config', 'get', r.key]"
 contains "  deliberately, then hidden"   "$js" "click again to hide it"
+# A machine's card: ending the session and stopping the machine live on it, and
+# a button that cannot be pressed is not shown.
+contains "the card has Stop session"      "$js" "btn('stopsession', 'btn btn-primary'"
+contains "  and Stop machine"             "$js" "btn('stopmachine', 'btn', null, null, 'Stop machine')"
+contains "  not for a spot machine"       "$js" "box.lifecycle === 'spot'"
+contains "  Play gives way while it runs" "$js" "|| !!sessionNow || sessionJob"
+contains "  the header leaves the session" "$js" "|| j.cmd[0] === 'open';"
+contains "  a machine of yours says Stop session" "$js" "playing ? 'Stop session' : 'Stop setup'"
+contains "  Esc closes none of the Play, Stop or Delete windows" "$js" "['adddlg', 'rundlg', 'playdlg', 'restoredlg', 'keepdlg']"
+contains "a disabled card button is hidden" "$(cat app/renderer/src.css)" "#d-hero button:disabled, #b-machine button:disabled, [data-host] button:disabled { display: none; }"
+# Copying into Saved games has a bar under its steps.
+contains "the Stop popup draws a bar from save events" "$js" "if (event.t === 'save') saveOnEvent(event);"
+contains "  under the steps"            "$js" "row.lastChild.firstChild.style.width"
+# The Play popup says what happens, in order, and how long the copy takes.
+contains "the Play popup is titled for what it does" "$(cat app/renderer/index.html)" "Choose saved games to include"
+contains "  the disk never goes below what the games need" "$js" "diskGb = have ? ctx.extraHave : Math.max(want, p.neededDisk);"
+# Delete machine on a running machine: the same list, then the same working popup.
+contains "Delete machine runs in the same window as Stop" "$js" "if (statusNow && statusNow.box && statusNow.box.state === 'running') return keepFlow('delete', untick);"
+# A stopped machine's hourly price is what it costs when it runs, and says so.
+contains "a stopped machine's price says when running" "$js" "box.state === 'stopped' ? ' when running' : ''"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

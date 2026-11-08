@@ -55,7 +55,7 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st null '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "before a build: the plan"          "$(row AFTER)" "plan=true"
 contains "  saying what Build starts billing" "$(row AFTER)" "chip=Hyderabad · Spot, else on-demand · ₹16.44/hour"
-contains "the confirm names the rate"        "$(row AFTER)" "Billed ₹16.44/hour while running."
+contains "the confirm names the rate"        "$(row AFTER)" "Billed ₹16.44/hour from now until you stop or delete it."
 # Mid-build: setup, budget, machine and Tailscale done; the box's own steps
 # (base packages, the driver) are one step, installing.
 contains "four steps done, the fifth running" "$(row AFTER)" "mid=0=done,1=done,2=done,3=done,4=running,5=locked,6=locked,7=locked"
@@ -277,7 +277,9 @@ B5S="window.__after = async () => {
   const q = f => (document.querySelector('#b-machine-card [data-f=' + f + ']') || {}).textContent;
   return 'title=' + q('title') + ' | word=' + q('word') + ' | meta=' + q('sub')
     + ' | play=' + document.getElementById('b-open').textContent.trim()
-    + ' | acts=' + ['b-open', 'b-destroy'].filter(b => !document.getElementById(b).hidden).join(',');
+    + ' | acts=' + ['b-open', 'b-destroy'].filter(b => !document.getElementById(b).hidden).join(',')
+    + ' | ts=' + ((document.querySelector('#b-checks [data-check=Tailscale]') || {}).dataset || {}).ok
+    + ' | where=' + q('where');
 };"
 ENGINE="$B5S"
 BOXS='{"id": "i-1", "state": "stopped", "type": "g4dn.xlarge", "lifecycle": "normal", "launched": "2026-01-01T00:00:00Z"}'
@@ -291,6 +293,12 @@ BOXD='{"id": "i-1", "state": "shutting-down", "type": "g4dn.xlarge", "lifecycle"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st "$BOXD" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "being removed: no Delete"  "$(row AFTER)" "Play | acts="
+BOXT='{"id": "i-1", "state": "stopping", "type": "g4dn.xlarge", "lifecycle": "normal", "launched": "2026-01-01T00:00:00Z"}'
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st "$BOXT" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "stopping: it is saving, and says when billing ends" "$(row AFTER)" "meta=Saving and shutting down. Billing by the hour ends once it has stopped"
+lacks    "  and no Delete while it saves on its way down" "$(row AFTER)" "b-destroy"
+contains "  Tailscale is not a fault while it is off" "$(row AFTER)" "ts=later"
 ENGINE=""
 
 echo "7e3. a stopped machine's games disk: what it costs, when it goes, and whether it may be removed"
@@ -338,29 +346,313 @@ B5P="window.__after = async () => {
   await wait();
   const dlg = document.getElementById('playdlg');
   const rows = [...dlg.querySelectorAll('#playdlg-games label')].map(l => l.innerText.replace(/\\s+/g, ' ').trim());
-  const price = document.getElementById('playdlg-price').textContent;
-  // Untick the small one, then start.
-  dlg.querySelectorAll('#playdlg-games input')[1].click();
-  const price2 = document.getElementById('playdlg-price').textContent;
+  const price = document.getElementById('playdlg-gb').value;
+  const ticks = [...dlg.querySelectorAll('#playdlg-games input')].map(i => i.checked ? 'x' : '-').join('');
+  const diskHidden0 = document.getElementById('playdlg-disk').hidden + ' minusOff0=' + document.getElementById('playdlg-minus').disabled;
+  // Tick the big one, which does not fit what is left of the fast drive, then start.
+  dlg.querySelectorAll('#playdlg-games input')[0].click();
+  const price2 = document.getElementById('playdlg-gb').value;
+  // Lower than the games need is refused: minus is off, and a typed 10 comes back up.
+  const minusOff = document.getElementById('playdlg-minus').disabled;
+  const gbIn = document.getElementById('playdlg-gb');
+  gbIn.value = '10'; gbIn.onchange();
+  const typedLow = gbIn.value;
+  // Raising it is allowed.
+  document.getElementById('playdlg-plus').click();
+  const raised = gbIn.value;
+  document.getElementById('playdlg-minus').click();
+  const diskBox = document.getElementById('playdlg-disk-note').textContent + ' minusOff=' + minusOff + ' typedLow=' + typedLow + ' raised=' + raised + ' back=' + gbIn.value;
   // The page's own close handler, called here: a close event is queued behind the
   // virtual clock this page runs on and may not arrive before the answer is read.
   dlg.close('yes');
   dlg.onclose();
   // The run waits for any read still in flight, so look for it rather than for a moment.
   for (let i = 0; i < 100 && !window.__ran.some(l => l.includes('--extra-gb')); i++) await new Promise(r => setTimeout(r, 30));
-  return 'label=' + label + ' | open=' + dlg.open + ' | rows=' + rows.join(';') + ' | price=' + price + ' | price2=' + price2
+  // The machine is getting ready: the progress window is open, one row per game.
+  const pd = document.getElementById('restoredlg');
+  const jid = window.__lastId;
+  const rd = () => [...pd.querySelectorAll('#restoredlg-games > div')].map(d => d.innerText.replace(/\\s+/g, ' ').trim()).join(';');
+  const opened = 'progressOpen=' + pd.open + ' rows0=' + rd();
+  window.__emit(jid, { t: 'step', id: 'open.start', text: 'starting the machine' });
+  window.__emit(jid, { t: 'restore', id: '111', state: 'copying', got: 50 * 1073741824, of: 100 * 1073741824 });
+  window.__emit(jid, { t: 'restore', id: '222', state: 'waiting', got: 0, of: 10 * 1073741824 });
+  const mid = 'mid=' + rd() + ' bar=' + pd.querySelector('#restoredlg-games > div .bg-primary').style.width;
+  // One game does not come back whole: it is named, and Try again is offered.
+  window.__emit(jid, { t: 'restore', id: '111', state: 'done', got: 100 * 1073741824, of: 100 * 1073741824 });
+  window.__emit(jid, { t: 'restore', id: '222', state: 'failed', got: 1073741824, of: 10 * 1073741824 });
+  window.__emit(jid, { t: 'exit', rc: 1 });
+  const failedUi = 'failedTitle=' + document.getElementById('restoredlg-title').textContent
+    + ' retry=' + !document.getElementById('restoredlg-retry').hidden + ' cancel=' + !document.getElementById('restoredlg-cancel').hidden;
+  document.getElementById('restoredlg-retry').click();
+  for (let i = 0; i < 60 && window.__ran.filter(l => l.startsWith('open')).length < 2; i++) await new Promise(r => setTimeout(r, 30));
+  const retried = 'retry=' + window.__ran.filter(l => l.startsWith('open')).slice(-1)[0];
+  // Then a clean run: the stream's own step closes the window.
+  await new Promise(r => setTimeout(r, 60));   // the retried job is registered a moment after cg is asked
+  const openJob = [...jobs].filter(([, j]) => j.cmd[0] === 'open').pop()[0];   // reads also take ids; the session is the open job
+  window.__emit(openJob, { t: 'restore', id: '222', state: 'done', got: 10 * 1073741824, of: 10 * 1073741824 });
+  window.__emit(openJob, { t: 'step', id: 'open.sunshine', text: 'starting the game stream' });
+  const stillOpen = pd.open;
+  window.__emit(openJob, { t: 'step', id: 'open.play', text: 'playing' });
+  const closed = 'closedByItself=' + !pd.open + ' openWhileStreamStarts=' + stillOpen;
+  return opened + ' | ' + mid + ' | ' + failedUi + ' | ' + retried + ' | ' + closed + ' |||| ' + 'label=' + label + ' | open=' + dlg.open + ' | rows=' + rows.join(';') + ' | ticks=' + ticks + ' | diskHidden0=' + diskHidden0 + ' | price=' + price + ' | price2=' + price2 + ' | diskBox=' + diskBox
     + ' | ran=' + window.__ran.filter(l => l.includes('--extra-gb')).join(',') + ' | again=' + (localStorage.getItem('cg-disk-removed') || '');
 };"
 ENGINE="$B5P"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"disk --json\": {\"state\":\"stopped\",\"extra_gb\":0,\"removable\":false,\"stopped_at\":\"2026-11-08T12:00:00Z\",\"expiry_days\":14},
-  \"library list --json\": {\"games\": [{\"appid\": 111, \"name\": \"Big Game\", \"bytes\": 107374182400}, {\"appid\": 222, \"name\": \"Small Game\", \"bytes\": 10737418240}], \"bucket\": \"b\", \"total_bytes\": 118111600640},
+  \"library list --json\": {\"games\": [{\"appid\": 111, \"name\": \"Big Game\", \"bytes\": 107374182400}, {\"appid\": 222, \"name\": \"Small Game\", \"bytes\": 10737418240}], \"bucket\": \"b\", \"total_bytes\": 118111600640, \"selectable_gb\": 60, \"reserve_gb\": 20},
   \"status --json\": $(st "$BOXS" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "the button says it starts the machine"  "$(row AFTER)" "label=Start and play"
 contains "the popup lists the saved games, biggest first" "$(row AFTER)" "rows=Big Game 100.0 GB;Small Game 10.0 GB"
-contains "  and sizes the new disk for all of them with room to spare" "$(row AFTER)" "New disk: 130 GB"
-contains "  and again when one is unticked"        "$(row AFTER)" "price2=New disk: 120 GB"
-contains "starting passes the size and the games" "$(row AFTER)" "ran=open --extra-gb 120 --extra-apps 111"
+contains "  the first time only the game that fits the fast drive is ticked" "$(row AFTER)" "ticks=-x"
+contains "  the disk field is there, at 0, and cannot go lower" "$(row AFTER)" "diskHidden0=false minusOff0=true | price=0"
+contains "  ticking one that does not fit raises it to what it needs" "$(row AFTER)" "price2=130"
+contains "  and says how much did not fit"          "$(row AFTER)" "diskBox=The ticked games need 100.0 GB more than the machine has free, so at least 130 GB."
+contains "  it cannot be lowered below that, by button or by typing" "$(row AFTER)" "minusOff=true typedLow=130"
+contains "  but it can be raised, and lowered back to the need" "$(row AFTER)" "raised=140 back=130"
+contains "starting opens the progress window with a row per game" "$(row AFTER)" "progressOpen=true rows0=Big Game waiting"
+contains "  each shows how far it is"                "$(row AFTER)" "Big Game 50.0 GB of 100.0 GB · 50%"
+contains "  and the bar is that full"                "$(row AFTER)" "bar=50%"
+contains "a game that did not come back is named"    "$(row AFTER)" "failedTitle=Some games did not come back retry=true cancel=false"
+contains "  Try again asks for that game only"       "$(row AFTER)" "retry=open --extra-gb 130 --extra-apps 111 --games 222:10737418240"
+contains "  and the window closes by itself once the stream's steps begin" "$(row AFTER)" "closedByItself=true openWhileStreamStarts=true"
+contains "starting passes the size, the disk's games and every game" "$(row AFTER)" "ran=open --extra-gb 130 --extra-apps 111 --games 111:107374182400,222:10737418240"
+ENGINE=""
+
+echo "7e4b. no saved games: Play is the same flow - the popup (with the disk), then the progress window"
+B5N="window.__after = async () => {
+  for (let i = 0; i < 120 && !statusNow; i++) await new Promise(r => setTimeout(r, 20));
+  await new Promise(r => setTimeout(r, 300));
+  document.querySelector('.nav-item[data-view=build]').click();
+  await new Promise(r => setTimeout(r, 60));
+  document.getElementById('b-open').click();
+  const dlg = document.getElementById('playdlg');
+  for (let i = 0; i < 100 && !document.getElementById('playdlg-yes').disabled === false; i++) await new Promise(r => setTimeout(r, 30));
+  for (let i = 0; i < 100 && document.getElementById('playdlg-yes').disabled; i++) await new Promise(r => setTimeout(r, 30));
+  const says = document.getElementById('playdlg-games').innerText.replace(/\\s+/g, ' ').trim();
+  const disk = 'disk=' + !document.getElementById('playdlg-disk').hidden + ' gb=' + document.getElementById('playdlg-gb').value;
+  const opened = 'popup=' + dlg.open;
+  dlg.close('yes'); dlg.onclose();
+  for (let i = 0; i < 100 && !window.__ran.some(l => l.startsWith('open')); i++) await new Promise(r => setTimeout(r, 30));
+  return opened + ' | says=' + says + ' | ' + disk + ' | progress=' + document.getElementById('restoredlg').open
+    + ' | sub=' + document.getElementById('restoredlg-sub').textContent + ' | ran=' + window.__ran.filter(l => l.startsWith('open')).join(',');
+};"
+ENGINE="$B5N"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"disk --json\": {\"state\":\"stopped\",\"extra_gb\":0,\"removable\":false,\"stopped_at\":\"2026-11-08T12:00:00Z\",\"expiry_days\":14},
+  \"library list --json\": {\"games\": [], \"bucket\": \"b\", \"total_bytes\": 0, \"selectable_gb\": 60, \"reserve_gb\": 20},
+  \"status --json\": $(st "$BOXS" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "no saved games: the same popup opens"     "$(row AFTER)" "popup=true"
+contains "  and says there are none yet"            "$(row AFTER)" "says=No saved games yet."
+contains "  with the disk field, at 0"              "$(row AFTER)" "disk=true gb=0"
+contains "  then the progress window, as with games" "$(row AFTER)" "progress=true | sub=Connecting to your machine and starting the stream."
+contains "  and the machine is started"             "$(row AFTER)" "ran=open"
+ENGINE=""
+
+echo "7e4c. a stopped machine: games last seen on the root disk or the games disk are already on it, not copied again"
+B5R="try { localStorage.setItem('cg-box-games', JSON.stringify({id: 'i-1', games: [{appid: '111', disk: 'root'}, {appid: '222', disk: 'extra'}]})); } catch (e) {}
+window.__after = async () => {
+  for (let i = 0; i < 120 && !statusNow; i++) await new Promise(r => setTimeout(r, 20));
+  await new Promise(r => setTimeout(r, 300));
+  document.querySelector('.nav-item[data-view=build]').click();
+  await new Promise(r => setTimeout(r, 60));
+  document.getElementById('b-open').click();
+  for (let i = 0; i < 100 && document.getElementById('playdlg-yes').disabled; i++) await new Promise(r => setTimeout(r, 30));
+  const rows = [...document.querySelectorAll('#playdlg-games label')].map(l => l.innerText.replace(/\\s+/g, ' ').trim() + (l.querySelector('input').disabled ? ' [locked]' : '')).join(';');
+  return 'rows=' + rows;
+};"
+ENGINE="$B5R"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"disk --json\": {\"state\":\"stopped\",\"extra_gb\":0,\"removable\":false,\"stopped_at\":\"2026-11-08T12:00:00Z\",\"expiry_days\":14},
+  \"library list --json\": {\"games\": [{\"appid\": 111, \"name\": \"Root Game\", \"bytes\": 10737418240}, {\"appid\": 222, \"name\": \"Disk Game\", \"bytes\": 5368709120}], \"bucket\": \"b\", \"total_bytes\": 16106127360, \"selectable_gb\": 60, \"reserve_gb\": 20},
+  \"status --json\": $(st "$BOXS" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "a game on the root disk is already on the stopped machine, and locked" "$(row AFTER)" "Root Game already on the machine · root disk [locked]"
+contains "  one on a games disk that is gone is offered again"   "$(row AFTER)" "Disk Game 5.0 GB"
+ENGINE=""
+
+echo "7e5. Stop machine: one window - the games grouped by what happens to them, then the run in the same window"
+B5K="window.__slow = ['stop --yes --skip 111,333']; window.__slowMs = 1500;
+window.__after = async () => {
+  for (let i = 0; i < 120 && !statusNow; i++) await new Promise(r => setTimeout(r, 20));
+  await new Promise(r => setTimeout(r, 300));
+  document.querySelector('.nav-item[data-view=build]').click();
+  await new Promise(r => setTimeout(r, 60));
+  const btn = document.getElementById('b-stopmachine');
+  const shown = 'stopShown=' + !btn.hidden;
+  btn.click();
+  const dlg = document.getElementById('keepdlg');
+  const reading = 'readingAtOnce=' + dlg.open;
+  for (let i = 0; i < 100 && !dlg.querySelector('#keepdlg-games input'); i++) await new Promise(r => setTimeout(r, 30));
+  const groups = [...dlg.querySelectorAll('#keepdlg-games > div')].map(g => g.innerText.replace(/\\s+/g, ' ').trim()).join(' / ');
+  const ticks = [...dlg.querySelectorAll('#keepdlg-games input')].map(i => i.disabled ? '_' : i.checked ? 'x' : '-').join('');
+  const sum0 = document.getElementById('keepdlg-summary').textContent;
+  const yes0 = document.getElementById('keepdlg-yes').textContent;
+  const boxes = [...dlg.querySelectorAll('#keepdlg-games input')].filter(i => !i.disabled);
+  // A game on the games disk survives a stop: unticked, it says so; then ticked again.
+  boxes[2].click();
+  const diskNote = [...dlg.querySelectorAll('#keepdlg-games p.pl-\\\\[1\\\\.6rem\\\\]')].filter(n => !n.hidden).map(n => n.textContent).join(' / ');
+  boxes[2].click();
+  boxes[0].click(); boxes[1].click();
+  const yes1 = document.getElementById('keepdlg-yes').textContent;
+  const sum1 = document.getElementById('keepdlg-summary').textContent;
+  const notes = [...dlg.querySelectorAll('#keepdlg-games p.pl-\\\\[1\\\\.6rem\\\\]')].filter(n => !n.hidden).map(n => n.textContent).join(' / ');
+  document.getElementById('keepdlg-yes').click();
+  for (let i = 0; i < 150 && !window.__ran.some(l => l.startsWith('stop')); i++) await new Promise(r => setTimeout(r, 30));
+  await new Promise(r => setTimeout(r, 300));
+  const steps = () => [...document.querySelectorAll('#keepdlg-steps [data-step]')].map(r => r.firstChild.textContent + (r.firstChild.classList.contains('spinner') ? '◌' : '') + r.dataset.step).join('/');
+  const mid = 'midOpen=' + dlg.open + ' midTitle=' + document.getElementById('keepdlg-title').textContent + ' refdlg=' + document.getElementById('refdlg').open + ' steps=' + steps();
+  const sj = [...jobs].filter(([, j]) => j.cmd[0] === 'stop').pop();
+  let bar0 = 'none', bar1 = 'none';
+  if (sj) {
+    window.__emit(sj[0], { t: 'step', text: 'Saving your Steam login and the games you kept to Saved games' });
+    window.__emit(sj[0], { t: 'save', id: 'all', text: 'Measuring what to save', got: 0, of: 0 });
+    const r0 = document.getElementById('keepdlg-save');
+    bar0 = r0 ? r0.innerText.trim() + ' moving=' + !r0.lastChild.classList.contains('determinate') + ' under=' + r0.previousElementSibling.dataset.step : 'none';
+    window.__emit(sj[0], { t: 'save', id: 'all', text: 'Saving your games', got: 2 * 1073741824, of: 8 * 1073741824 });
+    const r1 = document.getElementById('keepdlg-save');
+    bar1 = r1 ? r1.innerText.trim() + ' width=' + r1.lastChild.firstChild.style.width : 'none';
+  }
+  const steps2 = 'steps2=' + steps();
+  let live = 'none';
+  if (sj) {
+    window.__emit(sj[0], { t: 'step', text: 'Stopping the machine at AWS (billing ends once it has stopped)' });
+    window.__emit(sj[0], { t: 'wait', id: 'box.stopped', state: 'waiting', text: 'stopping', secs: 80, of: 600 });
+    window.__emit(sj[0], { t: 'line', kind: 'cont', text: '  machine: cg-library: pushing ZERO PARADES' });
+    const lr = document.getElementById('keepdlg-live');
+    live = lr ? lr.textContent.replace(/\n/g, ' | ') + ' under=' + lr.previousElementSibling.dataset.step : 'none';
+  }
+  await new Promise(r => setTimeout(r, 1500));
+  const after = 'afterOpen=' + dlg.open;
+  return shown + ' | ' + reading + ' | groups=' + groups + ' | ticks=' + ticks + ' | sum0=' + sum0 + ' | yes0=' + yes0
+    + ' | yes1=' + yes1 + ' | sum1=' + sum1 + ' | notes=' + notes + ' | diskNote=' + diskNote + ' | ' + mid + ' | bar0=' + bar0 + ' | bar1=' + bar1 + ' | ' + steps2 + ' | live=' + live + ' | ' + after
+    + ' | ran=' + window.__ran.filter(l => l.startsWith('library forget') || l.startsWith('stop')).join(',');
+};"
+ENGINE="$B5K"
+BOXR='{"id": "i-1", "state": "running", "type": "g4dn.xlarge", "lifecycle": "normal", "launched": "2026-01-01T00:00:00Z"}'
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"library forget 111\": {}, \"stop --yes --skip 111,333\": {}, \"disk --json\": {\"state\": \"running\", \"extra_gb\": 0},
+  \"library list --json\": {\"games\": [{\"appid\": 111, \"name\": \"Saved Game\", \"bytes\": 10737418240}], \"bucket\": \"b\", \"total_bytes\": 10737418240, \"selectable_gb\": 60, \"reserve_gb\": 20},
+  \"games --json --box\": {\"games\": [{\"appid\": \"111\", \"name\": \"Saved Game\", \"state\": \"installed\", \"bytes\": 10737418240}, {\"appid\": \"333\", \"name\": \"New Game\", \"state\": \"installed\", \"bytes\": 2147483648, \"disk\": \"nvme\"}, {\"appid\": \"666\", \"name\": \"Disk Game\", \"state\": \"installed\", \"bytes\": 1073741824, \"disk\": \"extra\"}, {\"appid\": \"555\", \"name\": \"Half Game\", \"state\": \"downloading\", \"bytes\": 3221225472, \"percent\": 61}, {\"appid\": \"444\", \"name\": \"Only Saved\", \"state\": \"in S3 only\", \"bytes\": 1073741824}, {\"appid\": \"1493710\", \"name\": \"Proton Experimental\", \"state\": \"installed\", \"bytes\": 1503238553, \"tool\": true}], \"disk\": {\"used_bytes\": 1, \"free_bytes\": 2}},
+  \"status --json\": $(st "$BOXR" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "an on-demand machine that is running offers Stop machine" "$(row AFTER)" "stopShown=true"
+contains "  the window opens at once, reading"   "$(row AFTER)" "readingAtOnce=true"
+contains "  games grouped by what happens to them" "$(row AFTER)" "groups=IN SAVED GAMES Saved Game 10.0 GB / NEW ON THIS MACHINE New Game 2.0 GB · fast drive Disk Game 1.0 GB · games disk / NOT SAVED Half Game 3.0 GB · downloading 61% Still downloading: not saved. Steam downloads it again next time."
+lacks    "  not the ones only in Saved games"  "$(row AFTER)" "Only Saved"
+lacks    "  nor Steam's own tools, which are never saved" "$(row AFTER)" "Proton Experimental"
+contains "  all ticked; a download cannot be"  "$(row AFTER)" "ticks=xxx_"
+contains "  one line says what will happen"    "$(row AFTER)" "sum0=Saves 2 new games (3.0 GB), updates 1. | yes0=Save and stop"
+contains "  unticking a saved one: the button says it deletes" "$(row AFTER)" "yes1=Delete 1 game and stop"
+contains "  and the line too"                  "$(row AFTER)" "sum1=Saves 1 new game (1.0 GB), deletes 1 saved game."
+contains "  each unticked game says what happens to it" "$(row AFTER)" "notes=Deleted from Saved games. Cannot be undone. / Not saved. Gone when the machine stops."
+contains "  one on the games disk is not lost by a stop, and says so" "$(row AFTER)" "diskNote=Not saved. It stays on the games disk."
+contains "  the run is in the SAME window, retitled, nothing else on top" "$(row AFTER)" "midOpen=true midTitle=Stopping the machine refdlg=false"
+contains "  every step listed from the start"   "$(row AFTER)" "Getting ready/✓Deleting Saved Game from Saved games/"
+contains "  steps to come are shown as to come" "$(row AFTER)" "○Stopping the machine at AWS"
+contains "  the save's bar is there at once, under its step, moving" "$(row AFTER)" "bar0=Measuring what to save moving=true under=Saving your games and Steam login"
+contains "  then sized"                         "$(row AFTER)" "bar1=Saving your games · 2.0 GB of 8.0 GB width=25%"
+contains "  while AWS stops it: AWS's state and the machine's last line, under that step" "$(row AFTER)" "live=AWS says: stopping · 1 min 20 s | Machine: cg-library: pushing ZERO PARADES under=Stopping the machine at AWS"
+contains "  the window closes once it is done"   "$(row AFTER)" "afterOpen=false"
+contains "  the saved one is deleted, then the stop leaves both out" "$(row AFTER)" "ran=library forget 111,stop --yes --skip 111,333"
+ENGINE=""
+
+echo "7e5c. the games disk at Stop: unticked by default; ticked and locked once nothing on it is kept; deleted after the stop"
+B5D2="window.__after = async () => {
+  for (let i = 0; i < 120 && !statusNow; i++) await new Promise(r => setTimeout(r, 20));
+  await new Promise(r => setTimeout(r, 300));
+  document.querySelector('.nav-item[data-view=build]').click();
+  await new Promise(r => setTimeout(r, 60));
+  document.getElementById('b-stopmachine').click();
+  const dlg = document.getElementById('keepdlg');
+  for (let i = 0; i < 100 && !dlg.querySelector('#keepdlg-games input'); i++) await new Promise(r => setTimeout(r, 30));
+  const boxes = [...dlg.querySelectorAll('#keepdlg-games input')];
+  const diskCb = boxes[boxes.length - 1];
+  const state = () => 'disk=' + (diskCb.checked ? 'x' : '-') + (diskCb.disabled ? 'L' : '') + ' yes=' + document.getElementById('keepdlg-yes').textContent
+    + ' sum=' + document.getElementById('keepdlg-summary').textContent;
+  const head = [...dlg.querySelectorAll('#keepdlg-games .section-label')].map(h => h.textContent).join(',');
+  const s0 = state();
+  diskCb.click();
+  const s1 = state() + ' note=' + [...dlg.querySelectorAll('#keepdlg-games p.pl-\\\\[1\\\\.6rem\\\\]')].filter(n => !n.hidden).map(n => n.textContent).join(' / ');
+  diskCb.click();
+  boxes[0].click();
+  const s2 = state() + ' note=' + [...dlg.querySelectorAll('#keepdlg-games p.pl-\\\\[1\\\\.6rem\\\\]')].filter(n => !n.hidden).map(n => n.textContent).join(' / ');
+  boxes[0].click();
+  const s3 = state();
+  boxes[0].click();
+  document.getElementById('keepdlg-yes').click();
+  for (let i = 0; i < 150 && !window.__ran.some(l => l.startsWith('disk remove')); i++) await new Promise(r => setTimeout(r, 30));
+  await new Promise(r => setTimeout(r, 200));
+  return 'head=' + head + ' | s0=' + s0 + ' | s1=' + s1 + ' | s2=' + s2 + ' | s3=' + s3
+    + ' | ran=' + window.__ran.filter(l => l.startsWith('stop') || l.startsWith('disk remove')).join(',') + ' | closed=' + !dlg.open;
+};"
+ENGINE="$B5D2"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"stop --yes --skip 666\": {}, \"disk remove\": {},
+  \"disk --json\": {\"state\": \"running\", \"extra_gb\": 160},
+  \"library list --json\": {\"games\": [], \"bucket\": \"b\", \"total_bytes\": 0, \"selectable_gb\": 60, \"reserve_gb\": 20},
+  \"games --json --box\": {\"games\": [{\"appid\": \"666\", \"name\": \"Disk Game\", \"state\": \"installed\", \"bytes\": 1073741824, \"disk\": \"extra\"}], \"disk\": null},
+  \"status --json\": $(st "$BOXR" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "the games disk has its own section"          "$(row AFTER)" "head=New on this machine,Games disk · 160 GB"
+contains "  unticked by default while a game on it is kept" "$(row AFTER)" "s0=disk=- yes=Save and stop"
+contains "  ticked by hand: the button and line say so" "$(row AFTER)" "s1=disk=x yes=Save, stop and delete disk sum=Saves 1 new game (1.0 GB), deletes the games disk."
+contains "  and a kept game on it is saved first"      "$(row AFTER)" "Saved, then the disk is deleted."
+contains "  nothing on it kept: ticked and locked"     "$(row AFTER)" "s2=disk=xL yes=Stop and delete disk"
+contains "  and the game on it is gone with it"        "$(row AFTER)" "⚠ Not saved. Gone with the games disk."
+contains "  saying why it is locked"                   "$(row AFTER)" "Nothing on it is kept, so it is deleted. Tick a game on it to keep the disk."
+contains "  ticking a game on it again unlocks and unticks it" "$(row AFTER)" "s3=disk=- yes=Save and stop"
+contains "  the stop leaves the game out, then the disk is removed" "$(row AFTER)" "ran=stop --yes --skip 666,disk remove"
+contains "  and the window closes"                     "$(row AFTER)" "closed=true"
+ENGINE=""
+
+echo "7e5b. a stop that fails says what finished, what did not, and offers Try again"
+B5F="window.__broken = ['stop --yes'];
+window.__after = async () => {
+  for (let i = 0; i < 120 && !statusNow; i++) await new Promise(r => setTimeout(r, 20));
+  await new Promise(r => setTimeout(r, 300));
+  document.querySelector('.nav-item[data-view=build]').click();
+  await new Promise(r => setTimeout(r, 60));
+  document.getElementById('b-stopmachine').click();
+  const dlg = document.getElementById('keepdlg');
+  for (let i = 0; i < 100 && !dlg.querySelector('#keepdlg-games input'); i++) await new Promise(r => setTimeout(r, 30));
+  document.getElementById('keepdlg-yes').click();
+  for (let i = 0; i < 100 && document.getElementById('keepdlg-retry').hidden; i++) await new Promise(r => setTimeout(r, 30));
+  const steps = [...document.querySelectorAll('#keepdlg-steps [data-step]')].map(r => r.firstChild.textContent + r.dataset.step).join('/');
+  return 'open=' + dlg.open + ' | title=' + document.getElementById('keepdlg-title').textContent
+    + ' | retry=' + !document.getElementById('keepdlg-retry').hidden + ' close=' + !document.getElementById('keepdlg-close').hidden
+    + ' | steps=' + steps + ' | why=' + document.getElementById('keepdlg-steps').innerText.replace(/\\s+/g, ' ')
+    + ' | note=' + document.getElementById('keepdlg-run-note').textContent;
+};"
+ENGINE="$B5F"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"library list --json\": {\"games\": [], \"bucket\": \"b\", \"total_bytes\": 0, \"selectable_gb\": 60, \"reserve_gb\": 20},
+  \"games --json --box\": {\"games\": [{\"appid\": \"333\", \"name\": \"New Game\", \"state\": \"installed\", \"bytes\": 2147483648}], \"disk\": null},
+  \"disk --json\": {\"state\": \"running\", \"extra_gb\": 0},
+  \"status --json\": $(st "$BOXR" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "a failed stop keeps the window, says not done" "$(row AFTER)" "open=true | title=Stopping the machine - not done"
+contains "  with Try again and Close"           "$(row AFTER)" "retry=true close=true"
+contains "  what finished is ticked, the step that failed crossed" "$(row AFTER)" "✓Getting ready/✗Closing Steam"
+contains "  and the reason under it"             "$(row AFTER)" "could not reach AWS"
+contains "  and that it is still billing"        "$(row AFTER)" "note=The machine is still running and billing."
+ENGINE=""
+
+echo "7e6. a Stop machine that never finished is said on the card, with the way to finish it"
+B5U="try { localStorage.setItem('cg-flow-pending', JSON.stringify({kind: 'stop', id: 'i-1', skip: ['333'], at: 1})); } catch (e) {}
+window.__after = async () => {
+  for (let i = 0; i < 120 && !statusNow; i++) await new Promise(r => setTimeout(r, 20));
+  await new Promise(r => setTimeout(r, 300));
+  document.querySelector('.nav-item[data-view=build]').click();
+  await new Promise(r => setTimeout(r, 60));
+  const u = document.getElementById('b-unfinished');
+  return 'shown=' + !u.hidden + ' | text=' + u.innerText.replace(/\\s+/g, ' ').trim() + ' | kept=' + (localStorage.getItem('cg-flow-pending') !== null);
+};"
+ENGINE="$B5U"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st "$BOXR" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "running after a stop that was cut off: the card says so" "$(row AFTER)" "shown=true | text=Your last Stop machine did not finish, so the machine is still running and billing"
+contains "  with the way to finish it"            "$(row AFTER)" "Stop machine now"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st "$BOXS" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "stopped after all: nothing is said, and the note is gone" "$(row AFTER)" "shown=false | text="
+contains "  and forgotten"                        "$(row AFTER)" "kept=false"
 ENGINE=""
 
 echo "7f. play is a session, as steps; closing Moonlight just ends it"
@@ -373,11 +665,7 @@ B6="window.__after = async () => {
   const st = () => [...document.querySelectorAll('#b-steps [data-step]')].map(r => r.dataset.state).join(',');
   const card = () => (document.getElementById('b-plan').hidden ? '' : 'plan')
     + (document.getElementById('b-strip').hidden ? '' : 'run:' + document.getElementById('b-strip-title').textContent);
-  const play = async () => {
-    document.getElementById('b-open').click();
-    await wait();
-    return window.__lastId;
-  };
+  const play = () => window.__playThrough();
   let id = await play();
   const line = t => window.__emit(id, { t: 'line', text: t });
   const starting = card() + ' ' + st();
@@ -397,13 +685,15 @@ B6="window.__after = async () => {
   window.__emit(id, { t: 'exit', rc: 0 });
   await wait();
   const kept = card() + 'panel:' + document.querySelector('#b-machine-card [data-f=title]').textContent;
-  return 'starting=' + starting + ' | playing=' + playing + ' | kept=' + kept + ' | asked=' + document.getElementById('ask').open;
+  return 'starting=' + starting + ' | playing=' + playing + ' | kept=' + kept + ' | asked=' + document.getElementById('ask').open
+    + ' | sessionInLog=' + document.getElementById('b-log').textContent.includes('waiting for sunshine ok');
 };"
 ENGINE="$B6"
 BOX='{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle": "spot", "launched": "2026-01-01T00:00:00Z"}'
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": $(st "$BOX" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "play starts with the machine"     "$(row AFTER)" "starting=run:Starting session running,locked,locked,locked"
+contains "  the Machine page's log is the build's: a session's lines are not in it" "$(row AFTER)" "sessionInLog=false"
 contains "  then is playing"                "$(row AFTER)" "playing=run:Playing done,done,done,running"
 contains "  saying how to stop, and what stays" "$(row AFTER)" "Close Moonlight to end the session. The machine keeps running until auto-stop or Delete."
 contains "  and what it costs"              "$(row AFTER)" "so far"
@@ -518,9 +808,7 @@ B8="window.__after = async () => {
   const wait = () => new Promise(r => setTimeout(r, 30));
   const card = () => (document.getElementById('b-plan').hidden ? '' : 'plan')
     + (document.getElementById('b-strip').hidden ? '' : 'run:' + document.getElementById('b-strip-title').textContent);
-  document.getElementById('b-open').click();
-  await wait();
-  const id = window.__lastId;
+  const id = await window.__playThrough();
   for (const [t, sid] of [['connecting over Tailscale', 'open.tailscale'], ['starting the game stream', 'open.sunshine'], ['playing', 'open.play']]) window.__emit(id, { t: 'step', text: t, id: sid });
   for (const l of ['instance already running', 'waiting for sunshine ok', 'disk:']) window.__emit(id, { t: 'line', text: l });
   await wait();
@@ -562,9 +850,7 @@ B9="window.__after = async () => {
                                             launched: new Date().toISOString() };
   window.__emit(id, { t: 'exit', rc: 0 });
   await wait(); await wait();
-  document.getElementById('b-open').click();
-  await wait();
-  id = window.__lastId;
+  id = await window.__playThrough();
   window.__emit(id, { t: 'line', text: 'session-only line' });
   window.__emit(id, { t: 'exit', rc: 130 });
   await wait(); await wait();

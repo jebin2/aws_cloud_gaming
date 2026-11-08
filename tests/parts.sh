@@ -21,7 +21,7 @@ states='x => x.map(([n, s]) => n + ":" + s).join(",")'
 echo "1. a build with no word of which pieces are done: the latest to start is running"
 check "the last started runs, earlier ones are done" \
   "$(js "($states)(partStates(['base','disk','nvidia'], false)).split(',').slice(0,7).join(',')")" \
-  "Base system:done,Game disk:done,Auto-stop:waiting,Tailscale:waiting,Game library:waiting,Desktop:waiting,NVIDIA driver:running"
+  "Base system:done,Fast drive:done,Auto-stop:waiting,Tailscale:waiting,Game library:waiting,Desktop:waiting,NVIDIA driver:running"
 
 echo "2. a supervised build: started and not finished means running, however many"
 check "two together" \

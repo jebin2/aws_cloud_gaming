@@ -120,6 +120,24 @@ window.cg = {
     return () => {};
   },
 };
+// Play, all the way through its popup: pressed, the popup's reads answered (with
+// nothing saved, unless the case says otherwise), Play pressed in the popup, and
+// the session job's id once it is asked for. Play is one flow now, games or none.
+window.__playThrough = async () => {
+  const a = window.__answers;
+  a['library list --json'] = a['library list --json'] || { games: [], bucket: 'b', total_bytes: 0, selectable_gb: 60, reserve_gb: 20 };
+  a['games --json --box'] = a['games --json --box'] || { games: [], disk: null };
+  a['disk --json'] = a['disk --json'] || { state: 'running', extra_gb: 0 };
+  const before = window.__ran.filter(l => l.startsWith('open')).length;
+  document.getElementById('b-open').click();
+  const dlg = document.getElementById('playdlg'), yes = document.getElementById('playdlg-yes');
+  for (let i = 0; i < 100 && (!dlg.open || yes.disabled); i++) await new Promise(r => setTimeout(r, 20));
+  dlg.close('yes'); if (dlg.onclose) dlg.onclose();
+  for (let i = 0; i < 100 && window.__ran.filter(l => l.startsWith('open')).length <= before; i++) await new Promise(r => setTimeout(r, 20));
+  await new Promise(r => setTimeout(r, 30));
+  const j = [...jobs].filter(([, x]) => x.cmd[0] === 'open').pop();
+  return j ? j[0] : window.__lastId;
+};
 STUB
 
 probe() { # probe <json answers object literal>

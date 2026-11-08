@@ -61,8 +61,8 @@ cat > "$T/r/probe.js" <<'PROBE'
   const downloading = o => Object.assign({
     games: [
       { appid: '1', name: 'Red Dead Redemption 2', state: 'downloading', bytes: 76 * GB, percent: 38,
-        minutes_left: 125, total_bytes: 200 * GB, left_bytes: 124 * GB },
-      { appid: '2', name: 'Hades', state: 'installed', bytes: 14 * GB },
+        minutes_left: 125, total_bytes: 200 * GB, left_bytes: 124 * GB, disk: 'extra' },
+      { appid: '2', name: 'Hades', state: 'installed', bytes: 14 * GB, disk: 'root' },
       { appid: '1493710', name: 'Proton Experimental', state: 'downloading', bytes: GB, percent: 40, total_bytes: GB, left_bytes: 0 },
       { appid: '228980', name: 'Steamworks Common Redistributables', state: 'downloading', bytes: 0 },
     ],
@@ -153,11 +153,11 @@ contains "  and the card says it is reading" "$(row READING)" "Reading your game
 
 echo "2. a download in progress"
 contains "the game and its state"         "$(row ROWS)" "Red Dead Redemption 2 downloading"
-contains "  how far, how much, how fast, how long" "$(row ROWS)" "38% · 76 GB of 200 GB · 14 MB/s · about 2 h 5 min left"
+contains "  how far, how much, how fast, how long" "$(row ROWS)" "38% · 76 GB of 200 GB · 14 MB/s · about 2 h 5 min left · on the games disk"
 check    "  the bar is that full"          "$(row BAR)" "BAR | 38%"
 check    "Steam's own tools are not rows of their own" "$(grep -c 'Proton Experimental' <<<"$(row ROWS)")" "0"
 contains "  one quiet line says they are being fetched" "$(row TOOLS)" "Steam is also fetching its own tools"
-contains "the games that are done are listed too" "$(row ROWS)" "Hades installed 14 GB"
+contains "the games that are done are listed too" "$(row ROWS)" "Hades installed 14 GB · on the root disk"
 contains "the room is said"               "$(row SPACE)" "Space: 112 GB used · 48 GB free"
 contains "more than there is free says so" "$(row NEED)" "hidden=false | The downloads need 124 GB more and 48 GB is free."
 contains "it says when the answer was given" "$(row AGE)" "AGE | updated "

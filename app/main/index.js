@@ -92,6 +92,66 @@ const beside = raw => {
   return BESIDE_SESSION.some(p => p.every((w, i) => cmd[i] === w));
 };
 
+// Every run that changes something keeps its own log file, with the time of each
+// line: ~/.config/cg/logs/<time>-<command>.log (the app's data folder). The page
+// shows a run's log only until the next one starts, so when a step is slow or a
+// run is cancelled this is what says what happened and when. The last 40 stay.
+function runLog(args) {
+  const fs = require('node:fs');
+  let fd = null;
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const name = `${stamp}-${verb(args).slice(0, 2).join('-') || 'run'}.log`;
+    fd = fs.openSync(path.join(dir, name), 'a', 0o600);
+    fs.writeSync(fd, `cg ${args.join(' ')}\n`);
+    const old = fs.readdirSync(dir).filter(f => f.endsWith('.log')).sort();
+    for (const f of old.slice(0, Math.max(0, old.length - 40))) { try { fs.unlinkSync(path.join(dir, f)); } catch { /* in use */ } }
+  } catch { return null; }
+  return event => {
+    if (fd === null) return;
+    try {
+      const t = new Date().toTimeString().slice(0, 8) + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+      const words = [event.t, event.id, event.state, event.kind, event.text, event.rc != null ? `rc=${event.rc}` : '']
+        .filter(x => x !== undefined && x !== '').join(' ');
+      fs.writeSync(fd, `${t}  ${words}\n`);
+      if (event.t === 'exit') { fs.closeSync(fd); fd = null; }
+    } catch { fd = null; }
+  };
+}
+
+// The reads - status, the bill, the games on the machine - share one log per time
+// the app is opened: ~/.config/cg/logs/<time>-reads.log, each line marked with its
+// read. A screen that keeps loading is a read that has not answered, and this
+// says which one and since when.
+let readsFd;
+function readLog(id, args) {
+  const fs = require('node:fs');
+  if (readsFd === undefined) {
+    readsFd = null;
+    try {
+      const dir = path.join(app.getPath('userData'), 'logs');
+      fs.mkdirSync(dir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      readsFd = fs.openSync(path.join(dir, `${stamp}-reads.log`), 'a', 0o600);
+    } catch { readsFd = null; }
+  }
+  if (readsFd === null) return null;
+  const name = `#${id} ${verb(args).slice(0, 2).join(' ')}`;
+  const line = text => {
+    try {
+      const t = new Date().toTimeString().slice(0, 8) + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+      fs.writeSync(readsFd, `${t}  ${name}  ${text}\n`);
+    } catch { /* a log is never worth failing a read */ }
+  };
+  line(`start: cg ${args.join(' ')}`);
+  return event => {
+    if (event.t === 'exit') line(`exit rc=${event.rc}`);
+    else if (event.t === 'error' || (event.t === 'line' && event.kind === 'fail')) line(`${event.t}: ${event.text || ''}`);
+  };
+}
+
 function startJob(args, env = {}) {
   const readOnly = isReadOnly(args);
   const waitsFor = j => !(beside(args) && verb(j.args)[0] === 'open');
@@ -105,10 +165,12 @@ function startJob(args, env = {}) {
   const id = nextId++;
   const allowed = envAllowed();
   const safe = Object.fromEntries(Object.entries(env).filter(([k]) => allowed.has(k)));
+  const log = readOnly ? readLog(id, args) : runLog(args);
   const child = run({
     repo: REPO,
     args, env: safe,
     onEvent: event => {
+      if (log) log(event);
       send('cg:event', { id, event });
       if (event.t === 'exit') jobs.delete(id);
     },
@@ -128,6 +190,14 @@ ipcMain.handle('cg:answer', (_e, { id, text }) => {
 ipcMain.handle('cg:cancel', (_e, id) => {
   const job = jobs.get(id);
   return job ? interrupt(job.child) : false;
+});
+// The run logs' folder: opened in the file manager, and named back, so "where are
+// the logs" is a button and not a path to remember.
+ipcMain.handle('cg:open-logs', async () => {
+  const dir = path.join(app.getPath('userData'), 'logs');
+  try { require('node:fs').mkdirSync(dir, { recursive: true }); } catch { /* opened anyway */ }
+  await shell.openPath(dir);
+  return dir;
 });
 ipcMain.handle('cg:busy', () => [...jobs.values()].map(j => ({ id: j.id, args: j.args })));
 // The ids cg may ask under, as cg itself lists them. The window pre-answers a
@@ -225,8 +295,13 @@ app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) creat
 
 // Killing cg mid-run can cost games: a destroy is pushing to S3 as it goes.
 app.on('before-quit', e => {
-  const risky = [...jobs.values()].filter(j => !j.readOnly);
-  if (!risky.length) return;      // reading AWS can be abandoned safely
+  // A stop is saving the games before the machine goes: cg does not make it run
+  // alone, but quitting under it is as risky as quitting under a delete.
+  const risky = [...jobs.values()].filter(j => !j.readOnly || verb(j.args)[0] === 'stop');
+  // Reading AWS can be abandoned safely - but stopped, not left behind: a read
+  // left running (an ssh to the machine, say) outlived the window and was still
+  // going when the app was opened again.
+  if (!risky.length) { for (const j of jobs.values()) interrupt(j.child); jobs.clear(); return; }
   e.preventDefault();
   const choice = dialog.showMessageBoxSync(win, {
     type: 'warning',

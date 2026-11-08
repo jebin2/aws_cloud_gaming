@@ -353,7 +353,7 @@ cat > "$T/r/probe.js" <<'PROBE'
   out.push('BPICK | ' + card('what'));
   // A number column's heading sits over its numbers.
   out.push('HEADALIGN | ' + [...document.querySelectorAll('#s-chooser th')]
-    .filter(th => /Game disk|Spot availability/.test(th.textContent)).map(th => getComputedStyle(th).textAlign).join(','));
+    .filter(th => /Fast drive|Spot availability/.test(th.textContent)).map(th => getComputedStyle(th).textAlign).join(','));
   out.push('BWHERE | ' + card('where'));
   out.push('BNOTE | ' + card('warn'));
   // No answer yet is a skeleton; no answer because the check failed says so.
@@ -553,7 +553,7 @@ echo "8. the radios line up, and look like the rest of the window"
 contains "Settings is actually visible when measured" "$OUT" "VISIBLE | true"
 # Without the line above every rectangle is 0x0 at (0,0) and alignment passes
 # for free, so the measurement is checked for being a measurement at all.
-# Columns 6 and 7: Game disk sits before the score since machines differ in it.
+# Columns 6 and 7: Fast drive sits before the score since machines differ in it.
 for col in 6 7; do
   row=$(grep "^XCOL | $col | " <<<"$OUT")
   n=$(sed -E 's/.*n=([0-9]+).*/\1/' <<<"$row")

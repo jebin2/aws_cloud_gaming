@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('cg', {
   busy: () => ipcRenderer.invoke('cg:busy'),
   asks: () => ipcRenderer.invoke('cg:asks'),
   engine: () => ipcRenderer.invoke('cg:engine'),
+  // The folder of run logs, opened in the file manager; it answers where it is.
+  openLogs: () => ipcRenderer.invoke('cg:open-logs'),
   // The only web addresses this app may open. Tailscale's sign-in finishes in a
   // browser and there is no way around that; everything else stays denied.
   // The main process checks the URL again - a renderer is not trusted to.

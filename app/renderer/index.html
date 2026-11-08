@@ -245,52 +245,10 @@
     <div class="grid gap-space-md lg:grid-cols-2 items-start" id="b-plan">
 
       <div class="p-space-lg rounded-lg bg-surface-container-low">
-        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Games to install</span>
+        <span class="font-body-sm text-body-sm font-medium text-on-surface-variant">Games</span>
         <p class="font-code-sm text-code-sm text-outline mt-0.5" id="b-hint">
-          Downloaded from your saved games while the machine starts.
+          None are put on the machine when it is built. Each time you press Play you tick the games you want; they are copied from your saved games first, and a disk is added if they do not fit.
         </p>
-        <table class="w-full font-code-sm text-code-sm mt-space-sm">
-          <thead class="text-outline">
-            <tr class="text-left border-b border-surface-variant">
-              <th class="py-space-xs pr-space-sm font-normal w-6"></th>
-              <th class="py-space-xs pr-space-md font-normal">Game</th>
-              <th class="py-space-xs px-space-md font-normal text-right">Size</th>
-              <th class="py-space-xs pl-space-md font-normal text-right">Saved</th>
-            </tr>
-          </thead>
-          <tbody id="b-games"></tbody>
-        </table>
-        <div class="mt-space-md" id="b-alloc">
-          <div class="flex items-center justify-between font-code-sm text-code-sm">
-            <span id="b-fit" class="text-outline">Disk space</span>
-            <span id="b-fit-pct" class="text-on-surface-variant"></span>
-          </div>
-          <div class="h-1.5 rounded-full bg-surface-container mt-space-xs overflow-hidden">
-            <div class="h-full bg-primary" id="b-bar" style="width:0%"></div>
-          </div>
-          <!-- Whole GB, not tens: the machine's own drive (96 GB) is not on a grid of tens,
-               and a thumb that snaps off the number shown reads as a bug. The disk asked
-               for is rounded up to 10 GB when it is read. Always there: more room than the games need is allowed. It starts at what
-               the machine's own drive holds, grows by itself as games are ticked, and
-               can be pulled further by hand. -->
-          <div class="mt-space-md">
-            <div class="flex items-center justify-between font-code-sm text-code-sm">
-              <label class="text-outline" for="b-extra-pick">Room for games</label>
-              <span id="b-extra-val" class="text-on-surface"></span>
-            </div>
-            <input type="range" id="b-extra-pick" class="w-full accent-primary mt-space-xs cursor-pointer"
-                   min="0" max="980" step="1" value="0" disabled>
-            <div class="flex justify-between font-code-sm text-code-sm text-outline">
-              <span id="b-extra-lo"></span><span id="b-extra-hi"></span>
-            </div>
-          </div>
-          <!-- Under the slider, in a box that keeps its height whether or not there is
-               anything to say: above it, the line appearing and going moved the slider
-               out from under the pointer while it was being dragged. -->
-          <div class="mt-space-sm min-h-[3.5rem]">
-            <p id="b-extra" class="font-code-sm text-code-sm text-on-surface-variant" hidden></p>
-          </div>
-        </div>
       </div>
 
       <div class="p-space-lg rounded-lg bg-surface-container-low">
@@ -599,6 +557,7 @@
             <span class="material-symbols-outlined text-[16px]" data-icon="terminal">&#xeb8e;</span>Copy
           </button>
           <button class="btn" id="log-clear">Clear</button>
+          <button class="btn" id="log-files" title="Each run's log, with times, kept on this computer">Open log files</button>
         </div>
 
         <div class="font-code-sm text-code-sm flex-1 min-h-[200px] max-h-[62vh] overflow-auto rounded bg-surface-container-lowest p-space-md" id="log"></div>
@@ -671,7 +630,7 @@
       <ol class="mt-space-sm list-decimal pl-space-lg font-body-md text-body-md text-on-surface">
         <li>Open Steam &gt; Settings &gt; Storage</li>
         <li>Open the drive menu and press Add Drive</li>
-        <li>Pick the drive named <span class="font-code-sm text-code-sm" id="diskdlg-steam-path">cgextra</span> (the new disk)</li>
+        <li>Pick the drive at <span class="font-code-sm text-code-sm" id="diskdlg-steam-path">/scratch2</span> (named cgextra): the games disk</li>
         <li>Come back here and press Done</li>
       </ol>
       <p class="mt-space-sm font-code-sm text-code-sm text-on-surface-variant">Steam does not need to be restarted. Games you install after this can go on the new drive.</p>
@@ -687,17 +646,74 @@
 </dialog>
 
 <!-- A password, asked in passing: small, one field, and gone once answered. -->
-<!-- Playing a stopped machine whose games disk was removed: which games to bring
-     back onto a new one. -->
+<!-- Play: which saved games to put on the machine, and the disk they need. -->
 <dialog id="playdlg" class="dlg min-w-[460px] max-w-[560px]">
   <form method="dialog">
-    <p class="dlg-title">Which games do you want?</p>
+    <p class="dlg-title">Choose saved games to include</p>
     <p class="dlg-sub" id="playdlg-sub"></p>
     <div class="mt-space-md flex flex-col gap-space-xs max-h-[40vh] overflow-auto" id="playdlg-games"></div>
-    <p class="mt-space-md font-code-sm text-code-sm text-on-surface" id="playdlg-price"></p>
+    <p class="mt-space-md font-code-sm text-code-sm text-on-surface-variant" id="playdlg-total"></p>
+    <div class="mt-space-sm p-space-md rounded bg-surface-container" id="playdlg-disk" hidden>
+      <p class="font-body-md text-body-md text-on-surface" id="playdlg-disk-text"></p>
+      <div class="flex items-center gap-space-sm mt-space-xs">
+        <button type="button" class="btn" id="playdlg-minus" aria-label="Smaller disk">-</button>
+        <input type="number" id="playdlg-gb" min="0" max="1000" step="10" value="0"
+               class="w-24 bg-surface border border-surface-variant rounded px-space-sm py-0.5 font-code-sm text-code-sm text-on-surface">
+        <span class="font-code-sm text-code-sm text-on-surface">GB</span>
+        <button type="button" class="btn" id="playdlg-plus" aria-label="Bigger disk">+</button>
+      </div>
+      <p class="mt-space-xs font-code-sm text-code-sm text-on-surface-variant" id="playdlg-disk-note"></p>
+    </div>
+    <p class="mt-space-sm font-code-sm text-code-sm text-on-surface" id="playdlg-price"></p>
+    <p class="mt-space-xs font-code-sm text-code-sm text-error" id="playdlg-warn" hidden></p>
     <menu class="dlg-actions">
       <button value="no" class="btn" id="playdlg-no">Cancel</button>
-      <button value="yes" class="btn btn-primary" id="playdlg-yes">Start and play</button>
+      <button value="yes" class="btn btn-primary" id="playdlg-yes">Play</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- Stop machine and Delete machine: the games on the machine, each ticked to be
+     kept in Saved games or unticked to be left out (and deleted from Saved games
+     if it is there). -->
+<dialog id="keepdlg" class="dlg min-w-[460px] max-w-[580px]">
+  <form method="dialog" onsubmit="return false">
+    <p class="dlg-title" id="keepdlg-title">Stop the machine?</p>
+    <!-- Choosing: the games on the machine, grouped by what happens to them. -->
+    <div id="keepdlg-choose">
+      <p class="dlg-sub" id="keepdlg-sub"></p>
+      <div class="mt-space-md flex flex-col gap-space-md max-h-[46vh] overflow-auto" id="keepdlg-games"></div>
+      <p class="mt-space-md font-body-md text-body-md text-on-surface" id="keepdlg-summary"></p>
+      <p class="mt-space-xs font-code-sm text-code-sm text-on-surface-variant" id="keepdlg-after"></p>
+    </div>
+    <!-- Then the same window shows it happening: every step listed from the start. -->
+    <div id="keepdlg-run" hidden>
+      <div class="mt-space-md flex flex-col gap-space-sm" id="keepdlg-steps"></div>
+      <p class="mt-space-md font-code-sm text-code-sm text-on-surface-variant" id="keepdlg-run-note"></p>
+    </div>
+    <menu class="dlg-actions">
+      <button type="button" class="btn" id="keepdlg-no">Cancel</button>
+      <button type="button" class="btn" id="keepdlg-close" hidden>Close</button>
+      <button type="button" class="btn btn-primary" id="keepdlg-retry" hidden>Try again</button>
+      <button type="button" class="btn btn-primary" id="keepdlg-yes">Save and stop</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- Play, after the button: the machine getting ready and each game coming back.
+     It closes by itself when every game is there. -->
+<dialog id="restoredlg" class="dlg min-w-[460px] max-w-[560px]">
+  <form method="dialog" onsubmit="return false">
+    <p class="dlg-title" id="restoredlg-title">Getting your machine ready</p>
+    <p class="dlg-sub" id="restoredlg-sub"></p>
+    <div class="mt-space-md flex flex-col gap-space-xs font-body-md text-body-md" id="restoredlg-steps"></div>
+    <p class="mt-space-sm font-code-sm text-code-sm text-on-surface-variant break-words" id="restoredlg-now"></p>
+    <div class="mt-space-md flex flex-col gap-space-sm" id="restoredlg-games"></div>
+    <p class="mt-space-md font-code-sm text-code-sm text-on-surface-variant" id="restoredlg-bill"></p>
+    <menu class="dlg-actions">
+      <button type="button" class="btn" id="restoredlg-cancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="restoredlg-retry" hidden>Try again</button>
+      <button type="button" class="btn" id="restoredlg-close" hidden>Close</button>
     </menu>
   </form>
 </dialog>

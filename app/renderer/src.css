@@ -44,6 +44,10 @@ select option { background: theme(colors.surface-container-high); color: theme(c
            focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary
            disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-container-high;
   }
+  /* A button that cannot be pressed is not shown. On a machine's card the
+     action that is not possible right now (Play while it streams, a button
+     waiting for a run to end) is simply absent, never greyed. */
+  #d-hero button:disabled, #b-machine button:disabled, [data-host] button:disabled { display: none; }
   .btn-primary { @apply bg-primary text-on-primary font-semibold hover:bg-primary-fixed disabled:hover:bg-primary; }
   .btn-danger  { @apply bg-error-container text-on-error-container hover:bg-error-container hover:brightness-125; }
   /* A status word: a soft tinted capsule, no outline. */

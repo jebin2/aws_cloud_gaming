@@ -71,6 +71,7 @@ const CG_WORDS = {
   init:                      { name: 'the build' },
   destroy:                   { name: 'deleting the machine' },
   open:                      { name: 'the game session' },
+  stop:                      { name: 'stopping the machine' },
   'library push':            { name: 'saving your games' },
   'library pull':            { name: 'downloading your games' },
   'library forget':          { name: 'deleting a game' },
@@ -125,6 +126,8 @@ const busyWhy = () => {
 };
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
+// The AWS machine's game session (or its start), as [id, job] pairs.
+const openJobs = () => [...jobs].filter(([, j]) => j.cmd[0] === 'open');
 // A machine of yours waits while cg runs something alone - an AWS build, a
 // delete, a session: cg refuses its setup or stream at the start, and pressed
 // anyway, the step read as failed with "Waiting for the build to finish."
@@ -143,9 +146,9 @@ function lockHostButtons() {
 // nothing to do with AWS, so they are not reads to cancel or wait out. They
 // have their own Stop, on the machine's card.
 const hostRun = j => j.cmd[0] === 'host' && (j.cmd[1] === 'setup' || j.cmd[1] === 'open');
-// What the header's Stop leaves alone: a machine of yours (its card has Stop)
-// and a build (its card has Cancel).
-const headerSpares = j => hostRun(j) || j.cmd[0] === 'init';
+// What the header's Stop leaves alone: a machine of yours and an AWS session (the
+// card has Stop session) and a build (its card has Cancel).
+const headerSpares = j => hostRun(j) || j.cmd[0] === 'init' || j.cmd[0] === 'open';
 // Woken each time a job ends - see readsSettled.
 const jobEnded = [];
 // Until the reads in flight have landed. A step's own command runs alone (cg
@@ -201,8 +204,10 @@ function updateHeader() {
   $('refresh-cost').hidden = view !== 'cost' || !$('refresh-cost').textContent;
   if ($('refresh-age')) $('refresh-age').hidden = view !== 'cost' || !costNowAt;
   // These change something, so they wait for whatever else is running.
+  // Only a run that changes something takes them away. A read - the one Refresh
+  // or Play itself makes - used to, and the button vanished and came back.
   for (const b of ['b-build', 'b-open', 'b-destroy', 'd-open', 'd-destroy', 'd-build'])
-    $(b).disabled = jobs.size > 0;
+    $(b).disabled = writing();
   for (const b of ['b-open', 'd-open']) if (sessionNow) $(b).disabled = true;
 
   // A build starting or finishing is the dashboard's news too.
@@ -645,7 +650,8 @@ function machineFacts() {
            where: [region ? placeName(region) : null,
                    box || cfgVal('GAME_SPOT') === '1' ? (spot ? 'Spot' : 'On-demand')
                      : cfgVal('GAME_SPOT') === '0' ? 'On-demand' : 'Spot, else on-demand',
-                   priceText ? `${priceText}/hour` : null].filter(Boolean).join(' · ') };
+                   // A stopped machine is not charged by the hour; only its disk is.
+                   priceText ? `${priceText}/hour${box && box.state === 'stopped' ? ' when running' : ''}` : null].filter(Boolean).join(' · ') };
 }
 
 function renderMachineCard(card) {
@@ -677,9 +683,11 @@ function renderMachineCard(card) {
                                   : 'Auto-stops when idle.';
   } else if (box) {
     title = box.state === 'stopped' ? 'Machine stopped' : `Machine ${box.state}`;
-    sub = box.state === 'pending' ? 'Starting.' : box.state === 'stopping' || box.state === 'shutting-down'
-      ? 'Shutting down.'
-      : box.state === 'stopped' ? 'Your setup is kept; games come back from Saved games on start. Only the disk is billed.' : 'Not running.';
+    sub = box.state === 'pending' ? 'Starting.' : box.state === 'stopping'
+      ? 'Saving and shutting down. Billing by the hour ends once it has stopped; Refresh to see it.'
+      : box.state === 'shutting-down' ? 'Being deleted.'
+      : box.state === 'stopped' ? (keepDone && keepDone.id === box.id && keepDone.kind === 'stop' && keepDone.text
+          ? `Stopped: ${keepDone.text}. ` : '') + 'Your setup is kept; games come back from Saved games on start. Only the disk is billed.' : 'Not running.';
   } else {
     title = 'No machine running';
   }
@@ -778,13 +786,16 @@ function mountMachineCard(box, p) {
   btn('fix', 'btn btn-primary', null, null, 'Finish setting up').hidden = true;
   btn('build', 'btn btn-primary', 'rocket_launch', '\ueb9b', 'Build machine');
   btn('open', 'btn btn-primary', 'stadia_controller', '\uf135', 'Play').hidden = true;
+  // While a session runs these stand where Play was: ending it, or stopping the machine.
+  btn('stopsession', 'btn btn-primary', null, null, 'Stop session').hidden = true;
+  btn('stopmachine', 'btn', null, null, 'Stop machine').hidden = true;
   btn('watch', 'btn', null, null, 'Watch the build').hidden = true;
   if (!home) {
     btn('change', 'btn', null, null, 'Change machine').onclick = () => openMachines();
     const q = btn('quality', 'btn', null, null, 'Stream quality');
     q.onclick = () => goSetting(settingEl('GAME_RES'));
     btn('adddisk', 'btn', null, null, 'Add disk').onclick = () => openAddDisk();
-    const rm = btn('removedisk', 'btn', null, null, 'Remove game disk');
+    const rm = btn('removedisk', 'btn', null, null, 'Remove games disk');
     rm.hidden = true;
     rm.onclick = () => removeGameDisk();
   }
@@ -801,7 +812,49 @@ function mountMachineCard(box, p) {
     more.append($('b-aws-remove'));
     row.append(more);
   }
-  box.append(body, busy, row);
+  // A Stop machine or Delete machine that never finished - the app was closed,
+  // the laptop slept - left the machine running. Said here, with the way to finish.
+  const unf = el('div', 'mt-space-md p-space-md rounded bg-error-container text-on-error-container flex flex-col gap-space-sm');
+  unf.id = `${p}-unfinished`; unf.hidden = true;
+  const unfText = el('p', 'font-body-md text-body-md'); unfText.dataset.f = 'unfinished';
+  const unfGo = el('button', 'btn btn-danger self-start'); unfGo.id = `${p}-unfinished-go`;
+  unfGo.onclick = () => { const f = flowPending.get(); if (f) finishFlow(f); };
+  unf.append(unfText, unfGo);
+  box.append(body, unf, busy, row);
+}
+
+// A stop or delete begun on this laptop and not seen through: kept in this
+// window's storage from the click until the run ends (well or not), so only one
+// that was cut off - the app closed, the laptop slept - is still there next time.
+const FLOW_KEY = 'cg-flow-pending';
+const flowPending = {
+  get() { try { return JSON.parse(localStorage.getItem(FLOW_KEY) || 'null'); } catch { return null; } },
+  set(v) { try { localStorage.setItem(FLOW_KEY, JSON.stringify(v)); } catch { /* a convenience */ } },
+  clear() { try { localStorage.removeItem(FLOW_KEY); } catch { /* nothing to clear */ } },
+};
+function paintUnfinished(p, box) {
+  const card = $(`${p}-unfinished`);
+  if (!card) return;
+  const f = flowPending.get();
+  // Gone, or already stopped or going: whatever it was, it is not billing by the
+  // hour any more, and there is nothing left to finish.
+  if (f && (!box || box.id !== f.id || box.state !== 'running')) {
+    if (!box || box.id !== f.id || ['stopped', 'stopping', 'shutting-down', 'terminated'].includes(box.state)) flowPending.clear();
+    card.hidden = true;
+    return;
+  }
+  const show = !!f && !flowBusy && !jobsFor('stop') && !jobsFor('destroy');
+  card.hidden = !show;
+  if (!show) return;
+  const rate = statusNow ? machineFacts().priceText : null;
+  const what = f.kind === 'delete' ? 'Delete machine' : 'Stop machine';
+  card.querySelector('[data-f=unfinished]').textContent =
+    `Your last ${what} did not finish, so the machine is still running and billing${rate ? ` ${rate}/hour` : ''}.`;
+  $(`${p}-unfinished-go`).textContent = f.kind === 'delete' ? 'Delete machine now' : 'Stop machine now';
+}
+// Finishing it: the same list, with what was unticked last time unticked again.
+function finishFlow(f) {
+  return f.kind === 'delete' ? deleteMachine(f.skip || []) : stopMachine(f.skip || []);
 }
 
 function paintMachineCards() {
@@ -820,7 +873,7 @@ function paintMachineCards() {
       card.textContent = '';
       const t = el('p', 'font-headline-lg text-headline-lg', 'AWS needs you'); t.dataset.f = 'title';
       card.append(t, el('p', 'font-body-md text-body-md text-on-surface-variant mt-space-xs', stuck.problem.title));
-      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk', 'removedisk'] : [])]) $(`${p}-${b}`).hidden = true;
+      for (const b of ['build', 'open', 'stopsession', 'stopmachine', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk', 'removedisk'] : [])]) $(`${p}-${b}`).hidden = true;
       $(`${p}-busy`).hidden = true;
       continue;
     }
@@ -841,7 +894,7 @@ function paintMachineCards() {
                     ...(why ? [el('p', 'font-body-md text-body-md text-on-surface-variant mt-space-xs', why)]
                             : [el('span', 'skel mt-space-xs h-9 w-48'), el('span', 'skel mt-space-sm h-4 w-72')]));
       }
-      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk', 'removedisk'] : [])]) $(`${p}-${b}`).hidden = true;
+      for (const b of ['build', 'open', 'stopsession', 'stopmachine', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk', 'removedisk'] : [])]) $(`${p}-${b}`).hidden = true;
       $(`${p}-busy`).hidden = !!why;
       // Nothing to look into yet: a Details button over a skeleton opens a page
       // that has nothing to say either. Once there is a reason, it is the way in.
@@ -856,13 +909,24 @@ function paintMachineCards() {
     $(`${p}-build`).hidden = !!box || building || !!(s.error && s.error.credentials);
     // A stopped machine is started by Play too: cg open starts it first.
     const stopped = !!(box && box.state === 'stopped');
-    $(`${p}-open`).hidden = !(running || stopped) || building;
+    // Playing, or starting to: Play gives way to Stop session and Stop machine.
+    const sessionJob = openJobs().length > 0;
+    $(`${p}-open`).hidden = !(running || stopped) || building || !!sessionNow || sessionJob;
+    $(`${p}-stopsession`).hidden = !sessionJob;
+    const ss = $(`${p}-stopsession`).lastChild;
+    if (ss && ss.nodeType === 3) ss.textContent = sessionNow ? 'Stop session' : 'Cancel';
+    // A spot machine cannot be stopped, only deleted; nothing else may be mid-run.
+    $(`${p}-stopmachine`).hidden = !running || building || box.lifecycle === 'spot'
+      || [...jobs.values()].some(j => j.cmd[0] !== 'open' && j.write);
     $(`${p}-open`).dataset.stopped = stopped ? 'yes' : '';
     const ob = $(`${p}-open`).lastChild;
     if (ob && ob.nodeType === 3) ob.textContent = sessionNow ? 'Streaming' : stopped ? 'Start and play' : 'Play';
     $(`${p}-watch`).hidden = !building || p === 'b';
+    paintUnfinished(p, box);
     // Nothing to delete once AWS is already removing it.
-    $(`${p}-destroy`).hidden = !box || building || p === 'd' || ['shutting-down', 'terminated'].includes(box.state);
+    // Not while AWS is removing it, and not while it is stopping: the machine is
+    // saving the games on its way down, and a delete then would cut that short.
+    $(`${p}-destroy`).hidden = !box || building || p === 'd' || ['shutting-down', 'terminated', 'stopping'].includes(box.state);
     if (p === 'b') {
       $('b-change').hidden = !!box || building;
       // Always there while the machine is up: more room is wanted mid-game as
@@ -1474,6 +1538,8 @@ function paintBoxGames() {
   // They are not games: one quiet line says so, instead of a row each.
   const isTool = g => /^(Proton|Steam Linux Runtime|Steamworks Common Redistributables)/i.test(g.name || '');
   const games = all.filter(g => !isTool(g));
+  // Which disk a game is installed on, as the box reported it; an older box says nothing.
+  const diskWords = d => ({ nvme: 'on the fast drive', extra: 'on the games disk', root: 'on the root disk' })[d] || '';
   const toolsBusy = all.some(g => isTool(g) && g.state === 'downloading');
   if (!games.length) say(pcFailed ? note.textContent : toolsBusy ? '' : 'No games on your game PC yet.');
   for (const g of games) {
@@ -1491,11 +1557,13 @@ function paintBoxGames() {
       const speed = pcNow.inbound_bytes_per_sec > 1e6 ? `${(pcNow.inbound_bytes_per_sec / 1e6).toFixed(0)} MB/s` : '';
       const left = g.minutes_left ? `about ${minutesWords(g.minutes_left)} left` : '';
       row.append(track, el('span', 'font-body-sm text-body-sm text-on-surface-variant',
-        [`${Math.round(g.percent)}%`, done, speed, left].filter(Boolean).join(' · ')));
+        [`${Math.round(g.percent)}%`, done, speed, left, diskWords(g.disk)].filter(Boolean).join(' · ')));
     } else if (g.incomplete) {
       row.append(el('span', 'font-body-sm text-body-sm text-tertiary', g.note));
     } else if (g.bytes) {
-      row.append(el('span', 'font-body-sm text-body-sm text-outline', gbWords(g.bytes)));
+      const sz = el('span', 'font-body-sm text-body-sm text-outline', [gbWords(g.bytes), diskWords(g.disk)].filter(Boolean).join(' · '));
+      sz.dataset.f = 'size';
+      row.append(sz);
     }
     rows.append(row);
   }
@@ -1762,17 +1830,23 @@ function libraryLeft(err) {
   if (/saved, but/.test(err)) return 'The setting was saved, but auto-stop still counts the old days.';
   return 'Nothing was changed.';
 }
-async function libraryRun(args, doing, askId, word, left = libraryLeft) {
+// opts.append: one of several commands in ONE popup (Stop machine, Delete
+// machine): the title stays, the steps so far stay, and this command's steps are
+// added below them - rather than each command wiping the popup and retitling it.
+async function libraryRun(args, doing, askId, word, left = libraryLeft, opts = {}) {
   typedPending = askId ? { askId, word } : null;
   const dlg = $('refdlg');
-  $('refdlg-title').textContent = doing;
+  const append = !!opts.append && dlg.open;
+  if (!append) $('refdlg-title').textContent = doing;
   $('refdlg-sub').textContent = '';
   $('refdlg-menu').hidden = true;
   // Under the title, what cg is doing - its own steps as they arrive, each
   // ticked when the next begins. It used to repeat the title, word for word.
   const list = $('refdlg-list');
-  list.textContent = '';
-  let current = null;
+  // Appending: the step in progress (still spinning) is the one this command
+  // carries on from, and is ticked when its first step arrives.
+  let current = append ? [...list.children].filter(r => r.dataset && r.dataset.step).pop() || null : null;
+  if (!append) list.textContent = '';
   const step = text => {
     if (current) current.firstChild.replaceWith(Object.assign(document.createElement('span'),
       { className: 'w-4 text-center font-code-md text-code-md text-primary', textContent: '✓' }));
@@ -1783,11 +1857,13 @@ async function libraryRun(args, doing, askId, word, left = libraryLeft) {
                    Object.assign(document.createElement('div'), { textContent: text }));
     list.append(current);
   };
-  step('Working…');
-  let first = true;
+  if (!append) step('Working…');
+  $('refdlg-save')?.remove();
+  let first = !append;
   const onStep = text => {
     const plain = text.replace(/\b(?:af|ap|ca|eu|il|me|mx|sa|us)-[a-z]+-\d\b/g, code => placeName(code));
     const said = plain.charAt(0).toUpperCase() + plain.slice(1);
+    $('refdlg-save')?.remove();   // a new step: the save's bar belonged to the one before
     // The placeholder gives way to cg's first real step rather than being ticked.
     if (first) { first = false; list.textContent = ''; current = null; }
     step(said);
@@ -1798,9 +1874,14 @@ async function libraryRun(args, doing, askId, word, left = libraryLeft) {
   if (rc === 0) return true;
   const why = (err || '').trim().split('\n').filter(Boolean).slice(-2).join(' ')
     || `cg ${args.join(' ')} stopped (exit ${rc})`;
-  $('refdlg-title').textContent = `${doing} - not done`;
+  $('refdlg-title').textContent = `${append ? $('refdlg-title').textContent : doing} - not done`;
   $('refdlg-sub').textContent = left(err || '');
-  list.textContent = '';
+  // Appending, the steps that did finish stay on screen; the one that failed is crossed.
+  if (append) {
+    $('refdlg-save')?.remove();
+    if (current && current.firstChild && current.firstChild.classList.contains('spinner'))
+      current.firstChild.replaceWith(Object.assign(document.createElement('span'), { className: 'w-4 text-center text-error', textContent: '✗' }));
+  } else list.textContent = '';
   const bad = document.createElement('div');
   bad.className = 'flex items-start gap-space-sm font-body-md text-body-md';
   bad.dataset.state = 'failed';
@@ -3394,8 +3475,6 @@ let statusAt = null;   // when it was
 // free, but it takes a few seconds and means nothing with no machine.
 let pingNow = null, pingAt = 0, pingBusy = false;
 const activity = [];  // what cg has done in this window, newest first
-const picked = new Set();
-
 function daysAgo(iso) {
   if (!iso) return 'never';
   const days = Math.floor((Date.now() - new Date(iso)) / 86400000);
@@ -3403,50 +3482,10 @@ function daysAgo(iso) {
   return days === 0 ? 'today' : days === 1 ? 'yesterday' : `${days}d ago`;
 }
 
+// The saved games, kept for the Play popup. The Build page no longer lists them:
+// nothing is put on a machine when it is built.
 function paintPicker(d) {
   archive = d;
-  const failed = !!d.error;
-  const body = $('b-games');
-  body.textContent = '';
-  if (!(d.games || []).length) {
-    const tr = document.createElement('tr');
-    const td = document.createElement('td');
-    td.colSpan = 4;
-    td.className = 'py-space-md ' + (failed ? 'text-error' : 'text-outline');
-    td.textContent = failed
-      ? `Could not read saved games: ${d.error}`
-      : 'No saved games. The machine starts empty.';
-    tr.append(td); body.append(tr);
-  }
-  for (const g of d.games || []) {
-    const tr = document.createElement('tr');
-    tr.className = 'border-b border-surface-variant/40 hover:bg-surface-container cursor-pointer';
-    const cell = (cls) => { const td = document.createElement('td'); td.className = cls; tr.append(td); return td; };
-
-    const box = document.createElement('input');
-    box.type = 'checkbox'; box.className = 'accent-primary align-middle'; box.dataset.appid = g.appid;
-    // A game too big even for the disk cg adds can never be restored, whatever
-    // else is unticked: it is not offered, and says why. Bigger than the machine's
-    // own drive is no longer that - cg adds a disk for it.
-    const tooBig = extraDiskGb(g.bytes / 1073741824, d.reserve_gb ?? 20, d.selectable_gb == null ? null : d.selectable_gb + (d.reserve_gb ?? 20)) > MAX_EXTRA_DISK_GB;
-    if (tooBig) { picked.delete(g.appid); box.dataset.toobig = 'yes'; }
-    box.checked = picked.has(g.appid);
-    box.onchange = () => { box.checked ? picked.add(g.appid) : picked.delete(g.appid); paintFit(); };
-    cell('py-space-sm pr-space-sm').append(box);
-
-    const nameCell = cell('py-space-sm pr-space-md text-on-surface');
-    nameCell.textContent = g.name || g.installdir || g.appid;
-    if (tooBig) {
-      nameCell.append(el('span', 'block font-code-sm text-code-sm text-error',
-        `More than a game PC here can hold (${MAX_EXTRA_DISK_GB} GB).`));
-      tr.className = tr.className.replace('cursor-pointer', 'opacity-60');
-    }
-    cell('py-space-sm px-space-md text-right text-on-surface-variant').textContent = GB(g.bytes);
-    cell('py-space-sm pl-space-md text-right text-outline').textContent = savedOn(g.pushed);
-
-    tr.onclick = e => { if (!box.disabled && e.target !== box) { box.checked = !box.checked; box.onchange(); } };
-    body.append(tr);
-  }
   paintFit();
 }
 
@@ -3478,91 +3517,10 @@ function placeGames(games, driveGb) {
   }
   return { onDrive, onExtra };
 }
-function selectedGames() {
-  return (archive.games || []).filter(g => picked.has(g.appid)).map(g => ({ id: String(g.appid), gb: g.bytes / 1073741824 }));
-}
-
-function selectedGb() {
-  return (archive.games || []).filter(g => picked.has(g.appid))
-    .reduce((n, g) => n + g.bytes, 0) / 1073741824;
-}
-
-// The size of disk a person asked for on the Build page; 0 is "only if the games
-// need one". The disk made is the larger of this and what the games need.
-let extraPick = 0;
-// What the last paintFit worked out, for the confirmation before a build to say:
-// the size of the added disk (0: none), how many games go on it, what it adds to
-// the hour, and what the machine costs without it.
-let fitPlan = { extra: 0, onExtra: 0, add: null, base: null };
+// Nothing but the button is left to settle on the Build page: a build is refused
+// while another job runs.
 function paintFit() {
-  // The disk a box offers is cg's arithmetic, read with the archive. Until it
-  // has been read the meter says so, and nothing is refused on a guess: the box
-  // enforces the real limit at boot, which is where it must be enforced.
-  const gb = selectedGb(), cap = archive.selectable_gb;
-  const reserve = archive.reserve_gb ?? 20;
-  // The machine's own drive first; what does not fit it needs the added disk.
-  const { onDrive, onExtra } = placeGames(selectedGames(), cap);
-  const onDriveGb = onDrive.reduce((n, g) => n + g.gb, 0), overGb = onExtra.reduce((n, g) => n + g.gb, 0);
-  const auto = onExtra.length ? Math.ceil((overGb + reserve) / EXTRA_DISK_STEP_GB) * EXTRA_DISK_STEP_GB : 0;
-  const extra = Math.max(auto, extraPick);
-  const over = extra > MAX_EXTRA_DISK_GB;
-  // Whose disk: the machine the next build makes, as cg read it.
-  $('b-fit').textContent = archive.disk_type ? `Disk space (${archive.disk_type})` : 'Disk space';
-  $('b-fit').className = 'font-code-sm text-code-sm text-outline';
-  // All the room there is: the drive's, and the added disk's past what is kept free.
-  const room = cap == null ? null : cap + (extra ? extra - reserve : 0);
-  const pct = room != null && room > 0 ? Math.min(100, (gb / room) * 100) : 0;
-  $('b-fit-pct').textContent = over ? `${gb.toFixed(1)} GB is more than a game PC here can hold. Deselect a game.`
-    : extra && onExtra.length ? `${gb.toFixed(1)} GB · ${onDriveGb.toFixed(1)} GB on the drive, ${overGb.toFixed(1)} GB on a ${extra} GB disk`
-    : extra ? `${gb.toFixed(1)} GB · a ${extra} GB disk will be added`
-    : cap != null ? `${gb.toFixed(1)} of ${cap} GB`
-    : picked.size ? `${gb.toFixed(1)} GB · capacity unknown` : '';
-  $('b-fit-pct').className = 'font-code-sm text-code-sm ' + (over ? 'text-error' : 'text-on-surface-variant');
-  $('b-bar').style.width = pct + '%';
-  $('b-bar').className = 'h-full ' + (over ? 'bg-error' : 'bg-primary');
-  // The slider is the room for games, in GB: the machine's own drive plus the added
-  // disk. It starts at the drive's size, can never be dragged under what the ticked
-  // games need (that end follows them as they are ticked), and the disk past the
-  // drive is what is added. Nothing is offered until the drive is known.
-  const slider = $('b-extra-pick');
-  const top = cap == null ? 0 : cap + MAX_EXTRA_DISK_GB - reserve;
-  slider.disabled = cap == null;
-  if (cap != null) {
-    const floor = Math.min(cap + (auto ? auto - reserve : 0), top);
-    const at = Math.min(cap + (extra ? extra - reserve : 0), top);
-    slider.min = String(floor);
-    slider.max = String(top);
-    slider.value = String(at);
-    $('b-extra-lo').textContent = `${floor} GB${auto ? ' (what your games need)' : ' (the machine\'s own drive)'}`;
-    $('b-extra-hi').textContent = `${top} GB`;
-    $('b-extra-val').textContent = `${at} GB`;
-  } else {
-    $('b-extra-lo').textContent = $('b-extra-hi').textContent = $('b-extra-val').textContent = '';
-  }
-  // What the extra disk adds to the hour, and what the hour comes to: said before
-  // the build, because it is money.
-  const note = $('b-extra');
-  const per = diskInrPerGbHour();
-  const add = extra && per != null ? extra * per : null;
-  const base = statusNow ? machineFacts().price : null;
-  note.textContent = !extra || over ? '' : [
-    extra > auto ? `You chose ${extra} GB of extra space for your games.`
-      : `Games that do not fit the machine's own drive go on a ${extra} GB extra disk.`,
-    add != null && base != null ? `It adds ${rsh(add)} an hour, so this machine costs about ${rsh(base + add)} an hour while it runs.`
-      : add != null ? `It adds ${rsh(add)} an hour.` : '',
-  ].filter(Boolean).join(' ');
-  note.hidden = !note.textContent;
-  fitPlan = { extra: over ? 0 : extra, onExtra: onExtra.length, add, base };
-  // A box is already running: there is nothing to build, and cg would refuse.
-  // The screen says so and offers what you can actually do with it.
-  const up = !!boxNow;
-  $('b-build').disabled = over || jobs.size > 0;
-  for (const box of $('b-games').querySelectorAll('input[type=checkbox]')) box.disabled = up || box.dataset.toobig === 'yes';
-  // Nothing here applies while a box is up: what it holds was chosen at build.
-  $('b-alloc').hidden = up;
-  $('b-hint').textContent = up
-    ? 'A machine is running. Games were selected at build time.'
-    : 'Restored from saved games during startup.';
+  $('b-build').disabled = jobs.size > 0;
 }
 
 // The machine strip: the type you asked for, and what AWS says that type is.
@@ -3790,7 +3748,7 @@ function paintChooser() {
       // a radio at the cell's left edge, so a right-aligned header sat over
       // nothing. capacity is the only genuinely right-aligned column.
       for (const [label, cls] of [['Region', ''], ['Latency', ''], ['Machine', ''], ['GPU', ''],
-                                  ['Game disk', 'num'], ['Spot availability', 'num'],
+                                  ['Fast drive', 'num'], ['Spot availability', 'num'],
                                   ['Spot/hour', ''], ['On-demand/hour', '']]) {
         const th = document.createElement('th');
         th.textContent = label; th.className = cls;
@@ -4047,6 +4005,7 @@ const BUILD_STEPS = [
 const OPEN_STEPS = [
   { doing: 'Starting the machine', done: 'Machine started', id: 'open.start' },
   { doing: 'Connecting over Tailscale', done: 'Connected over Tailscale', id: 'open.tailscale' },
+  { doing: 'Bringing your games back', done: 'Games are back', id: 'open.restore' },
   { doing: 'Starting the game stream', done: 'Game stream ready', id: 'open.sunshine' },
   { doing: 'Playing', done: 'Played', id: 'open.play', stream: true,
     note: 'Close Moonlight to end the session. The machine keeps running until auto-stop or Delete.' },
@@ -4058,14 +4017,14 @@ const HOST_OPEN_STEPS = [
   { doing: 'Playing', done: 'Played', id: 'host.play', stream: true,
     note: 'Close Moonlight to end the session.' },
 ];
-const openSteps = r => (r && r.host ? HOST_OPEN_STEPS : OPEN_STEPS);
+const openSteps = r => (r && r.host ? HOST_OPEN_STEPS : OPEN_STEPS.filter(d => d.id !== 'open.restore' || (r && r.restore)));
 // What the machine installs, in the order it does it, each matched to the
 // progress line the box prints when it starts that piece (lib/bootstrap.d).
 // Shown as chips inside "Installing the software", ticked as the box moves on:
 // the step installs far more than a driver, and said so in three words.
 const BUILD_PARTS = [
   ['Base system', 'base'],
-  ['Game disk', 'disk'],
+  ['Fast drive', 'disk'],
   ['Auto-stop', 'idle-watchdog'],
   ['Tailscale', 'tailscale'],
   ['Game library', 'library'],
@@ -4107,7 +4066,7 @@ let lastBuild = null, lastBuildLog = '';   // whether "How it was built" is unfo
 const runRow = text => ({ name: text, start: Date.now(), end: null, lines: [], failed: false });
 function runBegin(kind, opts = {}) {
   run = { kind, start: Date.now(), billFrom: null, state: 'running', idx: -1, steps: [],
-          games: opts.games || 0, gamesGb: opts.gamesGb || 0, apps: opts.apps || 'none', parts: [], wait: null,
+          games: opts.games || 0, gamesGb: opts.gamesGb || 0, apps: opts.apps || 'none', parts: [], wait: null, restore: !!opts.restore,
           rate: kind === 'init' ? buildRate() : null };
   if (kind === 'init') run.steps = BUILD_STEPS.map(() => null);
   if (kind === 'open') {
@@ -4579,8 +4538,10 @@ function paintRun() {
 
 // The live line and step heading for runs, now that the strip has no line of
 // its own: kept as functions because the event handler calls them.
+const buildLogged = () => !!(run && run.kind === 'init');
 function buildStep(text, id) {
   const log = $('b-log');
+  if (!buildLogged()) { $('b-prog-step').textContent = text; runStep(text, id); paintRun(); return; }
   if (log.dataset.fresh !== 'no') { log.textContent = ''; log.dataset.fresh = 'no'; buildStarted = Date.now(); }
   buildSteps += 1;
   const head = document.createElement('div');
@@ -4600,6 +4561,7 @@ function buildStep(text, id) {
 
 // cg times every step; the transcript keeps how long each took.
 function buildStepEnd(event) {
+  if (!buildLogged()) return;
   const heads = $('b-log').querySelectorAll('.step');
   const last = heads[heads.length - 1];
   if (!last) return;
@@ -4799,6 +4761,12 @@ function buildFailClear() {
 
 function buildLine(event) {
   const log = $('b-log');
+  if (!buildLogged()) {
+    if (event.text && event.kind !== 'fail') $('b-prog-step').textContent = event.text;
+    runLine(event.text);
+    paintRun();
+    return;
+  }
   const row = document.createElement('div');
   row.className = event.kind === 'fail' ? 'text-error'
                 : event.kind === 'ok' ? 'text-primary' : 'text-on-surface-variant';
@@ -4817,6 +4785,9 @@ window.cg.onEvent(({ id, event }) => {
   const job = jobs.get(id);
   if (!job) return;
   logLine(event);
+  if (job.cmd[0] === 'open') restoreOnEvent(event);
+  if (event.t === 'save') saveOnEvent(event);
+  if ((event.t === 'wait' || event.t === 'line') && keepUi.mode === 'run' && $('keepdlg').open) keepLive(event);
   // The Build card's run: a build, a delete, a session. A change to the saved
   // games is reported by its own popup, on its own page.
   // A session on a machine of yours is not a write - it runs beside reads -
@@ -5164,7 +5135,7 @@ function hostCard(h, full) {
   }
   if (setting || playing) {
     // Ends it here; a setup stopped part-way carries on from there next time.
-    btn('Stop', 'btn', () => {
+    btn(playing ? 'Stop session' : 'Stop setup', playing ? 'btn btn-primary btn-lg' : 'btn', () => {
       const j = [...jobs].find(([, x]) => hostRun(x) && x.cmd[2] === h.name);
       if (j) window.cg.cancel(j[0]);
     }, 'stop');
@@ -5225,7 +5196,9 @@ function paintAwsChecks() {
     tskeyNow ? [tskeyNow.valid === true, 'Tailscale access token',
                 tskeyNow.valid ? 'working' : tskeyNow.valid === false ? 'refused'
                   : tskeyNow.present ? 'Tailscale did not respond' : 'not saved'] : null,
-    m ? [!!tn.online, 'Tailscale', tn.online ? (tn.node || 'connected') : 'not connected'] : null,
+    // A machine that is not running is not on the tailnet, and that is not a fault.
+    m ? (m.state !== 'running' && !tn.online ? [null, 'Tailscale', 'connects when the machine starts']
+         : [!!tn.online, 'Tailscale', tn.online ? (tn.node || 'connected') : 'not connected']) : null,
     m ? [m.ready !== false, 'Set up', m.ready === false ? 'still building' : 'finished'] : null,
     m && g2 ? [g2.armed !== false, 'Auto-stop on the machine',
                g2.armed === false ? 'off' : g2.idle_min != null ? `after ${g2.idle_min} min idle` : 'on'] : null,
@@ -5284,10 +5257,10 @@ function hostDetail(h, failed) {
   }
   if (setting || playing) {
     // Ends it here; a setup stopped part-way carries on from there next time.
-    btn('Stop', 'btn', () => {
+    btn(playing ? 'Stop session' : 'Stop setup', playing ? 'btn btn-primary btn-lg w-full' : 'btn', () => {
       const j = [...jobs].find(([, x]) => hostRun(x) && x.cmd[2] === h.name);
       if (j) window.cg.cancel(j[0]);
-    }, 'stop', more);
+    }, 'stop', playing ? acts : more);
   }
   const q = btn('Stream quality', 'btn', () => goSetting(settingEl('GAME_RES')), 'quality', more);
   q.disabled = !settingEl('GAME_RES');
@@ -5592,11 +5565,11 @@ function closeAdd() {
   paintHome();
 }
 $('adddlg-close').onclick = e => { e.preventDefault(); closeAdd(); };
-// Esc closes neither the add dialog nor the run dialog: each is a flow under
+// Esc closes none of the add, run, Play-games or copy-progress dialogs: each is a flow under
 // way, and leaving one is its own button - Close, Cancel, Later, Done. Stopped
 // at the key, because a cancel event the dialog has already been sent is not
 // reliably stoppable.
-for (const id of ['adddlg', 'rundlg']) {
+for (const id of ['adddlg', 'rundlg', 'playdlg', 'restoredlg', 'keepdlg']) {
   $(id).addEventListener('keydown', e => { if (e.key === 'Escape') e.preventDefault(); });
   $(id).addEventListener('cancel', e => e.preventDefault());
 }
@@ -5890,7 +5863,7 @@ const SHOWN_AFTER = new Set(['init', 'destroy', 'open', 'library']);
 function afterWrite(job, rc) {
   // A cancelled build goes straight on to its delete; the read waits for that.
   // A refused change to the saved games keeps its own popup, saying why.
-  if (!SHOWN_AFTER.has(job.cmd[0]) || (run && run.cancelling)
+  if (!SHOWN_AFTER.has(job.cmd[0]) || (run && run.cancelling) || flowBusy
       || (job.cmd[0] === 'library' && rc !== 0)) return refreshAll();
   // A change to the saved games touches the saved games, and nothing else -
   // not the tools on this laptop, the keys or the locations, which it used to
@@ -7119,6 +7092,10 @@ restoreBill();                   // the last bill on this laptop, until a new ch
 for (const b of document.querySelectorAll('[data-filter]')) {
   b.onclick = () => applyLogFilter(b.dataset.filter);
 }
+$('log-files').onclick = async () => {
+  try { const dir = await window.cg.openLogs(); $('log-count').textContent = dir; }
+  catch { $('log-count').textContent = 'Could not open the log folder'; }
+};
 $('log-clear').onclick = () => {
   $('log').textContent = '';
   logCount = 0;
@@ -7207,7 +7184,7 @@ async function chooseMachine(row, spot) {
   // one catch. A move always says what it leaves behind: saved games belong to
   // a location, and a machine elsewhere cannot reach them.
   const body = [
-    [row.type, row.gpu && gpuName(row.gpu, row.vram), row.store != null && `${row.store} GB game disk`].filter(Boolean).join(' · '),
+    [row.type, row.gpu && gpuName(row.gpu, row.vram), row.store != null && `${row.store} GB fast drive`].filter(Boolean).join(' · '),
     `${spot ? 'Spot' : 'On-demand'}${price != null
       ? ` · ${hourText(perHour(price), spot && row.spotMax != null ? perHour(row.spotMax) : null)} an hour while it runs` : ''}`,
     spot ? 'Cheaper; can be reclaimed mid-session.' : 'Not reclaimed.',
@@ -7291,19 +7268,6 @@ $('b-login-choice').onchange = async ev => {
   ev.target.disabled = false;
 };
 
-// The disk asked for on the Build page: said in the line under the games.
-// A position on the slider is the room for games, the machine's own drive included;
-// the disk asked for is what is past the drive, plus the part Steam and the system
-// keep. At or under the drive's size, or under what the games need, it is no choice
-// at all: the disk follows the games.
-$('b-extra-pick').oninput = ev => {
-  const cap = archive.selectable_gb, reserve = archive.reserve_gb ?? 20;
-  const room = Number(ev.target.value) || 0;
-  extraPick = cap == null || room <= cap ? 0
-    : Math.min(MAX_EXTRA_DISK_GB, Math.ceil((room - cap + reserve) / EXTRA_DISK_STEP_GB) * EXTRA_DISK_STEP_GB);
-  paintFit();
-};
-
 // Add disk, on the running machine. cg says what it will do (second) and how
 // much room there is to add (max_add_gb); this only asks how much, says the
 // price, and runs it.
@@ -7382,7 +7346,7 @@ async function openAddDisk() {
     $('diskdlg-price').textContent = picked >= 1 && per != null
       ? `+${rsh(picked * per)} an hour while the machine exists` : 'Billed by the hour while the machine exists.';
     $('diskdlg-warn').textContent = [
-      st.second ? 'A second disk is added beside the one you have. Your games stay where they are and nothing closes. When it is added, you add it in Steam\'s storage settings: the next window shows how.'
+      st.second ? 'A games disk is added beside the machine\'s fast drive. Your games stay where they are and nothing closes. When it is added, you add it in Steam\'s storage settings: the next window shows how.'
                 : 'Takes about a minute. Your game keeps running. If Steam does not show the new space, close it and open it again.',
       st.second ? '' : 'AWS lets a disk be made bigger once every 6 hours.',
       'The disk is deleted with the machine.',
@@ -7446,9 +7410,14 @@ function startRun(args, opts = {}) {
   // A session on a machine of yours runs on that machine's page.
   if (opts.host) goHost(opts.host);
   else if (!opts.stay) goAws();
-  $('b-log').dataset.fresh = 'yes';
-  $('b-log').textContent = '';
-  $('b-log-title').textContent = `${CgName(args)} · log`;
+  // The log at the foot of the Machine page is the build's, and only the build's:
+  // a session, a delete and everything else have their own window, and the
+  // Activity page keeps all of it.
+  if (args[0] === 'init') {
+    $('b-log').dataset.fresh = 'yes';
+    $('b-log').textContent = '';
+    $('b-log-title').textContent = 'Build log';
+  }
   buildSteps = 0;
   buildStarted = Date.now();
   $('b-prog').className = 'h-full bg-primary rounded-full';
@@ -7491,7 +7460,7 @@ function resumeBuild(s) {
 // A build, with the games ticked now. Try again uses the ones the failed build
 // had, so a retry builds the same machine.
 function buildWith(apps, games, gamesGb) {
-  return startRun(['init'], { env: { GAME_APPS: apps, GAME_EXTRA_DISK_GB: String(extraPick) }, apps, games, gamesGb });
+  return startRun(['init'], { env: { GAME_APPS: apps, GAME_EXTRA_DISK_GB: '0' }, apps, games, gamesGb });
 }
 function retryBuild() {
   const r = run || {};
@@ -7515,64 +7484,751 @@ async function removeGameDisk() {
     $('refdlg').close();
     diskRemoved.set(id, true);
     stoppedDiskFor = '';
+    boxGames.dropDisk(id);
     note('Games disk removed', 'text-primary');
     await readStoppedDisk(statusNow);
   }
 }
-// Which games to bring back onto the new disk. Resolves to {apps, gb}, or null on Cancel.
-function askPlayGames() {
-  const games = ((libNow && !libNow.error && libNow.games) || []).slice().sort((a, b) => b.bytes - a.bytes);
-  if (!games.length) return Promise.resolve({ apps: [], gb: 0 });
+// ── Play: which saved games go on the machine ───────────────────────────────
+//
+// Nothing is put on a machine when it is built. Pressing Play lists the saved
+// games, you tick the ones you want, and they are copied before the stream opens.
+// What does not fit the machine's own fast drive goes on an added disk, made for
+// the purpose and sized here (and changeable) before anything is spent.
+const PLAY_PICKS_KEY = 'cg-play-picks';
+const playPicks = {
+  get() { try { return JSON.parse(localStorage.getItem(PLAY_PICKS_KEY) || 'null'); } catch { return null; } },
+  set(ids) { try { localStorage.setItem(PLAY_PICKS_KEY, JSON.stringify(ids)); } catch { /* a convenience */ } },
+};
+const GIB = 1073741824;
+const HEADROOM_MIN_GB = 30, HEADROOM_SHARE = 0.2;
+// Room kept free for what is downloaded later: a fifth of the games, at least 30 GB.
+const headroomGb = gamesGb => Math.max(HEADROOM_MIN_GB, Math.ceil(gamesGb * HEADROOM_SHARE));
+// Where the ticked games go and what disk that takes. driveFree is the fast
+// drive's free GB (null when not known); extraHave the added disk already there.
+function planPlay(chosen, driveFree, extraHave) {
+  const need = chosen.reduce((n, g) => n + g.gb, 0);
+  const head = headroomGb(need);
+  if (!chosen.length) return { need, head, onDrive: [], onExtra: [], neededDisk: 0 };
+  if (driveFree == null) return { need, head, onDrive: chosen, onExtra: [], neededDisk: 0, unknown: true };
+  const { onDrive, onExtra } = placeGames(chosen, Math.max(0, driveFree - head));
+  const over = onExtra.reduce((n, g) => n + g.gb, 0);
+  const neededDisk = !onExtra.length || extraHave > 0 ? 0 : Math.max(EXTRA_DISK_STEP_GB, Math.ceil((over + head) / EXTRA_DISK_STEP_GB) * EXTRA_DISK_STEP_GB);
+  return { need, head, onDrive, onExtra, neededDisk, over };
+}
+
+// Which games, and the disk. Resolves to {games, extraGb, extraIds}, or null on
+// Cancel. `ctx` is what the machine told: drive free GB, the added disk it
+// has (GB), and the games already on it.
+function askPlayGames(ctx) {
+  const all = ((libNow && !libNow.error && libNow.games) || []).slice().sort((a, b) => b.bytes - a.bytes);
+  const onBox = ctx.onBox || new Set();
   const dlg = $('playdlg'), list = $('playdlg-games');
-  const GB = 1073741824, reserve = 20;
-  const picked = new Set(games.map(g => String(g.appid)));
-  $('playdlg-sub').textContent = 'These are in Saved games. Pick the ones to bring back; a new disk is made for them.';
-  const size = () => {
-    const bytes = games.filter(g => picked.has(String(g.appid))).reduce((n, g) => n + g.bytes, 0);
-    return picked.size ? Math.max(10, Math.ceil((bytes / GB + reserve) / 10) * 10) : 0;
-  };
+  const id = g => String(g.appid);
+  // First time: the games that fit the fast drive, so nothing is bought unasked.
+  // After that: what you ticked last time.
+  const last = playPicks.get();
+  const picked = new Set(onBox);
+  if (last) { for (const g of all) if (last.includes(id(g))) picked.add(id(g)); }
+  else {
+    const fit = placeGames(all.filter(g => !onBox.has(id(g))).map(g => ({ id: id(g), gb: g.bytes / GIB })), ctx.driveFree == null ? null : Math.max(0, ctx.driveFree - HEADROOM_MIN_GB)).onDrive;
+    for (const f of fit) picked.add(f.id);
+  }
+  // The added disk: 0 unless you ask for one, and never less than the ticked games
+  // need. Ticking a game that does not fit what is free raises it; you can raise it
+  // further, but not below what the games need.
+  let diskGb = 0, want = 0;
+  const chosen = () => all.filter(g => picked.has(id(g)) && !onBox.has(id(g))).map(g => ({ id: id(g), gb: g.bytes / GIB }));
+  const plan = () => planPlay(chosen(), ctx.driveFree, ctx.extraHave);
+  for (const x of ['playdlg-sub', 'playdlg-total', 'playdlg-price']) $(x).hidden = true;
   const paint = () => {
-    const gb = size();
-    const month = gb ? diskMonthInr(gb) : null;
-    $('playdlg-price').textContent = gb
-      ? `New disk: ${gb} GB${month != null ? `, about ${rs(month)} a month while it exists` : ''}.`
-      : 'No games picked: the machine starts without a games disk.';
+    const p = plan();
+    const have = ctx.extraHave > 0;
+    diskGb = have ? ctx.extraHave : Math.max(want, p.neededDisk);
+    const maxed = !have && (diskGb > MAX_EXTRA_DISK_GB || p.neededDisk > MAX_EXTRA_DISK_GB);
+    const note = $('playdlg-disk-note');
+    $('playdlg-disk').hidden = false;
+    $('playdlg-gb').value = String(diskGb);
+    $('playdlg-gb').min = String(have ? diskGb : p.neededDisk);
+    $('playdlg-gb').disabled = $('playdlg-plus').disabled = have;
+    $('playdlg-minus').disabled = have || diskGb <= p.neededDisk;
+    if (have) {
+      $('playdlg-disk-text').textContent = `Games disk (already on this machine)`;
+      note.textContent = p.onExtra.length && p.over > ctx.extraHave - 20
+        ? 'The games may not all fit on it; any that do not are skipped and named. Remove the disk first to make a bigger one.'
+        : '';
+    } else {
+      const month = diskGb ? diskMonthInr(diskGb) : null;
+      $('playdlg-disk-text').textContent = 'Add disk';
+      note.textContent = (p.onExtra.length
+        ? `The ticked games need ${p.over.toFixed(1)} GB more than the machine has free, so at least ${p.neededDisk} GB.`
+        : '') + (diskGb && month != null ? `${p.onExtra.length ? ' ' : ''}About ${rs(month)} a month.` : '');
+    }
+    const warn = $('playdlg-warn');
+    warn.hidden = !maxed;
+    warn.textContent = maxed ? `That is more than a game PC here can hold (${MAX_EXTRA_DISK_GB} GB of games disk). Untick a game.` : '';
+    $('playdlg-yes').disabled = maxed;
   };
   list.textContent = '';
-  for (const g of games) {
+  if (!all.length) list.append(el('p', 'font-body-md text-body-md text-outline',
+    libNow && libNow.error ? 'Saved games could not be read just now, so none can be brought back. Play still starts the machine.'
+      : 'No saved games yet. Install games from Steam once you are in; Stop machine saves them.'));
+  for (const g of all) {
     const row = el('label', 'flex items-center gap-space-sm font-body-md text-body-md');
-    const cb = el('input'); cb.type = 'checkbox'; cb.checked = true;
-    cb.onchange = () => { if (cb.checked) picked.add(String(g.appid)); else picked.delete(String(g.appid)); paint(); };
-    row.append(cb, el('span', 'grow', g.name || String(g.appid)), el('span', 'font-code-sm text-code-sm text-outline', `${(g.bytes / GB).toFixed(1)} GB`));
+    const cb = el('input', 'accent-primary'); cb.type = 'checkbox'; cb.checked = picked.has(id(g));
+    const here = onBox.has(id(g));
+    if (here) cb.disabled = true;
+    cb.onchange = () => { if (cb.checked) picked.add(id(g)); else picked.delete(id(g)); paint(); };
+    row.append(cb, el('span', 'grow', g.name || id(g)),
+      el('span', 'font-code-sm text-code-sm text-outline', here
+        ? `already on the machine${({ root: ' · root disk', extra: ' · games disk', nvme: ' · fast drive' })[ctx.where && ctx.where.get(id(g))] || ''}`
+        : GB(g.bytes)));
     list.append(row);
   }
+  const step = by => { want = Math.max(0, Math.min(MAX_EXTRA_DISK_GB, Math.round((diskGb + by) / EXTRA_DISK_STEP_GB) * EXTRA_DISK_STEP_GB)); paint(); };
+  $('playdlg-minus').onclick = () => step(-EXTRA_DISK_STEP_GB);
+  $('playdlg-plus').onclick = () => step(EXTRA_DISK_STEP_GB);
+  $('playdlg-gb').oninput = null;
+  $('playdlg-gb').onchange = () => { want = Math.max(0, Math.min(MAX_EXTRA_DISK_GB, Math.ceil((Number($('playdlg-gb').value) || 0) / EXTRA_DISK_STEP_GB) * EXTRA_DISK_STEP_GB)); paint(); };
   paint();
   return new Promise(resolve => {
-    dlg.onclose = () => resolve(dlg.returnValue === 'yes' ? { apps: [...picked], gb: size() } : null);
-    dlg.showModal();
+    dlg.onclose = () => {
+      if (dlg.returnValue !== 'yes') return resolve(null);
+      const p = plan(), byId = new Map(all.map(g => [id(g), g]));
+      playPicks.set([...picked]);
+      const games = chosen().map(c => ({ appid: c.id, bytes: byId.get(c.id).bytes, name: byId.get(c.id).name || c.id }));
+      const extraGb = ctx.extraHave > 0 ? ctx.extraHave : diskGb;
+      resolve({ games, extraGb, extraIds: p.onExtra.map(g => g.id) });
+    };
+    dlg.returnValue = '';
+    if (!dlg.open) dlg.showModal();
   });
 }
 
+// ── Play: the machine getting ready, and each game coming back ──────────────
+let restoreUi = null;
+function restoreShow(pick) {
+  const dlg = $('restoredlg');
+  $('restoredlg-title').textContent = 'Getting your machine ready';
+  $('restoredlg-sub').textContent = pick.games.length ? 'Your games are being copied to the machine. This closes by itself when Moonlight opens.'
+    : 'Connecting to your machine and starting the stream. This closes by itself when Moonlight opens.';
+  $('restoredlg-steps').textContent = '';
+  $('restoredlg-now').textContent = '';
+  const box = $('restoredlg-games'); box.textContent = '';
+  const rows = new Map();
+  for (const g of pick.games) {
+    const wrap = el('div', 'flex flex-col gap-0.5');
+    const head = el('div', 'flex items-baseline justify-between gap-space-sm font-body-md text-body-md');
+    const name = el('span', 'grow', g.name), info = el('span', 'font-code-sm text-code-sm text-outline', 'waiting…');
+    head.append(name, info);
+    const track = el('div', 'h-1.5 rounded-full bg-surface-container overflow-hidden');
+    const bar = el('div', 'h-full bg-primary rounded-full'); bar.style.width = '0%';
+    track.append(bar);
+    wrap.append(head, track);
+    wrap.dataset.game = g.appid;
+    box.append(wrap);
+    rows.set(String(g.appid), { info, bar, name, g, state: 'waiting' });
+  }
+  const rate = statusNow ? machineFacts().priceText : null;
+  $('restoredlg-bill').textContent = pick.games.length ? `Billing ${rate ? `${rate}/hour` : 'by the hour'} while the games copy.` : '';
+  for (const id of ['restoredlg-retry', 'restoredlg-close']) $(id).hidden = true;
+  $('restoredlg-cancel').hidden = false;
+  restoreUi = { rows, pick, current: null, failed: false, finished: false };
+  dlg.oncancel = e => { if (restoreUi && !restoreUi.finished) e.preventDefault(); };
+  if (!dlg.open) dlg.showModal();
+}
+// What the machine is doing right now, in its own words: the wait that is going on
+// (how long so far), or the last thing the copy or the connection said. A step
+// that goes on for minutes with only its name on screen looks like a hang.
+function restoreNow(text) { if (restoreUi && text) $('restoredlg-now').textContent = text; }
+// How long the step in progress has waited, on the step itself - not in the line
+// below, where it used to overwrite every reason the wait gave.
+function restoreWaited(e) {
+  const row = restoreUi && restoreUi.current;
+  if (!row) return;
+  const label = row.lastChild;
+  if (!label.dataset.base) label.dataset.base = label.textContent;
+  label.textContent = e.state === 'waiting' ? `${label.dataset.base} · ${e.secs} s` : label.dataset.base;
+}
+function restoreStep(text) {
+  if (!restoreUi || !text) return;
+  const list = $('restoredlg-steps');
+  if (restoreUi.current) restoreUi.current.firstChild.replaceWith(el('span', 'w-4 text-center font-code-md text-code-md text-primary', '✓'));
+  const row = el('div', 'flex items-start gap-space-sm');
+  row.append(el('span', 'spinner mt-0.5'), el('div', '', text.charAt(0).toUpperCase() + text.slice(1)));
+  list.append(row);
+  restoreUi.current = row;
+}
+function restoreGame(e) {
+  const r = restoreUi && restoreUi.rows.get(String(e.id));
+  if (!r) return;
+  // "there": already installed on the machine (root disk, games disk) - not copied.
+  r.state = e.state === 'there' ? 'done' : e.state;
+  const whole = e.state === 'done' || e.state === 'there';
+  const pct = e.of > 0 ? Math.min(100, Math.round(e.got * 100 / e.of)) : (whole ? 100 : 0);
+  r.bar.style.width = (whole ? 100 : pct) + '%';
+  r.bar.className = 'h-full rounded-full ' + (e.state === 'failed' ? 'bg-error' : 'bg-primary');
+  r.info.className = 'font-code-sm text-code-sm ' + (e.state === 'failed' ? 'text-error' : 'text-outline');
+  r.info.textContent = e.state === 'there' ? 'already on the machine ✓' : e.state === 'done' ? 'done ✓'
+    : e.state === 'failed' ? 'did not come back whole'
+    : e.state === 'waiting' ? 'waiting…'
+    : e.of > 0 ? `${GB(e.got)} of ${GB(e.of)} · ${pct}%` : GB(e.got);
+  if (e.state === 'failed') restoreUi.failed = true;
+}
+function restoreEnd(rc) {
+  if (!restoreUi) return;
+  const ui = restoreUi;
+  ui.finished = true;
+  if (rc === 0 && !ui.failed) { $('restoredlg').close(); restoreUi = null; return; }
+  const failed = [...ui.rows.values()].filter(r => r.state !== 'done');
+  $('restoredlg-title').textContent = ui.failed ? 'Some games did not come back' : 'Stopped';
+  $('restoredlg-sub').textContent = ui.failed
+    ? 'Nothing was removed and the machine is still running. Most often the disk had no room; Try again, or press Play and untick the game.'
+    : 'The machine is still running and billing until auto-stop or Delete. Press Play to try again.';
+  $('restoredlg-cancel').hidden = true;
+  $('restoredlg-close').hidden = false;
+  $('restoredlg-retry').hidden = !(ui.failed && failed.length);
+  ui.retry = failed.map(r => r.g);
+}
+function restoreCancel() {
+  for (const [id, j] of jobs) if (j.cmd[0] === 'open') window.cg.cancel(id);
+}
+$('restoredlg-cancel').onclick = () => { restoreCancel(); if (restoreUi) restoreUi.finished = true; $('restoredlg').close(); restoreUi = null; };
+$('restoredlg-close').onclick = () => { $('restoredlg').close(); restoreUi = null; };
+$('restoredlg-retry').onclick = () => {
+  const ui = restoreUi; if (!ui) return;
+  $('restoredlg').close(); restoreUi = null;
+  playWith({ ...ui.pick, games: ui.retry });
+};
+// A step cg announces moves the dialog on; once the stream's own steps start the
+// games are all back and it closes.
+function restoreOnEvent(event) {
+  if (!restoreUi) return;
+  if (event.t === 'restore') restoreGame(event);
+  else if (event.t === 'wait') restoreWaited(event);
+  // A game's own progress line ("2863680: copying, 3.8GB of 12GB") is already its
+  // row below, with its name; repeated here by number it only confused.
+  else if (event.t === 'line' && event.text && event.kind !== 'fail' && !/^\d+: (waiting|copying|done|failed)\b/.test(event.text.trim())) restoreNow(event.text.trim());
+  else if (event.t === 'step') {
+    // Open until Moonlight is starting, so the wait for the stream is on screen too.
+    if (event.id === 'open.play') { if (!restoreUi.failed) restoreEnd(0); }
+    else restoreStep(event.text);
+  } else if (event.t === 'exit') restoreEnd(event.rc);
+}
+
+// What the machine says about itself, read when Play is pressed: its fast drive's
+// free room, the games disk it has, and the games already on it.
+// Which games are on the disks a stop keeps - the root disk and the games disk -
+// as the machine said last time it was asked (Play, Stop machine). A stopped
+// machine cannot be asked, and these games are on it all the same.
+const BOX_GAMES_KEY = 'cg-box-games';
+const boxGames = {
+  get(id) { try { const v = JSON.parse(localStorage.getItem(BOX_GAMES_KEY) || 'null'); return v && v.id === id ? v.games || [] : []; } catch { return []; } },
+  set(id, games) {
+    const kept = (games || []).filter(g => (g.disk === 'root' || g.disk === 'extra') && /^(installed|running)$/i.test(g.state || '') && !g.incomplete)
+      .map(g => ({ appid: String(g.appid), disk: g.disk }));
+    try { localStorage.setItem(BOX_GAMES_KEY, JSON.stringify({ id, games: kept })); } catch { /* a convenience */ }
+  },
+  dropDisk(id) { this.set(id, this.get(id).filter(g => g.disk !== 'extra').map(g => ({ ...g, state: 'installed' }))); },
+};
+async function readPlayContext(b) {
+  const ctx = { state: b.state, driveFree: null, extraHave: 0, onBox: new Set(), where: new Map() };
+  const sel = libNow && libNow.selectable_gb;
+  if (b.state === 'running') {
+    try {
+      const pc = JSON.parse(await runCg(['games', '--json', '--box'], { capture: true }));
+      for (const g of pc.games || []) if (/^(installed|running)$/i.test(g.state) && !g.incomplete) {
+        ctx.onBox.add(String(g.appid));
+        if (g.disk) ctx.where.set(String(g.appid), g.disk);
+      }
+      if (pc.disk && pc.disk.free_bytes != null) ctx.driveFree = pc.disk.free_bytes / GIB;
+      boxGames.set(b.id, pc.games);
+    } catch { /* unknown: nothing is locked, the copy skips what is whole */ }
+  }
+  if (ctx.driveFree == null && sel != null) ctx.driveFree = sel;   // a stopped machine's fast drive starts empty
+  try { ctx.extraHave = (JSON.parse(await runCg(['disk', '--json'], { capture: true })).extra_gb) || 0; } catch { /* none known */ }
+  // Stopped: what the root disk and the games disk had when it was last asked.
+  // The games disk's only while it still exists. cg checks again once the machine
+  // is up, so a list that is out of date costs nothing worse than a copy.
+  if (b.state !== 'running') for (const g of boxGames.get(b.id)) {
+    if (g.disk === 'extra' && !(ctx.extraHave > 0)) continue;
+    ctx.onBox.add(g.appid); ctx.where.set(g.appid, g.disk);
+  }
+  return ctx;
+}
+
+function playWith(pick) {
+  const args = ['open'];
+  if (pick.extraGb > 0) args.push('--extra-gb', String(pick.extraGb));
+  if (pick.extraIds && pick.extraIds.length) args.push('--extra-apps', pick.extraIds.join(','));
+  if (pick.games.length) args.push('--games', pick.games.map(g => `${g.appid}:${g.bytes}`).join(','));
+  const p = startRun(args, { restore: pick.games.length > 0 });
+  if (!$('restoredlg').open) restoreShow(pick);
+  return p;
+}
+
+// Play reads the machine before it can ask which games: a second or more. The
+// popup is up for that, saying so (playLoading), and a second click does nothing.
+let playPreparing = false;
+function playLoading() {
+  $('playdlg-sub').textContent = 'Looking at your machine and your saved games…';
+  $('playdlg-sub').hidden = false;
+  const list = $('playdlg-games');
+  list.textContent = '';
+  const row = el('div', 'flex items-center gap-space-sm font-body-md text-body-md text-on-surface-variant');
+  row.append(el('span', 'spinner'), el('span', '', 'Reading…'));
+  list.append(row);
+  for (const id of ['playdlg-total', 'playdlg-price']) $(id).textContent = '';
+  $('playdlg-disk').hidden = true;
+  $('playdlg-warn').hidden = true;
+  $('playdlg-yes').disabled = true;
+}
 const play = async () => {
   if (sessionNow) return refresh();   // already streaming: re-check, start nothing
+  if (playPreparing) return;
   const b = statusNow && statusNow.box;
-  // Pressed before the disk was read: read it now, rather than start without asking.
-  if (b && b.state === 'stopped' && diskRemoved.has(b.id) && !stoppedDisk) { stoppedDiskFor = ''; await readStoppedDisk(statusNow); }
-  if (b && b.state === 'stopped' && diskRemoved.has(b.id) && stoppedDisk && stoppedDisk.extra_gb === 0) {
+  if (!b || !['running', 'stopped'].includes(b.state)) return startRun(['open']);
+  let pick = null;
+  // The popup opens the moment Play is pressed, saying what it is reading; the
+  // games fill it once the machine and Saved games have answered. A click that
+  // shows nothing for seconds reads as a click that did nothing.
+  const dlg = $('playdlg');
+  let gaveUp = false;
+  playPreparing = true;
+  playLoading();
+  dlg.onclose = () => { gaveUp = true; };
+  dlg.returnValue = '';
+  dlg.showModal();
+  try {
     if (!libNow) await runCg(['library', 'list', '--json'], { json: 'library', group: 'refresh' }).catch(() => {});
-    const pick = await askPlayGames();
-    if (!pick) return;
-    diskRemoved.set(b.id, false);
-    stoppedDiskFor = '';
-    await readsSettled();   // the machine's own command runs alone: not while a read is still landing
-    if (pick.gb > 0) return startRun(['open', '--extra-gb', String(pick.gb), '--extra-apps', pick.apps.join(',')]);
-  }
-  return startRun(['open']);
+    // Always the same popup, games or none: with nothing saved yet it says so, and
+    // the disk can still be chosen - Play is one flow, whatever is in Saved games.
+    if (!gaveUp) {
+      const ctx = await readPlayContext(b);
+      if (!gaveUp) pick = await askPlayGames(ctx);
+    }
+  } finally { playPreparing = false; }
+  if (gaveUp && !pick) return;
+  if (!pick) return;
+  diskRemoved.set(b.id, false);
+  stoppedDiskFor = '';
+  // The progress window next, at once, whether or not there is anything to copy -
+  // with nothing to copy, the connecting and the stream starting were a silent gap
+  // until Moonlight appeared. The run starts when the reads in flight land.
+  restoreShow(pick);
+  await readsSettled();   // the machine's own command runs alone: not while a read is still landing
+  return playWith(pick);
 };
 $('d-open').onclick = play;
+async function stopSession() {
+  if (!openJobs().length) return;
+  const ok = await askConfirm(sessionNow ? {
+    title: 'Stop the session?',
+    body: 'Moonlight closes. The machine keeps running and billing; Stop machine stops it.',
+    yes: 'Stop session', no: 'Keep playing', danger: true,
+  } : {
+    title: 'Stop starting the session?',
+    body: 'The session does not open. The machine keeps running and billing; Stop machine stops it.',
+    yes: 'Stop starting', no: 'Keep going', danger: true,
+  });
+  if (ok) for (const [id] of openJobs()) window.cg.cancel(id);
+}
+// ── Stop machine and Delete machine: one window, start to finish ────────────
+//
+// The window opens at once, reading the machine. Then the games on it, grouped by
+// what happens to them, all ticked: kept in Saved games (copied if new, updated if
+// already there). Unticked: left out - not copied, and deleted from Saved games if
+// it is there. A game still downloading cannot be saved and is said so. Steam's
+// own tools are not listed: they are never saved. Then the SAME window shows the
+// run: every step listed from the start (○ to come, ◌ now, ✓ done), the save's
+// bar under its step, and on a failure what did finish, what did not, and Try
+// again. It closes itself when it is all done, and the card says what was done.
+const keepUi = { mode: 'choose' };
+const savable = g => /^(installed|running)$/i.test(g.state || '') && !g.incomplete;
+function keepMode(mode) {
+  keepUi.mode = mode;
+  $('keepdlg-choose').hidden = mode !== 'choose';
+  $('keepdlg-run').hidden = mode === 'choose';
+  $('keepdlg-no').hidden = mode !== 'choose';
+  $('keepdlg-yes').hidden = mode !== 'choose';
+  $('keepdlg-close').hidden = mode !== 'failed';
+  $('keepdlg-retry').hidden = mode !== 'failed';
+}
+// Choosing. Resolves with the choice and leaves the window open for the run; null
+// when cancelled (the window is closed).
+async function askKeepGames(kind, untick = []) {
+  const dlg = $('keepdlg'), list = $('keepdlg-games');
+  const stop = kind === 'stop';
+  const b = statusNow && statusNow.box;
+  keepMode('choose');
+  $('keepdlg-title').textContent = stop ? 'Stop the machine?' : 'Delete the machine?';
+  $('keepdlg-sub').textContent = '';
+  $('keepdlg-summary').textContent = '';
+  $('keepdlg-after').textContent = '';
+  list.textContent = '';
+  const spin = el('div', 'flex items-center gap-space-sm font-body-md text-body-md text-on-surface-variant');
+  spin.append(el('span', 'spinner'), el('span', '', 'Looking at the games on the machine…'));
+  list.append(spin);
+  const yes = $('keepdlg-yes');
+  yes.disabled = true; yes.className = 'btn btn-primary';
+  yes.textContent = stop ? 'Save and stop' : 'Save and delete machine';
+  let answer = null;
+  const settled = new Promise(r => { answer = r; });
+  $('keepdlg-no').onclick = () => { dlg.close(); answer(null); };
+  dlg.onclose = () => answer(null);
+  if (!dlg.open) dlg.showModal();
+  let games = null;
+  try {
+    if (!libNow) await runCg(['library', 'list', '--json'], { json: 'library', group: 'refresh' }).catch(() => {});
+    const pc = JSON.parse(await runCg(['games', '--json', '--box'], { capture: true }));
+    games = (pc.games || []).filter(g => g.state !== 'in S3 only' && !g.tool);
+    if (b) boxGames.set(b.id, pc.games);
+  } catch { games = null; }
+  // The games disk, if the machine has one: Stop can delete it too.
+  let diskGb = 0;
+  if (stop && games !== null) {
+    try { diskGb = (JSON.parse(await runCg(['disk', '--json'], { capture: true })).extra_gb) || 0; } catch { diskGb = 0; }
+  }
+  if (!dlg.open) return null;
+  const saved = new Set(((libNow && !libNow.error && libNow.games) || []).map(g => String(g.appid)));
+  const id = g => String(g.appid);
+  const name = g => g.name || id(g);
+  const all = games || [];
+  const ok = all.filter(savable), cannot = all.filter(g => !savable(g));
+  const keep = new Set(ok.map(id).filter(x => !untick.includes(x)));
+  const end = stop ? 'then it stops' : 'then the machine and its disk are deleted';
+  $('keepdlg-sub').textContent = games === null
+    ? `The games on the machine could not be read, so they cannot be chosen: all of them are saved, ${end}.`
+    : !all.length ? `No games on this machine. Your Steam login is saved, ${end}.`
+    : 'Ticked games are kept in Saved games.';
+  list.textContent = '';
+  const notes = new Map();
+  const group = (title, rows) => {
+    if (!rows.length) return;
+    const box = el('div', 'flex flex-col gap-space-xs');
+    box.append(el('p', 'section-label mb-0', title));
+    for (const g of rows) {
+      const wrap = el('div', 'flex flex-col');
+      const row = el('label', 'flex items-center gap-space-sm font-body-md text-body-md');
+      const cb = el('input', 'accent-primary'); cb.type = 'checkbox';
+      const can = savable(g);
+      cb.checked = can && keep.has(id(g));
+      cb.disabled = !can;
+      cb.onchange = () => { if (cb.checked) keep.add(id(g)); else keep.delete(id(g)); paint(); };
+      // Where it is decides what a stop does to it: the fast drive is wiped, the
+      // games disk and the root disk keep what is on them.
+      const where = { nvme: 'fast drive', extra: 'games disk', root: 'root disk' }[g.disk] || '';
+      const size = (can ? GB(g.bytes || 0)
+        : `${GB(g.bytes || 0)} · ${g.percent != null ? `downloading ${Math.round(g.percent)}%` : String(g.state || 'not finished').toLowerCase()}`)
+        + (where ? ` · ${where}` : '');
+      row.append(cb, el('span', 'grow', name(g)), el('span', 'font-code-sm text-code-sm text-outline', size));
+      const n = el('p', 'pl-[1.6rem] font-code-sm text-code-sm');
+      wrap.append(row, n);
+      notes.set(id(g), { n, g, can });
+      box.append(wrap);
+    }
+    list.append(box);
+  };
+  group('In Saved games', ok.filter(g => saved.has(id(g))));
+  group('New on this machine', ok.filter(g => !saved.has(id(g))));
+  group('Not saved', cannot);
+  // The games disk: deleted too if you tick it, and always when nothing on it is
+  // kept - an empty or abandoned disk would only go on billing.
+  const onDisk = all.filter(g => g.disk === 'extra');
+  let wantDisk = false;
+  const diskBox = diskGb > 0 ? el('div', 'flex flex-col gap-space-xs') : null;
+  const diskCb = el('input', 'accent-primary'); diskCb.type = 'checkbox';
+  const diskNote = el('p', 'pl-[1.6rem] font-code-sm text-code-sm text-on-surface-variant');
+  const diskMonth = diskGb ? diskMonthInr(diskGb) : null;
+  if (diskBox) {
+    diskBox.append(el('p', 'section-label mb-0', `Games disk · ${diskGb} GB${diskMonth != null ? ` · about ${rs(diskMonth)} a month` : ''}`));
+    const lab = el('label', 'flex items-center gap-space-sm font-body-md text-body-md');
+    lab.append(diskCb, el('span', 'grow', 'Delete the games disk too'));
+    diskBox.append(lab, diskNote);
+    list.append(diskBox);
+    diskCb.onchange = () => { wantDisk = diskCb.checked; paint(); };
+  }
+  const forcedDisk = () => diskGb > 0 && !onDisk.some(g => savable(g) && keep.has(id(g)));
+  const dropDisk = () => diskGb > 0 && (forcedDisk() || wantDisk);
+  const plan = () => {
+    const kept = ok.filter(g => keep.has(id(g))), dropped = ok.filter(g => !keep.has(id(g)));
+    return {
+      saveNew: kept.filter(g => !saved.has(id(g))), update: kept.filter(g => saved.has(id(g))),
+      forget: dropped.filter(g => saved.has(id(g))), skipNew: dropped.filter(g => !saved.has(id(g))),
+    };
+  };
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const inr = b && b.disk_gb ? diskMonthInr(b.disk_gb) : null;
+  const rate = statusNow ? machineFacts().priceText : null;
+  const paint = () => {
+    const p = plan();
+    for (const { n, g, can } of notes.values()) {
+      const goes = dropDisk() && g.disk === 'extra';
+      if (!can && goes) {
+        n.className = 'pl-[1.6rem] font-code-sm text-code-sm text-error';
+        n.textContent = '⚠ Still downloading: not saved, and gone with the games disk.';
+      } else if (goes && keep.has(id(g))) {
+        n.className = 'pl-[1.6rem] font-code-sm text-code-sm text-on-surface-variant';
+        n.textContent = 'Saved, then the disk is deleted.';
+      } else if (goes && !saved.has(id(g))) {
+        n.className = 'pl-[1.6rem] font-code-sm text-code-sm text-error';
+        n.textContent = '⚠ Not saved. Gone with the games disk.';
+      } else if (!can) {
+        n.className = 'pl-[1.6rem] font-code-sm text-code-sm text-on-surface-variant';
+        n.textContent = saved.has(id(g)) ? 'Still downloading: not saved. The copy in Saved games stays as it was.'
+          : stop && (g.disk === 'extra' || g.disk === 'root') ? `Still downloading: not saved, but it stays on the ${g.disk === 'extra' ? 'games disk' : 'root disk'} and Steam carries on next time.`
+          : 'Still downloading: not saved. Steam downloads it again next time.';
+      } else if (keep.has(id(g))) { n.textContent = ''; }
+      else if (saved.has(id(g))) { n.className = 'pl-[1.6rem] font-code-sm text-code-sm text-error'; n.textContent = 'Deleted from Saved games. Cannot be undone.'; }
+      else {
+        n.className = 'pl-[1.6rem] font-code-sm text-code-sm text-on-surface-variant';
+        // A stop wipes only the fast drive; a delete takes every disk with it.
+        const kept = stop && (g.disk === 'extra' || g.disk === 'root');
+        n.textContent = kept ? `Not saved. It stays on the ${g.disk === 'extra' ? 'games disk' : 'root disk'}.`
+          : `Not saved. Gone when the machine ${stop ? 'stops' : 'is deleted'}.`;
+      }
+      n.hidden = !n.textContent;
+    }
+    const newGb = p.saveNew.reduce((t, g) => t + (g.bytes || 0), 0);
+    const parts = [];
+    if (p.saveNew.length) parts.push(`Saves ${plural(p.saveNew.length, 'new game')} (${GB(newGb)})`);
+    if (p.update.length) parts.push(`${parts.length ? 'updates' : 'Updates'} ${p.update.length}`);
+    if (p.forget.length) parts.push(`${parts.length ? 'deletes' : 'Deletes'} ${plural(p.forget.length, 'saved game')}`);
+    const disk = dropDisk();
+    if (disk) parts.push(`${parts.length ? 'deletes' : 'Deletes'} the games disk`);
+    $('keepdlg-summary').textContent = games === null || (!all.length && !disk) ? ''
+      : parts.length ? parts.join(', ') + '.' : 'Saves no games.';
+    if (diskBox) {
+      const forced = forcedDisk();
+      if (!forced && diskCb.disabled) wantDisk = false;   // a game on it ticked again: back to the choice
+      diskCb.checked = disk;
+      diskCb.disabled = forced;
+      diskNote.textContent = forced ? (onDisk.length ? 'Nothing on it is kept, so it is deleted. Tick a game on it to keep the disk.'
+                                                     : 'Nothing is on it, so it is deleted.')
+        : disk ? `Saves${diskMonth != null ? ` about ${rs(diskMonth)}` : ''} a month. Play makes a new one when your games need it.` : '';
+      diskNote.hidden = !diskNote.textContent;
+    }
+    const lost = p.forget.length || (disk && onDisk.some(g => !keep.has(id(g))));
+    const kept = p.saveNew.length + p.update.length;
+    const dg = p.forget.length ? `Delete ${plural(p.forget.length, 'game')}` : '';
+    yes.textContent = !stop ? (dg ? `${dg} and delete machine` : 'Save and delete machine')
+      : dg ? (disk ? `${dg}, stop and delete disk` : `${dg} and stop`)
+      : kept ? (disk ? 'Save, stop and delete disk' : 'Save and stop')
+      : (disk ? 'Stop and delete disk' : 'Stop');
+    yes.className = lost || !stop ? 'btn btn-danger' : 'btn btn-primary';
+    yes.disabled = false;
+    $('keepdlg-after').textContent = stop
+      ? `After it stops: ${rate ? `${rate}/hour` : 'the hourly charge'} ends. Still billed: the machine's disk${inr != null ? ` (about ${rs(inr)} a month)` : ''}${diskGb && !disk ? `${diskMonth != null ? ` and the games disk (about ${rs(diskMonth)} a month)` : ' and the games disk'}` : ''}.`
+      : `${rate ? `${rate}/hour` : 'Billing'} ends when it is deleted. Your saved games stay.`;
+  };
+  paint();
+  yes.onclick = () => {
+    const p = plan();
+    answer({
+      skip: [...p.forget, ...p.skipNew].map(id),
+      forget: p.forget.map(g => ({ id: id(g), name: name(g) })),
+      summary: { saved: p.saveNew.length + p.update.length, deleted: p.forget.length, disk: dropDisk() },
+      deleteDisk: dropDisk(),
+      // Something on the disk that no save can hold (a download) goes with it: chosen.
+      diskLoss: dropDisk() && onDisk.some(g => !savable(g)),
+    });
+  };
+  return settled;
+}
+
+// The run, in the same window: every step listed up front, each matched to what
+// cg says as it goes. A step cg never says (Steam was not open) is ticked when a
+// later one begins.
+function keepRun(title, steps) {
+  keepMode('run');
+  $('keepdlg-title').textContent = title;
+  $('keepdlg-run-note').textContent = 'Keep the app open until this finishes.';
+  const list = $('keepdlg-steps');
+  list.textContent = '';
+  const rows = steps.map(s => {
+    const r = el('div', 'flex items-start gap-space-sm font-body-md text-body-md');
+    r.dataset.step = s.label;
+    r.append(el('span', 'w-4 text-center font-code-md text-code-md text-outline', '○'), el('div', 'min-w-0', s.label));
+    list.append(r);
+    return { ...s, r, state: 'todo' };
+  });
+  let at = -1;
+  const mark = (i, state) => {
+    const r = rows[i]; if (!r || r.state === state) return;
+    r.state = state;
+    r.r.firstChild.replaceWith(state === 'now' ? el('span', 'spinner mt-0.5')
+      : el('span', 'w-4 text-center font-code-md text-code-md ' + (state === 'done' ? 'text-primary' : 'text-error'), state === 'done' ? '✓' : '✗'));
+  };
+  const go = i => {
+    if (i <= at) return;
+    for (let k = Math.max(0, at); k < i; k++) mark(k, 'done');
+    at = i; mark(i, 'now');
+    $('keepdlg-save')?.remove();
+    $('keepdlg-live')?.remove(); keepUi.aws = ''; keepUi.said = '';
+  };
+  return {
+    go,
+    key: k => go(rows.findIndex((r, i) => i > at && r.key === k)),
+    said(text) {   // cg's own step: the planned row it belongs to, if any
+      const i = rows.findIndex((r, j) => j > at && r.match && r.match.test(text));
+      if (i >= 0) go(i);
+    },
+    current: () => rows[at] && rows[at].r,
+    fail(why) {
+      if (at >= 0) mark(at, 'fail');
+      const w = el('p', 'pl-[1.6rem] font-code-sm text-code-sm text-on-surface-variant break-words', why);
+      if (rows[at]) rows[at].r.after(w); else list.append(w);
+      $('keepdlg-save')?.remove();
+    },
+    finish() { for (let k = Math.max(0, at); k < rows.length; k++) mark(k, 'done'); },
+  };
+}
+// The save's bar, under its own step in the window (or in the plain popup).
+function saveOnEvent(e) {
+  const inKeep = $('keepdlg').open && keepUi.mode === 'run';
+  const host = inKeep ? keepUi.run && keepUi.run.current() : null;
+  const dlg = inKeep ? $('keepdlg') : $('refdlg'), list = inKeep ? $('keepdlg-steps') : $('refdlg-list');
+  if (!dlg.open || !list) return;
+  const bid = inKeep ? 'keepdlg-save' : 'refdlg-save';
+  let row = $(bid);
+  if (!row) {
+    row = el('div', 'flex flex-col gap-space-xs pl-[1.6rem]'); row.id = bid;
+    row.append(el('span', 'font-code-sm text-code-sm text-on-surface-variant'),
+               Object.assign(el('div', 'onb-progress determinate'), { innerHTML: '<i style="width:0%"></i>' }));
+  }
+  const of = Number(e.of) || 0, got = Math.min(Number(e.got) || 0, of);
+  row.firstChild.textContent = of ? `${e.text || 'Saving'} · ${GB(got)} of ${GB(of)}` : (e.text || 'Saving');
+  // No size yet: the moving bar, which says "working" without a number.
+  row.lastChild.classList.toggle('determinate', !!of);
+  row.lastChild.firstChild.style.width = of ? `${Math.round(got * 100 / of)}%` : '';
+  if (host) host.after(row); else list.append(row);
+}
+// What is happening right now, under the step in progress: AWS's own state while
+// the stop waits for it ("stopping · 1 min 20 s"), and the latest thing the
+// machine or cg said. A step that takes minutes with nothing under it looks stuck.
+function keepLive(e) {
+  const host = keepUi.run && keepUi.run.current();
+  if (!host) return;
+  let text = '';
+  if (e.t === 'wait' && /^box\./.test(e.id || '') && e.text) {
+    text = `AWS says: ${e.text}${e.state === 'waiting' ? ` · ${waitSecs(e.secs)}` : ''}`;
+    keepUi.aws = text;
+  } else if (e.t === 'line' && e.text && e.kind !== 'fail') {
+    const t = e.text.trim();
+    // Not cg's own echo of the state change - that is the AWS line already.
+    if (/^(running|stopping|stopped|pending|still \w+ \(\d+s\)|\w+ after \d+s)$/.test(t)) return;
+    keepUi.said = t.replace(/^machine:\s*/, 'Machine: ');
+  } else return;
+  let row = $('keepdlg-live');
+  if (!row) { row = el('p', 'pl-[1.6rem] font-code-sm text-code-sm text-on-surface-variant break-words whitespace-pre-line'); row.id = 'keepdlg-live'; }
+  if (row.previousElementSibling !== host) host.after(row);
+  row.textContent = [keepUi.aws, keepUi.said].filter(Boolean).join('\n');
+}
+// One cg command of the run: its steps feed the window; its failure is the reason.
+async function keepCmd(run, args, ask) {
+  typedPending = ask || null;
+  const { rc, err } = await runCg(args, { wantRc: true, onStep: t => run.said(t), aside: args[0] !== 'library' });
+  typedPending = null;
+  if (rc === 0) return null;
+  return (err || '').trim().split('\n').filter(Boolean).slice(-2).join(' ') || `cg ${args.join(' ')} stopped (exit ${rc})`;
+}
+// Stop machine and Delete machine, after the choice: the steps, then the run.
+async function keepGo(kind, choice) {
+  const stop = kind === 'stop';
+  const steps = [
+    { key: 'ready', label: openJobs().length ? 'Ending the session' : 'Getting ready' },
+    ...choice.forget.map(g => ({ key: 'forget:' + g.id, label: `Deleting ${g.name} from Saved games` })),
+    { key: 'steam', label: 'Closing Steam', match: /closing steam/i },
+    ...(choice.skip.length ? [{ key: 'skip', label: 'Leaving out the games you unticked', match: /leaving out/i }] : []),
+    { key: 'save', label: choice.summary.saved ? 'Saving your games and Steam login' : 'Saving your Steam login', match: /^saving your/i },
+    stop ? { key: 'end', label: 'Stopping the machine at AWS', match: /stopping the machine at aws/i }
+         : { key: 'end', label: 'Deleting the machine and its disk', match: /terminat|deregister|leftover volume|box deleted|ending the machine/i },
+    ...(stop && choice.deleteDisk ? [{ key: 'disk', label: 'Deleting the games disk' }] : []),
+  ];
+  const run = keepUi.run = keepRun(stop ? 'Stopping the machine' : 'Deleting the machine', steps);
+  keepUi.failedAt = '';
+  run.key('ready');
+  await endSessionJobs();
+  await readsSettled();   // the commands below run alone: not while a read lands
+  for (const g of choice.forget) {
+    run.key('forget:' + g.id);
+    const why = await keepCmd(run, ['library', 'forget', g.id], { askId: 'forget-game', word: 'FORGET' });
+    if (why) return why;
+  }
+  run.key('steam');
+  const args = stop ? ['stop', '--yes'] : ['destroy'];
+  if (choice.skip.length) args.push('--skip', choice.skip.join(','));
+  const why = await keepCmd(run, args);
+  if (why) return why;
+  // Only once the machine has stopped and the save is done: cg disk remove itself
+  // refuses unless Saved games has a complete save from this run.
+  if (stop && choice.deleteDisk) {
+    run.key('disk');
+    keepUi.failedAt = 'disk';
+    const dwhy = await keepCmd(run, ['disk', 'remove', ...(choice.diskLoss ? ['--unsaved-ok'] : [])]);
+    if (dwhy) return dwhy;
+  }
+  run.finish();
+  return null;
+}
+async function keepFlow(kind, untick) {
+  const b = statusNow && statusNow.box;
+  const choice = await askKeepGames(kind, Array.isArray(untick) ? untick : []);
+  if (!choice) return;
+  flowPending.set({ kind, id: b && b.id, skip: choice.skip, at: Date.now() });
+  flowBusy = true;
+  let why;
+  try { why = await keepGo(kind, choice); }
+  catch (e) { why = (e && e.message) || String(e); }
+  finally { flowBusy = false; flowPending.clear(); }
+  const stop = kind === 'stop';
+  if (!why) {
+    $('keepdlg').onclose = null;
+    $('keepdlg').close();
+    keepDone = { id: b && b.id, kind, text: [choice.summary.saved ? `saved ${choice.summary.saved} game${choice.summary.saved === 1 ? '' : 's'}` : '',
+      choice.summary.deleted ? `deleted ${choice.summary.deleted}` : '',
+      choice.summary.disk ? 'deleted the games disk' : ''].filter(Boolean).join(' · ') };
+    if (choice.deleteDisk && b) { diskRemoved.set(b.id, true); stoppedDiskFor = ''; boxGames.dropDisk(b.id); }
+    note(stop ? 'Machine stopped' : 'Machine deleted', 'text-primary');
+  } else {
+    keepUi.run.fail(why);
+    $('keepdlg-title').textContent = `${stop ? 'Stopping' : 'Deleting'} the machine - not done`;
+    $('keepdlg-run-note').textContent = keepUi.failedAt === 'disk'
+      ? 'The machine is stopped; the games disk is still there and billing. Remove games disk on the card deletes it.'
+      : 'The machine is still running and billing. Anything already deleted from Saved games stays deleted.';
+    keepMode('failed');
+    $('keepdlg-close').onclick = () => { $('keepdlg').onclose = null; $('keepdlg').close(); };
+    $('keepdlg-retry').onclick = () => { $('keepdlg').onclose = null; $('keepdlg').close(); keepFlow(kind, choice.skip); };
+    $('keepdlg').onclose = null;
+  }
+  await refresh();
+}
+// What the last stop or delete did, for the card to say once it has stopped.
+var keepDone = null;   // var: read by painters that can run before this line is reached
+// Stop machine and Delete machine run several commands. Each command that changes
+// something is normally followed by a refresh that puts its own popup up; mid-run
+// those would cover the window. While a run goes on, they happen quietly.
+var flowBusy = false;   // var: read by painters that can run before this line is reached
+// Ends the session, giving it up to 20 seconds; then on regardless - what follows
+// needs the machine reachable, not the session job gone, and a session that will
+// not end must not leave the click doing nothing.
+async function endSessionJobs() {
+  for (const [id] of openJobs()) window.cg.cancel(id);
+  for (let i = 0; i < 80 && openJobs().length; i++) await new Promise(r => setTimeout(r, 250));
+}
+async function stopMachine(untick = []) {
+  const b = statusNow && statusNow.box;
+  if (!b || b.state !== 'running' || b.lifecycle === 'spot') return;
+  return keepFlow('stop', untick);
+}
+$('d-stopsession').onclick = $('b-stopsession').onclick = stopSession;
+$('d-stopmachine').onclick = $('b-stopmachine').onclick = () => stopMachine();
 $('b-open').onclick = play;
 $('b-destroy').onclick = () => $('d-destroy').onclick();
-$('d-destroy').onclick = async () => {
+$('d-destroy').onclick = () => deleteMachine();
+async function deleteMachine(untick = []) {
+  // A running machine has games on it: the same window as Stop machine.
+  if (statusNow && statusNow.box && statusNow.box.state === 'running') return keepFlow('delete', untick);
   const ok = await askConfirm({
     title: 'Delete the machine?',
     body: (sessionNow ? 'The current session is closed first.\n\n' : '')
@@ -7584,30 +8240,20 @@ $('d-destroy').onclick = async () => {
            ? ` The last build took ${statusNow.build.last_min} min.` : ''),
     yes: 'Delete machine', danger: true,
   });
-  if (ok) await startRun(['destroy']);
+  if (!ok) return;
+  await readsSettled();   // it runs alone: not while a read is still landing
+  await startRun(['destroy']);
 };
 $('b-build').onclick = async () => {
-  const apps = picked.size ? [...picked].join(',') : 'none';
-  const gb = selectedGb();
   const rate = statusNow ? machineFacts().priceText : null;
-  // The disk added for the games, said here as well as under the slider: this is
-  // the last thing read before money is spent.
-  const { extra, onExtra, add, base } = fitPlan;
-  const disk = extra
-    ? `\n\nAn extra ${extra} GB disk is added ${onExtra ? "for the games that do not fit the machine's own drive" : 'for your games, as you chose'}`
-      + `${add != null ? `, ${rsh(add)} an hour` : ''}.`
-    : '';
-  const bill = extra && add != null && base != null
-    ? `Billed about ${rsh(base + add)}/hour while running (${rate != null ? rate : rsh(base)} for the machine, ${rsh(add)} for the disk).`
-    : `Billed ${rate != null ? `${rate}/hour` : 'hourly'} while running.`;
   const ok = await askConfirm({
     title: 'Build the machine?',
-    body: `${picked.size ? `${picked.size} game${picked.size === 1 ? '' : 's'}, ${gb.toFixed(1)} GB, will be`
-                         : 'No games will be'} restored during the build.${disk}\n\n${bill}`,
+    body: `Billed ${rate != null ? `${rate}/hour` : 'hourly'} from now until you stop or delete it.`,
     yes: 'Build',
   });
   if (!ok) return;
-  await buildWith(apps, picked.size, gb);
+  await readsSettled();   // it runs alone: not while a read is still landing
+  await buildWith('none', 0, 0);
 };
 
 for (const link of document.querySelectorAll('.nav-item')) {
