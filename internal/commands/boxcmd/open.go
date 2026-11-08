@@ -6,11 +6,13 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/format"
 	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	"github.com/jebin2/aws_cloud_gaming/internal/provision"
 	"github.com/jebin2/aws_cloud_gaming/internal/session"
 )
 
@@ -179,6 +181,11 @@ func (d Deps) Open(ctx context.Context) int {
 				return d.die("the machine is still shutting down and saving your games. Try again in a few minutes")
 			}
 		}
+		// Playing again after the games disk was removed: a new one is made and
+		// connected BEFORE the machine starts, so it is there at the first boot.
+		if code := d.extraBeforeStart(ctx); code != 0 {
+			return code
+		}
 		d.Out.Echo("starting " + d.Box.ID + " ...")
 		if err := d.Box.Start(ctx); err != nil {
 			if strings.Contains(err.Error(), "VcpuLimitExceeded") {
@@ -208,6 +215,10 @@ func (d Deps) Open(ctx context.Context) int {
 	d.Out.Echo("  " + path)
 	if strings.Contains(path, "relay") || strings.Contains(path, "DERP") {
 		d.Out.Echo("  WARNING: relayed, not direct - latency will suffer")
+	}
+
+	if code := d.extraAfterStart(ctx); code != 0 {
+		return code
 	}
 
 	ip, _ := d.Box.IP(ctx)
@@ -321,4 +332,66 @@ func (d Deps) noSunshine(ctx context.Context, ip string) bool {
 		"")
 	d.block("This box never finished building", lines...)
 	return true
+}
+
+var appIDs = regexp.MustCompile(`^[0-9]+(,[0-9]+)*$`)
+
+// wantsExtra: this play was asked to have a games disk of its own.
+func (d Deps) wantsExtra() bool { return d.ExtraGB > 0 && d.DiskAWS != nil }
+
+// extraBeforeStart makes and connects the games disk when the machine has none.
+// Connecting to a stopped machine is allowed, and it costs nothing until it runs.
+func (d Deps) extraBeforeStart(ctx context.Context) int {
+	if !d.wantsExtra() {
+		return 0
+	}
+	if d.ExtraApps != "" && !appIDs.MatchString(d.ExtraApps) {
+		return d.die("those games are not a list of game ids: " + d.ExtraApps)
+	}
+	vol, zone, _, _, err := diskFacts(ctx, d.DiskAWS, d.Box.ID)
+	if err != nil {
+		return d.die(firstErrorLine(err.Error()))
+	}
+	if vol != "" {
+		return 0 // already there: it kept its games, or has room for them
+	}
+	gb := (d.ExtraGB + 9) / 10 * 10
+	if gb > provision.MaxExtraDiskGB {
+		return d.die(fmt.Sprintf("that is more than a game PC here can hold (%d GB of added disk at most)", provision.MaxExtraDiskGB))
+	}
+	_, code := d.makeAndAttach(ctx, d.DiskAWS, zone, gb)
+	return code
+}
+
+// extraAfterStart mounts the disk if it is not mounted yet, then starts bringing
+// the chosen games back onto it IN THE BACKGROUND on the machine, so the stream
+// does not wait for a long download. A game restores whole or not at all.
+func (d Deps) extraAfterStart(ctx context.Context) int {
+	if !d.wantsExtra() {
+		return 0
+	}
+	vol, _, _, _, err := diskFacts(ctx, d.DiskAWS, d.Box.ID)
+	if err != nil || vol == "" {
+		return d.die("the games disk is not connected to the machine")
+	}
+	d.Out.SayID("open.disk", "Checking the games disk")
+	if d.relay(ctx, remote("mountpoint", "-q", extraMount)) != nil {
+		if code := d.setUpExtra(ctx, d.DiskAWS, vol, d.ExtraGB); code != 0 {
+			return code
+		}
+	}
+	if d.ExtraApps == "" {
+		return 0
+	}
+	d.Out.SayID("open.restore", "Bringing your games back from Saved games")
+	cmd := "set -a; . /etc/cg-library.conf; set +a; export CG_EXTRA_APPS=" + d.ExtraApps +
+		"; exec /usr/local/bin/cg-library pull --apps " + d.ExtraApps
+	run := remote("sudo", "systemd-run", "--quiet", "--unit=cg-restore-extra-"+strconv.FormatInt(d.Now().Unix(), 10),
+		"--uid=ubuntu", "--gid=ubuntu", "/bin/bash", "-c", cmd)
+	if err := d.relay(ctx, run); err != nil {
+		d.said(err)
+		return d.die("could not start bringing the games back. The disk is ready; run it again to retry")
+	}
+	d.Out.Echo("the games are coming back in the background; each one shows in Games when it is whole")
+	return 0
 }

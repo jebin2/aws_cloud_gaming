@@ -294,3 +294,20 @@ func (d Deps) tagKey() string {
 	}
 	return "cg:host"
 }
+
+// PushedFunc reads when the archive last had everything saved. A bucket that
+// cannot be named is an error, never "nothing saved yet": the caller refuses
+// either way, but only one of them tells the person why.
+func (x DestroyDeps) PushedFunc() func(ctx context.Context) (time.Time, bool, error) {
+	return func(ctx context.Context) (time.Time, bool, error) {
+		b, ok := x.Lib.BucketName()
+		if !ok {
+			return time.Time{}, false, fmt.Errorf("could not work out the archive bucket")
+		}
+		region := x.Lib.Region
+		if loc, err := x.Lib.S3.Location(ctx, b); err == nil && loc != "" {
+			region = loc
+		}
+		return x.Lib.PushedAt(ctx, b, region)
+	}
+}

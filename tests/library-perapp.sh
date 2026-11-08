@@ -95,6 +95,11 @@ contains "pushed the installed game"  "$out" "pushing Counter-Strike 2"
 contains "synced its common dir"      "$(cat "$T/s5.log")" "common/CS2/"
 contains "synced its compatdata"      "$(cat "$T/s5.log")" "compatdata/730/"
 contains "synced its shadercache"     "$(cat "$T/s5.log")" "shadercache/730/"
+# A push that saved everything leaves the marker the laptop reads before it will
+# delete the games disk: taken down first, written last.
+contains "marker taken down first"    "$(cat "$T/s5.log")" "rm s3://b/steam/pushed.json"
+contains "and written once all is saved" "$(cat "$T/s5.log")" "cp "
+check    "marker written exactly once" "$(grep -c 'pushed.json' "$T/s5.log" | tr -d ' ')" "2"
 
 echo "2. and issues NOTHING that could reach the archived games"
 # The whole point. Diablo and Wukong are in the archive and not on this disk.
@@ -114,7 +119,9 @@ out=$(run push)
 contains "says so plainly"            "$out" "no games installed"
 contains "and that the archive is safe" "$out" "archive is left alone"
 check    "issued no sync at all"      "$(cnt 'sync')" "0"
-check    "issued no delete at all"    "$(cnt 'rm')" "0"
+# The one removal a push makes is its own "everything is saved" marker, taken
+# down first; nothing of any game.
+check    "issued no delete at all"    "$(grep 'rm' "$T/s5.log" | grep -vc 'steam/pushed.json' || true)" "0"
 
 echo "4. pull --apps restores only what was asked for"
 out=$(run pull --apps 2358720)
@@ -257,6 +264,7 @@ for f in 1042 6 1026 36 132 516; do
   sed -i "s/\"StateFlags\"\t\t\"[0-9]*\"/\"StateFlags\"\t\t\"$f\"/"     "$T/scratch/steam/steamapps/appmanifest_2344520.acf"
   out=$(run push)
   contains "flags=$f refused" "$out" "SKIPPING Diablo IV"
+  check    "flags=$f leaves no 'everything is saved' marker" "$(grep -c 'cp .*pushed.json' "$T/s5.log" || true)" "0"
   check    "flags=$f uploaded nothing" "$(cnt 'sync')" "0"
   reset
 done

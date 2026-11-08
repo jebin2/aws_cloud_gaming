@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ type DiskAPI interface {
 	ModifyVolume(context.Context, *ec2.ModifyVolumeInput, ...func(*ec2.Options)) (*ec2.ModifyVolumeOutput, error)
 	CreateVolume(context.Context, *ec2.CreateVolumeInput, ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error)
 	AttachVolume(context.Context, *ec2.AttachVolumeInput, ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error)
+	DetachVolume(context.Context, *ec2.DetachVolumeInput, ...func(*ec2.Options)) (*ec2.DetachVolumeOutput, error)
 	DeleteVolume(context.Context, *ec2.DeleteVolumeInput, ...func(*ec2.Options)) (*ec2.DeleteVolumeOutput, error)
 	ModifyInstanceAttribute(context.Context, *ec2.ModifyInstanceAttributeInput, ...func(*ec2.Options)) (*ec2.ModifyInstanceAttributeOutput, error)
 }
@@ -66,21 +68,52 @@ type DiskStatus struct {
 	// can be put there. The app asks for it when the person says they added the
 	// disk in Steam's storage settings, and says so when it is not there yet.
 	ExtraInSteam bool `json:"extra_in_steam"`
+	// State is the machine's: "running", "stopped" and so on. The rest is read
+	// from AWS and the archive alone, so it is answered with the machine off.
+	State string `json:"state,omitempty"`
+	// ExtraGB is the added disk's size, running or stopped; 0 when there is none.
+	ExtraGB int `json:"extra_gb"`
+	// Removable: the machine is stopped, has an added disk, and the archive holds
+	// everything saved since it last started. Why is the reason when it does not.
+	Removable bool `json:"removable"`
+	// StoppedAt is when it stopped (RFC 3339), when AWS says; ExpiryDays is how
+	// long a stopped machine is kept before the watchdog deletes it (0 = never).
+	StoppedAt  string `json:"stopped_at,omitempty"`
+	ExpiryDays int    `json:"expiry_days,omitempty"`
+	Why        string `json:"why,omitempty"`
 }
 
 // addedVolume is the id of the disk added for the games, "" when the machine has
 // none, and the zone the machine is in.
 func addedVolume(ctx context.Context, c DiskAPI, id string) (vol, zone string, err error) {
+	vol, zone, _, _, err = diskFacts(ctx, c, id)
+	return vol, zone, err
+}
+
+var stopReason = regexp.MustCompile(`\((\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) GMT\)`)
+
+// diskFacts is addedVolume and when the machine last started (AWS restarts the
+// launch time at every start), which says whether a push is newer than the session.
+func diskFacts(ctx context.Context, c DiskAPI, id string) (vol, zone string, launched time.Time, stopped string, err error) {
 	o, err := c.DescribeInstances(ctx, &ec2.DescribeInstancesInput{InstanceIds: []string{id}})
 	if err != nil {
-		return "", "", err
+		return "", "", time.Time{}, "", err
 	}
 	if len(o.Reservations) == 0 || len(o.Reservations[0].Instances) == 0 {
-		return "", "", fmt.Errorf("InvalidInstanceID.NotFound: %s", id)
+		return "", "", time.Time{}, "", fmt.Errorf("InvalidInstanceID.NotFound: %s", id)
 	}
 	in := o.Reservations[0].Instances[0]
 	if in.Placement != nil {
 		zone = aws.ToString(in.Placement.AvailabilityZone)
+	}
+	if in.LaunchTime != nil {
+		launched = *in.LaunchTime
+	}
+	// "User initiated (2026-11-08 12:00:11 GMT)": when it stopped, if AWS says.
+	if m := stopReason.FindStringSubmatch(aws.ToString(in.StateTransitionReason)); m != nil {
+		if t, perr := time.Parse("2006-01-02 15:04:05", m[1]); perr == nil {
+			stopped = t.UTC().Format(time.RFC3339)
+		}
 	}
 	for _, m := range in.BlockDeviceMappings {
 		if m.Ebs == nil {
@@ -90,7 +123,27 @@ func addedVolume(ctx context.Context, c DiskAPI, id string) (vol, zone string, e
 			vol = aws.ToString(m.Ebs.VolumeId)
 		}
 	}
-	return vol, zone, nil
+	return vol, zone, launched, stopped, nil
+}
+
+// removable says whether the added disk may be deleted: the machine is stopped
+// and the archive holds every game as of the last time it ran. The marker the
+// box's push writes only when it saved everything is the evidence; nothing else
+// is, and an answer that cannot be read is a no.
+func (d Deps) removable(ctx context.Context, launched time.Time) (bool, string) {
+	if d.Pushed == nil {
+		return false, "could not read Saved games"
+	}
+	at, found, err := d.Pushed(ctx)
+	switch {
+	case err != nil:
+		return false, "could not read Saved games: " + firstErrorLine(err.Error())
+	case !found:
+		return false, "Saved games has no complete save from this machine. Start it, let it go idle and stop by itself, then try again"
+	case !launched.IsZero() && at.Before(launched):
+		return false, "the games have not been saved since the machine last started. Start it, let it go idle and stop by itself, then try again"
+	}
+	return true, ""
 }
 
 func volumeGB(ctx context.Context, c DiskAPI, vol string) (int, error) {
@@ -144,9 +197,30 @@ func (d Deps) Disk(ctx context.Context, c DiskAPI, asJSON bool) int {
 	st := DiskStatus{StepGB: provision.ExtraDiskStepGB}
 	if s, err := d.Box.State(ctx); err != nil {
 		return d.die(err.Error())
-	} else if s == "running" {
-		if _, ok := d.Box.IP(ctx); ok {
-			st.Running = true
+	} else {
+		st.State = s
+		if s == "running" {
+			if _, ok := d.Box.IP(ctx); ok {
+				st.Running = true
+			}
+		}
+	}
+	if st.State == "stopped" {
+		vol, _, launched, stopped, err := diskFacts(ctx, c, d.Box.ID)
+		if err != nil {
+			return d.die(firstErrorLine(err.Error()))
+		}
+		st.StoppedAt = stopped
+		if v := strings.TrimSpace(d.Env.Get("GAME_ARCHIVE_EXPIRY_DAYS")); v != "" {
+			st.ExpiryDays, _ = strconv.Atoi(v)
+		} else {
+			st.ExpiryDays = 14
+		}
+		if vol != "" {
+			if gb, err := volumeGB(ctx, c, vol); err == nil {
+				st.ExtraGB = gb
+			}
+			st.Removable, st.Why = d.removable(ctx, launched)
 		}
 	}
 	if st.Running {
@@ -157,6 +231,7 @@ func (d Deps) Disk(ctx context.Context, c DiskAPI, asJSON bool) int {
 		if vol != "" {
 			if gb, err := volumeGB(ctx, c, vol); err == nil {
 				st.Disk = gb
+				st.ExtraGB = gb
 			}
 		}
 		st.Second = vol == ""
@@ -294,6 +369,16 @@ df -h "$mnt" | tail -1`
 // under a running Steam). From then on the machine has a disk of its own to
 // grow, and the next Add disk just makes that one bigger.
 func (d Deps) addSecondDisk(ctx context.Context, c DiskAPI, zone string, gb int) int {
+	vol, code := d.makeAndAttach(ctx, c, zone, gb)
+	if vol == "" {
+		return code
+	}
+	return d.setUpExtra(ctx, c, vol, gb)
+}
+
+// makeAndAttach makes the disk and connects it to the machine, running or
+// stopped (AWS attaches to either). "" and the exit code when it could not.
+func (d Deps) makeAndAttach(ctx context.Context, c DiskAPI, zone string, gb int) (string, int) {
 	d.Out.SayID("disk.make", fmt.Sprintf("Making a %d GB disk", gb))
 	tagKey := d.Box.TagKey
 	if tagKey == "" {
@@ -304,16 +389,14 @@ func (d Deps) addSecondDisk(ctx context.Context, c DiskAPI, zone string, gb int)
 		AvailabilityZone: aws.String(zone), Size: aws.Int32(int32(gb)), VolumeType: ec2types.VolumeTypeGp3,
 		TagSpecifications: []ec2types.TagSpecification{{ResourceType: ec2types.ResourceTypeVolume, Tags: tags}}})
 	if err != nil {
-		return d.die("AWS would not make the disk: " + firstErrorLine(err.Error()))
+		return "", d.die("AWS would not make the disk: " + firstErrorLine(err.Error()))
 	}
 	vol := aws.ToString(cv.VolumeId)
 	// Whatever happens after this, the disk exists and bills: it is removed again
 	// if it cannot be put to use, rather than left behind.
-	fail := func(text string) int {
-		if _, err := c.DeleteVolume(context.WithoutCancel(ctx), &ec2.DeleteVolumeInput{VolumeId: aws.String(vol)}); err != nil {
-			d.Out.LogAs("warn", "the new disk could not be removed again; it is tagged for cg, and cg destroy takes it")
-		}
-		return d.die(text)
+	fail := func(text string) (string, int) {
+		d.dropVolume(ctx, c, vol)
+		return "", d.die(text)
 	}
 	if !d.waitVolume(ctx, c, vol, "available") {
 		return fail("the new disk did not become ready")
@@ -323,7 +406,7 @@ func (d Deps) addSecondDisk(ctx context.Context, c DiskAPI, zone string, gb int)
 		return fail("AWS would not connect the disk: " + firstErrorLine(err.Error()))
 	}
 	if !d.waitVolume(ctx, c, vol, "in-use") {
-		return d.die("the new disk is made but did not connect; cg destroy removes it, or try again")
+		return "", d.die("the new disk is made but did not connect; cg destroy removes it, or try again")
 	}
 	// So that it goes with the machine and stops billing when the machine goes.
 	if _, err := c.ModifyInstanceAttribute(ctx, &ec2.ModifyInstanceAttributeInput{
@@ -332,10 +415,23 @@ func (d Deps) addSecondDisk(ctx context.Context, c DiskAPI, zone string, gb int)
 			DeviceName: aws.String(extraDevice), Ebs: &ec2types.EbsInstanceBlockDeviceSpecification{VolumeId: aws.String(vol), DeleteOnTermination: aws.Bool(true)}}}}); err != nil {
 		d.Out.LogAs("warn", "the disk was not marked to go with the machine; cg destroy still removes it")
 	}
+	return vol, 0
+}
+
+// dropVolume deletes a disk that could not be put to use, rather than leave it billing.
+func (d Deps) dropVolume(ctx context.Context, c DiskAPI, vol string) {
+	if _, err := c.DeleteVolume(context.WithoutCancel(ctx), &ec2.DeleteVolumeInput{VolumeId: aws.String(vol)}); err != nil {
+		d.Out.LogAs("warn", "the new disk could not be removed again; it is tagged for cg, and cg destroy takes it")
+	}
+}
+
+// setUpExtra formats and mounts the connected disk, on the running machine.
+func (d Deps) setUpExtra(ctx context.Context, c DiskAPI, vol string, gb int) int {
 	d.Out.SayID("disk.copy", "Setting the new disk up")
 	script, err := extraScript()
 	if err != nil {
-		return fail("the app is missing a file it needs: " + err.Error())
+		d.dropVolume(ctx, c, vol)
+		return d.die("the app is missing a file it needs: " + err.Error())
 	}
 	if err := d.relay(ctx, remote("bash", "-c", script)); err != nil {
 		d.said(err)
@@ -410,3 +506,42 @@ grep -q '^LABEL=cgextra ' /etc/fstab || echo 'LABEL=cgextra /scratch2 ext4 defau
 mountpoint -q /scratch2 || sudo mount /scratch2
 sudo mkdir -p /scratch2/steam/steamapps/common
 sudo chown -R ubuntu:ubuntu /scratch2`
+
+// RemoveDisk is `cg disk remove`: delete the games disk of a STOPPED machine.
+// The games are in Saved games, and the disk is $0.0912 a GB-month for nothing.
+// It refuses unless the archive says everything was saved since the machine
+// last started, because this deletes the only other copy of whatever was not.
+func (d Deps) RemoveDisk(ctx context.Context, c DiskAPI) int {
+	if d.Box.ID == "" {
+		return d.die("there is no game PC yet")
+	}
+	if s, err := d.Box.State(ctx); err != nil {
+		return d.die(firstErrorLine(err.Error()))
+	} else if s != "stopped" {
+		return d.die("the game PC is " + s + "; a disk can only be removed while it is stopped")
+	}
+	d.Out.SayID("disk.find", "Looking at the game PC's disks")
+	vol, _, launched, _, err := diskFacts(ctx, c, d.Box.ID)
+	if err != nil {
+		return d.die(firstErrorLine(err.Error()))
+	}
+	if vol == "" {
+		return d.die("this game PC has no added disk")
+	}
+	if ok, why := d.removable(ctx, launched); !ok {
+		return d.die("not removing the disk: " + why)
+	}
+	d.Out.SayID("disk.remove", "Disconnecting the disk")
+	if _, err := c.DetachVolume(ctx, &ec2.DetachVolumeInput{VolumeId: aws.String(vol), InstanceId: aws.String(d.Box.ID)}); err != nil {
+		return d.die("AWS would not disconnect the disk: " + firstErrorLine(err.Error()))
+	}
+	if !d.waitVolume(ctx, c, vol, "available") {
+		return d.die("the disk did not disconnect; nothing was deleted. Try again")
+	}
+	d.Out.SayID("disk.delete", "Deleting the disk")
+	if _, err := c.DeleteVolume(ctx, &ec2.DeleteVolumeInput{VolumeId: aws.String(vol)}); err != nil {
+		return d.die("AWS would not delete the disk: " + firstErrorLine(err.Error()))
+	}
+	d.Out.SayID("disk.removed", "Done: the games disk is gone. Playing again makes a new one and brings your games back from Saved games")
+	return 0
+}

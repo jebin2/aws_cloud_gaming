@@ -215,10 +215,23 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			}
 			return hostcmd.Run(ctx, hostcmd.New(get, env, out), []string{"open", name}, false, out)
 		}
-		d, _, err := boxcmd.New(ctx, get, env, out)
+		d, c, err := boxcmd.New(ctx, get, env, out)
 		if err != nil {
 			out.Die(err.Error())
 			return 1
+		}
+		// --extra-gb N --extra-apps 1,2: make a games disk and bring those games
+		// onto it (what Play asks after the disk was removed).
+		for i := 0; i+1 < len(args); i++ {
+			switch args[i] {
+			case "--extra-gb":
+				d.ExtraGB, _ = strconv.Atoi(args[i+1])
+			case "--extra-apps":
+				d.ExtraApps = args[i+1]
+			}
+		}
+		if d.ExtraGB > 0 {
+			d.DiskAWS = c
 		}
 		return d.Open(ctx)
 	case "stop", "down":
@@ -255,6 +268,14 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 		if err != nil {
 			out.Die(err.Error())
 			return 1
+		}
+		if len(args) > 0 && args[0] == "remove" || jsonFlag {
+			if x, xerr := boxcmd.NewDestroyDeps(ctx, config.Load(get, repoDir(get)), c, out); xerr == nil {
+				d.Pushed = x.PushedFunc()
+			}
+		}
+		if len(args) > 0 && args[0] == "remove" {
+			return d.RemoveDisk(ctx, c)
 		}
 		if len(args) > 0 && args[0] == "add" {
 			gb := 0

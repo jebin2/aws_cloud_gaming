@@ -687,6 +687,21 @@
 </dialog>
 
 <!-- A password, asked in passing: small, one field, and gone once answered. -->
+<!-- Playing a stopped machine whose games disk was removed: which games to bring
+     back onto a new one. -->
+<dialog id="playdlg" class="dlg min-w-[460px] max-w-[560px]">
+  <form method="dialog">
+    <p class="dlg-title">Which games do you want?</p>
+    <p class="dlg-sub" id="playdlg-sub"></p>
+    <div class="mt-space-md flex flex-col gap-space-xs max-h-[40vh] overflow-auto" id="playdlg-games"></div>
+    <p class="mt-space-md font-code-sm text-code-sm text-on-surface" id="playdlg-price"></p>
+    <menu class="dlg-actions">
+      <button value="no" class="btn" id="playdlg-no">Cancel</button>
+      <button value="yes" class="btn btn-primary" id="playdlg-yes">Start and play</button>
+    </menu>
+  </form>
+</dialog>
+
 <dialog id="pwdlg" class="dlg w-[24rem] max-w-[calc(100vw-2rem)]">
   <form method="dialog">
     <p class="dlg-title" id="pwdlg-title">Password</p>

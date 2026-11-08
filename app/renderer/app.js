@@ -516,6 +516,36 @@ function askPing(s) {
   runCg(['ping', '--json'], { json: 'ping', group: 'refresh' }).then(() => { pingBusy = false; });
 }
 
+// A stopped machine's added games disk, read once per machine: how big it is and
+// whether Saved games has everything on it (so deleting it loses nothing).
+// A disk's rupees a month, from the rate cg read. null when it has not been read.
+const diskMonthInr = gb => {
+  const r = (statusNow && statusNow.rates) || {};
+  return r.ebs_gb_month && r.inr_per_usd ? gb * r.ebs_gb_month * r.inr_per_usd : null;
+};
+let stoppedDisk = null, stoppedDiskFor = '';
+async function readStoppedDisk(s) {
+  const b = s.box;
+  if (!b || b.state !== 'stopped') { stoppedDisk = null; stoppedDiskFor = ''; return; }
+  if (stoppedDiskFor === b.id) return;
+  stoppedDiskFor = b.id;
+  try { stoppedDisk = JSON.parse(await runCg(['disk', '--json'], { capture: true })); }
+  catch { stoppedDisk = null; stoppedDiskFor = ''; }
+  paintMachineCards();
+}
+// The machines whose games disk this app removed: playing one asks which games
+// to bring back, because they are no longer on it.
+const diskRemoved = {
+  has(id) { try { return (JSON.parse(localStorage.getItem('cg-disk-removed') || '{}'))[id] === 1; } catch { return false; } },
+  set(id, on) {
+    try {
+      const m = JSON.parse(localStorage.getItem('cg-disk-removed') || '{}');
+      if (on) m[id] = 1; else delete m[id];
+      localStorage.setItem('cg-disk-removed', JSON.stringify(m));
+    } catch { /* a convenience: playing without the question still works */ }
+  },
+};
+
 function paintStatus(s) {
   statusAt = new Date().toISOString();
   const wasUp = statusNow && statusNow.box && statusNow.box.state === 'running';
@@ -537,6 +567,7 @@ function paintStatus(s) {
   sessionNow = s.session || null;
   paintSession();
   paintDash();
+  readStoppedDisk(s);
 }
 
 // ── The dashboard ───────────────────────────────────────────────────────────
@@ -699,6 +730,19 @@ function renderMachineCard(card) {
   mid.append(lines);
   card.append(top, mid);
   if (warn.length) { const w = el('p', 'font-code-sm text-code-sm text-tertiary mt-space-sm', warn.join(' · ')); w.dataset.f = 'warn'; card.append(w); }
+  // A stopped machine: what it still costs, and when it goes if left alone.
+  if (box && box.state === 'stopped' && stoppedDisk) {
+    const lines = [];
+    if (stoppedDisk.extra_gb > 0) {
+      const inr = diskMonthInr(stoppedDisk.extra_gb);
+      lines.push(`Games disk ${stoppedDisk.extra_gb} GB${inr != null ? `, about ${rs(inr)} a month` : ''}.`);
+    }
+    if (stoppedDisk.stopped_at && stoppedDisk.expiry_days > 0) {
+      const gone = new Date(Date.parse(stoppedDisk.stopped_at) + stoppedDisk.expiry_days * 86400000);
+      lines.push(`Deleted automatically on ${gone.toLocaleDateString([], { day: 'numeric', month: 'short' })} unless you start it.`);
+    }
+    if (lines.length) { const n = el('p', 'font-code-sm text-code-sm text-on-surface-variant mt-space-sm', lines.join(' ')); n.dataset.f = 'stopnote'; card.append(n); }
+  }
   if (note) { const n = el('p', 'font-code-sm text-code-sm text-outline mt-space-sm', note); n.dataset.f = 'note'; card.append(n); }
   return f;
 }
@@ -740,6 +784,9 @@ function mountMachineCard(box, p) {
     const q = btn('quality', 'btn', null, null, 'Stream quality');
     q.onclick = () => goSetting(settingEl('GAME_RES'));
     btn('adddisk', 'btn', null, null, 'Add disk').onclick = () => openAddDisk();
+    const rm = btn('removedisk', 'btn', null, null, 'Remove game disk');
+    rm.hidden = true;
+    rm.onclick = () => removeGameDisk();
   }
   // Home never shows it - Details does, as a machine of yours's tile does - but
   // its handler is the one every delete button calls.
@@ -773,7 +820,7 @@ function paintMachineCards() {
       card.textContent = '';
       const t = el('p', 'font-headline-lg text-headline-lg', 'AWS needs you'); t.dataset.f = 'title';
       card.append(t, el('p', 'font-body-md text-body-md text-on-surface-variant mt-space-xs', stuck.problem.title));
-      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk'] : [])]) $(`${p}-${b}`).hidden = true;
+      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk', 'removedisk'] : [])]) $(`${p}-${b}`).hidden = true;
       $(`${p}-busy`).hidden = true;
       continue;
     }
@@ -794,7 +841,7 @@ function paintMachineCards() {
                     ...(why ? [el('p', 'font-body-md text-body-md text-on-surface-variant mt-space-xs', why)]
                             : [el('span', 'skel mt-space-xs h-9 w-48'), el('span', 'skel mt-space-sm h-4 w-72')]));
       }
-      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk'] : [])]) $(`${p}-${b}`).hidden = true;
+      for (const b of ['build', 'open', 'watch', 'destroy', ...(p === 'b' ? ['change', 'adddisk', 'removedisk'] : [])]) $(`${p}-${b}`).hidden = true;
       $(`${p}-busy`).hidden = !!why;
       // Nothing to look into yet: a Details button over a skeleton opens a page
       // that has nothing to say either. Once there is a reason, it is the way in.
@@ -821,6 +868,12 @@ function paintMachineCards() {
       // Always there while the machine is up: more room is wanted mid-game as
       // often as before the build.
       $('b-adddisk').hidden = !running || building;
+      // Only a stopped machine has a disk that can go on its own; it waits for
+      // the archive to say every game is saved, and says what it is waiting for.
+      const rd = $('b-removedisk');
+      rd.hidden = !(box && box.state === 'stopped' && stoppedDisk && stoppedDisk.extra_gb > 0) || building;
+      rd.disabled = !(stoppedDisk && stoppedDisk.removable);
+      rd.title = stoppedDisk && !stoppedDisk.removable ? stoppedDisk.why || '' : 'Delete the games disk; the games stay in Saved games';
       $('b-quality').disabled = !settingEl('GAME_RES');
       // Disconnecting deletes the machine too, but not from under a build.
       $('b-aws-remove').disabled = building;
@@ -7445,8 +7498,75 @@ function retryBuild() {
   return buildWith(r.apps || 'none', r.games || 0, r.gamesGb || 0);
 }
 
-const play = () => {
+async function removeGameDisk() {
+  const d = stoppedDisk, id = statusNow && statusNow.box && statusNow.box.id;
+  if (!d || !d.removable || !id) return;
+  const inr = diskMonthInr(d.extra_gb);
+  const ok = await askConfirm({
+    title: 'Remove the games disk?',
+    body: `The ${d.extra_gb} GB disk is deleted${inr != null ? `, which saves about ${rs(inr)} a month` : ''}.\n\n`
+        + 'Your games stay in Saved games. The next time you play, you pick which games to bring back, and a new disk is made for them.\n\n'
+        + 'The machine itself stays, so it still starts quickly.',
+    yes: 'Remove disk', danger: true,
+  });
+  if (!ok) return;
+  const done = await libraryRun(['disk', 'remove'], 'Removing the games disk', null, null, () => 'Nothing was deleted.');
+  if (done) {
+    $('refdlg').close();
+    diskRemoved.set(id, true);
+    stoppedDiskFor = '';
+    note('Games disk removed', 'text-primary');
+    await readStoppedDisk(statusNow);
+  }
+}
+// Which games to bring back onto the new disk. Resolves to {apps, gb}, or null on Cancel.
+function askPlayGames() {
+  const games = ((libNow && !libNow.error && libNow.games) || []).slice().sort((a, b) => b.bytes - a.bytes);
+  if (!games.length) return Promise.resolve({ apps: [], gb: 0 });
+  const dlg = $('playdlg'), list = $('playdlg-games');
+  const GB = 1073741824, reserve = 20;
+  const picked = new Set(games.map(g => String(g.appid)));
+  $('playdlg-sub').textContent = 'These are in Saved games. Pick the ones to bring back; a new disk is made for them.';
+  const size = () => {
+    const bytes = games.filter(g => picked.has(String(g.appid))).reduce((n, g) => n + g.bytes, 0);
+    return picked.size ? Math.max(10, Math.ceil((bytes / GB + reserve) / 10) * 10) : 0;
+  };
+  const paint = () => {
+    const gb = size();
+    const month = gb ? diskMonthInr(gb) : null;
+    $('playdlg-price').textContent = gb
+      ? `New disk: ${gb} GB${month != null ? `, about ${rs(month)} a month while it exists` : ''}.`
+      : 'No games picked: the machine starts without a games disk.';
+  };
+  list.textContent = '';
+  for (const g of games) {
+    const row = el('label', 'flex items-center gap-space-sm font-body-md text-body-md');
+    const cb = el('input'); cb.type = 'checkbox'; cb.checked = true;
+    cb.onchange = () => { if (cb.checked) picked.add(String(g.appid)); else picked.delete(String(g.appid)); paint(); };
+    row.append(cb, el('span', 'grow', g.name || String(g.appid)), el('span', 'font-code-sm text-code-sm text-outline', `${(g.bytes / GB).toFixed(1)} GB`));
+    list.append(row);
+  }
+  paint();
+  return new Promise(resolve => {
+    dlg.onclose = () => resolve(dlg.returnValue === 'yes' ? { apps: [...picked], gb: size() } : null);
+    dlg.showModal();
+  });
+}
+
+const play = async () => {
   if (sessionNow) return refresh();   // already streaming: re-check, start nothing
+  const b = statusNow && statusNow.box;
+  // Pressed before the disk was read: read it now, rather than start without asking.
+  if (b && b.state === 'stopped' && diskRemoved.has(b.id) && !stoppedDisk) { stoppedDiskFor = ''; await readStoppedDisk(statusNow); }
+  if (b && b.state === 'stopped' && diskRemoved.has(b.id) && stoppedDisk && stoppedDisk.extra_gb === 0) {
+    if (!libNow) await runCg(['library', 'list', '--json'], { json: 'library', group: 'refresh' }).catch(() => {});
+    const pick = await askPlayGames();
+    if (!pick) return;
+    diskRemoved.set(b.id, false);
+    stoppedDiskFor = '';
+    await readsSettled();   // the machine's own command runs alone: not while a read is still landing
+    if (pick.gb > 0) return startRun(['open', '--extra-gb', String(pick.gb), '--extra-apps', pick.apps.join(',')]);
+  }
   return startRun(['open']);
 };
 $('d-open').onclick = play;

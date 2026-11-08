@@ -336,3 +336,22 @@ When a download finishes, the phone is told once ("Game ready"): `game-notify.ti
 manifests every minute, remembers each game it saw downloading, and sends through `cg-notify` when that game
 is fully installed and neither paused nor waiting for an update. A game that was simply there says nothing.
 Off without `GAME_NTFY_URL`, like the box's other notifications.
+
+## Removing the games disk while the machine is stopped
+
+An on-demand machine that stops keeps its root disk, and its added games disk if it has one. The
+added disk is $0.0912 a GB-month and holds nothing that Saved games does not, so a stopped machine
+may drop it: the app's **Remove game disk** (`cg disk remove`). Playing again asks which of the
+saved games to bring back, makes a disk sized for them (their size plus 20 GB, to 10 GB steps) and
+connects it before the machine starts (`cg open --extra-gb N --extra-apps ids`). AWS allows
+attaching a disk to a stopped machine, and nothing bills for it until the machine runs.
+
+What makes deleting safe is one small object, `steam/pushed.json`. `cg-library push` removes it
+before it starts and writes it only when it ends having saved every game it found; a game skipped
+(Steam still working on it, a broken install) or a push that dies leaves none. The laptop deletes
+the disk only when the marker is newer than the machine's last start, and reads anything else, an
+unreadable answer included, as no. The fast drive (NVMe) is wiped on every stop and is never part of
+this; the root disk holds the system and the Steam login and stays with the machine.
+
+A machine left stopped is deleted by the cloud watchdog after `GAME_ARCHIVE_EXPIRY_DAYS` (14), with
+its games already saved; the stopped card says on which day.

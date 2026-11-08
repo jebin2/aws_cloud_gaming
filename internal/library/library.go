@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jebin2/aws_cloud_gaming/internal/bucket"
 )
@@ -86,6 +87,33 @@ func (l Library) IndexAt(ctx context.Context, b, region string) (apps []App, buc
 		return []App{}, false, nil
 	}
 	return ix.Apps, false, nil
+}
+
+// PushedAt is when the last push finished with every game it found saved, from
+// the marker the box writes then (and takes down when a push starts, so a push
+// that failed leaves none). found is false when there is no marker: nothing can
+// be said to be fully saved. An unreadable answer is an error, never "not found".
+func (l Library) PushedAt(ctx context.Context, b, region string) (at time.Time, found bool, err error) {
+	body, err := l.S3.Get(ctx, b, region, "steam/pushed.json")
+	if err != nil {
+		if r := Reason(err, b); r == "missing" {
+			return time.Time{}, false, nil
+		} else {
+			return time.Time{}, false, fmt.Errorf("%s", r)
+		}
+	}
+	var m struct {
+		At string `json:"at"`
+		OK bool   `json:"ok"`
+	}
+	if json.Unmarshal(body, &m) != nil || !m.OK {
+		return time.Time{}, false, nil
+	}
+	t, perr := time.Parse(time.RFC3339, m.At)
+	if perr != nil {
+		return time.Time{}, false, nil
+	}
+	return t, true, nil
 }
 
 // Orphan is a folder in the archive that the index does not know.

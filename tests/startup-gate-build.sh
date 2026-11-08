@@ -293,6 +293,76 @@ OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
 contains "being removed: no Delete"  "$(row AFTER)" "Play | acts="
 ENGINE=""
 
+echo "7e3. a stopped machine's games disk: what it costs, when it goes, and whether it may be removed"
+B5D="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1500));
+  document.querySelector('.nav-item[data-view=build]').click();
+  await new Promise(r => setTimeout(r, 60));
+  const q = f => (document.querySelector('#b-machine-card [data-f=' + f + ']') || {}).textContent;
+  const rd = document.getElementById('b-removedisk');
+  return 'note=' + q('stopnote') + ' | remove=' + (rd.hidden ? 'hidden' : rd.disabled ? 'disabled' : 'ready')
+    + ' | why=' + rd.title;
+};"
+ENGINE="$B5D"
+for D in '{"state":"stopped","extra_gb":160,"removable":true,"stopped_at":"2026-11-08T12:00:00Z","expiry_days":14}' \
+         '{"state":"stopped","extra_gb":160,"removable":false,"why":"Saved games has no complete save from this machine.","stopped_at":"2026-11-08T12:00:00Z","expiry_days":14}' \
+         '{"state":"stopped","extra_gb":0,"removable":false,"stopped_at":"2026-11-08T12:00:00Z","expiry_days":0}'; do
+  OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP, \"disk --json\": $D,
+    \"status --json\": $(st "$BOXS" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+  case $D in
+    *'"removable":true'*)
+      contains "can be removed: the disk and its cost"  "$(row AFTER)" "note=Games disk 160 GB, about "
+      contains "  and the day it would be deleted"      "$(row AFTER)" "Deleted automatically on "
+      contains "  the button is ready"                  "$(row AFTER)" "remove=ready" ;;
+    *'"extra_gb":160'*)
+      contains "not saved yet: the button waits"        "$(row AFTER)" "remove=disabled"
+      contains "  and says what it waits for"           "$(row AFTER)" "why=Saved games has no complete save" ;;
+    *)
+      contains "no added disk: no button"               "$(row AFTER)" "remove=hidden"
+      lacks    "  and no deletion date when it is off"  "$(row AFTER)" "Deleted automatically" ;;
+  esac
+done
+ENGINE=""
+
+echo "7e4. playing a machine whose games disk was removed asks which games to bring back"
+B5P="window.__after = async () => {
+  localStorage.setItem('cg-disk-removed', JSON.stringify({'i-1': 1}));
+  // Until the machine and its disk have both been read, not for a moment.
+  for (let i = 0; i < 120 && !(statusNow && stoppedDisk); i++) await new Promise(r => setTimeout(r, 20));
+  document.querySelector('.nav-item[data-view=build]').click();
+  await new Promise(r => setTimeout(r, 30));
+  const wait = () => new Promise(r => setTimeout(r, 30));
+  const btn = document.getElementById('b-open');
+  const label = btn.textContent.trim().replace(/^[^A-Za-z]+/, '');
+  btn.click();
+  await wait();
+  const dlg = document.getElementById('playdlg');
+  const rows = [...dlg.querySelectorAll('#playdlg-games label')].map(l => l.innerText.replace(/\\s+/g, ' ').trim());
+  const price = document.getElementById('playdlg-price').textContent;
+  // Untick the small one, then start.
+  dlg.querySelectorAll('#playdlg-games input')[1].click();
+  const price2 = document.getElementById('playdlg-price').textContent;
+  // The page's own close handler, called here: a close event is queued behind the
+  // virtual clock this page runs on and may not arrive before the answer is read.
+  dlg.close('yes');
+  dlg.onclose();
+  // The run waits for any read still in flight, so look for it rather than for a moment.
+  for (let i = 0; i < 100 && !window.__ran.some(l => l.includes('--extra-gb')); i++) await new Promise(r => setTimeout(r, 30));
+  return 'label=' + label + ' | open=' + dlg.open + ' | rows=' + rows.join(';') + ' | price=' + price + ' | price2=' + price2
+    + ' | ran=' + window.__ran.filter(l => l.includes('--extra-gb')).join(',') + ' | again=' + (localStorage.getItem('cg-disk-removed') || '');
+};"
+ENGINE="$B5P"
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"disk --json\": {\"state\":\"stopped\",\"extra_gb\":0,\"removable\":false,\"stopped_at\":\"2026-11-08T12:00:00Z\",\"expiry_days\":14},
+  \"library list --json\": {\"games\": [{\"appid\": 111, \"name\": \"Big Game\", \"bytes\": 107374182400}, {\"appid\": 222, \"name\": \"Small Game\", \"bytes\": 10737418240}], \"bucket\": \"b\", \"total_bytes\": 118111600640},
+  \"status --json\": $(st "$BOXS" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "the button says it starts the machine"  "$(row AFTER)" "label=Start and play"
+contains "the popup lists the saved games, biggest first" "$(row AFTER)" "rows=Big Game 100.0 GB;Small Game 10.0 GB"
+contains "  and sizes the new disk for all of them with room to spare" "$(row AFTER)" "New disk: 130 GB"
+contains "  and again when one is unticked"        "$(row AFTER)" "price2=New disk: 120 GB"
+contains "starting passes the size and the games" "$(row AFTER)" "ran=open --extra-gb 120 --extra-apps 111"
+ENGINE=""
+
 echo "7f. play is a session, as steps; closing Moonlight just ends it"
 # cg open announces no steps, so the card used to say "Starting the stream" over
 # an empty list for the whole session.

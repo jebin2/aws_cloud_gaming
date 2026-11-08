@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -29,7 +30,16 @@ type fakeDisk struct {
 	newState    string
 	newAttached bool
 	deleted     []string
-	size        int32 // the size asked for
+	detached    []string
+	launched    time.Time // the machine's launch time; zero leaves it unset
+	size        int32     // the size asked for
+}
+
+func (f *fakeDisk) DetachVolume(_ context.Context, in *ec2.DetachVolumeInput, _ ...func(*ec2.Options)) (*ec2.DetachVolumeOutput, error) {
+	f.detached = append(f.detached, aws.ToString(in.VolumeId))
+	f.extraVol = ""
+	f.newVol, f.newState, f.newAttached = aws.ToString(in.VolumeId), "available", false
+	return &ec2.DetachVolumeOutput{}, nil
 }
 
 func (f *fakeDisk) DescribeInstances(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
@@ -37,6 +47,9 @@ func (f *fakeDisk) DescribeInstances(context.Context, *ec2.DescribeInstancesInpu
 		BlockDeviceMappings: []ec2types.InstanceBlockDeviceMapping{{DeviceName: aws.String("/dev/sda1"), Ebs: &ec2types.EbsInstanceBlockDevice{VolumeId: aws.String("vol-root")}}}}
 	if f.gamesVol != "" {
 		in.BlockDeviceMappings = append(in.BlockDeviceMappings, ec2types.InstanceBlockDeviceMapping{DeviceName: aws.String("/dev/sdf"), Ebs: &ec2types.EbsInstanceBlockDevice{VolumeId: aws.String(f.gamesVol)}})
+	}
+	if !f.launched.IsZero() {
+		in.LaunchTime = aws.Time(f.launched)
 	}
 	if f.extraVol != "" {
 		in.BlockDeviceMappings = append(in.BlockDeviceMappings, ec2types.InstanceBlockDeviceMapping{DeviceName: aws.String("/dev/sdg"), Ebs: &ec2types.EbsInstanceBlockDevice{VolumeId: aws.String(f.extraVol)}})
@@ -285,5 +298,106 @@ func TestAddDiskNeedsARunningMachine(t *testing.T) {
 	r = diskRig(t)
 	if rc := r.d.AddDisk(context.Background(), &fakeDisk{}, 0); rc != 1 {
 		t.Errorf("how much? %s", r.w)
+	}
+}
+
+// A stopped machine with an added disk: whether it may be deleted depends on the
+// archive alone - a save that finished clean, after the machine last started.
+func stoppedRig(t *testing.T, pushed func(context.Context) (time.Time, bool, error)) (*rig, *fakeDisk) {
+	r := diskRig(t)
+	r.e.state = "stopped"
+	r.d.Pushed = pushed
+	f := &fakeDisk{extraVol: "vol-extra", extraGB: 160, launched: time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)}
+	return r, f
+}
+
+func TestStoppedDiskSaysWhetherItMayBeRemoved(t *testing.T) {
+	launch := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name   string
+		pushed func(context.Context) (time.Time, bool, error)
+		ok     bool
+		why    string
+	}{
+		{"saved after it started", func(context.Context) (time.Time, bool, error) { return launch.Add(time.Hour), true, nil }, true, ""},
+		{"no complete save", func(context.Context) (time.Time, bool, error) { return time.Time{}, false, nil }, false, "no complete save"},
+		{"saved before it started", func(context.Context) (time.Time, bool, error) { return launch.Add(-time.Hour), true, nil }, false, "not been saved since"},
+		{"archive unreadable", func(context.Context) (time.Time, bool, error) { return time.Time{}, false, fmt.Errorf("AccessDenied") }, false, "could not read Saved games"},
+	} {
+		r, f := stoppedRig(t, c.pushed)
+		if rc := r.d.Disk(context.Background(), f, true); rc != 0 {
+			t.Fatalf("%s: %s%s", c.name, r.o, r.w)
+		}
+		var st DiskStatus
+		if err := json.Unmarshal(r.o.Bytes(), &st); err != nil {
+			t.Fatalf("%v\n%s", err, r.o)
+		}
+		if st.State != "stopped" || st.ExtraGB != 160 || st.Removable != c.ok || !strings.Contains(st.Why, c.why) {
+			t.Errorf("%s: %+v", c.name, st)
+		}
+	}
+	r, _ := stoppedRig(t, nil)
+	r.d.Pushed = nil
+	if rc := r.d.Disk(context.Background(), &fakeDisk{extraVol: "vol-extra", extraGB: 160}, true); rc != 0 || strings.Contains(r.o.String(), `"removable": true`) {
+		t.Errorf("without a way to read the archive nothing is removable: %s", r.o)
+	}
+}
+
+func TestRemoveDiskDeletesOnlyAfterACompleteSave(t *testing.T) {
+	launch := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
+	r, f := stoppedRig(t, func(context.Context) (time.Time, bool, error) { return launch.Add(time.Hour), true, nil })
+	if rc := r.d.RemoveDisk(context.Background(), f); rc != 0 {
+		t.Fatalf("%s%s", r.o, r.w)
+	}
+	if len(f.detached) != 1 || f.detached[0] != "vol-extra" || len(f.deleted) != 1 || f.deleted[0] != "vol-extra" {
+		t.Errorf("detached %v, deleted %v", f.detached, f.deleted)
+	}
+
+	r, f = stoppedRig(t, func(context.Context) (time.Time, bool, error) { return time.Time{}, false, nil })
+	if rc := r.d.RemoveDisk(context.Background(), f); rc == 0 {
+		t.Errorf("no complete save must refuse: %s", r.o)
+	}
+	if len(f.detached) != 0 || len(f.deleted) != 0 {
+		t.Errorf("nothing may be touched: detached %v, deleted %v", f.detached, f.deleted)
+	}
+
+	r, f = stoppedRig(t, func(context.Context) (time.Time, bool, error) { return launch.Add(time.Hour), true, nil })
+	r.e.state = "running"
+	if rc := r.d.RemoveDisk(context.Background(), f); rc == 0 || len(f.deleted) != 0 {
+		t.Errorf("a running machine's disk is never removed: %s", r.o)
+	}
+	r, f = stoppedRig(t, func(context.Context) (time.Time, bool, error) { return launch.Add(time.Hour), true, nil })
+	f.extraVol = ""
+	if rc := r.d.RemoveDisk(context.Background(), f); rc == 0 {
+		t.Errorf("no disk to remove must say so: %s", r.o)
+	}
+}
+
+func TestPlayAfterRemovalMakesTheDiskBeforeTheMachineStarts(t *testing.T) {
+	r := diskRig(t)
+	r.e.state = "stopped"
+	f := &fakeDisk{}
+	r.d.DiskAWS, r.d.ExtraGB, r.d.ExtraApps = f, 95, "2358720,1245620"
+	if rc := r.d.extraBeforeStart(context.Background()); rc != 0 {
+		t.Fatalf("%s%s", r.o, r.w)
+	}
+	want := []string{"create 100GB gp3 ap-south-1b Name=", "attach vol-new /dev/sdg", "mark /dev/sdg vol-new delete-with-box=true"}
+	for i, w := range want {
+		if i >= len(f.calls) || !strings.HasPrefix(f.calls[i], w) {
+			t.Errorf("call %d: want %q, calls %v", i, w, f.calls)
+		}
+	}
+	// A disk that is already there is left alone.
+	r = diskRig(t)
+	f = &fakeDisk{extraVol: "vol-extra", extraGB: 160}
+	r.d.DiskAWS, r.d.ExtraGB = f, 95
+	if rc := r.d.extraBeforeStart(context.Background()); rc != 0 || len(f.calls) != 0 {
+		t.Errorf("a disk that is there is not made again: rc %d calls %v", rc, f.calls)
+	}
+	// Anything that is not a list of game ids never reaches the machine's shell.
+	r = diskRig(t)
+	r.d.DiskAWS, r.d.ExtraGB, r.d.ExtraApps = &fakeDisk{}, 95, "1; rm -rf /"
+	if rc := r.d.extraBeforeStart(context.Background()); rc == 0 {
+		t.Error("a game list with a shell command in it must be refused")
 	}
 }

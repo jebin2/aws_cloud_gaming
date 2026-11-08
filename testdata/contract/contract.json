@@ -6,6 +6,7 @@
     ["library", "clean"], ["library", "account"], ["library", "move"],
     ["library", "reset"], ["library", "keep-for"],
     ["disk", "add"],
+    ["disk", "remove"],
     ["creds", "set"],
     ["creds", "tailscale", "signin"],
     ["creds", "tailscale", "authkey"],

@@ -584,6 +584,15 @@ push_lock() {
   fi
 }
 
+# Written only by a push that saved every game it found. The laptop reads it to
+# decide whether the added games disk may be deleted while the machine is stopped.
+mark_pushed() {
+  local t; t=$(mktemp)
+  printf '{"at":"%s","ok":true}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$t"
+  "$S5" cp "$t" "$S3/pushed.json" >/dev/null 2>&1 || log "WARNING: could not write the push marker"
+  rm -f "$t"
+}
+
 cmd_push() {
   local force=0 verify=0 a
   for a in "$@"; do
@@ -603,6 +612,12 @@ cmd_push() {
   # a session that restored no games is exactly the one whose login is new.
   account_push
 
+  # "Everything on this machine is in the archive" is a claim, and only a push
+  # that finished clean may make it. The marker is taken down first, so a push
+  # that dies, is skipped or is cut off leaves none: the laptop reads its absence
+  # as "not safe to remove the games disk".
+  "$S5" rm "$S3/pushed.json" >/dev/null 2>&1 || true
+
   # The library must have been restored on THIS boot. Weaker than it was, now
   # that an absent app is never deleted - but it still stops a half-restored
   # game overwriting a complete one.
@@ -611,7 +626,7 @@ cmd_push() {
   fi
 
   local lib0="$LIB" libs; libs=$(all_libs)
-  local pushed_ids=" " any=0
+  local pushed_ids=" " any=0 bad=0
   local strategy=(--size-only)
   (( verify )) && strategy=()
   # Read once: the index is re-written inside the loop, and re-reading it per
@@ -632,6 +647,7 @@ cmd_push() {
         log "SKIPPING $name ($id): Steam says StateFlags=$flags - downloading, validating"
         log "  or needing repair. Pushing it would overwrite a complete archive with"
         log "  a partial copy. It will archive itself once Steam finishes."
+        bad=$((bad+1))
         continue
       fi
       bytes=$(app_bytes "$dir" "$id")
@@ -649,6 +665,7 @@ print(next((a.get("bytes",0) for a in apps if str(a.get("appid"))==appid), 0))' 
         log "SKIPPING $name ($id): local $(hb "$bytes") is less than half the archived $(hb "$archived")"
         log "  that looks like a broken install, not an uninstall. --force overrides;"
         log "  to remove it deliberately: cg library forget $id"
+        bad=$((bad+1))
         continue
       fi
       log "pushing $name ($id, $(hb "$bytes"))"
@@ -681,6 +698,7 @@ print(next((a.get("bytes",0) for a in apps if str(a.get("appid"))==appid), 0))' 
         "$S5" rm "$S3/steamapps/appmanifest_$id.acf" >/dev/null 2>&1 || true
         log "  $name is NOT archived - files uploaded but the manifest was withheld"
         log "  (a partial game that Steam thinks is installed is worse than none)"
+        bad=$((bad+1))
       fi
     done <<< "$apps"
     # Only the archive's own library owns this marker.
@@ -689,10 +707,12 @@ print(next((a.get("bytes",0) for a in apps if str(a.get("appid"))==appid), 0))' 
   LIB="$lib0"
   if (( ! any )); then
     log "no games installed - nothing to push (the archive is left alone)"
+    mark_pushed
     return 0
   fi
 
   date -Iseconds > "$STATE/last-push"
+  if (( bad == 0 )); then mark_pushed; else log "$bad game(s) were not saved - the archive does not yet hold everything"; fi
   log "pushed $n game(s) in $(( $(date +%s) - t0 ))s"
 }
 

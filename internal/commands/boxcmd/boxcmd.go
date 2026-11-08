@@ -46,6 +46,15 @@ type Deps struct {
 	Destroy func(ctx context.Context) int
 	// Force is --force.
 	Force bool
+	// Pushed is when the archive last had everything saved (the marker the box
+	// writes after a clean push); nil reads nothing, which is a "no".
+	Pushed func(ctx context.Context) (at time.Time, found bool, err error)
+	// ExtraGB and ExtraApps: cg open makes a disk of this size and restores
+	// these games (appids, comma separated) onto it. Zero and "" make none.
+	ExtraGB   int
+	ExtraApps string
+	// DiskAWS is AWS's disks, for the play that makes one; nil makes none.
+	DiskAWS DiskAPI
 	// Dial checks a TCP port; nil really dials.
 	Dial func(addr string, timeout time.Duration) error
 }
