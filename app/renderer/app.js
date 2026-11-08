@@ -4065,8 +4065,10 @@ function runBegin(kind, opts = {}) {
     run.idx = 0;
     if (!run.host) {
       // The machine has been billing since it launched, not since Play.
+      // A stopped machine bills from this start, not from the launch it had days ago.
       const box = liveBox();
-      run.billFrom = box && box.launched ? new Date(box.launched).getTime() : null;
+      run.billFrom = box && box.state !== 'running' ? Date.now()
+        : box && box.launched ? new Date(box.launched).getTime() : null;
       run.rate = buildRate();
     }
   }
@@ -4084,6 +4086,12 @@ function runEnter(defs, at) {
   run.steps[at] = runRow('');
   run.idx = at;
   run.wait = null;
+  // The machine was stopped when the page last looked. Once Play has started it,
+  // look again - once, not on a timer - so the card and the checks say running.
+  if (run.kind === 'open' && !run.host && defs[at] && defs[at].id === 'open.sunshine' && !run.reread) {
+    run.reread = true;
+    readFresh(['status', '--json'], 'status').catch(() => {});
+  }
   return true;
 }
 // cg names a stage by id; a screen follows the id and never the words.
