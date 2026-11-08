@@ -78,7 +78,13 @@ mkdir -p "$STATE"
 
 # Don't shut down while the user is still connecting / launching a game.
 uptime_min=$(( $(cut -d. -f1 /proc/uptime) / 60 ))
-(( uptime_min < BOOT_GRACE )) && exit 0
+if (( uptime_min < BOOT_GRACE )); then
+  # The count lives on the root disk, which a stop keeps. A machine that stopped
+  # itself at 15 of 15 would otherwise wake with 15 already counted and stop again
+  # at the first check after the grace, whatever the person was about to do.
+  echo 0 > "$STATE/idle" 2>/dev/null || true
+  exit 0
+fi
 
 counter() { # counter <iface> <tx|rx>; 0 if the interface is absent
   local f="/sys/class/net/$1/statistics/$2_bytes"

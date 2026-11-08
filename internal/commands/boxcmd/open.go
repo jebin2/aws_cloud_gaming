@@ -217,6 +217,11 @@ func (d Deps) Open(ctx context.Context) int {
 		d.Out.Echo("  WARNING: relayed, not direct - latency will suffer")
 	}
 
+	// A machine that stopped itself keeps its idle count on the root disk; older
+	// ones wake up already counted and stop again 20 minutes in. Said to be zero
+	// once it is reachable. Best effort: nothing about this may fail a play.
+	_ = d.relay(ctx, "sudo sh -c 'echo 0 > /var/lib/idle-watchdog/idle' 2>/dev/null || true")
+
 	if code := d.extraAfterStart(ctx); code != 0 {
 		return code
 	}

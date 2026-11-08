@@ -138,4 +138,15 @@ LOG="$T/log" PATH="$T/bin:$PATH" THRESHOLD=999999999999999 RX_THRESHOLD=99999999
   bash "$SRC" >/dev/null 2>&1
 check "downloading there: no shutdown" "$(grep -oE 'PUSH|SHUTDOWN' "$T/log" 2>/dev/null | tr '\n' ' ')" ""
 
+echo "8. a machine that stopped itself at the limit does not wake up already counted"
+# The count lives on the root disk, which a stop keeps. Waking with 3 of 3 stopped it
+# again at the first check after the boot grace, whatever the person was doing.
+rm -f "$T/log"; echo 3 > "$T/state/idle"
+LOG="$T/log" PATH="$T/bin:$PATH" THRESHOLD=999999999999999 RX_THRESHOLD=999999999999999 \
+  CG_NOTIFY_BIN="$PWD/host/cg-notify" UPLOAD_POLL_SEC=0.1 STATE="$T/state" IDLE_LIMIT=3 BOOT_GRACE=999999 IFACE=lo \
+  CG_LIBRARY_BIN="$T/bin/cg-library" SHUTDOWN_BIN="$T/bin/shutdown" \
+  bash "$SRC" >/dev/null 2>&1
+check "inside the boot grace: nothing happens"  "$(grep -oE 'PUSH|SHUTDOWN' "$T/log" 2>/dev/null | tr '\n' ' ')" ""
+check "  and the old count is cleared"           "$(cat "$T/state/idle")" "0"
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]
