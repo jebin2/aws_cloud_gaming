@@ -645,9 +645,10 @@ function renderMachineCard(card) {
                       : idleAfter ? `Auto-stops after ${idleAfter} idle.`
                                   : 'Auto-stops when idle.';
   } else if (box) {
-    title = `Machine ${box.state}`;
+    title = box.state === 'stopped' ? 'Machine stopped' : `Machine ${box.state}`;
     sub = box.state === 'pending' ? 'Starting.' : box.state === 'stopping' || box.state === 'shutting-down'
-      ? 'Shutting down.' : 'Not running.';
+      ? 'Shutting down.'
+      : box.state === 'stopped' ? 'Your games and setup are kept. Only the disk is billed.' : 'Not running.';
   } else {
     title = 'No machine running';
   }
@@ -672,7 +673,7 @@ function renderMachineCard(card) {
   const head = el('div', 'min-w-0');
   if (page) {
     const [tone, word] = credErr ? ['text-error', 'Needs you'] : building ? ['text-primary', 'Building']
-      : running ? ['text-primary', sessionNow ? 'Streaming' : 'Online'] : box ? ['text-tertiary', 'Not running']
+      : running ? ['text-primary', sessionNow ? 'Streaming' : 'Online'] : box ? ['text-tertiary', box.state === 'stopped' ? 'Stopped' : 'Not running']
       : ['text-outline', 'Not built'];
     const w = el('span', `font-label-caps text-label-caps uppercase ${tone}`, word); w.dataset.f = 'word';
     head.append(w);
@@ -806,9 +807,15 @@ function paintMachineCards() {
     const running = !!(box && box.state === 'running');
     $(`${p}-busy`).hidden = !building;
     $(`${p}-build`).hidden = !!box || building || !!(s.error && s.error.credentials);
-    $(`${p}-open`).hidden = !running || building;
+    // A stopped machine is started by Play too: cg open starts it first.
+    const stopped = !!(box && box.state === 'stopped');
+    $(`${p}-open`).hidden = !(running || stopped) || building;
+    $(`${p}-open`).dataset.stopped = stopped ? 'yes' : '';
+    const ob = $(`${p}-open`).lastChild;
+    if (ob && ob.nodeType === 3) ob.textContent = sessionNow ? 'Streaming' : stopped ? 'Start and play' : 'Play';
     $(`${p}-watch`).hidden = !building || p === 'b';
-    $(`${p}-destroy`).hidden = !box || building || p === 'd';
+    // Nothing to delete once AWS is already removing it.
+    $(`${p}-destroy`).hidden = !box || building || p === 'd' || ['shutting-down', 'terminated'].includes(box.state);
     if (p === 'b') {
       $('b-change').hidden = !!box || building;
       // Always there while the machine is up: more room is wanted mid-game as
@@ -973,7 +980,7 @@ function paintSession() {
     const b = $(id);
     if (!b) continue;
     const label = b.lastChild;
-    if (label && label.nodeType === 3) label.textContent = live ? 'Streaming' : 'Play';
+    if (label && label.nodeType === 3 && b.dataset.stopped !== 'yes') label.textContent = live ? 'Streaming' : 'Play';
     b.title = live
       ? `a session is already open`
       : 'Opens Moonlight and connects to your machine';
@@ -7443,6 +7450,8 @@ $('d-destroy').onclick = async () => {
     body: (sessionNow ? 'The current session is closed first.\n\n' : '')
         + 'Games are saved first; nothing is deleted if saving fails.\n\n'
         + 'The machine and its disk are deleted.'
+        + (statusNow && statusNow.box && statusNow.box.state === 'stopped'
+           ? '\n\nIt is only stopped: Start and play brings it back with your games, and only the disk is billed meanwhile. Delete it to stop that charge too.' : '')
         + (((statusNow || {}).build || {}).last_min != null
            ? ` The last build took ${statusNow.build.last_min} min.` : ''),
     yes: 'Delete machine', danger: true,

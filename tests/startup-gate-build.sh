@@ -269,6 +269,30 @@ contains "  how long it has been up"  "$(row AFTER)" "meta=Up "
 contains "  play, or delete it"       "$(row AFTER)" "acts=b-open,b-destroy"
 ENGINE=""
 
+echo "7e2. a stopped machine is started by Play; one AWS is removing offers nothing"
+B5S="window.__after = async () => {
+  await new Promise(r => setTimeout(r, 1200));
+  document.querySelector('.nav-item[data-view=build]').click();
+  await new Promise(r => setTimeout(r, 30));
+  const q = f => (document.querySelector('#b-machine-card [data-f=' + f + ']') || {}).textContent;
+  return 'title=' + q('title') + ' | word=' + q('word') + ' | meta=' + q('sub')
+    + ' | play=' + document.getElementById('b-open').textContent.trim()
+    + ' | acts=' + ['b-open', 'b-destroy'].filter(b => !document.getElementById(b).hidden).join(',');
+};"
+ENGINE="$B5S"
+BOXS='{"id": "i-1", "state": "stopped", "type": "g4dn.xlarge", "lifecycle": "normal", "launched": "2026-01-01T00:00:00Z"}'
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st "$BOXS" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "stopped: says so"               "$(row AFTER)" "title=Machine stopped | word=Stopped"
+contains "  and what is kept"             "$(row AFTER)" "Your games and setup are kept. Only the disk is billed."
+contains "  Play starts it"               "$(row AFTER)" "Start and play | acts=b-open"
+contains "  and Delete is still there"    "$(row AFTER)" "acts=b-open,b-destroy"
+BOXD='{"id": "i-1", "state": "shutting-down", "type": "g4dn.xlarge", "lifecycle": "spot", "launched": "2026-01-01T00:00:00Z"}'
+OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
+  \"status --json\": $(st "$BOXD" '{"bytes": 0}' '{"volumes_gb": 0}' '{"limit": 57}')}")
+contains "being removed: no Delete"  "$(row AFTER)" "Play | acts="
+ENGINE=""
+
 echo "7f. play is a session, as steps; closing Moonlight just ends it"
 # cg open announces no steps, so the card used to say "Starting the stream" over
 # an empty list for the whole session.
