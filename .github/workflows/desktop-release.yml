@@ -271,7 +271,7 @@ jobs:
 
             The AppImage is listed last on purpose. AppImage type-2 needs `libfuse.so.2`, which
             distributions have largely moved past - on Arch that means `pacman -S fuse2` first,
-            or running it as `./ayis-*.AppImage --appimage-extract-and-run`. The `.tar.gz` needs
+            or running it as `./ayis-*-linux-*.AppImage --appimage-extract-and-run`. The `.tar.gz` needs
             nothing at all.
 
             ## Before it can play

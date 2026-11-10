@@ -1,5 +1,5 @@
 {
-  "name": "ayis-app",
+  "name": "ayis",
   "version": "0.1.0",
   "private": true,
   "description": "Desktop viewer for ayis - the scripts stay the engine",
@@ -30,6 +30,7 @@
       "output": "dist"
     },
     "linux": {
+      "artifactName": "ayis-${version}-linux-${arch}.${ext}",
       "target": [
         "AppImage",
         "deb",
