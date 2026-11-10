@@ -12,16 +12,16 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/sweep"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	wd "github.com/jebin2/aws_cloud_gaming/internal/watchdog"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/commands/sweep"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
+	wd "github.com/jebin2/ayis/internal/watchdog"
 )
 
-const usage = "usage: cg quota [status|request [ondemand|spot]|appeal [ondemand|spot]]"
+const usage = "usage: ayis quota [status|request [ondemand|spot]|appeal [ondemand|spot]]"
 
-// Run is `cg quota`.
+// Run is `ayis quota`.
 func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string, jsonFlag bool, out *output.Out) int {
 	sub := "status"
 	if len(args) > 0 {
@@ -66,7 +66,7 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string,
 		return 0
 	case "request":
 		if kind != "ondemand" && kind != "spot" {
-			out.Die("usage: cg quota request [ondemand|spot]")
+			out.Die("usage: ayis quota request [ondemand|spot]")
 			return 1
 		}
 		return Asker{Quota: q, Say: out.Say, LogAs: out.LogAs, Log: out.Log}.Request(ctx, kind)
@@ -100,12 +100,12 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string,
 }
 
 func cacheDir(get config.Lookup) string {
-	if v, ok := get("CG_CACHE_DIR"); ok && v != "" {
+	if v, ok := get("AYIS_CACHE_DIR"); ok && v != "" {
 		return v
 	}
 	if base, ok := get("XDG_CACHE_HOME"); ok && base != "" {
-		return filepath.Join(base, "cg")
+		return filepath.Join(base, "ayis")
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".cache", "cg")
+	return filepath.Join(home, ".cache", "ayis")
 }

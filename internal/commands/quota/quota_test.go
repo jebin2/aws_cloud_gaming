@@ -98,8 +98,8 @@ func TestTheLastRequestIsTheNewest(t *testing.T) {
 			t.Errorf("lacks %q:\n%s", want, text)
 		}
 	}
-	if len(after) != 2 || after[0] != "  ask for ondemand and spot:  cg quota request ondemand" ||
-		after[1] != "  the first answer is usually no; the appeal is what works: cg quota appeal ondemand" {
+	if len(after) != 2 || after[0] != "  ask for ondemand and spot:  ayis quota request ondemand" ||
+		after[1] != "  the first answer is usually no; the appeal is what works: ayis quota appeal ondemand" {
 		t.Errorf("%q", after)
 	}
 	rows, after = Rows(Status{VCPUsNeeded: 4, OnDemand: &Kind{Enough: true, Value: aws.Float64(4)}, Spot: &Kind{Enough: true, Value: aws.Float64(4)}})
@@ -126,7 +126,7 @@ func TestAskForExactlyWhatOneBoxNeeds(t *testing.T) {
 		t.Fatalf("rc %d requests %v", rc, s.requests)
 	}
 	for _, want := range []string{"SAY asking for 4 vCPU of G and VT on demand in ap-south-1", "ok asked AWS for 4 vCPU. request req-1",
-		"displayId=1234567890", "automatic refusal", "cg quota appeal ondemand"} {
+		"displayId=1234567890", "automatic refusal", "ayis quota appeal ondemand"} {
 		if !strings.Contains(out.all(), want) {
 			t.Errorf("lacks %q:\n%s", want, out.all())
 		}

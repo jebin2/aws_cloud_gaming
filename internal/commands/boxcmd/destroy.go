@@ -12,11 +12,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/destroy"
-	"github.com/jebin2/aws_cloud_gaming/internal/format"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/session"
+	"github.com/jebin2/ayis/internal/destroy"
+	"github.com/jebin2/ayis/internal/format"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/session"
 )
 
 // IAM is what locking the archive uses.
@@ -25,7 +25,7 @@ type IAM interface {
 	PutRolePolicy(context.Context, *iam.PutRolePolicyInput, ...func(*iam.Options)) (*iam.PutRolePolicyOutput, error)
 }
 
-// DestroyDeps is what `cg destroy` uses beyond the box.
+// DestroyDeps is what `ayis destroy` uses beyond the box.
 type DestroyDeps struct {
 	EC2 destroy.EC2
 	IAM IAM
@@ -40,7 +40,7 @@ type DestroyDeps struct {
 // archive, so its own shutdown mirror cannot change anything. This is what makes
 // `--no-push` mean what it says.
 //
-// Skipping the laptop-side push is only half the job: cg-library-shutdown.service
+// Skipping the laptop-side push is only half the job: ayis-library-shutdown.service
 // runs ON the box from ExecStop, and terminating triggers a graceful shutdown, so
 // it fires whether or not this end pushed. Disabling that unit would need ssh -
 // unavailable exactly when it is most wanted, because a box too busy to answer
@@ -108,7 +108,7 @@ func (d Deps) archiveReport(ctx context.Context, x DestroyDeps) bool {
 }
 
 // sessionEndFirst: a stream open onto the box being deleted goes black mid-push,
-// and the `cg open` behind it then offers to end a box that no longer exists.
+// and the `ayis open` behind it then offers to end a box that no longer exists.
 // Close it first, and say so.
 func (d Deps) sessionEndFirst(x DestroyDeps) {
 	l, held := session.Running(d.SessionFile, d.Probe)
@@ -133,7 +133,7 @@ func (d Deps) sessionEndFirst(x DestroyDeps) {
 	}
 }
 
-// DestroyBox is `cg destroy [--force] [--no-push]`.
+// DestroyBox is `ayis destroy [--force] [--no-push]`.
 func (d Deps) DestroyBox(ctx context.Context, x DestroyDeps, args []string) int {
 	var all, force, nopush bool
 	for i := 0; i < len(args); i++ {
@@ -174,7 +174,7 @@ func (d Deps) DestroyBox(ctx context.Context, x DestroyDeps, args []string) int 
 
 	// Destroy takes the instance store with it, and that is where the games are. A
 	// failed push is not a warning to print and carry on past - it means the next
-	// `cg init` re-downloads everything, which is the exact problem this whole
+	// `ayis init` re-downloads everything, which is the exact problem this whole
 	// design exists to solve.
 	if nopush {
 		d.Out.Say("destroying WITHOUT mirroring - the archive is left exactly as it is")
@@ -186,13 +186,13 @@ func (d Deps) DestroyBox(ctx context.Context, x DestroyDeps, args []string) int 
 		// only once that has finished - which is when the box is "terminated".
 		rc := d.remove(ctx, x, true)
 		if rc != 0 {
-			d.Out.Log("archive left read-only - the box is not confirmed gone, and its shutdown mirror could still write. cg init restores it once a box is built")
+			d.Out.Log("archive left read-only - the box is not confirmed gone, and its shutdown mirror could still write. ayis init restores it once a box is built")
 			return rc
 		}
 		// The instance is gone, so restore normal access. If this is interrupted the
-		// policy stays read-only, and `cg init` rewrites it on the next build.
+		// policy stays read-only, and `ayis init` rewrites it on the next build.
 		if !d.archiveLock(ctx, x, "rw") {
-			d.Out.Log("archive left read-only - cg init restores it")
+			d.Out.Log("archive left read-only - ayis init restores it")
 		}
 		return rc
 	}
@@ -229,14 +229,14 @@ func (d Deps) DestroyBox(ctx context.Context, x DestroyDeps, args []string) int 
 					"  The push from here failed, which usually means ssh cannot reach the box.",
 					"  That is not the same as 'the games are lost':",
 					"",
-					"    cg-library-shutdown.service runs ON the box, from ExecStop, and",
+					"    ayis-library-shutdown.service runs ON the box, from ExecStop, and",
 					"    mirrors the library as the machine shuts down. It needs no ssh.",
 					"    Terminating sends a graceful shutdown, so it still runs.",
 					"",
 					"  So --force is usually safe here. Afterwards, confirm it worked:",
-					"      cg library list      # the archive, read straight from S3",
+					"      ayis library list      # the archive, read straight from S3",
 					"")
-				return d.die("not mirrored from here - see above, then: cg destroy --force")
+				return d.die("not mirrored from here - see above, then: ayis destroy --force")
 			}
 			d.Out.Log("WARNING: proceeding without a mirror (--force) - games will be re-downloaded")
 		}
@@ -249,7 +249,7 @@ func (d Deps) DestroyBox(ctx context.Context, x DestroyDeps, args []string) int 
 	return d.remove(ctx, x, false)
 }
 
-// remove is the destroy itself: the instance, cg's images and their snapshots,
+// remove is the destroy itself: the instance, ayis's images and their snapshots,
 // the box's leftover volumes.
 func (d Deps) remove(ctx context.Context, x DestroyDeps, waitForTerminated bool) int {
 	plan, err := destroy.Read(ctx, x.EC2, d.Box.Host, d.tagKey())
@@ -283,7 +283,7 @@ func (d Deps) remove(ctx context.Context, x DestroyDeps, waitForTerminated bool)
 	//
 	// GAME_REGION is NOT in this list, and must never be: it is a setting the
 	// person chose, not state this box created. Deleting it made the next
-	// `cg init` fall back to the registry default - so a destroy followed by a
+	// `ayis init` fall back to the registry default - so a destroy followed by a
 	// rebuild silently moved the rig to a different region, with a different
 	// archive bucket, and said nothing.
 	if gone {
@@ -293,9 +293,9 @@ func (d Deps) remove(ctx context.Context, x DestroyDeps, waitForTerminated bool)
 	}
 	d.Out.Log(fmt.Sprintf("keeping the budget %s-monthly - it guards the account, not the box", d.Box.Host))
 	if len(failures) > 0 {
-		return d.die(fmt.Sprintf("%d thing(s) could not be deleted and may still bill - see above, then run cg destroy again", len(failures)))
+		return d.die(fmt.Sprintf("%d thing(s) could not be deleted and may still bill - see above, then run ayis destroy again", len(failures)))
 	}
-	d.Out.Say("box deleted - security group, key pair and tailnet node kept for cg init")
+	d.Out.Say("box deleted - security group, key pair and tailnet node kept for ayis init")
 	return 0
 }
 
@@ -303,7 +303,7 @@ func (d Deps) tagKey() string {
 	if d.Box.TagKey != "" {
 		return d.Box.TagKey
 	}
-	return "cg:host"
+	return "ayis:host"
 }
 
 // PushedFunc reads when the archive last had everything saved. A bucket that

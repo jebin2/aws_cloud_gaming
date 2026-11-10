@@ -15,28 +15,28 @@ func TestResolveOrder(t *testing.T) {
 	repo := t.TempDir()
 	xdg := t.TempDir()
 	base := map[string]string{"XDG_CONFIG_HOME": xdg, "HOME": "/h"}
-	if got, want := Resolve(lookup(map[string]string{"CG_ENV_FILE": "/x/e", "CG_HOME": "/y", "XDG_CONFIG_HOME": xdg}), repo), "/x/e"; got != want {
-		t.Errorf("CG_ENV_FILE: %s", got)
+	if got, want := Resolve(lookup(map[string]string{"AYIS_ENV_FILE": "/x/e", "AYIS_HOME": "/y", "XDG_CONFIG_HOME": xdg}), repo), "/x/e"; got != want {
+		t.Errorf("AYIS_ENV_FILE: %s", got)
 	}
-	if got, want := filepath.ToSlash(Resolve(lookup(map[string]string{"CG_HOME": "/y"}), repo)), "/y/.env"; got != want {
-		t.Errorf("CG_HOME: %s", got)
+	if got, want := filepath.ToSlash(Resolve(lookup(map[string]string{"AYIS_HOME": "/y"}), repo)), "/y/.env"; got != want {
+		t.Errorf("AYIS_HOME: %s", got)
 	}
 	if got, want := Resolve(lookup(base), repo), filepath.Join(repo, ".env"); got != want {
 		t.Errorf("a writable checkout: %s", got)
 	}
 	ro := filepath.Join(t.TempDir(), "missing")
-	if got, want := Resolve(lookup(base), ro), filepath.Join(xdg, "cg", ".env"); got != want {
+	if got, want := Resolve(lookup(base), ro), filepath.Join(xdg, "ayis", ".env"); got != want {
 		t.Errorf("an installed copy: %s", got)
 	}
 }
 
 func TestLoadReadsButNeverExecutes(t *testing.T) {
 	f := filepath.Join(t.TempDir(), ".env")
-	body := "# a comment\nGAME_REGION=ap-south-1\ngamevps\n  # indented comment\nGAME_TS_HOST=box=1\n$(touch /tmp/x)\nGAME_S3_BUCKET=b"
+	body := "# a comment\nGAME_REGION=ap-south-1\nayis\n  # indented comment\nGAME_TS_HOST=box=1\n$(touch /tmp/x)\nGAME_S3_BUCKET=b"
 	if err := os.WriteFile(f, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	e := Load(lookup(map[string]string{"CG_ENV_FILE": f, "GAME_REGION": ""}), "")
+	e := Load(lookup(map[string]string{"AYIS_ENV_FILE": f, "GAME_REGION": ""}), "")
 	if e.Region() != "ap-south-1" {
 		t.Errorf("region %q", e.Region())
 	}
@@ -51,12 +51,12 @@ func TestLoadReadsButNeverExecutes(t *testing.T) {
 func TestExportedWinsAndDefaultsBackStop(t *testing.T) {
 	f := filepath.Join(t.TempDir(), ".env")
 	_ = os.WriteFile(f, []byte("GAME_REGION=ap-south-1\n"), 0o600)
-	e := Load(lookup(map[string]string{"CG_ENV_FILE": f, "GAME_REGION": "eu-west-1"}), "")
+	e := Load(lookup(map[string]string{"AYIS_ENV_FILE": f, "GAME_REGION": "eu-west-1"}), "")
 	if e.Region() != "eu-west-1" {
 		t.Errorf("an exported value must beat the file, got %q", e.Region())
 	}
-	e = Load(lookup(map[string]string{"CG_ENV_FILE": filepath.Join(t.TempDir(), "none")}), "")
-	if e.Region() != "ap-south-2" || e.Host() != "gamevps" {
+	e = Load(lookup(map[string]string{"AYIS_ENV_FILE": filepath.Join(t.TempDir(), "none")}), "")
+	if e.Region() != "ap-south-2" || e.Host() != "ayis" {
 		t.Errorf("defaults: %q %q", e.Region(), e.Host())
 	}
 }
@@ -91,7 +91,7 @@ func TestValidate(t *testing.T) {
 func TestIntFloorsAndDefaults(t *testing.T) {
 	f := filepath.Join(t.TempDir(), ".env")
 	_ = os.WriteFile(f, []byte("GAME_WATCHDOG_IDLE_MIN=3\nGAME_ARCHIVE_EXPIRY_DAYS=oops\n"), 0o600)
-	e := Load(lookup(map[string]string{"CG_ENV_FILE": f}), "")
+	e := Load(lookup(map[string]string{"AYIS_ENV_FILE": f}), "")
 	if e.Int("GAME_WATCHDOG_IDLE_MIN") != 10 {
 		t.Errorf("under the floor: %d", e.Int("GAME_WATCHDOG_IDLE_MIN"))
 	}
@@ -105,7 +105,7 @@ func TestIntFloorsAndDefaults(t *testing.T) {
 
 func TestSetKeepsOtherLinesAndTheMode(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "sub", ".env")
-	e := Load(lookup(map[string]string{"CG_ENV_FILE": f}), "")
+	e := Load(lookup(map[string]string{"AYIS_ENV_FILE": f}), "")
 	if err := e.Set("A", "1"); err != nil {
 		t.Fatal(err)
 	}

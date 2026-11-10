@@ -1,35 +1,35 @@
 'use strict';
-// Runs cg and turns its output into events. This module is the whole contract
+// Runs ayis and turns its output into events. This module is the whole contract
 // between the app and the engine, which is why it is plain Node and tested
 // without Electron.
 //
-// The app never calls AWS. It runs cg with CG_JSON=1 and renders what comes
+// The app never calls AWS. It runs ayis with AYIS_JSON=1 and renders what comes
 // back: events on stderr, the command's own data on stdout, answers on stdin.
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 const path = require('node:path');
 
-// cg is one static program, so the same file runs everywhere: ./cg on Linux and
-// macOS, cg.exe on Windows. (The app used to go through WSL there, back when the
+// ayis is one static program, so the same file runs everywhere: ./ayis on Linux and
+// macOS, ayis.exe on Windows. (The app used to go through WSL there, back when the
 // engine was a pile of bash scripts.)
 function spawnArgs(repo, args) {
   if (process.platform === 'win32') {
-    return { file: path.join(repo, 'cg.exe'), argv: args, opts: { cwd: repo, windowsHide: true } };
+    return { file: path.join(repo, 'ayis.exe'), argv: args, opts: { cwd: repo, windowsHide: true } };
   }
-  return { file: './cg', argv: args, opts: { cwd: repo } };
+  return { file: './ayis', argv: args, opts: { cwd: repo } };
 }
 
 // run({repo, args, onEvent}) -> the child process.
 // onEvent receives parsed events, plus {t:'raw'} for anything that is not one
-// and {t:'exit', rc} at the end. A raw line is a command cg ran talking - show
+// and {t:'exit', rc} at the end. A raw line is a command ayis ran talking - show
 // it or ignore it, but never parse it as data.
 function run({ repo, args, onEvent, env = {} }) {
   const { file, argv, opts } = spawnArgs(repo, args);
   const child = spawn(file, argv, {
     ...opts,
-    env: { ...process.env, ...env, CG_JSON: '1' },
+    env: { ...process.env, ...env, AYIS_JSON: '1' },
     stdio: ['pipe', 'pipe', 'pipe'],
-    // Its own process group, so Stop can signal everything cg started - aws,
+    // Its own process group, so Stop can signal everything ayis started - aws,
     // ssh, provision.sh - the way Ctrl+C does in a terminal. Signalling the
     // child alone left those running.
     detached: true,
@@ -59,7 +59,7 @@ function run({ repo, args, onEvent, env = {} }) {
     onEvent({ t: 'error', text: err.message });
     settle(127);                       // could not run it at all
   });
-  // `exit`, not `close`: close waits for stdio to close, and a process cg left
+  // `exit`, not `close`: close waits for stdio to close, and a process ayis left
   // behind holds those pipes open - the job would never look finished. `close`
   // stays only as a backstop for the case where 'exit' never comes; once
   // settled it is a no-op, so the lateness that ruled it out cannot bite.
@@ -77,11 +77,11 @@ function answer(child, text) {
   return true;
 }
 
-// Ctrl+C, to the whole group. cg traps it, closes its step and exits 130.
+// Ctrl+C, to the whole group. ayis traps it, closes its step and exits 130.
 function interrupt(child) {
   if (!child || child.killed) return false;
   // Windows has no process groups or SIGINT to send: taskkill /T walks the tree
-  // (cg, and the ssh and aws it started) and ends it. cg cannot close its step
+  // (ayis, and the ssh and aws it started) and ends it. ayis cannot close its step
   // first there, so a Stop on Windows is abrupt.
   if (process.platform === 'win32') {
     try { spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); return true; }

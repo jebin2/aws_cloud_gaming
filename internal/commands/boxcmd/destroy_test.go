@@ -11,9 +11,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/bucket"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/session"
+	"github.com/jebin2/ayis/internal/bucket"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/session"
 )
 
 type iamFake struct {
@@ -46,11 +46,11 @@ func destroyRig(t *testing.T, input string) (*rig, DestroyDeps, *iamFake, *libra
 	r.d.Env.Set("SUNSHINE_USER", "admin")
 	r.d.Env.Set("GAME_REGION", "ap-south-1")
 	s := library.NewMemStore()
-	name := bucket.Name("123", "gamevps", "ap-south-1")
+	name := bucket.Name("123", "ayis", "ap-south-1")
 	s.Add(name, "ap-south-1", "steam/index.json", 10)
 	s.Add(name, "ap-south-1", "steam/steamapps/common/G/x", 2048)
 	i := &iamFake{hasRole: true}
-	x := DestroyDeps{EC2: r.e, IAM: i, Lib: library.Library{S3: s, Host: "gamevps", Region: "ap-south-1", Account: "123"}}
+	x := DestroyDeps{EC2: r.e, IAM: i, Lib: library.Library{S3: s, Host: "ayis", Region: "ap-south-1", Account: "123"}}
 	return r, x, i, s
 }
 
@@ -63,7 +63,7 @@ func TestDestroyMirrorsThenRemovesThenForgetsTheBoxButNotTheRegion(t *testing.T)
 	}
 	got := r.o.String()
 	for _, want := range []string{"==> Saving your games and Steam login to Saved games", "This permanently deletes the box and everything listed here:", "instances       i-0abc",
-		"keeping the budget gamevps-monthly - it guards the account, not the box", "==> box deleted - security group, key pair and tailnet node kept for cg init"} {
+		"keeping the budget ayis-monthly - it guards the account, not the box", "==> box deleted - security group, key pair and tailnet node kept for ayis init"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}
@@ -74,7 +74,7 @@ func TestDestroyMirrorsThenRemovesThenForgetsTheBoxButNotTheRegion(t *testing.T)
 	// The mirror came before the terminate.
 	push := -1
 	for i, l := range r.r.Ran {
-		if strings.Contains(l, "cg-library push") {
+		if strings.Contains(l, "ayis-library push") {
 			push = i
 		}
 	}
@@ -93,7 +93,7 @@ func TestDestroyWontGoWhenTheMirrorFailsUnlessForced(t *testing.T) {
 	fail := func(r *rig) {
 		prev := r.r.Hook
 		r.r.Hook = func(line string) (bool, string, error) {
-			if strings.Contains(line, "cg-library push") {
+			if strings.Contains(line, "ayis-library push") {
 				return true, "", &exitCode{1}
 			}
 			return prev(line)
@@ -101,7 +101,7 @@ func TestDestroyWontGoWhenTheMirrorFailsUnlessForced(t *testing.T) {
 	}
 	r, x, _, _ := destroyRig(t, "")
 	fail(r)
-	if rc := r.d.DestroyBox(context.Background(), x, nil); rc != 1 || strings.Contains(strings.Join(r.e.calls, ","), "terminate") || !strings.Contains(r.w.String(), "not mirrored from here - see above, then: cg destroy --force") {
+	if rc := r.d.DestroyBox(context.Background(), x, nil); rc != 1 || strings.Contains(strings.Join(r.e.calls, ","), "terminate") || !strings.Contains(r.w.String(), "not mirrored from here - see above, then: ayis destroy --force") {
 		t.Fatalf("rc %d %v\n%s", rc, r.e.calls, r.w)
 	}
 	if !strings.Contains(r.o.String(), "mirrors the library as the machine shuts down. It needs no ssh.") {
@@ -125,7 +125,7 @@ func TestDestroyOfAStoppedBoxReportsTheArchiveInsteadOfPushing(t *testing.T) {
 		t.Errorf("%s", got)
 	}
 	for _, l := range r.r.Ran {
-		if strings.Contains(l, "cg-library") {
+		if strings.Contains(l, "ayis-library") {
 			t.Error("pushed from a box that is not running")
 		}
 	}
@@ -149,12 +149,12 @@ func TestNoPushLocksTheArchiveBeforeAndUnlocksAfter(t *testing.T) {
 		t.Errorf("read-only first, writable again after: %v", i.puts)
 	}
 	for _, l := range r.r.Ran {
-		if strings.Contains(l, "cg-library") {
+		if strings.Contains(l, "ayis-library") {
 			t.Error("--no-push must not push")
 		}
 	}
 	got := r.o.String()
-	for _, want := range []string{"destroying WITHOUT mirroring - the archive is left exactly as it is", "archive set read-only for gamevps-box - its shutdown mirror cannot write", "archive writable again for gamevps-box"} {
+	for _, want := range []string{"destroying WITHOUT mirroring - the archive is left exactly as it is", "archive set read-only for ayis-box - its shutdown mirror cannot write", "archive writable again for ayis-box"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}
@@ -184,7 +184,7 @@ func TestDestroyClosesAnOpenStreamFirst(t *testing.T) {
 	r, x, _, _ := destroyRig(t, "y\n")
 	r.e.state = "stopped"
 	session.Claim(r.d.SessionFile, time.Now())
-	r.d.Probe = alwaysCg{}
+	r.d.Probe = alwaysAyis{}
 	ended := false
 	x.Ender = &session.Ender{Path: r.d.SessionFile, Probe: probeOnce{&ended}, Sleep: func(time.Duration) {}, Signal: func(int, syscallSignal) { ended = true }, Children: func(int, syscallSignal) {}}
 	if rc := r.d.DestroyBox(context.Background(), x, nil); rc != 0 {
@@ -197,11 +197,11 @@ func TestDestroyClosesAnOpenStreamFirst(t *testing.T) {
 
 type syscallSignal = syscall.Signal
 
-// probeOnce sees a live cg until it has been signalled.
+// probeOnce sees a live ayis until it has been signalled.
 type probeOnce struct{ ended *bool }
 
 func (p probeOnce) Alive(int) bool          { return !*p.ended }
-func (p probeOnce) Args(int) (string, bool) { return "cg open", true }
+func (p probeOnce) Args(int) (string, bool) { return "ayis open", true }
 
 // A spot box takes 6-7 minutes to reach "terminated" and stopped billing when it
 // began shutting down. Destroy used to sit through all of it, and a person
@@ -219,7 +219,7 @@ func TestDestroyDoesNotWaitForTheLastMinutesOfATermination(t *testing.T) {
 		t.Errorf("%s", got)
 	}
 	if r.d.Env.Get("GAME_INSTANCE_ID") != "" {
-		t.Error("a machine that is shutting down is gone as far as cg is concerned")
+		t.Error("a machine that is shutting down is gone as far as ayis is concerned")
 	}
 }
 
@@ -231,7 +231,7 @@ func TestNoPushRefusesWhenTheRoleCannotBeRead(t *testing.T) {
 	if rc := r.d.DestroyBox(context.Background(), x, []string{"--no-push"}); rc != 1 || strings.Contains(strings.Join(r.e.calls, ","), "terminate") || len(i.puts) != 0 {
 		t.Errorf("rc %d calls %v puts %d\n%s%s", rc, r.e.calls, len(i.puts), r.o, r.w)
 	}
-	if !strings.Contains(r.o.String()+r.w.String(), "could not read the role gamevps-box") {
+	if !strings.Contains(r.o.String()+r.w.String(), "could not read the role ayis-box") {
 		t.Errorf("it must say why:\n%s%s", r.o, r.w)
 	}
 }
@@ -259,7 +259,7 @@ func TestDestroyTreatsAnUnreadableBoxAsRunning(t *testing.T) {
 	r.e.describeErr = errors.New("RequestLimitExceeded: Request limit exceeded")
 	prev := r.r.Hook
 	r.r.Hook = func(line string) (bool, string, error) {
-		if strings.Contains(line, "cg-library push") {
+		if strings.Contains(line, "ayis-library push") {
 			return true, "", &exitCode{1}
 		}
 		return prev(line)
@@ -280,7 +280,7 @@ func TestDestroyTreatsAnUnreadableBoxAsRunning(t *testing.T) {
 		t.Errorf("a stale id has nothing to push from, and must not be treated as running:\n%s%s", r.o, r.w)
 	}
 	for _, l := range r.r.Ran {
-		if strings.Contains(l, "cg-library push") {
+		if strings.Contains(l, "ayis-library push") {
 			t.Error("pushed from a box that is not there")
 		}
 	}

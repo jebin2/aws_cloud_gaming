@@ -12,7 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 )
 
-// Tail is what `cg status` appends after the report, and only for the
+// Tail is what `ayis status` appends after the report, and only for the
 // plain view: the disks of the box in .env, the game library as the box sees
 // it, and this boot's traffic. All of it is asked of the box over the tailnet,
 // which is free, and any of it can be missing - a stopped box answers nothing,
@@ -26,12 +26,12 @@ func (g *Gatherer) Tail(ctx context.Context, instanceID string, egressCache stri
 	}
 	ip := g.nodeIP(ctx)
 	if ip != "" {
-		out, err := g.ssh(ctx, ip, 10, "/usr/local/bin/cg-library status")
+		out, err := g.ssh(ctx, ip, 10, "/usr/local/bin/ayis-library status")
 		b.WriteString("\ngame library\n")
 		if err == nil && strings.TrimSpace(string(out)) != "" {
 			b.WriteString(strings.TrimRight(string(out), "\n") + "\n")
 		} else {
-			b.WriteString("  box not reachable - the archive is listed by: cg library list\n")
+			b.WriteString("  box not reachable - the archive is listed by: ayis library list\n")
 		}
 		b.WriteString(g.traffic(ctx, ip, egressCache))
 	}
@@ -101,7 +101,7 @@ func (g *Gatherer) traffic(ctx context.Context, ip, egressCache string) string {
 	ts, wan, win, up := n[0], n[1], n[2], n[3]
 	const gb = 1073741824
 	var b strings.Builder
-	b.WriteString("\nTRAFFIC (this boot only - see cg cost for the billed month)\n")
+	b.WriteString("\nTRAFFIC (this boot only - see ayis cost for the billed month)\n")
 	fmt.Fprintf(&b, "  stream out      %.2f GB", ts/gb)
 	if up > 0 {
 		fmt.Fprintf(&b, "   avg %.1f Mbps over %.1f h", ts*8/up/1000000, up/3600)
@@ -110,18 +110,18 @@ func (g *Gatherer) traffic(ctx context.Context, ip, egressCache string) string {
 	fmt.Fprintf(&b, "  total out       %.2f GB   <- what AWS bills (adds wireguard overhead, ssh, apt)\n", wan/gb)
 	fmt.Fprintf(&b, "  total in        %.2f GB   (free - game downloads land here)\n", win/gb)
 	// NOT a monthly figure: these are NIC counters since THIS box booted, and
-	// every session is a new box. The month lives in cg cost, from Cost Explorer.
+	// every session is a new box. The month lives in ayis cost, from Cost Explorer.
 	b.WriteString("  (above is this boot only)\n")
 	b.WriteString(EgressMonth(egressCache, g.Now()))
 	return b.String()
 }
 
-// EgressMonth is what `cg cost` last paid Cost Explorer for, shown free and
+// EgressMonth is what `ayis cost` last paid Cost Explorer for, shown free and
 // stamped with its age so it is never mistaken for live.
 func EgressMonth(path string, now time.Time) string {
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return "  monthly egress  unknown - run: cg cost\n"
+		return "  monthly egress  unknown - run: ayis cost\n"
 	}
 	f := strings.Fields(string(body))
 	if len(f) == 0 {
@@ -156,7 +156,7 @@ func EgressMonth(path string, now time.Time) string {
 	}
 	s := fmt.Sprintf("  monthly egress  %.1f GB used, ~%.0f GB of %.0f GB free left  (as of %s)\n", used, left, free, when)
 	if age > 1440 {
-		s += "                  stale - refresh with: cg cost\n"
+		s += "                  stale - refresh with: ayis cost\n"
 	}
 	return s
 }

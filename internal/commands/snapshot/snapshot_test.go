@@ -25,12 +25,12 @@ func fl(v float64) *float64 { return &v }
 
 func TestNewestFirstAndPriced(t *testing.T) {
 	imgs, err := List(context.Background(), fake{[]ec2types.Image{
-		img("ami-old", "gamevps-image-1", "2026-09-01T10:00:00.000Z", 50), img("ami-new", "gamevps-image-2", "2026-10-01T10:00:00.000Z", 100)}})
+		img("ami-old", "ayis-image-1", "2026-09-01T10:00:00.000Z", 50), img("ami-new", "ayis-image-2", "2026-10-01T10:00:00.000Z", 100)}})
 	if err != nil || imgs[0].ID != "ami-new" {
 		t.Fatalf("%v %v", imgs, err)
 	}
 	text := Show(imgs, fl(0.05), fl(100))
-	for _, want := range []string{"IMAGE", "ami-new                 2026-10-01T10:00:00    100      5.00  gamevps-image-2", "at most 7.50 USD/month (~INR 750) for 2 image(s)", "delete one with:  cg snapshot --delete <image-id>"} {
+	for _, want := range []string{"IMAGE", "ami-new                 2026-10-01T10:00:00    100      5.00  ayis-image-2", "at most 7.50 USD/month (~INR 750) for 2 image(s)", "delete one with:  ayis snapshot --delete <image-id>"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("lacks %q:\n%s", want, text)
 		}

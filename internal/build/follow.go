@@ -1,5 +1,5 @@
 // Package build is the second half of every build, whatever the machine is: an
-// AWS box cg just launched, or a machine of your own. From "it is building itself"
+// AWS box ayis just launched, or a machine of your own. From "it is building itself"
 // to "ready to play" - one path, so both say the same things in the same order and
 // fail the same way.
 package build
@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	"github.com/jebin2/ayis/internal/local"
 )
 
 // Remote runs a command on the machine under sh.
@@ -48,10 +48,10 @@ func Aborted(failedSeen bool, state string) bool {
 // install, not this build: read first, it hid every failed setup there until the
 // 40-minute timeout.
 const stateCmd = `s="";
-if [ -f /var/lib/cloud-gaming-bootstrap.rc ]; then
-  [ "$(cat /var/lib/cloud-gaming-bootstrap.rc)" = 0 ] && s=done || s=exited;
+if [ -f /var/lib/ayis-bootstrap.rc ]; then
+  [ "$(cat /var/lib/ayis-bootstrap.rc)" = 0 ] && s=done || s=exited;
 else s=$(cloud-init status 2>/dev/null | head -1); s=${s#status: }; fi;
-grep -q "bootstrap complete" /var/log/cloud-gaming-bootstrap.log 2>/dev/null && f=yes || f=no;
+grep -q "bootstrap complete" /var/log/ayis-bootstrap.log 2>/dev/null && f=yes || f=no;
 printf "%s|%s\n" "${s:-unknown}" "$f"`
 
 var (
@@ -119,7 +119,7 @@ type Follower struct {
 	// Target and Key are only for the lines that tell a person how to look.
 	Target, Key string
 	Timeout     time.Duration // 40 minutes by default
-	// Supervised: the build is run by cg-build on the box, which keeps a numbered
+	// Supervised: the build is run by ayis-build on the box, which keeps a numbered
 	// record of everything it does. It is read from where the last read stopped, so
 	// a dropped connection or a reboot loses nothing and repeats nothing. Until the
 	// box has one (its first minutes), and on a machine that never will, the build's
@@ -127,7 +127,7 @@ type Follower struct {
 	Supervised bool
 }
 
-// event is one line of the supervisor's record (cg-build events).
+// event is one line of the supervisor's record (ayis-build events).
 type event struct {
 	Seq     int     `json:"seq"`
 	Kind    string  `json:"kind"`
@@ -156,7 +156,7 @@ func (f Follower) stoppedLines(ctx context.Context, last string) {
 	} else {
 		f.Log("the build STOPPED before it finished - the end of its log:")
 	}
-	if out, err := f.R.SSH(ctx, "tail -n 8 /var/log/cloud-gaming-bootstrap.log"); err == nil {
+	if out, err := f.R.SSH(ctx, "tail -n 8 /var/log/ayis-bootstrap.log"); err == nil {
 		for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
 			if l != "" {
 				f.Log("    " + l)
@@ -165,7 +165,7 @@ func (f Follower) stoppedLines(ctx context.Context, last string) {
 	}
 	f.Log("  nothing after that step ran.")
 	f.Log("  ssh " + f.ssh())
-	f.Log("  sudo tail -50 /var/log/cloud-gaming-bootstrap.log")
+	f.Log("  sudo tail -50 /var/log/ayis-bootstrap.log")
 }
 
 func (f Follower) ssh() string {
@@ -196,14 +196,14 @@ func (f Follower) Stream(ctx context.Context) error {
 		var err error
 		fromEvents := false
 		if f.Supervised {
-			out, err = f.R.SSH(ctx, fmt.Sprintf("cg-build events --since %d", evSeq))
+			out, err = f.R.SSH(ctx, fmt.Sprintf("ayis-build events --since %d", evSeq))
 			fromEvents = err == nil || !notThere(err)
 		}
 		if !fromEvents || (err == nil && !evOnly && strings.TrimSpace(string(out)) == "") {
 			// No record yet: the first minutes of the build, before the supervisor
 			// exists, are in the log.
 			var lerr error
-			out, lerr = f.R.SSH(ctx, fmt.Sprintf("tail -n +%d /var/log/cloud-gaming-bootstrap.log 2>/dev/null", seen+1))
+			out, lerr = f.R.SSH(ctx, fmt.Sprintf("tail -n +%d /var/log/ayis-bootstrap.log 2>/dev/null", seen+1))
 			if lerr == nil || !fromEvents {
 				err, fromEvents = lerr, false
 			}
@@ -220,7 +220,7 @@ func (f Follower) Stream(ctx context.Context) error {
 			if len(running) > 0 && waited-lastLine >= QuietBeat {
 				f.Log(Working(running, waited-lastLine))
 			}
-			if _, err := f.R.SSH(ctx, "test -f /var/lib/cloud-gaming-ready"); err == nil {
+			if _, err := f.R.SSH(ctx, "test -f /var/lib/ayis-ready"); err == nil {
 				f.Log(fmt.Sprintf("build complete after %dm", int(waited/time.Minute)))
 				f.beat("build.box", "done", stage, waited, timeout)
 				return nil
@@ -255,7 +255,7 @@ func (f Follower) Stream(ctx context.Context) error {
 					}
 				}
 			}
-			if _, err := f.R.SSH(ctx, "test -f /var/lib/cloud-gaming-ready"); err == nil {
+			if _, err := f.R.SSH(ctx, "test -f /var/lib/ayis-ready"); err == nil {
 				f.Log(fmt.Sprintf("build complete after %dm", int(waited/time.Minute)))
 				f.beat("build.box", "done", stage, waited, timeout)
 				return nil
@@ -299,7 +299,7 @@ func (f Follower) Stream(ctx context.Context) error {
 	f.beat("build.box", "timeout", stage, timeout, timeout)
 	f.Log(fmt.Sprintf("TIMEOUT after %dm. Check on the box:", int(timeout/time.Minute)))
 	f.Log("  ssh " + f.ssh())
-	f.Log("  sudo tail -50 /var/log/cloud-gaming-bootstrap.log")
+	f.Log("  sudo tail -50 /var/log/ayis-bootstrap.log")
 	return ErrStopped
 }
 

@@ -13,7 +13,7 @@ lacks    "  never a second Tools row"  "$(row STAGES)" "cli="
 contains "  Tools is still the step"   "$(row STAGES)" "tools=active"
 contains "  the CLI chip says why"     "$(row STAGETEXT)" "AWS CLI v2 (installed, but not working)"
 contains "  and it is red"             "$(row TOOLS)" "aws:no"
-# Installing skips a tool cg can find, so it offers a fresh look instead.
+# Installing skips a tool ayis can find, so it offers a fresh look instead.
 contains "  offering a fresh look"     "$(row BUTTONS)" "tools=Check again"
 
 echo "3. tools and key are there, the tailnet is not"
@@ -32,7 +32,7 @@ echo "3a. pressed while the last checks are still landing, it waits its turn"
 ENGINE="window.__after = async () => {
   window.__slow = ['watcher --json']; window.__slowMs = 600;
   window.__answers['watcher --json'] = { guards: [] };
-  runCg(['watcher', '--json'], { json: 'guards' });
+  runAyis(['watcher', '--json'], { json: 'guards' });
   await new Promise(r => setTimeout(r, 20));
   document.querySelector('#onb-steps [data-stage=tailnet] button').click();
   await new Promise(r => setTimeout(r, 50));
@@ -62,10 +62,10 @@ OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $cred
 contains "a saved key alone does not tick it" "$(row STAGES)" "authkey=active"
 check    "  the token is still asked for"     "$(row BUTTONS)" "BUTTONS | authkey=Add access token"
 
-echo "3b2. saving the token reaches cg, and the stage is read again"
-# The save worked and the screen did not change: cg wrote .env, the dialog
+echo "3b2. saving the token reaches ayis, and the stage is read again"
+# The save worked and the screen did not change: ayis wrote .env, the dialog
 # closed, and nothing re-read - because `creds tailscale authkey` was missing
-# from `cg --contract`, so main called it a read. A write is what triggers the
+# from `ayis --contract`, so main called it a read. A write is what triggers the
 # re-read, so a real save read as nothing happening at all.
 ENGINE="window.__after = async () => {
   document.querySelector('#onb-steps [data-stage=\"authkey\"] button').click();
@@ -89,14 +89,14 @@ ENGINE="window.__after = async () => {
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_nokey, \"config --json\": $cfg_ok, \"creds set tailscale\": {}}")
 contains "the token dialog opens here" "$(row AFTER)" "dialog=true title=Tailscale access token"
 contains "  and stays until the token is read back" "$(row AFTER)" "mid=true:Saved. Checking…"
-contains "  and Save reaches cg"       "$(row AFTER)" "saved=true"
+contains "  and Save reaches ayis"       "$(row AFTER)" "saved=true"
 contains "  the dialog closes"         "$(row AFTER)" "closed=true"
 contains "  and the stage is re-read"  "$(row AFTER)" "reread=true"
 contains "  a key is still bulleted"   "$(row AFTER)" "type=password"
 ENGINE=""
 
 echo "3c. a token that can mint a key means there is no stage at all"
-# cg makes the key when the build needs it, so the prerequisite is already met
+# ayis makes the key when the build needs it, so the prerequisite is already met
 # and the pipeline does not ask you for one.
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_canmint, \"config --json\": $cfg_ok}")
 # Nothing is missing here: the step is ticked where it sits, like every other.
@@ -110,13 +110,13 @@ contains "  and says what it is for"   "$(row STAGETEXT)" "Email address for bud
 
 echo "3d2. the address is asked for here too"
 # Same detour as the key stage: this one sent you to Settings, to find the row
-# among the watchdog knobs and edit it in place. `cg config set` takes the
+# among the watchdog knobs and edit it in place. `ayis config set` takes the
 # value as an argument and validates it, so it is the same one-line dialog.
 ENGINE="window.__after = async () => {
   document.querySelector('#onb-steps [data-stage=\"email\"] button').click();
   const open1 = document.getElementById('onefield').open;
   document.getElementById('onefield-input').value = 'me@example.com';
-  // From now on cg reports the address as set, the way the real one would.
+  // From now on ayis reports the address as set, the way the real one would.
   window.__answers['config --json'] = [{key: 'EMAIL_ALERTS', kind: 'text', secret: false,
                                         is_set: true, value: 'me@example.com'},
                                        {key: 'GAME_REGION', kind: 'text', secret: false,
@@ -134,9 +134,9 @@ ENGINE="window.__after = async () => {
 };"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_ok, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_noemail, \"config set EMAIL_ALERTS me@example.com\": {}}")
 contains "the address dialog opens here" "$(row AFTER)" "dialog=true"
-contains "  and Save reaches cg"         "$(row AFTER)" "saved=true"
+contains "  and Save reaches ayis"         "$(row AFTER)" "saved=true"
 contains "  the dialog closes"           "$(row AFTER)" "closed=true"
-# `cg config set` is not a command cg says runs alone, so nothing re-reads on
+# `ayis config set` is not a command ayis says runs alone, so nothing re-reads on
 # its own: the dialog asks for the read itself.
 contains "  and the setting is re-read"  "$(row AFTER)" "reread=true"
 lacks    "  nobody went to Settings"     "$(row AFTER)" "view=settings"
@@ -144,14 +144,14 @@ lacks    "  nobody went to Settings"     "$(row AFTER)" "view=settings"
 contains "  and it is readable"          "$(row AFTER)" "type=text"
 # The last blocking stage just cleared, by a save that is not a write: the
 # reads behind the gate still have to be asked, or "where it runs" waits on a
-# cg machines that nobody will ever start.
+# ayis machines that nobody will ever start.
 contains "  and the gate opens behind it" "$(row AFTER)" "aws=true"
 ENGINE=""
 
 echo "3e. the laptop could not reach AWS, which is not the key's fault"
 # It used to say "AWS rejected this access key" to a laptop with no network - a
 # lie about a call that never arrived, and it sent people to replace a key that
-# was fine. cg says which it was; the stage only reads it.
+# was fine. ayis says which it was; the stage only reads it.
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_OK" true), \"creds --json\": $creds_offline, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
 contains "it says the call never arrived" "$(row STAGETEXT)" "Cannot reach AWS"
 lacks    "  and blames nothing"           "$(row STAGETEXT)" "rejected"

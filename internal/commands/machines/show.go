@@ -68,19 +68,19 @@ func Show(t Table, all bool) string {
 			fmt.Sprintf("%g GB", m.RAMGiB), disk, inr(m.INRHourSpot), inr(m.INRHourOnDemand), note)
 	}
 	if rest := len(t.Machines) - len(usable); rest > 0 && !all {
-		fmt.Fprintf(&b, "\n  %d larger shapes exist here that no quota covers: cg machines --all\n", rest)
+		fmt.Fprintf(&b, "\n  %d larger shapes exist here that no quota covers: ayis machines --all\n", rest)
 	}
-	b.WriteString("\n  * is the one in use. Change it with: cg config set GAME_INSTANCE_TYPE <type>\n")
+	b.WriteString("\n  * is the one in use. Change it with: ayis config set GAME_INSTANCE_TYPE <type>\n")
 	b.WriteString("  a type with no spot price has no spot market in this region\n")
 	return b.String()
 }
 
-// JSON is `cg machines --json`.
+// JSON is `ayis machines --json`.
 func JSON(t Table) ([]byte, error) { return json.Marshal(t) }
 
 var regionShape = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]$`)
 
 // IsRegion is whether an argument names a region. An explicit region used to be
-// swallowed as if it were the --all flag, so `cg machines ap-south-1 --all`
+// swallowed as if it were the --all flag, so `ayis machines ap-south-1 --all`
 // reported the CURRENT region and dropped --all.
 func IsRegion(s string) bool { return regionShape.MatchString(s) }

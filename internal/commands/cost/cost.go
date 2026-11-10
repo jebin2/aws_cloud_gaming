@@ -6,15 +6,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
-	"github.com/jebin2/aws_cloud_gaming/internal/costdaily"
-	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
-	"github.com/jebin2/aws_cloud_gaming/internal/costreport"
-	"github.com/jebin2/aws_cloud_gaming/internal/format"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
+	"github.com/jebin2/ayis/internal/commands/status"
+	"github.com/jebin2/ayis/internal/costdaily"
+	"github.com/jebin2/ayis/internal/costfacts"
+	"github.com/jebin2/ayis/internal/costreport"
+	"github.com/jebin2/ayis/internal/format"
+	"github.com/jebin2/ayis/internal/pricing"
 )
 
-// Inputs is everything `cg cost` prints, already read. Rendering is pure: the
+// Inputs is everything `ayis cost` prints, already read. Rendering is pure: the
 // same inputs print the same report, which is what the tests rely on.
 type Inputs struct {
 	Facts          costfacts.Facts
@@ -97,7 +97,7 @@ func (in Inputs) archiveLine() string {
 	b := in.Facts.Bucket
 	switch b.State {
 	case costfacts.BucketUnset:
-		return "  game library    not set up yet - cg init creates it\n"
+		return "  game library    not set up yet - ayis init creates it\n"
 	case costfacts.BucketMissing:
 		return fmt.Sprintf("  game library    none - s3://%s does not exist\n", b.Name)
 	case costfacts.BucketUnreadable:
@@ -151,7 +151,7 @@ func (in Inputs) resources() string {
 		if in.Rates.EBSGBMonth != nil {
 			cost = fmt.Sprintf("%.2f", f.Legacy.V.GB**in.Rates.EBSGBMonth)
 		}
-		fmt.Fprintf(&b, "  old EBS volume  %s  %.0f GB in %s  (~$%s/mo, LEGACY - cg games --volume --delete)\n",
+		fmt.Fprintf(&b, "  old EBS volume  %s  %.0f GB in %s  (~$%s/mo, LEGACY - ayis games --volume --delete)\n",
 			f.Legacy.V.ID, f.Legacy.V.GB, f.Legacy.V.AZ, cost)
 	} else {
 		b.WriteString(in.archiveLine())
@@ -220,7 +220,7 @@ func (in Inputs) Human(daily bool, extra string) string {
 	}
 	if in.Facts.Budget.OK && in.Facts.Budget.V == nil {
 		b.WriteString("\n  WARNING: no budget exists - nothing will alert you about spend.\n")
-		b.WriteString("  Run cg init to create it.\n")
+		b.WriteString("  Run ayis init to create it.\n")
 	}
 	return b.String()
 }

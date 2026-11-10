@@ -1,4 +1,4 @@
-module github.com/jebin2/aws_cloud_gaming
+module github.com/jebin2/ayis
 
 go 1.27
 

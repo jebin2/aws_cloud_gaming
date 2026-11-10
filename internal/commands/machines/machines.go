@@ -1,4 +1,4 @@
-// Package machines is `cg machines`: what a region will actually rent you.
+// Package machines is `ayis machines`: what a region will actually rent you.
 //
 // The app needs an instance-type picker, and it must not hold a list of its
 // own: every type, price and GPU name here comes from AWS, because a list typed
@@ -26,7 +26,7 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
+	"github.com/jebin2/ayis/internal/pricing"
 )
 
 // EC2API is the part of EC2 the table reads; the SDK client satisfies it.
@@ -47,7 +47,7 @@ type Reader struct {
 	Quotas   QuotasAPI
 	Products pricing.Products // the Price List, for on-demand
 	Region   string
-	CacheDir string // XDG_CACHE_HOME/cg
+	CacheDir string // XDG_CACHE_HOME/ayis
 	Now      func() time.Time
 	// Override replaces the GPU type list with these (the tests, or a
 	// deliberately short list).

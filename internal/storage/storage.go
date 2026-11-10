@@ -1,4 +1,4 @@
-// Package storage finds what cg left behind in EVERY region: a region move
+// Package storage finds what ayis left behind in EVERY region: a region move
 // leaves disks, images and snapshots where nothing looks, and they bill all the
 // same. The scan asks every region at once, and a region AWS would not answer
 // for is said, never read as empty.
@@ -9,7 +9,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
+	"github.com/jebin2/ayis/internal/costfacts"
 )
 
 // Found is what one region holds.

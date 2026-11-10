@@ -12,8 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
-	"github.com/jebin2/aws_cloud_gaming/internal/storage"
+	"github.com/jebin2/ayis/internal/costfacts"
+	"github.com/jebin2/ayis/internal/storage"
 )
 
 type region struct {
@@ -148,7 +148,7 @@ func TestSettingsGoTenAtATime(t *testing.T) {
 	td, calls, _, _, _ := rig()
 	var names []string
 	for i := 0; i < 23; i++ {
-		names = append(names, "/cloud-gaming/gamevps/kept/b/"+string(rune('a'+i)))
+		names = append(names, "/ayis/ayis/kept/b/"+string(rune('a'+i)))
 	}
 	if !td.DeleteSettings(context.Background(), map[string][]string{"ap-south-2": names[:3], "ap-south-1": names}) {
 		t.Fatal("failed")
@@ -184,12 +184,12 @@ func TestTheRoleGoesInTheOrderIAMAllows(t *testing.T) {
 	td, _, said, _, _ := rig()
 	i := &iamFake{}
 	td.IAM = i
-	td.RemoveRole(context.Background(), "gamevps")
-	if strings.Join(i.calls, ",") != "detach,profile,policy,role" || (*said)[1] != "deleted role and instance profile gamevps-box" {
+	td.RemoveRole(context.Background(), "ayis")
+	if strings.Join(i.calls, ",") != "detach,profile,policy,role" || (*said)[1] != "deleted role and instance profile ayis-box" {
 		t.Errorf("a role cannot go while it is in a profile or has a policy: %v %v", i.calls, *said)
 	}
-	td.RemoveRole(context.Background(), "gamevps")
-	if (*said)[len(*said)-1] != "role gamevps-box was already gone" {
+	td.RemoveRole(context.Background(), "ayis")
+	if (*said)[len(*said)-1] != "role ayis-box was already gone" {
 		t.Error(*said)
 	}
 }
@@ -205,7 +205,7 @@ func (i *iamDenied) DeleteRole(context.Context, *iam.DeleteRoleInput, ...func(*i
 func TestARoleThatCannotBeDeletedIsNotCalledGone(t *testing.T) {
 	td, _, said, failed, _ := rig()
 	td.IAM = &iamDenied{}
-	if td.RemoveRole(context.Background(), "gamevps") || len(*failed) != 1 || !strings.Contains((*failed)[0], "could not delete the role for gamevps-box: AccessDenied") || strings.Contains(strings.Join(*said, "|"), "already gone") {
+	if td.RemoveRole(context.Background(), "ayis") || len(*failed) != 1 || !strings.Contains((*failed)[0], "could not delete the role for ayis-box: AccessDenied") || strings.Contains(strings.Join(*said, "|"), "already gone") {
 		t.Errorf("failed %v said %v", *failed, *said)
 	}
 }

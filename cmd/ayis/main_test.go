@@ -13,7 +13,7 @@ func build(t *testing.T) string {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("no go toolchain here to build with")
 	}
-	bin := t.TempDir() + "/cg"
+	bin := t.TempDir() + "/ayis"
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
@@ -30,7 +30,7 @@ func TestVersionAndUnknowns(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) != 2 || !strings.HasPrefix(lines[0], "cg ") || lines[1] != "events 6" {
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "ayis ") || lines[1] != "events 6" {
 		t.Errorf("--version printed %q", out)
 	}
 	c := exec.Command(bin, "--nope")

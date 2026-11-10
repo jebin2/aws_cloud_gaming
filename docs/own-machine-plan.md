@@ -6,9 +6,9 @@ machines are the whole design: Home is a card per machine and "+ Add a
 machine" - AWS, or a server of yours. There is no setup screen; adding a
 machine walks the steps it needs (this laptop's once, then the machine's), and
 a machine that needs something says so on its own card. A server's first
-connection may use its password, once: cg puts a key of its own on it
-(`cg host add`) and takes it off again on remove. Removing AWS is
-`cg aws forget`, refused while a machine or saved games are there; it deletes
+connection may use its password, once: ayis puts a key of its own on it
+(`ayis host add`) and takes it off again on remove. Removing AWS is
+`ayis aws forget`, refused while a machine or saved games are there; it deletes
 nothing in AWS and leaves the access key alone. Windows (step 2) is not built.
 Costs nothing on AWS.
 
@@ -18,25 +18,25 @@ There is one flow; only where the machine comes from differs.
 
 | | shared | the AWS box only | a machine of yours only |
 |---|---|---|---|
-| reaching it | `mssh` (lib/common.sh): sh on the far side, stdin only when piped on purpose | cg's own key | your ssh setup |
+| reaching it | `mssh` (lib/common.sh): sh on the far side, stdin only when piped on purpose | ayis's own key | your ssh setup |
 | the build | `lib/bootstrap.d`, assembled by `lib/render.sh` | user-data at first boot | copied over ssh, run detached with sudo |
 | what it adds | every module adds only what is missing | `/scratch`, S3 library, idle shutdown, headless X, Firefox, reboot (`aws_box`) | - |
 | to "ready" | `lib/build.sh build_finish`: log followed, Sunshine login, pairing, Steam | hooks: on-host watchdog, the /scratch library | its tailnet address read once it joins |
 | playing | `stream_play` (lib/session.sh) | start the instance, offer to delete it | Sunshine checked first |
-| commands | `cg status --on <name>`, `cg open --on <name>` | the default | `cg host add|setup|list|remove` |
+| commands | `ayis status --on <name>`, `ayis open --on <name>` | the default | `ayis host add|setup|list|remove` |
 
 ## The idea
 
-Besides an AWS machine, cg can stream from a machine you already have: a home
+Besides an AWS machine, ayis can stream from a machine you already have: a home
 gaming PC or a spare box. Prerequisites: **Linux or Windows already installed,
-and ssh access to it.** cg sets up only what streaming needs and touches nothing
+and ssh access to it.** ayis sets up only what streaming needs and touches nothing
 else.
 
 ## What carries over and what does not
 
 | Part | AWS only? | On your own machine |
 |---|---|---|
-| Moonlight over Tailscale, pairing, Play, `cg ping` | no | works as is - Sunshine's API is the same on Linux and Windows |
+| Moonlight over Tailscale, pairing, Play, `ayis ping` | no | works as is - Sunshine's API is the same on Linux and Windows |
 | Setup (driver, desktop, Sunshine, Steam) | partly | today it is AWS user-data; the streaming part runs over ssh instead |
 | Build / delete, spot, quotas, regions, chooser | yes | not needed - the machine is always there |
 | Saved games in S3 | yes | not needed - games stay on its own disk |
@@ -45,12 +45,12 @@ else.
 
 ## How it would work
 
-1. **Add it:** `cg host add mypc --ssh user@192.168.1.20`
+1. **Add it:** `ayis host add mypc --ssh user@192.168.1.20`
    Connects over ssh, detects Linux or Windows and the GPU (NVIDIA, AMD or
    Intel - Sunshine encodes on all three). Uses your ssh keys and config; never
    asks for or stores a password.
 
-2. **Set it up:** `cg host setup mypc`, over ssh, adding only what is missing.
+2. **Set it up:** `ayis host setup mypc`, over ssh, adding only what is missing.
    Safe to run again.
 
    | Step | Linux | Windows |
@@ -90,18 +90,18 @@ else.
 
 ## Build order
 
-1. CLI: `cg host add | setup | status`, Linux first. Testable against a real
+1. CLI: `ayis host add | setup | status`, Linux first. Testable against a real
    Linux machine over ssh - this laptop itself can be the test host.
 2. Windows setup steps. Needs a Windows machine to try; none is available here.
 3. App: the AWS / own-machine choice, and the pages that change with it.
 
 ## How step 1 behaves (as built)
 
-- Machines are kept in `~/.config/cg/hosts.json`, mode 0600 (it holds each
+- Machines are kept in `~/.config/ayis/hosts.json`, mode 0600 (it holds each
   one's Sunshine login).
 - Every remote command runs through `sh -c`, so the login shell on the machine
   (fish on CachyOS) does not matter. ssh is given stdin only for data piped on
-  purpose, so it cannot swallow an answer the app sends cg.
+  purpose, so it cannot swallow an answer the app sends ayis.
 - Sunshine is installed from LizardByte's latest release, the file picked by
   the distribution's own os-release (`+ubuntu24.04_amd64.deb`, `+debiantrixie`,
   `-x86_64.pkg.tar.zst`, `.fc43.x86_64.rpm`) - no version written down.
@@ -110,7 +110,7 @@ else.
   The Tailscale auth key goes in a 0600 temp file on the machine, not argv.
 - The Sunshine login uses the same code as the AWS build (lib/sunshine-login.sh):
   saved first, checked, set again on the machine when they disagree.
-- A name that the AWS clean-up could match (`gamevps`, `gamevps-2`) is refused.
+- A name that the AWS clean-up could match (`ayis`, `ayis-2`) is refused.
 
 ## Open questions
 

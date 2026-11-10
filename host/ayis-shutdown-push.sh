@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ExecStop of cg-library-shutdown.service: the last mirror before the box goes.
+# ExecStop of ayis-library-shutdown.service: the last mirror before the box goes.
 #
 # It is also the last chance anything on the box has to say that games were
 # lost. The push can fail, or be cut off by TimeoutStopSec - and either way the
@@ -7,15 +7,15 @@
 # A push that works says nothing: the cloud watchdog confirms the box is gone.
 set -uo pipefail
 
-CG_LIBRARY_BIN="${CG_LIBRARY_BIN:-/usr/local/bin/cg-library}"
-CG_NOTIFY_BIN="${CG_NOTIFY_BIN:-/usr/local/bin/cg-notify}"
+AYIS_LIBRARY_BIN="${AYIS_LIBRARY_BIN:-/usr/local/bin/ayis-library}"
+AYIS_NOTIFY_BIN="${AYIS_NOTIFY_BIN:-/usr/local/bin/ayis-notify}"
 
 notify() { # notify <title> <message> - never fails
-  [[ -x $CG_NOTIFY_BIN ]] && "$CG_NOTIFY_BIN" "$1" "$2" high warning
+  [[ -x $AYIS_NOTIFY_BIN ]] && "$AYIS_NOTIFY_BIN" "$1" "$2" high warning
   return 0
 }
 
-out=$(mktemp -t cg-shutdown-push.XXXXXX 2>/dev/null) || out=/dev/null
+out=$(mktemp -t ayis-shutdown-push.XXXXXX 2>/dev/null) || out=/dev/null
 push=""
 
 # systemd sends SIGTERM when TimeoutStopSec runs out.
@@ -30,7 +30,7 @@ trap cut_off TERM INT
 
 # To a file rather than straight to the journal, so a failure can quote its last
 # line; the file goes to the journal afterwards either way.
-"$CG_LIBRARY_BIN" push > "$out" 2>&1 &
+"$AYIS_LIBRARY_BIN" push > "$out" 2>&1 &
 push=$!
 wait "$push"; rc=$?
 cat "$out" 2>/dev/null

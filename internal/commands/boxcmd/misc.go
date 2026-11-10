@@ -9,12 +9,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	"github.com/jebin2/ayis/internal/local"
 )
 
-// Clean is `cg clean`: give the box back some of its root disk.
+// Clean is `ayis clean`: give the box back some of its root disk.
 //
-// NAMED things only. The Bash `cg clean` ran `find /scratch -mindepth 1 -maxdepth 1
+// NAMED things only. The Bash `ayis clean` ran `find /scratch -mindepth 1 -maxdepth 1
 // -exec rm -rf`, which deletes the installed games - /scratch/steam is the
 // library - and the mirror then faithfully propagates the deletion to S3 at the
 // next push. A safer version of the command had been written in lib/game and
@@ -26,7 +26,7 @@ func (d Deps) Clean(ctx context.Context) int {
 		return d.die("no instance in .env")
 	}
 	if s, err := d.Box.State(ctx); err != nil || s != "running" {
-		return d.die("box is not running; cg open first, or use: cg destroy && cg init")
+		return d.die("box is not running; ayis open first, or use: ayis destroy && ayis init")
 	}
 	d.Out.Say("before")
 	d.Out.Echo(d.disks(ctx))
@@ -53,9 +53,9 @@ const cleanScript = `set -e
     sudo /usr/local/bin/mount-scratch.sh 2>/dev/null || true
     echo "  caches, logs and downloads cleared; installed games are not touched"`
 
-// Pair is `cg pair`: redo the Moonlight/Sunshine handshake without rebuilding the
+// Pair is `ayis pair`: redo the Moonlight/Sunshine handshake without rebuilding the
 // box. Pairing is per Sunshine instance, so every rebuild needs a fresh one, and
-// `cg init` does it. When that step fails - it has - the box streams nothing and
+// `ayis init` does it. When that step fails - it has - the box streams nothing and
 // the only recourse used to be another twenty-minute build. Sunshine reporting
 // "paired clients: 0" is the symptom; this is the four-second fix.
 func (d Deps) PairMoonlight(ctx context.Context) int {
@@ -65,7 +65,7 @@ func (d Deps) PairMoonlight(ctx context.Context) int {
 	ip, _ := d.Box.IP(ctx)
 	user, pass := d.Env.Get("SUNSHINE_USER"), d.Env.Get("SUNSHINE_PASS")
 	if user == "" || pass == "" {
-		return d.die("no Sunshine credentials in .env - they are written by cg init")
+		return d.die("no Sunshine credentials in .env - they are written by ayis init")
 	}
 	if !d.Moonlight {
 		return d.die("moonlight is not installed")
@@ -79,20 +79,20 @@ func (d Deps) PairMoonlight(ctx context.Context) int {
 	}
 	d.Out.SayID("pair", fmt.Sprintf("pairing with %s (%s)", d.Box.Node, ip))
 	if d.Pair.Pair(ctx, ip, user, pass) {
-		d.Out.Log("paired - cg open should stream now")
+		d.Out.Log("paired - ayis open should stream now")
 		return 0
 	}
 	return d.die(fmt.Sprintf("pairing failed. The web UI is https://%s:47990 (credentials in .env)", ip))
 }
 
-// SnapshotCreate is `cg snapshot` / `cg snapshot create`.
+// SnapshotCreate is `ayis snapshot` / `ayis snapshot create`.
 func (d Deps) SnapshotCreate(ctx context.Context) int {
 	return d.SnapshotCreateWith(ctx, true)
 }
 
 // SnapshotCreateWith is it with the wait optional. AWS takes ten minutes or more
 // to finish a 50 GB image, and the image is made whether or not anyone waits:
-// --no-wait starts it and leaves the rest to `cg snapshot --list`.
+// --no-wait starts it and leaves the rest to `ayis snapshot --list`.
 func (d Deps) SnapshotCreateWith(ctx context.Context, wait bool) int {
 	if d.Box.ID == "" {
 		return d.die("no instance in .env - nothing to snapshot")
@@ -112,20 +112,20 @@ func (d Deps) SnapshotCreateWith(ctx context.Context, wait bool) int {
 	}
 	d.Out.Log(ami)
 	if !wait {
-		d.Out.Log("AWS is making it in the background (ten minutes or more) - it shows as pending in: cg snapshot --list")
+		d.Out.Log("AWS is making it in the background (ten minutes or more) - it shows as pending in: ayis snapshot --list")
 		return 0
 	}
 	if !d.Box.WaitImage(ctx, ami, 1800*time.Second) {
 		if ctx.Err() != nil {
-			d.Out.Log("stopped waiting - AWS is still making " + ami + "; see: cg snapshot --list")
+			d.Out.Log("stopped waiting - AWS is still making " + ami + "; see: ayis snapshot --list")
 		}
 		return 1
 	}
-	d.Out.Log("ready - cg init will restore from it instead of rebuilding")
+	d.Out.Log("ready - ayis init will restore from it instead of rebuilding")
 	return 0
 }
 
-// SnapshotDelete is `cg snapshot --delete <id>`. Deregistering leaves the backing
+// SnapshotDelete is `ayis snapshot --delete <id>`. Deregistering leaves the backing
 // snapshots behind, still billing - that is the classic way to believe you
 // deleted something and keep paying - so each of them goes too.
 func (d Deps) SnapshotDelete(ctx context.Context, id string, c interface {
@@ -134,7 +134,7 @@ func (d Deps) SnapshotDelete(ctx context.Context, id string, c interface {
 	DeleteSnapshot(context.Context, *ec2.DeleteSnapshotInput, ...func(*ec2.Options)) (*ec2.DeleteSnapshotOutput, error)
 }) int {
 	if id == "" {
-		return d.die("which image? see: cg snapshot --list")
+		return d.die("which image? see: ayis snapshot --list")
 	}
 	var snaps []string
 	o, err := c.DescribeImages(ctx, &ec2.DescribeImagesInput{ImageIds: []string{id}})

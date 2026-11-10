@@ -11,7 +11,7 @@ longer switches and the client scales the picture instead. Set Moonlight to **19
 
 ## Moonlight client settings
 
-One setting on the **client**, easy to miss - and `cg open` sets it for you, so Alt+Tab works out
+One setting on the **client**, easy to miss - and `ayis open` sets it for you, so Alt+Tab works out
 of the box:
 
 - **Input Settings → Capture system keyboard shortcuts** → on. Without it Alt+Tab and Super are
@@ -22,7 +22,7 @@ of the box:
 
 Two ways to trip over this:
 
-`cg open` runs `moonlight stream <ip> Desktop`, which streams and exits without ever showing the
+`ayis open` runs `moonlight stream <ip> Desktop`, which streams and exits without ever showing the
 GUI - so there is no settings page to reach from it. Run `moonlight` on its own to change these.
 
 And a running Moonlight does not notice config edits; it also rewrites the file on exit,
@@ -30,7 +30,7 @@ discarding them. Change the setting in the GUI, or close Moonlight before editin
 
 ## Client settings from `.env`
 
-`cg open` passes these to Moonlight as launch flags, so there is no GUI to visit. A setting left
+`ayis open` passes these to Moonlight as launch flags, so there is no GUI to visit. A setting left
 unset passes no flag, leaving whatever Moonlight has saved:
 
 | `.env` | Flag | Example |
@@ -44,12 +44,12 @@ unset passes no flag, leaving whatever Moonlight has saved:
 
 ## Copy and paste
 
-While Moonlight is open, `cg open` keeps the two clipboards the same: copy text on your computer and it is
+While Moonlight is open, `ayis open` keeps the two clipboards the same: copy text on your computer and it is
 on the game PC a moment later, and the other way round. Only what is copied after the stream opens crosses.
 Text only, up to 1 MB. A Linux laptop needs `wl-clipboard` or `xclip`/`xsel`; macOS and Windows need
 nothing. `GAME_CLIPBOARD=off` turns it off. On GNOME's Wayland session `wl-paste` can only read while a
 window of this computer has focus, so copying from the game PC to the laptop may wait until Moonlight is
-focused; `cg clip send` and `cg clip get` do one copy by hand.
+focused; `ayis clip send` and `ayis clip get` do one copy by hand.
 
 ## One thing to turn off in Steam
 
@@ -64,7 +64,7 @@ That is a real CPU saving, but do not read it as "launches twice as fast" - the 
 turning it off was also replaying shaders already compiled by the previous attempt, so the two
 effects were not separated. The honest claim is narrow: it frees close to a core.
 
-It persists across stop/start (it lives on the root volume) but is lost on `cg destroy`, so
+It persists across stop/start (it lives on the root volume) but is lost on `ayis destroy`, so
 redo it after a rebuild. It cannot be scripted - Steam does not expose it as a config key.
 
 ## Limits

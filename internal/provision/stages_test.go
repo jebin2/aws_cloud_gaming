@@ -14,14 +14,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/render"
+	"github.com/jebin2/ayis/internal/render"
 )
 
 func repoFS() fs.FS { return os.DirFS("../..") }
 
 // The values a real launch gives the box, as awsVars names them.
 func realEnv() map[string]string {
-	return awsVars(Params{Host: "gamevps", Bucket: "cg-lib", AuthKey: "tskey-auth-x", DataGB: 190, ExtraApps: "7,9"},
+	return awsVars(Params{Host: "ayis", Bucket: "ayis-lib", AuthKey: "tskey-auth-x", DataGB: 190, ExtraApps: "7,9"},
 		"https://b.s3.ap-south-1.amazonaws.com/boot/host.tgz?a=b&c=d", "all", "use", "20")
 }
 
@@ -51,7 +51,7 @@ func TestAPlanThatLoopsOrNeedsWhatIsNotThereIsRefused(t *testing.T) {
 	if err := ValidatePlan(repoFS(), []Stage{{Name: "a", File: "12-scratch.sh"}, {Name: "a", File: "15-watchdog.sh"}}, env); err == nil {
 		t.Error("two stages with one name")
 	}
-	if err := ValidatePlan(repoFS(), []Stage{{Name: "a", File: "12-scratch.sh"}}, []string{"CG_USER"}); err == nil || !strings.Contains(err.Error(), "is not given") {
+	if err := ValidatePlan(repoFS(), []Stage{{Name: "a", File: "12-scratch.sh"}}, []string{"AYIS_USER"}); err == nil || !strings.Contains(err.Error(), "is not given") {
 		t.Errorf("a stage asking for a value the box is not given: %v", err)
 	}
 }
@@ -132,7 +132,7 @@ func TestTheUserDataIsSmallAndHandsOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(u.Raw)
-	for _, want := range []string{"tailscale up", "cg-build.service", "/etc/cg-build/env", "TS_AUTHKEY=tskey-auth-x", "CG_EXTRA_APPS=7,9", "S3_BUCKET=cg-lib"} {
+	for _, want := range []string{"tailscale up", "ayis-build.service", "/etc/ayis-build/env", "TS_AUTHKEY=tskey-auth-x", "AYIS_EXTRA_APPS=7,9", "S3_BUCKET=ayis-lib"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("the user-data lacks %q", want)
 		}
@@ -142,7 +142,7 @@ func TestTheUserDataIsSmallAndHandsOver(t *testing.T) {
 			t.Errorf("%q is a stage's work, not the user-data's", not)
 		}
 	}
-	if strings.Contains(s, "__") && strings.Contains(s, "__CG_") {
+	if strings.Contains(s, "__") && strings.Contains(s, "__AYIS_") {
 		t.Error("a placeholder is left")
 	}
 	t.Logf("user-data: %d bytes, %d gzipped of %d", len(u.Raw), len(u.Gzipped), UserDataLimit)
@@ -170,7 +170,7 @@ func TestTheBundleCarriesThePlanThePreludeAndEveryStage(t *testing.T) {
 		body, _ := io.ReadAll(tr)
 		files[h.Name] = string(body)
 	}
-	for _, want := range []string{"plan.json", "prelude.sh", "cg-build", "cg-build.service", "cg-library", "install-library.sh"} {
+	for _, want := range []string{"plan.json", "prelude.sh", "ayis-build", "ayis-build.service", "ayis-library", "install-library.sh"} {
 		if _, ok := files[want]; !ok {
 			t.Errorf("the bundle lacks %s", want)
 		}
@@ -192,7 +192,7 @@ func TestTheBundleCarriesThePlanThePreludeAndEveryStage(t *testing.T) {
 		}
 	}
 	if !strings.Contains(files["prelude.sh"], "progress()") || !strings.Contains(files["prelude.sh"], "ubuntu_release") ||
-		!strings.Contains(files["prelude.sh"], "cg_save_vars") {
+		!strings.Contains(files["prelude.sh"], "ayis_save_vars") {
 		t.Error("the prelude lacks the header's functions, the release helper or the hand-over of shared values")
 	}
 	if strings.Contains(files["prelude.sh"], "tee /var/log") || strings.Contains(files["prelude.sh"], "apt-get update") {
@@ -216,7 +216,7 @@ func TestAValueOneStageSetsIsThereForTheNext(t *testing.T) {
 	dir := t.TempDir()
 	run := func(body string) string {
 		cmd := exec.Command("bash", "-c", pre+"\n"+body)
-		cmd.Env = append(os.Environ(), "CG_BUILD_STATE="+dir)
+		cmd.Env = append(os.Environ(), "AYIS_BUILD_STATE="+dir)
 		_ = os.MkdirAll(dir+"/vars", 0o755)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -243,7 +243,7 @@ func TestTheRealPlanRunsToTheEndUnderTheRealSupervisor(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	host := root + "/opt/cloud-gaming-host"
+	host := root + "/opt/ayis-host"
 	gz, _ := gzip.NewReader(bytes.NewReader(b))
 	tr := tar.NewReader(gz)
 	for {
@@ -269,29 +269,29 @@ func TestTheRealPlanRunsToTheEndUnderTheRealSupervisor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.MkdirAll(root+"/etc/cg-build", 0o755); err != nil {
+	if err := os.MkdirAll(root+"/etc/ayis-build", 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// The user the prelude looks up: "ubuntu" is on the box, not necessarily here.
 	env := realEnv()
 	if u, err := user.Current(); err == nil {
-		env["CG_USER"] = u.Username
+		env["AYIS_USER"] = u.Username
 	}
 	lines, _ := EnvLines(env)
-	if err := os.WriteFile(root+"/etc/cg-build/env", []byte(lines+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(root+"/etc/ayis-build/env", []byte(lines+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// The one the bundle carries (comments stripped), not the file in the repo.
-	cmd := exec.Command("python3", host+"/cg-build", "run")
-	cmd.Env = append(os.Environ(), "CG_BUILD_ROOT="+root, "CG_BUILD_BACKOFF=0", "CG_BUILD_TICK=0.02", "CG_BUILD_HOME="+root, "CG_BUILD_NO_WAIT=1",
-		"CG_BUILD_NO_SYSTEMD=1", "CG_BUILD_BOOT_ID=b1", "CG_BUILD_REBOOT=echo reboot >> "+root+"/reboot")
+	cmd := exec.Command("python3", host+"/ayis-build", "run")
+	cmd.Env = append(os.Environ(), "AYIS_BUILD_ROOT="+root, "AYIS_BUILD_BACKOFF=0", "AYIS_BUILD_TICK=0.02", "AYIS_BUILD_HOME="+root, "AYIS_BUILD_NO_WAIT=1",
+		"AYIS_BUILD_NO_SYSTEMD=1", "AYIS_BUILD_BOOT_ID=b1", "AYIS_BUILD_REBOOT=echo reboot >> "+root+"/reboot")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	rc, _ := os.ReadFile(root + "/var/lib/cloud-gaming-bootstrap.rc")
+	rc, _ := os.ReadFile(root + "/var/lib/ayis-bootstrap.rc")
 	if strings.TrimSpace(string(rc)) != "0" {
-		ev, _ := os.ReadFile(root + "/var/lib/cg-build/events.jsonl")
-		lg, _ := os.ReadFile(root + "/var/log/cg-build/base.log")
+		ev, _ := os.ReadFile(root + "/var/lib/ayis-build/events.jsonl")
+		lg, _ := os.ReadFile(root + "/var/log/ayis-build/base.log")
 		t.Fatalf("the build did not end done: rc %q\n%s\n--- base.log\n%s", rc, ev, lg)
 	}
 	if r, _ := os.ReadFile(root + "/reboot"); strings.Count(string(r), "reboot") != 1 {

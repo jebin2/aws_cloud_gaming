@@ -32,25 +32,25 @@
 #   steam/meta/symlinks-<id>.tsv   S3 cannot store a symlink; see restore_symlinks
 set -uo pipefail
 
-[[ -r /etc/cg-library.conf ]] && . /etc/cg-library.conf
+[[ -r /etc/ayis-library.conf ]] && . /etc/ayis-library.conf
 
-LIB="${CG_LIB_DIR:-/scratch/steam}"
-BUCKET="${CG_S3_BUCKET:-}"
-PREFIX="${CG_S3_PREFIX:-steam}"
-STATE="${CG_STATE_DIR:-/var/lib/cg-library}"
-S5="${CG_S5CMD:-/usr/local/bin/s5cmd}"
+LIB="${AYIS_LIB_DIR:-/scratch/steam}"
+BUCKET="${AYIS_S3_BUCKET:-}"
+PREFIX="${AYIS_S3_PREFIX:-steam}"
+STATE="${AYIS_STATE_DIR:-/var/lib/ayis-library}"
+S5="${AYIS_S5CMD:-/usr/local/bin/s5cmd}"
 # Which apps this boot should restore. Chosen on the laptop before launch and
-# baked into /etc/cg-library.conf, because the restore runs here at boot with no
+# baked into /etc/ayis-library.conf, because the restore runs here at boot with no
 # terminal to ask at.
-APPS="${CG_APPS:-all}"
+APPS="${AYIS_APPS:-all}"
 # Whether to restore the archived Steam login, decided on the LAPTOP at build
-# time for the same reason CG_APPS is: the restore runs at boot with no terminal
+# time for the same reason AYIS_APPS is: the restore runs at boot with no terminal
 # to ask at. "use" restores it and the box comes up signed in; "fresh" skips it
 # and Steam asks for a password. Default "use" - that is what every box did
 # before this existed, and a new default would silently change what a rebuild
-# does. An explicit `cg library account pull` ignores this entirely: asking for
+# does. An explicit `ayis library account pull` ignores this entirely: asking for
 # it outright is not the same as a build-time preference.
-LOGIN="${CG_LOGIN:-use}"
+LOGIN="${AYIS_LOGIN:-use}"
 
 # s5cmd holds roughly workers x concurrency x part-size in memory. The defaults
 # (256 x 5 x 50 MB) want tens of GB. 64 x 4 x 16 MB measured at 323 MB peak.
@@ -58,16 +58,16 @@ LOGIN="${CG_LOGIN:-use}"
 # the refresh token, loginusers.vdf the remembered account, registry.vdf the
 # machine identity Steam Guard checks. All three die with the box unless they
 # are archived, which is why every new instance asked for Steam Guard again.
-STEAM_BASE="${CG_STEAM_BASE:-$HOME}"
-STEAM_DIR="${CG_STEAM_DIR:-.local/share/Steam}"
+STEAM_BASE="${AYIS_STEAM_BASE:-$HOME}"
+STEAM_DIR="${AYIS_STEAM_DIR:-.local/share/Steam}"
 # Best-effort `steam -shutdown` before archiving. Steam rewrites config.vdf as
 # it exits, so a clean exit archives the settled file rather than a mid-session
 # one. Set 0 to archive whatever is on disk right now.
-STEAM_SHUTDOWN="${CG_STEAM_SHUTDOWN:-1}"
+STEAM_SHUTDOWN="${AYIS_STEAM_SHUTDOWN:-1}"
 
-WORKERS="${CG_WORKERS:-64}"
-CONCURRENCY="${CG_CONCURRENCY:-4}"
-PART_MB="${CG_PART_MB:-16}"
+WORKERS="${AYIS_WORKERS:-64}"
+CONCURRENCY="${AYIS_CONCURRENCY:-4}"
+PART_MB="${AYIS_PART_MB:-16}"
 # --no-follow-symlinks is not a nicety. A Proton prefix contains
 # dosdevices/z: -> / and s: -> the library itself, so a symlink-following walk
 # descends into the whole filesystem AND into itself: 12 GB resident and an OOM
@@ -76,11 +76,11 @@ PART_MB="${CG_PART_MB:-16}"
 TUNE=(--concurrency "$CONCURRENCY" --part-size "$PART_MB" --no-follow-symlinks)
 EXCLUDES=(--exclude "downloading/*" --exclude "temp/*")
 
-log() { echo "$(date -Iseconds) cg-library: $*"; }
+log() { echo "$(date -Iseconds) ayis-library: $*"; }
 die() { log "error: $*" >&2; exit 1; }
 hb()  { numfmt --to=iec --suffix=B "${1:-0}" 2>/dev/null || echo "${1:-0}B"; }
 
-[[ -n $BUCKET ]] || die "no bucket configured (expected CG_S3_BUCKET in /etc/cg-library.conf)"
+[[ -n $BUCKET ]] || die "no bucket configured (expected AYIS_S3_BUCKET in /etc/ayis-library.conf)"
 [[ -x $S5 ]] || die "s5cmd not installed at $S5"
 mkdir -p "$STATE" 2>/dev/null || true
 
@@ -88,7 +88,7 @@ S3="s3://$BUCKET/$PREFIX"
 
 # The marker records WHICH boot restored the library, not merely that some boot
 # did: /var/lib is on the root volume and survives a reboot, /scratch does not.
-BOOT_ID_FILE="${CG_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}"
+BOOT_ID_FILE="${AYIS_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}"
 boot_id() { cat "$BOOT_ID_FILE" 2>/dev/null || echo unknown; }
 mark_restored() { boot_id > "$STATE/restored"; }
 restored() {
@@ -97,7 +97,7 @@ restored() {
 }
 # Games not to save: unticked at Stop machine on the laptop, which writes
 # "<boot id> <appid,appid>" to $STATE/skip. Every push of THIS boot leaves them out
-# - the one cg asks for and the one on the way down - and the next boot saves
+# - the one ayis asks for and the one on the way down - and the next boot saves
 # everything again, so a choice made once is never a choice forever.
 skipped() { # skipped <appid>
   local b="" ids=""
@@ -130,17 +130,17 @@ is_steam_tool() { # is_steam_tool <appid> <installdir>
 # lands on the root disk. Steam lists its libraries in libraryfolders.vdf, so that
 # is read too.
 #
-# CG_EXTRA_LIBS set (even to nothing) means "exactly these, besides the first":
-# a test, or a person who chose their places. It is NOT keyed on CG_LIB_DIR, which
-# /etc/cg-library.conf always sets on a real machine - that made this look in one
+# AYIS_EXTRA_LIBS set (even to nothing) means "exactly these, besides the first":
+# a test, or a person who chose their places. It is NOT keyed on AYIS_LIB_DIR, which
+# /etc/ayis-library.conf always sets on a real machine - that made this look in one
 # place only, and a game on the root disk was "no games installed".
-# CG_HOMES is where the users' homes are (/home), only so a test can point it.
+# AYIS_HOMES is where the users' homes are (/home), only so a test can point it.
 all_libs() {
-  local homes="${CG_HOMES:-/home}" p v r
+  local homes="${AYIS_HOMES:-/home}" p v r
   {
     echo "$LIB"
-    if [[ -n ${CG_EXTRA_LIBS+x} ]]; then
-      for p in $CG_EXTRA_LIBS; do echo "$p"; done
+    if [[ -n ${AYIS_EXTRA_LIBS+x} ]]; then
+      for p in $AYIS_EXTRA_LIBS; do echo "$p"; done
     else
       echo /scratch2/steam
       for v in "$homes"/*/.local/share/Steam/config/libraryfolders.vdf; do
@@ -292,15 +292,15 @@ cmd_pull() {
   # nothing is edited, nothing is deleted, and the archived login stays exactly
   # where it is for the next box that wants it.
   if [[ $LOGIN == fresh ]]; then
-    log "CG_LOGIN=fresh - not restoring the archived login; Steam will ask you to sign in"
-    log "  the archived login is untouched: cg library account pull restores it later"
+    log "AYIS_LOGIN=fresh - not restoring the archived login; Steam will ask you to sign in"
+    log "  the archived login is untouched: ayis library account pull restores it later"
   else
     account_pull
   fi
   touch "$STATE/account-done"
 
   if [[ $want == none ]]; then
-    log "CG_APPS=none - restoring nothing by request (the box is for something else)"
+    log "AYIS_APPS=none - restoring nothing by request (the box is for something else)"
     mark_restored
     return 0
   fi
@@ -324,27 +324,27 @@ for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.ge
     return 0
   fi
 
-  # Capacity, enforced HERE and not only in the laptop prompt. CG_APPS can say
+  # Capacity, enforced HERE and not only in the laptop prompt. AYIS_APPS can say
   # "all" from an older .env, from a scripted run, or from a prompt that was
   # skipped - and an archive larger than the disk would then fill /scratch
   # mid-restore, which fails in the least legible way possible: a half-restored
   # game that Steam reports as installed.
-  local lib0="$LIB" extra_lib="${CG_EXTRA_LIB:-/scratch2/steam}"
+  local lib0="$LIB" extra_lib="${AYIS_EXTRA_LIB:-/scratch2/steam}"
   local avail_kb avail
-  # CG_RESERVE_GB is the laptop's GAME_DISK_RESERVE_GB, written into the conf
+  # AYIS_RESERVE_GB is the laptop's GAME_DISK_RESERVE_GB, written into the conf
   # at build; the free space is measured, never assumed for a type. 20 only on
-  # a box built before the setting reached it. CG_DISK_BUDGET sets the ceiling
+  # a box built before the setting reached it. AYIS_DISK_BUDGET sets the ceiling
   # outright, which is how the tests exercise the skip path without a 300 GB
   # sandbox.
-  local reserve=$(( ${CG_RESERVE_GB:-20} * 1024 * 1024 * 1024 ))
+  local reserve=$(( ${AYIS_RESERVE_GB:-20} * 1024 * 1024 * 1024 ))
   # Each library has its own room. A game goes on the machine's own drive unless the
-  # laptop said it does not fit there (CG_EXTRA_APPS): then it goes on the disk
+  # laptop said it does not fit there (AYIS_EXTRA_APPS): then it goes on the disk
   # added for it, at /scratch2, and never on the root disk.
   local -A budget_of=() used_of=()
   open_budget() { # open_budget <library>
     avail_kb=$(df --output=avail -k "$1" 2>/dev/null | tail -1 | tr -d ' ')
     avail=$(( ${avail_kb:-0} * 1024 ))
-    local b=${CG_DISK_BUDGET:-$(( avail - reserve ))}
+    local b=${AYIS_DISK_BUDGET:-$(( avail - reserve ))}
     (( b < 0 )) && b=0
     budget_of[$1]=$b; used_of[$1]=0
     log "disk budget $(hb "$b") at $1 ($(hb "$avail") free, $(hb "$reserve") reserved)"
@@ -358,7 +358,7 @@ for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.ge
     want_bytes=${bytes:-0}
     [[ -n $prev_lib ]] && used_of[$prev_lib]=$used
     tlib="$lib0"
-    if [[ -n ${CG_EXTRA_APPS:-} && ",$CG_EXTRA_APPS," == *",$id,"* ]]; then
+    if [[ -n ${AYIS_EXTRA_APPS:-} && ",$AYIS_EXTRA_APPS," == *",$id,"* ]]; then
       tlib="$extra_lib"
       if ! mountpoint -q "$(dirname "$tlib")"; then
         log "SKIPPING $name ($id): it belongs on the added disk and that is not mounted - never the root disk"
@@ -386,7 +386,7 @@ for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.ge
     if (( used + need > budget )); then
       log "SKIPPING $name ($id): needs $(hb "$need") more, only $(hb $(( budget - used ))) left"
       (( ${have:-0} > 0 )) && log "  ($(hb "$have") of $(hb "$want_bytes") is already here)"
-      log "  restore it on its own later: cg library pull --apps $id"
+      log "  restore it on its own later: ayis library pull --apps $id"
       skipped=$((skipped+1))
       continue
     fi
@@ -448,7 +448,7 @@ for a in sel: print("%s\t%s\t%s\t%s" % (a["appid"], a.get("installdir",""), a.ge
   if (( incomplete )); then
     # No marker: a partial local copy must never be pushed over a complete
     # archive. Steam will repair the install by downloading the remainder; once
-    # it has, `cg library push --force` is the way to archive the repaired copy.
+    # it has, `ayis library push --force` is the way to archive the repaired copy.
     log "$incomplete game(s) restored INCOMPLETE - not marking this boot as restored"
     log "  the archive is intact; push is blocked until you pass --force"
     return 1
@@ -577,7 +577,7 @@ account_pull() {
 
 # --- push --------------------------------------------------------------------
 # One push at a time. Two can otherwise overlap - AWS terminating the box while
-# the idle watchdog is mid-push, or `cg destroy` pushing over ssh at the same
+# the idle watchdog is mid-push, or `ayis destroy` pushing over ssh at the same
 # moment - and each would upload the same files and rewrite index.json from its
 # own stale read, dropping the other's entry. The second WAITS rather than
 # giving up: the shutdown push must still run once the first is killed, and it
@@ -605,7 +605,7 @@ mark_pushed() {
 
 # fresh_push: a clean save of this boot, at most FRESH_SEC ago, and no game file
 # (folder, Proton prefix, shader cache, manifest) in any library written since.
-FRESH_SEC="${CG_FRESH_SEC:-900}"
+FRESH_SEC="${AYIS_FRESH_SEC:-900}"
 fresh_push() {
   local f="$STATE/pushed-clean" b="" t="" L
   [[ -f $f ]] || return 1
@@ -707,7 +707,7 @@ print(next((a.get("bytes",0) for a in apps if str(a.get("appid"))==appid), 0))' 
       if (( ${archived:-0} > 0 )) && (( bytes * 2 < archived )) && (( ! force )); then
         log "SKIPPING $name ($id): local $(hb "$bytes") is less than half the archived $(hb "$archived")"
         log "  that looks like a broken install, not an uninstall. --force overrides;"
-        log "  to remove it deliberately: cg library forget $id"
+        log "  to remove it deliberately: ayis library forget $id"
         bad=$((bad+1))
         continue
       fi
@@ -785,11 +785,11 @@ print("  %-10s %-34s %6.1f GB   $%.2f/month (INR %.0f)"
 
 # --- forget ------------------------------------------------------------------
 # The archive no longer shrinks by itself, so this is how a game leaves it. A
-# typed word, because it is as unrecoverable as `cg destroy --all`: there is no
+# typed word, because it is as unrecoverable as `ayis destroy --all`: there is no
 # versioning behind the bucket.
 cmd_forget() {
   local id="${1:-}" yes="${2:-}"
-  [[ -n $id ]] || die "usage: cg-library forget <appid>"
+  [[ -n $id ]] || die "usage: ayis-library forget <appid>"
   local row
   row=$(index_get | python3 -c '
 import json,sys
@@ -800,7 +800,7 @@ for a in apps:
     if str(a.get("appid"))==appid:
         print("%s\t%s\t%s" % (a.get("name","?"), a.get("installdir",""), a.get("bytes",0)))
         break' "$id")
-  [[ -n ${row//[[:space:]]/} ]] || die "appid $id is not in the archive (see: cg library list)"
+  [[ -n ${row//[[:space:]]/} ]] || die "appid $id is not in the archive (see: ayis library list)"
   local name dir bytes; IFS=$'\t' read -r name dir bytes <<<"$row"
   echo "This permanently deletes $name ($id, $(hb "$bytes")) from the archive."
   echo "No undo, no versioning. Playing it again means downloading it from Steam,"
@@ -868,7 +868,7 @@ cmd_check() {
 case "${1:-status}" in
   pull|restore)
     shift
-    # `--apps 123,456`, or a bare csv, or nothing (use CG_APPS from the config
+    # `--apps 123,456`, or a bare csv, or nothing (use AYIS_APPS from the config
     # that the laptop wrote before launch).
     want="$APPS"
     while [[ $# -gt 0 ]]; do
@@ -883,16 +883,16 @@ case "${1:-status}" in
                 case "${1:-}" in
                   push) account_push ;;
                   pull|restore) account_pull ;;
-                  *) echo "usage: cg-library account push|pull" >&2; exit 1 ;;
+                  *) echo "usage: ayis-library account push|pull" >&2; exit 1 ;;
                 esac ;;
   list)         cmd_list ;;
   forget)       shift; cmd_forget "$@" ;;
   check)        cmd_check ;;
   status|"")    cmd_status ;;
-  *) echo "usage: cg-library [pull [--apps <csv|all|none>]|push|account push|pull|list|forget <appid>|check|status]" >&2; exit 1 ;;
+  *) echo "usage: ayis-library [pull [--apps <csv|all|none>]|push|account push|pull|list|forget <appid>|check|status]" >&2; exit 1 ;;
 esac
 
-# See the note at the end of cg: bash reads a script incrementally and returns
+# See the note at the end of ayis: bash reads a script incrementally and returns
 # for more input after the last command, so a file edited while this runs can
 # resume at a stale offset. An explicit exit ends the read.
 exit

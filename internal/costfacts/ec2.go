@@ -1,5 +1,5 @@
-// Package costfacts collects what `cg cost` is built from: the box, the disks,
-// images and snapshots cg owns, the month's Cost Explorer answer, and the
+// Package costfacts collects what `ayis cost` is built from: the box, the disks,
+// images and snapshots ayis owns, the month's Cost Explorer answer, and the
 // prices. Every fact says whether it could be read. A failed read is unknown,
 // never empty and never zero: "AWS could not be asked" is not "nothing exists".
 package costfacts
@@ -141,9 +141,9 @@ func (g *Gatherer) volumes(ctx context.Context, filters []types.Filter) ([]Volum
 	}
 }
 
-// ownedVolumes are cg's leftovers: unattached, tagged cg:host=<host> and, with
-// games, the legacy games volume by the exact name cg gave it. Every volume in
-// the region was counted once, another project's too, and called cg's.
+// ownedVolumes are ayis's leftovers: unattached, tagged ayis:host=<host> and, with
+// games, the legacy games volume by the exact name ayis gave it. Every volume in
+// the region was counted once, another project's too, and called ayis's.
 func (g *Gatherer) ownedVolumes(ctx context.Context, games bool) ([]Volume, error) {
 	vols, err := g.volumes(ctx, []types.Filter{filter("status", "available"), filter("tag:"+g.TagKey, g.Host)})
 	if err != nil {
@@ -164,7 +164,7 @@ func (g *Gatherer) images(ctx context.Context) ([]Image, error) {
 	seen := map[string]bool{}
 	for _, f := range [][]types.Filter{
 		{filter("tag:"+g.TagKey, g.Host)},
-		{filter("tag:Name", g.Host+"-image")}, // the exact name cg gave them before the tag
+		{filter("tag:Name", g.Host+"-image")}, // the exact name ayis gave them before the tag
 	} {
 		var token *string
 		for {
@@ -286,15 +286,15 @@ func parseFloat(s string) *float64 {
 	return &v
 }
 
-// Owned is what cg owns in one region: the disks it left behind (and the legacy
+// Owned is what ayis owns in one region: the disks it left behind (and the legacy
 // games volume), its images with the snapshots behind them, and its tagged
-// snapshots - every one of them either tagged cg:host=<host> or named the exact
-// way cg named them before the tag. A failed read of any of the three fails the
-// whole answer: "nothing of cg's" must never be said about a region AWS would
+// snapshots - every one of them either tagged ayis:host=<host> or named the exact
+// way ayis named them before the tag. A failed read of any of the three fails the
+// whole answer: "nothing of ayis's" must never be said about a region AWS would
 // not answer for.
 func (g *Gatherer) Owned(ctx context.Context) (vols []Volume, imgs []Image, snaps []Snapshot, err error) {
 	if g.TagKey == "" {
-		g.TagKey = "cg:host"
+		g.TagKey = "ayis:host"
 	}
 	if vols, err = g.ownedVolumes(ctx, true); err != nil {
 		return nil, nil, nil, err

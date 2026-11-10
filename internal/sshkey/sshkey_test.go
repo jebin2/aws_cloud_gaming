@@ -148,13 +148,13 @@ func TestEnsureKeepsAMatchingPairAndReplacesAnUnusableOne(t *testing.T) {
 	fp, _ := Fingerprint(b)
 	// This laptop holds the private key: nothing changes.
 	a := &admin{fake: &fake{fp: fp}}
-	if err := Ensure(ctx, a, "gamevps", path, "cg:host", say, now); err != nil || len(a.deleted) != 0 || len(a.created) != 0 {
+	if err := Ensure(ctx, a, "ayis", path, "ayis:host", say, now); err != nil || len(a.deleted) != 0 || len(a.created) != 0 {
 		t.Fatalf("%v %v %v", err, a.deleted, a.created)
 	}
 	// Some other key: the pair is replaced, and the old file is kept under a dated name.
 	other, _ := writeKey(t, false)
 	a = &admin{fake: &fake{fp: fp}, material: "NEW-PRIVATE-KEY"}
-	if err := Ensure(ctx, a, "gamevps", other, "cg:host", say, now); err != nil {
+	if err := Ensure(ctx, a, "ayis", other, "ayis:host", say, now); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(other)
@@ -165,13 +165,13 @@ func TestEnsureKeepsAMatchingPairAndReplacesAnUnusableOne(t *testing.T) {
 		t.Errorf("%q %v %v %v", got, st.Mode(), err, a.deleted)
 	}
 	joined := strings.Join(said, "\n")
-	if !strings.Contains(joined, "==> replacing key pair gamevps - "+other+" is not the key pair's private key") || !strings.Contains(joined, "the old file is kept as "+kept) {
+	if !strings.Contains(joined, "==> replacing key pair ayis - "+other+" is not the key pair's private key") || !strings.Contains(joined, "the old file is kept as "+kept) {
 		t.Errorf("%s", joined)
 	}
 	// No pair at all: one is made and its private key written, nothing deleted.
 	a = &admin{fake: &fake{err: &smithy.GenericAPIError{Code: "InvalidKeyPair.NotFound"}}, material: "FRESH"}
-	fresh := filepath.Join(t.TempDir(), "ssh", "gamevps.pem")
-	if err := Ensure(ctx, a, "gamevps", fresh, "cg:host", say, now); err != nil || len(a.deleted) != 0 || len(a.created) != 1 {
+	fresh := filepath.Join(t.TempDir(), "ssh", "ayis.pem")
+	if err := Ensure(ctx, a, "ayis", fresh, "ayis:host", say, now); err != nil || len(a.deleted) != 0 || len(a.created) != 1 {
 		t.Fatalf("%v", err)
 	}
 	if b, _ := os.ReadFile(fresh); string(b) != "FRESH" {
@@ -179,7 +179,7 @@ func TestEnsureKeepsAMatchingPairAndReplacesAnUnusableOne(t *testing.T) {
 	}
 	// A pair that cannot be compared (imported, or AWS silent) is used as it is.
 	a = &admin{fake: &fake{fp: "ab:cd"}}
-	if err := Ensure(ctx, a, "gamevps", other, "cg:host", say, now); err != nil || len(a.created) != 0 {
+	if err := Ensure(ctx, a, "ayis", other, "ayis:host", say, now); err != nil || len(a.created) != 0 {
 		t.Errorf("%v", err)
 	}
 }

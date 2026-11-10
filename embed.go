@@ -1,8 +1,8 @@
-// Package cg holds the files that run somewhere else - on the AWS box, on a
+// Package ayis holds the files that run somewhere else - on the AWS box, on a
 // user's own server, in Lambda - and ship inside the one binary. They are
 // embedded unchanged. go:embed cannot reach a parent directory, which is why
 // this package is at the repository root and the importers are below it.
-package cg
+package ayis
 
 import "embed"
 

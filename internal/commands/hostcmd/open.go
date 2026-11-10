@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/session"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/session"
 )
 
-// Open is `cg host open <name>`: stream from it. No machine to start, nothing
+// Open is `ayis host open <name>`: stream from it. No machine to start, nothing
 // billed by the hour: it is already there.
 func (d Deps) Open(ctx context.Context, args []string, out *output.Out) int {
 	var name string
@@ -20,16 +20,16 @@ func (d Deps) Open(ctx context.Context, args []string, out *output.Out) int {
 		}
 	}
 	if name == "" {
-		out.Die("usage: cg host open <name>")
+		out.Die("usage: ayis host open <name>")
 		return 1
 	}
 	ip := d.Store.Get(name).Field("ts_ip")
 	if ip == "" {
-		out.Die(fmt.Sprintf("'%s' is not set up yet: cg host setup %s", name, name))
+		out.Die(fmt.Sprintf("'%s' is not set up yet: ayis host setup %s", name, name))
 		return 1
 	}
 	if !d.Moonlight {
-		out.Die("Moonlight is not installed - cg check --fix installs it")
+		out.Die("Moonlight is not installed - ayis check --fix installs it")
 		return 1
 	}
 	if l, held := session.Running(d.SessionFile, d.Probe); held {

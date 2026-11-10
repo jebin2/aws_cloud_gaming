@@ -11,10 +11,10 @@ import (
 
 	awspricing "github.com/aws/aws-sdk-go-v2/service/pricing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/pricing"
 )
 
 func envInt(get config.Lookup, key string, def int) int {
@@ -31,7 +31,7 @@ func envList(get config.Lookup, key string) []string {
 	return strings.Fields(v)
 }
 
-// Run is `cg sweep [--all] [--cached] [--json]`.
+// Run is `ayis sweep [--all] [--cached] [--json]`.
 func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string, jsonFlag bool, out *output.Out) int {
 	all, cached := false, false
 	for _, a := range args {
@@ -44,21 +44,21 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string,
 			jsonFlag = true
 		case "--watch":
 		default:
-			out.Die(fmt.Sprintf("unknown option '%s' (see: cg help)", a))
+			out.Die(fmt.Sprintf("unknown option '%s' (see: ayis help)", a))
 			return 1
 		}
 	}
 	dir := ""
-	if v, ok := get("CG_CACHE_DIR"); ok && v != "" {
+	if v, ok := get("AYIS_CACHE_DIR"); ok && v != "" {
 		dir = v
 	} else if base, ok := get("XDG_CACHE_HOME"); ok && base != "" {
-		dir = filepath.Join(base, "cg")
+		dir = filepath.Join(base, "ayis")
 	} else {
 		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".cache", "cg")
+		dir = filepath.Join(home, ".cache", "ayis")
 	}
 	name := "sweep.json"
-	if v, ok := get("CG_SWEEP_CACHE"); ok && v != "" {
+	if v, ok := get("AYIS_SWEEP_CACHE"); ok && v != "" {
 		name = v
 	}
 	store := Store{Dir: dir, Name: name}
@@ -67,7 +67,7 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string,
 	// rows instantly and rescans only when asked.
 	if cached {
 		if !jsonFlag {
-			out.Die("cg sweep --cached is for the app; run cg sweep to scan")
+			out.Die("ayis sweep --cached is for the app; run ayis sweep to scan")
 			return 1
 		}
 		return printJSON(store.Cached(), out)
@@ -81,10 +81,10 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string,
 	region := env.Region()
 	products := pricing.SDKProducts{Client: awspricing.NewFromConfig(us)}
 	rates := pricing.Load(ctx, pricing.Options{Getenv: env.Get, Source: pricing.AWSSource{API: products}}, region)
-	maxMS := float64(envInt(get, "CG_SWEEP_MAX_MS", 80))
-	opts := Options{Configured: region, Types: envList(get, "CG_SWEEP_TYPES"), Fallbacks: envList(get, "CG_SWEEP_FALLBACKS"),
-		MaxMS: maxMS, Samples: envInt(get, "CG_SWEEP_SAMPLES", 5), Parallel: envInt(get, "CG_SWEEP_PAR", 10), INRPerUSD: rates.INRPerUSD}
-	opts.From, _ = get("CG_SWEEP_FROM")
+	maxMS := float64(envInt(get, "AYIS_SWEEP_MAX_MS", 80))
+	opts := Options{Configured: region, Types: envList(get, "AYIS_SWEEP_TYPES"), Fallbacks: envList(get, "AYIS_SWEEP_FALLBACKS"),
+		MaxMS: maxMS, Samples: envInt(get, "AYIS_SWEEP_SAMPLES", 5), Parallel: envInt(get, "AYIS_SWEEP_PAR", 10), INRPerUSD: rates.INRPerUSD}
+	opts.From, _ = get("AYIS_SWEEP_FROM")
 	be := &AWS{Home: region, Get: get, Products: products}
 	res := store.Save(Scan(ctx, be, opts)) // an error answer is not remembered as a scan
 	if jsonFlag {

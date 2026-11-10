@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/costdaily"
+	"github.com/jebin2/ayis/internal/costdaily"
 )
 
 func f(v float64) *float64 { return &v }

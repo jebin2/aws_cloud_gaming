@@ -6,7 +6,7 @@
 # was classified as a command that must run alone, so it was refused before it
 # reached AWS while the screen behind it was reading - nothing threw, nothing
 # logged, the button simply did nothing. Then the appeal was painted over what
-# cg had said, so a request that HAD been filed read as homework.
+# ayis had said, so a request that HAD been filed read as homework.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 T=$(mktemp -d); pass=0; fail=0
@@ -23,7 +23,7 @@ check()    { if [[ $2 == "$3" ]]; then echo "  ok   $1"; pass=$((pass+1));
 echo "1. the scheduler lets the ask through"
 # The rule itself, RUN rather than grepped: this list decides whether a command
 # may start while something else is in flight, and getting it wrong is silent.
-# The rule itself, run rather than grepped - and it now comes from cg, which
+# The rule itself, run rather than grepped - and it now comes from ayis, which
 # is the only thing that knows which commands take locks. The app applies it;
 # getting that wrong is silent, and did it three times.
 sched=$(node -e '
@@ -31,7 +31,7 @@ const { execFileSync } = require("node:child_process");
 const src = require("node:fs").readFileSync("app/main/index.js", "utf8");
 const m = src.match(/const FLAG_TAKES_VALUE[\s\S]*?const isReadOnly = raw => !runsAlone\(raw\);/);
 if (!m) { console.log("NO RULE FOUND"); process.exit(0); }
-var CONTRACT = JSON.parse(execFileSync("./cg", ["--contract"], { encoding: "utf8" }));
+var CONTRACT = JSON.parse(execFileSync("./ayis", ["--contract"], { encoding: "utf8" }));
 eval(m[0].replace(/^const /gm, "var "));
 const want = [
   [["quota", "--json"], true], [["quota", "request", "spot"], true],
@@ -59,7 +59,7 @@ console.log("checked");
 contains "the rule was found"         "$sched" "checked"
 lacks    "nothing is misclassified"   "$sched" "WRONG"
 # One list, published by the thing that takes the locks.
-contains "cg publishes it"            "$(./cg --contract)" '"runs_alone"'
+contains "ayis publishes it"            "$(./ayis --contract)" '"runs_alone"'
 lacks    "  and the renderer keeps none" "$(cat app/renderer/app.js)" "const WRITES = new Set("
 contains "  it is told instead"       "$(cat app/renderer/app.js)" "write: !!res.write"
 
@@ -74,7 +74,7 @@ cp app/renderer/index.html app/renderer/app.js "$T/r/"
 cp app/renderer/*.css "$T/r/"
 cp -r app/renderer/fonts "$T/r/" 2>/dev/null || true
 
-# cg, as a script: each command answers from a queue, so `quota --json` can say
+# ayis, as a script: each command answers from a queue, so `quota --json` can say
 # something different after the request than it did before it - which is what
 # the dialog depends on.
 cat > "$T/r/stub.js" <<'STUB'
@@ -83,7 +83,7 @@ addEventListener('error', e => window.__errs.push(e.message));
 addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
 window.__ran = [];
 window.__answers = {};
-window.cg = {
+window.ayis = {
   run: (args) => {
     const line = args.join(' ');
     window.__ran.push(line);

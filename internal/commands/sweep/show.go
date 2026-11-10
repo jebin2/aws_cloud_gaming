@@ -92,12 +92,12 @@ func Show(d Result, all bool) string {
 			fmt.Fprintf(&b, "    %-16s %5.0f ms\n", r.Region, r.RTTMS)
 		}
 	case len(d.TooFar) > 0:
-		fmt.Fprintf(&b, "\n  %d more regions are over %gms and were skipped: cg sweep --all\n", len(d.TooFar), d.MaxMS)
+		fmt.Fprintf(&b, "\n  %d more regions are over %gms and were skipped: ayis sweep --all\n", len(d.TooFar), d.MaxMS)
 	}
 	if len(d.Unreachable) > 0 {
 		fmt.Fprintf(&b, "  %d regions did not answer a latency probe\n", len(d.Unreachable))
 	}
-	b.WriteString("\n  * is the region in use. Change it with: cg config set GAME_REGION <region>\n")
+	b.WriteString("\n  * is the region in use. Change it with: ayis config set GAME_REGION <region>\n")
 	return b.String()
 }
 

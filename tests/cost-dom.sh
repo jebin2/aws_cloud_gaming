@@ -3,8 +3,8 @@
 #
 # It showed dollars beside rupees, a total at 88 to the dollar over rows at
 # 94.95, a budget of Rs 5,412 for one set at 5,000, and "standby Rs 0" under a
-# bill charging S3 every day - because the games sat in a bucket cg was not
-# looking at. Fed the shape `cg cost --json` answers, read back as shown.
+# bill charging S3 every day - because the games sat in a bucket ayis was not
+# looking at. Fed the shape `ayis cost --json` answers, read back as shown.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 T=$(mktemp -d); pass=0; fail=0
@@ -33,7 +33,7 @@ cat > "$T/r/stub.js" <<'STUB'
 window.__errs = [];
 addEventListener('error', e => window.__errs.push(e.message));
 window.__ran = [];
-window.cg = {
+window.ayis = {
   run: (args) => { window.__ran.push(args.join(' '));
                    window.__lastId = (window.__lastId || 0) + 1;
                    return Promise.resolve({ ok: true, id: window.__lastId }); },
@@ -96,11 +96,11 @@ cat > "$T/r/probe.js" <<'PROBE'
     paintCost(COST({ resources: { instance: null, volumes_gb: 0, snapshots_gb: 0, images: 0, budget_usd: null } }));
     out.push('BOXED c-cap-note | ' + text('c-cap-note') + ' red=' + find('c-cap-note').classList.contains('text-error'));
     statusNow = null;
-    // The games cg found in another place explain the storage: the page names
+    // The games ayis found in another place explain the storage: the page names
     // them instead of calling it a mystery, and does not ask AWS again.
     paintCost(COST({}));
     window.__ran = [];
-    paintElsewhere({ error: null, places: [{ bucket: 'cg-library-old', region: 'ap-south-2', error: null,
+    paintElsewhere({ error: null, places: [{ bucket: 'ayis-library-old', region: 'ap-south-2', error: null,
       bytes: 174813455930, games_bytes: 174813206488, usd_month: 4.07,
       games: [{ name: 'Diablo IV', bytes: 174813206488 }], login: true }] });
     read('AWAY');
@@ -172,14 +172,14 @@ cat > "$T/r/probe.js" <<'PROBE'
     boxNow = { ...boxNow, disk_gb: 200 }; statusNow = { ...statusNow, box: boxNow };
     out.push('BIG DISK | ' + machineFacts().priceText);
     // A restart: nothing in this window, the last bill on this laptop.
-    const kept = JSON.parse(localStorage.getItem('cg.lastCost'));
+    const kept = JSON.parse(localStorage.getItem('ayis.lastCost'));
     kept.at = new Date(Date.now() - 2 * 86400000).toISOString();
     if (new Date(kept.at).getMonth() !== new Date().getMonth()) {
       // The 1st: the bill is kept from this month's first minute, and what happened since belongs to a month that has gone.
       kept.at = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 0, 1).toISOString();
-      localStorage.removeItem('cg.billChanges');
+      localStorage.removeItem('ayis.billChanges');
     }
-    localStorage.setItem('cg.lastCost', JSON.stringify(kept));
+    localStorage.setItem('ayis.lastCost', JSON.stringify(kept));
     costNow = null; costNowAt = null;
     document.getElementById('c-month-card').textContent = '';
     restoreBill();
@@ -229,7 +229,7 @@ print(html.unescape(m.group(1)) if m else "NO PROBE OUTPUT")')
 [[ $OUT == *"NO PROBE OUTPUT"* ]] && { echo "  FAIL the page did not render"; echo "cost-dom: 0 passed, 1 failed"; exit 1; }
 row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
-echo "1. the month, in rupees at cg's one rate"
+echo "1. the month, in rupees at ayis's one rate"
 contains "the total in rupees"           "$(row 'REAL c-month')" "₹167"
 contains "  hours played and the pace"   "$(row 'REAL c-month-sub')" "so far on the whole AWS account · 2.4 h runtime · projected ₹553 by $(sed 's/^MONTHEND | //' <<<"$(row MONTHEND)")"
 contains "the budget is yours, as set"   "$(row 'REAL c-cap-note')" "Budget ₹5,000/month. Alert by email only; nothing is stopped."
@@ -251,7 +251,7 @@ contains "  and that the bill runs a day behind" "$(row CHANGED)" "lags about a 
 check    "  on Home too"                  "$(row 'HOME CHANGED')" "HOME CHANGED | true"
 # A heartbeat, at full strength, and hoverable - the old dimming class it once
 # shared a name with turned the pointer off, hiding the reason.
-contains "  it beats"                    "$(row BEAT)" "anim=cg-heartbeat"
+contains "  it beats"                    "$(row BEAT)" "anim=ayis-heartbeat"
 contains "  can be hovered"              "$(row BEAT)" "pointer=auto"
 contains "a new check clears it"          "$(row RECHECKED)" "stale=false"
 check    "a running machine counts, once" "$(row RUNNING)" "RUNNING | a machine was running"
@@ -267,7 +267,7 @@ check    "an idle day says so"           "$(row 'REAL ROW1')" "REAL ROW1 | 13 Oc
 contains "the month row adds up"         "$(row 'REAL ROW3')" "Month so far / 2.4 h"
 contains "  to the same total"           "$(row 'REAL ROW3')" "/ ₹167"
 
-echo "3. storage the bill charges that cg cannot see is not guessed at"
+echo "3. storage the bill charges that ayis cannot see is not guessed at"
 # The bill runs days behind: a game just deleted read as lost storage.
 check    "no lost-storage warning"       "$(row 'REAL UNKNOWN')" "REAL UNKNOWN | hidden"
 lacks    "  nor counted in the total"    "$(row 'REAL c-standby')" "₹370"
@@ -277,7 +277,7 @@ contains "  and nothing stored says so"  "$(row 'REAL c-bills')" "Nothing stored
 # the question of what it was.
 lacks    "  and no empty disk row"         "$(row 'REAL c-bills')" "disk"
 contains "a bucket that explains it raises nothing" "$(row 'KNOWN UNKNOWN')" "hidden"
-contains "  and standby is what cg knows" "$(row 'KNOWN c-standby')" "₹813 a month"
+contains "  and standby is what ayis knows" "$(row 'KNOWN c-standby')" "₹813 a month"
 contains "  saved games with their size" "$(row 'KNOWN c-bills')" "Saved games →₹380 a month"
 contains "  a disk left behind is named" "$(row 'KNOWN c-bills')" "Orphaned disk50 GB · ₹433 a month"
 # Every build sets the budget before it launches: with no machine, not yet.

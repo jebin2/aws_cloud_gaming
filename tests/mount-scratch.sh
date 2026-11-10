@@ -32,7 +32,7 @@ chmod +x "$T/bin"/*
 # The script as the bootstrap writes it, with /scratch moved into the sandbox.
 script() { # script <DATA_GB>
   sed -n "/mount-scratch.sh <<'EOF'/,/^EOF$/p" lib/bootstrap.d/12-scratch.sh | sed '1d;$d' \
-    | sed "s#__CG_DATA_GB__#$1#; s#/scratch#$T/scratch#g" > "$T/ms.sh"
+    | sed "s#__AYIS_DATA_GB__#$1#; s#/scratch#$T/scratch#g" > "$T/ms.sh"
 }
 run() { LOG="$T/log" PATH="$T/bin:$PATH" DISKS="$DISKS" bash "$T/ms.sh" >"$T/out" 2>&1; echo $?; }
 # root, the machine's own drive, and (when one was added) the games disk.
@@ -50,7 +50,7 @@ echo "2. a games disk: still the drive at /scratch, and the disk with nothing mo
 script 190; DISKS=$WITH_EXTRA; rm -f "$T/log"
 check "ran"                      "$(run)" "0"
 check "formatted the machine's own drive" "$(grep -c 'MKFS.*nvme1n1' "$T/log")" "1"
-check "formatted the added disk"  "$(grep -c 'MKFS.*cgextra.*nvme2n1' "$T/log")" "1"
+check "formatted the added disk"  "$(grep -c 'MKFS.*ayisextra.*nvme2n1' "$T/log")" "1"
 check "  and never the root disk" "$(grep -c 'nvme0n1' "$T/log")" "0"
 check "  mounting it at /scratch2" "$(grep -c "MOUNT.*nvme2n1 $T/scratch2" "$T/log")" "1"
 
@@ -58,7 +58,7 @@ echo "3. a games disk, with it listed first (device order differs)"
 DISKS=$EXTRA_FIRST; rm -f "$T/log"
 check "ran"                      "$(run)" "0"
 check "still not the root disk"  "$(grep -c 'nvme0n1' "$T/log")" "0"
-check "  and the added disk is the one"  "$(grep -c 'MKFS.*cgextra.*nvme2n1' "$T/log")" "1"
+check "  and the added disk is the one"  "$(grep -c 'MKFS.*ayisextra.*nvme2n1' "$T/log")" "1"
 
 echo "4. the next boot: the added disk is already at /scratch2 and formatted"
 DISKS=$WITH_EXTRA; DATA_MOUNT="$T/scratch2"; FORMATTED=1; MOUNTED=0; export DATA_MOUNT FORMATTED MOUNTED

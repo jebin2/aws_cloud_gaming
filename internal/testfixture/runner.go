@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	"github.com/jebin2/ayis/internal/local"
 )
 
 // Runner is a fake local.Runner: programs that are "installed", what each

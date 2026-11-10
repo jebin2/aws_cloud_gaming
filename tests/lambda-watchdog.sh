@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, "lambda")
 import cloud_watchdog as w
 w.IDLE_MINUTES, w.BOOT_GRACE_MINUTES, w.STUCK_MINUTES, w.THRESHOLD = 30, 20, 60, 10485760
-# What cg passes at deploy (lib/cloud-watchdog.sh cw_env): the Lambda holds no price.
+# What ayis passes at deploy (lib/cloud-watchdog.sh cw_env): the Lambda holds no price.
 w.S3_USD_PER_GB, w.INR_PER_USD = 0.025, 88
 w.NTFY_URL = ""; SEND_FAILS = False
 def fake_send(url, title, message, priority, tags):
@@ -146,7 +146,7 @@ r=$(case_ 'ec2 = EC2([inst()], deny=True); cw = CW(QUIET); dry = True')
 contains "a denied permission is reported" "$r" "DENIED"
 
 echo "10b. a dry run proves the permission on a box it would NOT end"
-# The case that matters in practice: `cg watchdog check` is run during a
+# The case that matters in practice: `ayis watchdog check` is run during a
 # session, on a busy box - and used to say nothing about the permission.
 r=$(case_ 'ec2 = EC2([inst()]); cw = CW({"NetworkIn": [(10, 50*1048576)]}); dry = True')
 check "left alone, but the permission tested" "$(field 1 "$r")|$(field 2 "$r")" "none|terminate(dry)"
@@ -218,7 +218,7 @@ import sys, io, json, contextlib
 from datetime import datetime, timedelta, timezone
 sys.path.insert(0, "lambda")
 import cloud_watchdog as w
-w.TS_HOST, w.BUCKET, w.EXPIRY_DAYS, w.TRAIL_PAGES = "gamevps", "cg-library-test", 14, 3
+w.TS_HOST, w.BUCKET, w.EXPIRY_DAYS, w.TRAIL_PAGES = "ayis", "ayis-library-test", 14, 3
 w.NTFY_URL = ""; SEND_FAILS = False
 def fake_send(url, title, message, priority, tags):
     if SEND_FAILS: raise Exception("network down")
@@ -254,7 +254,7 @@ class SSM:
     def __init__(s, **marks):
         s.p, s.fails = {}, False
         for k, v in marks.items():
-            s.p["/cloud-gaming/gamevps/archive-" + k.replace("_", "-")] = v if isinstance(v, str) else iso(v)
+            s.p["/ayis/ayis/archive-" + k.replace("_", "-")] = v if isinstance(v, str) else iso(v)
     def get_parameter(s, Name):
         if s.fails: raise AwsError("AccessDeniedException")
         if Name not in s.p: raise AwsError("ParameterNotFound")
@@ -353,7 +353,7 @@ check "kept, no calls" "$(field 1 "$r")|$(field 2 "$r")" "kept|-"
 contains "counts down" "$r" "kept - last used 3d ago; deleted in 11d unless a box is launched"
 
 echo "26. mark is old, but CloudTrail shows a launch: kept, and the mark moved to it"
-r=$(arch_ 'trail = Trail([("gamevps", 5, None)])')
+r=$(arch_ 'trail = Trail([("ayis", 5, None)])')
 check "kept" "$(field 1 "$r")|$(field 2 "$r")" "kept|lookup,last-seen=2026-09-10T12:00:00Z"
 contains "names the evidence" "$r" "a box was launched 5d ago (CloudTrail)"
 
@@ -361,18 +361,18 @@ echo "27. mark is old AND CloudTrail agrees: emptied, uploads aborted, deleted, 
 r=$(arch_ '')
 check "deleted, in order" "$(field 1 "$r")|$(field 2 "$r")" \
   "deleted|lookup,delete-objects:1000,delete-objects:1000,delete-objects:500,abort,delete-bucket,deleted=2026-09-15T12:00:00Z"
-contains "says so" "$r" "unused for 20d - DELETED s3://cg-library-test (2500 objects)"
+contains "says so" "$r" "unused for 20d - DELETED s3://ayis-library-test (2500 objects)"
 r=$(arch_ 's3 = S3(gone=True)')
 check "already gone when deleting: absent, and remembered" "$(field 1 "$r")|$(field 2 "$r")" "absent|lookup,deleted=2026-09-15T12:00:00Z"
 
 echo "28. another host's launch, or a FAILED launch of this one, does not keep it"
-r=$(arch_ 'trail = Trail([("other-box", 1, None), ("gamevps", 2, "Client.InsufficientInstanceCapacity")])')
+r=$(arch_ 'trail = Trail([("other-box", 1, None), ("ayis", 2, "Client.InsufficientInstanceCapacity")])')
 check "deleted" "$(field 1 "$r")" "deleted"
 
 echo "29. anything uncertain deletes NOTHING"
 for spec in 'trail = Trail(fails=True)' \
             'trail = Trail(pages=5)' \
-            'trail = Trail([("gamevps", 1, None)], junk=True)' \
+            'trail = Trail([("ayis", 1, None)], junk=True)' \
             'ssm = SSM(last_seen="yesterday")' \
             'ssm.fails = True' \
             'cw = CWStub(fails=True)'; do
@@ -391,7 +391,7 @@ lacks "  and deleted nothing" "$(field 2 "$r")" "delete"
 echo "30. a dry run looks at any minute, and changes nothing"
 r=$(arch_ 'dry = True; now = NOW + timedelta(minutes=17)')
 check "would delete, no writes" "$(field 1 "$r")|$(field 2 "$r")" "would-delete|lookup"
-contains "says so" "$r" "WOULD DELETE s3://cg-library-test (dry run)"
+contains "says so" "$r" "WOULD DELETE s3://ayis-library-test (dry run)"
 r=$(arch_ 'dry = True; ssm = SSM()')
 check "no mark written in a dry run" "$(field 1 "$r")|$(field 2 "$r")" "started|-"
 
@@ -402,7 +402,7 @@ contains "but the archive was checked" "$r" "archive: kept - a box exists"
 
 echo "31b. it costs nothing until it deletes: no S3 request on any path that keeps the archive"
 for spec in 'ec2 = EC2([("i-a", "running")])' 'ssm = SSM()' 'ssm = SSM(last_seen=ago(days=3))' \
-            'trail = Trail([("gamevps", 5, None)])' 'cw = CWStub(gb=None)' 'dry = True' \
+            'trail = Trail([("ayis", 5, None)])' 'cw = CWStub(gb=None)' 'dry = True' \
             'w.NTFY_URL = "u"; w.EXPIRY_DAYS = 1; ssm = SSM(last_seen=ago(hours=3))'; do
   r=$(arch_ "$spec")
   check "no S3 request: $spec" "$(field 4 "$r")" "s3:none"
@@ -460,8 +460,8 @@ state_() {
 import sys, io, contextlib
 sys.path.insert(0, "lambda")
 import cloud_watchdog as w
-w.TS_HOST, w.NTFY_URL = "gamevps", "https://ntfy.sh/t"
-# What cg passes at deploy (cw_env): the Lambda holds no price of its own.
+w.TS_HOST, w.NTFY_URL = "ayis", "https://ntfy.sh/t"
+# What ayis passes at deploy (cw_env): the Lambda holds no price of its own.
 w.S3_USD_PER_GB, w.INR_PER_USD = 0.025, 88
 calls = []
 def fake_send(url, title, message, priority, tags):
@@ -469,12 +469,12 @@ def fake_send(url, title, message, priority, tags):
 w.send = fake_send
 from datetime import datetime, timezone
 NOW = datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc)
-w.BUCKET, w.EXPIRY_DAYS = "cg-library-test", 14
+w.BUCKET, w.EXPIRY_DAYS = "ayis-library-test", 14
 class AwsError(Exception):
     def __init__(s, code):
         super().__init__(code); s.response = {"Error": {"Code": code}}
 class EC2:
-    def __init__(s, name="gamevps", fails=False): s.name, s.fails = name, fails
+    def __init__(s, name="ayis", fails=False): s.name, s.fails = name, fails
     def describe_instances(s, InstanceIds=None, Filters=None):
         calls.append("describe:%s" % (InstanceIds or ["by-filter"])[0])
         if s.fails: raise AwsError("InvalidInstanceID.NotFound")
@@ -570,7 +570,7 @@ contains "  and when it expires"     "$r" "Deleted after 14 days with no box, ar
 r=$(state_ 'cw = CWS(gb=None)')
 contains "no archive: nothing else bills" "$r" "No game archive is measured in S3, so nothing else bills."
 r=$(state_ 'w.EXPIRY_DAYS = 0')
-contains "expiry off: kept until deleted" "$r" "Kept until you delete it: cg destroy --all."
+contains "expiry off: kept until deleted" "$r" "Kept until you delete it: ayis destroy --all."
 r=$(state_ 'cw = CWS(gb=0.5)')
 contains "a small archive keeps a decimal" "$r" "about 0.5 GB of games"
 r=$(state_ 'cw = CWS(fails=True)')
@@ -583,9 +583,9 @@ echo "38. a slow, then a stuck, shutdown - each said once, then hourly while it 
 SD="inst(state='shutting-down', reason='User initiated (2026-09-15 11:25:00 GMT)'"
 r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([$SD)]); cw = CW()")
 check "35 min: a heads-up, recorded against this shutdown" "$(field 2 "$r")" "notify:Game PC is slow to switch off,tag:i-a=2026-09-15T11:25:00Z"
-r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([$SD, tags=[{'Key': 'cg-slow-noted', 'Value': '2026-09-15T11:25:00Z'}])]); cw = CW()")
+r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([$SD, tags=[{'Key': 'ayis-slow-noted', 'Value': '2026-09-15T11:25:00Z'}])]); cw = CW()")
 check "  already sent for this shutdown: silent" "$(field 2 "$r")" "-"
-r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([$SD, tags=[{'Key': 'cg-slow-noted', 'Value': '2026-09-01T08:00:00Z'}])]); cw = CW()")
+r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([$SD, tags=[{'Key': 'ayis-slow-noted', 'Value': '2026-09-01T08:00:00Z'}])]); cw = CW()")
 contains "  a mark from an EARLIER shutdown does not count" "$(field 2 "$r")" "notify:Game PC is slow to switch off"
 r=$(case_ "w.NTFY_URL = 'u'; ec2 = EC2([inst(state='shutting-down', reason='User initiated (2026-09-15 11:45:00 GMT)')]); cw = CW()")
 check "15 min: nothing yet" "$(field 2 "$r")" "-"
@@ -593,7 +593,7 @@ r=$(case_ "w.NTFY_URL = 'u'; dry = True; ec2 = EC2([$SD)]); cw = CW()")
 check "a dry run: no heads-up, no tag" "$(field 2 "$r")" "-"
 r=$(case_ "ec2 = EC2([$SD)]); cw = CW()")
 check "no URL: no heads-up, no tag" "$(field 2 "$r")" "-"
-FD="inst(state='shutting-down', reason='User initiated (2026-09-15 10:00:00 GMT)', tags=[{'Key': 'cg-forced', 'Value': '2026-09-15T10:00:00Z/2026-09-15T12:00:00Z'}])"
+FD="inst(state='shutting-down', reason='User initiated (2026-09-15 10:00:00 GMT)', tags=[{'Key': 'ayis-forced', 'Value': '2026-09-15T10:00:00Z/2026-09-15T12:00:00Z'}])"
 r=$(case_ "w.NTFY_URL = 'u'; NOW = NOW + timedelta(minutes=3); ec2 = EC2([$FD]); cw = CW()")
 check "forced again 3 min later: silent" "$(field 2 "$r")" "terminate:i-a+SkipOsShutdown"
 r=$(case_ "w.NTFY_URL = 'u'; NOW = NOW + timedelta(minutes=30); ec2 = EC2([$FD]); cw = CW()")
@@ -603,8 +603,8 @@ check "an hour after forcing: the hourly reminder" "$(field 2 "$r")" "terminate:
 
 # --- one game at a time, wherever it is saved ---------------------------------
 # A region move left 162.8 GB of Diablo IV in a bucket nothing pointed at. With
-# the account known, the watchdog finds this host's buckets by the name cg
-# derives - never just by the cg-library- prefix - and expires each game on the
+# the account known, the watchdog finds this host's buckets by the name ayis
+# derives - never just by the ayis-library- prefix - and expires each game on the
 # later of "a machine was last seen" and that game's Reset mark. Default: no box,
 # last seen 20 days ago, CloudTrail empty, the 14-day rule.
 games_() {
@@ -614,9 +614,9 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, "lambda")
 import cloud_watchdog as w
 ACCT = "123456789012"
-def name(*p): return "cg-library-" + hashlib.sha256("-".join(p).encode()).hexdigest()[:12]
-NOW_B, OLD_B, FOREIGN = name(ACCT, "gamevps", "ap-south-1"), name(ACCT, "gamevps"), name("999999999999", "gamevps", "ap-south-2")
-w.TS_HOST, w.BUCKET, w.EXPIRY_DAYS, w.TRAIL_PAGES, w.ACCOUNT = "gamevps", NOW_B, 14, 3, ACCT
+def name(*p): return "ayis-library-" + hashlib.sha256("-".join(p).encode()).hexdigest()[:12]
+NOW_B, OLD_B, FOREIGN = name(ACCT, "ayis", "ap-south-1"), name(ACCT, "ayis"), name("999999999999", "ayis", "ap-south-2")
+w.TS_HOST, w.BUCKET, w.EXPIRY_DAYS, w.TRAIL_PAGES, w.ACCOUNT = "ayis", NOW_B, 14, 3, ACCT
 w.NTFY_URL = ""
 NOW = datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc)
 def ago(days=0, hours=0): return NOW - timedelta(days=days, hours=hours)
@@ -666,8 +666,8 @@ class S3:
 class SSM:
     def __init__(s, kept=None, last_seen=None, fails=False):
         s.p, s.fails = {}, fails
-        if last_seen: s.p["/cloud-gaming/gamevps/archive-last-seen"] = iso(last_seen)
-        for (b, a), t in (kept or {}).items(): s.p["/cloud-gaming/gamevps/kept/%s/%s" % (b, a)] = t if isinstance(t, str) else iso(t)
+        if last_seen: s.p["/ayis/ayis/archive-last-seen"] = iso(last_seen)
+        for (b, a), t in (kept or {}).items(): s.p["/ayis/ayis/kept/%s/%s" % (b, a)] = t if isinstance(t, str) else iso(t)
     def get_parameter(s, Name):
         if Name not in s.p: raise AwsError("ParameterNotFound")
         return {"Parameter": {"Value": s.p[Name]}}
@@ -699,11 +699,11 @@ with contextlib.redirect_stdout(buf):
         res = "RAISED"; print("error: %s" % e)
 print("%s | %s | %s | s3:%s | left:%s" % (res, ",".join(calls) or "-", buf.getvalue().replace("\n", " / ").strip(),
       ",".join(requests) or "none", ";".join("%s=%s" % (n[-4:], ",".join(a["name"] for a in json.loads(v[1].get("steam/index.json", '{"apps":[]}'))["apps"]))
-                                            for n, v in sorted(s3.b.items()) if n.startswith("cg-"))))
+                                            for n, v in sorted(s3.b.items()) if n.startswith("ayis-"))))
 PY2
 }
-nm() { python3 -c 'import hashlib,sys; print(("cg-library-" + hashlib.sha256("-".join(sys.argv[1:]).encode()).hexdigest()[:12])[-4:])' "$@"; }
-NOWB=$(nm 123456789012 gamevps ap-south-1); OLDB=$(nm 123456789012 gamevps); FOR=$(nm 999999999999 gamevps ap-south-2)
+nm() { python3 -c 'import hashlib,sys; print(("ayis-library-" + hashlib.sha256("-".join(sys.argv[1:]).encode()).hexdigest()[:12])[-4:])' "$@"; }
+NOWB=$(nm 123456789012 ayis ap-south-1); OLDB=$(nm 123456789012 ayis); FOR=$(nm 999999999999 ayis ap-south-2)
 
 
 echo "51. nothing reset: every game of this host goes, wherever it is, and nothing else"
@@ -775,7 +775,7 @@ import sys, io, contextlib
 from datetime import datetime, timedelta, timezone
 sys.path.insert(0, "lambda")
 import cloud_watchdog as w
-w.TS_HOST, w.EXPIRY_DAYS, w.NTFY_URL = "gamevps", 14, "u"
+w.TS_HOST, w.EXPIRY_DAYS, w.NTFY_URL = "ayis", 14, "u"
 calls = []
 w.send = lambda url, title, message, priority, tags: calls.append("notify:" + title)
 NOW = datetime(2026, 10, 25, 12, 2, 0, tzinfo=timezone.utc)
@@ -805,8 +805,8 @@ r=$(stopped_ 'ec2 = EC2([box(stopped=days(3))])')
 check    "stopped 3 days of 14: kept, nothing done" "$(field 1 "$r") | $(field 2 "$r")" "kept | -"
 contains "  and when it goes is said"   "$r" "deleted in 11d unless it is started"
 r=$(stopped_ 'ec2 = EC2([box(stopped=days(13.5))])')
-check    "inside the last day: warned"  "$(field 2 "$r")" "notify:Game PC will be deleted tomorrow,tag:cg-stopped-warned=2026-10-12T00:02:00Z"
-r=$(stopped_ 'ec2 = EC2([box(stopped=days(13.5), tags=[{"Key": "cg-stopped-warned", "Value": "2026-10-12T00:02:00Z"}])])')
+check    "inside the last day: warned"  "$(field 2 "$r")" "notify:Game PC will be deleted tomorrow,tag:ayis-stopped-warned=2026-10-12T00:02:00Z"
+r=$(stopped_ 'ec2 = EC2([box(stopped=days(13.5), tags=[{"Key": "ayis-stopped-warned", "Value": "2026-10-12T00:02:00Z"}])])')
 check    "  once"                       "$(field 2 "$r")" "-"
 r=$(stopped_ 'ec2 = EC2([box(stopped=days(15))])')
 check    "past the 14 days: deleted"    "$(field 1 "$r") | $(field 2 "$r")" "terminate | terminate:i-s,notify:Old game PC deleted"
@@ -814,11 +814,11 @@ contains "  saying its games stay in S3" "$r" "its games stay in S3 for 14 days"
 r=$(stopped_ 'ec2 = EC2([box(stopped=days(15), spot=True)])')
 check    "a spot box is not this check's" "$(field 1 "$r") | $(field 2 "$r")" "- | -"
 r=$(stopped_ 'ec2 = EC2([box()])')
-check    "no AWS timestamp: counted from now, recorded" "$(field 1 "$r") | $(field 2 "$r")" "kept | tag:cg-stopped-since=2026-10-25T12:02:00Z"
-r=$(stopped_ 'ec2 = EC2([box(tags=[{"Key": "cg-stopped-since", "Value": "2026-10-01T00:00:00Z"}], launched=40)])')
+check    "no AWS timestamp: counted from now, recorded" "$(field 1 "$r") | $(field 2 "$r")" "kept | tag:ayis-stopped-since=2026-10-25T12:02:00Z"
+r=$(stopped_ 'ec2 = EC2([box(tags=[{"Key": "ayis-stopped-since", "Value": "2026-10-01T00:00:00Z"}], launched=40)])')
 check    "  and deleted once that is past" "$(field 1 "$r")" "terminate"
-r=$(stopped_ 'ec2 = EC2([box(tags=[{"Key": "cg-stopped-since", "Value": "2026-09-01T00:00:00Z"}], launched=2)])')
-check    "  a record from an earlier stop does not count" "$(field 1 "$r") | $(field 2 "$r")" "kept | tag:cg-stopped-since=2026-10-25T12:02:00Z"
+r=$(stopped_ 'ec2 = EC2([box(tags=[{"Key": "ayis-stopped-since", "Value": "2026-09-01T00:00:00Z"}], launched=2)])')
+check    "  a record from an earlier stop does not count" "$(field 1 "$r") | $(field 2 "$r")" "kept | tag:ayis-stopped-since=2026-10-25T12:02:00Z"
 r=$(stopped_ 'dry = True; ec2 = EC2([box(stopped=days(15))])')
 check    "a dry run deletes nothing"    "$(field 1 "$r") | $(field 2 "$r")" "would-terminate | -"
 r=$(stopped_ 'w.EXPIRY_DAYS = 0; ec2 = EC2([box(stopped=days(400))])')

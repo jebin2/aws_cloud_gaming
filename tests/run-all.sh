@@ -50,7 +50,7 @@ trap '(( keep )) || rm -rf "$dir"' EXIT
 # python3 as the interpreter itself, not a version manager's shim. pyenv's
 # python3 is a bash script that works out which Python to run on every call -
 # about 80ms each, four times the interpreter's own start - and the suites call
-# it thousands of times: init-watchdog's fake aws alone is 31 calls per cg run,
+# it thousands of times: init-watchdog's fake aws alone is 31 calls per ayis run,
 # and the suite took 33s instead of 11. Asked once here, then first on PATH.
 # Where python3 is already the binary this changes nothing.
 real_py=$(python3 -c 'import sys; print(sys.executable)' 2>/dev/null || true)
@@ -59,14 +59,14 @@ if [[ -x $real_py && $(command -v python3) != "$real_py" ]]; then
   export PATH="$dir/py:$PATH"
 fi
 
-# cg is a Go program: build it where the suites expect it, and run Go's own
+# ayis is a Go program: build it where the suites expect it, and run Go's own
 # tests first - they are where the commands' behaviour is proven.
 if command -v go >/dev/null 2>&1; then
-  CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o cg ./cmd/cg || { echo "go build failed" >&2; exit 1; }
+  CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o ayis ./cmd/ayis || { echo "go build failed" >&2; exit 1; }
   go test ./... >"$dir/go-test.out" 2>&1 || { keep=1; echo "go test failed - output kept at $dir/go-test.out" >&2; cat "$dir/go-test.out" >&2; exit 1; }
   echo "go test ./... passed"
 else
-  echo "go is not installed: cg was not rebuilt and Go's tests did not run" >&2
+  echo "go is not installed: ayis was not rebuilt and Go's tests did not run" >&2
 fi
 
 suites=()
@@ -79,7 +79,7 @@ run_one() {
   local t=$1 n start; n=$(basename "$t" .sh)
   mkdir -p "$dir/home-$n/run"
   start=$(date +%s%N)
-  # XDG_RUNTIME_DIR: cg's "a stream is open" marker lives there, not in HOME.
+  # XDG_RUNTIME_DIR: ayis's "a stream is open" marker lives there, not in HOME.
   # Shared, a suite streaming beside destroy-all made its destroy ask "close
   # the stream first?" - which ate the typed DESTROY-ALL, so it aborted.
   HOME="$dir/home-$n" XDG_RUNTIME_DIR="$dir/home-$n/run" \

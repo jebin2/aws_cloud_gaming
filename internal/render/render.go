@@ -1,5 +1,5 @@
 // Package render assembles the build: lib/bootstrap.d's modules as one script,
-// for any machine cg sets up. The AWS box gets it as user-data; a machine of
+// for any machine ayis sets up. The AWS box gets it as user-data; a machine of
 // yours gets it over ssh. One assembly, so both run the same steps - the modules
 // themselves decide what each kind of machine needs.
 //
@@ -99,23 +99,23 @@ func assemble(fsys fs.FS, names []string, vars map[string]string) (string, error
 
 // Markers around the part of the header that is only functions and variables.
 const (
-	preludeBegin = "# cg:prelude-begin"
-	preludeEnd   = "# cg:prelude-end"
+	preludeBegin = "# ayis:prelude-begin"
+	preludeEnd   = "# ayis:prelude-end"
 )
 
 // Glue is added to the prelude of a supervised stage: the few values one stage
 // hands to a later one (a variable a module sets and another reads), kept in files
 // because each stage is a process of its own.
 const Glue = `
-CG_SUPERVISED=1
-cg_vars=${CG_BUILD_STATE:-/var/lib/cg-build}/vars
-for _v in "$cg_vars"/*; do [ -f "$_v" ] && export "$(basename "$_v")=$(cat "$_v")"; done
-cg_save_vars() { for _n in NVIDIA_ADDED DESKTOP_ADDED; do [ -n "${!_n:-}" ] && printf '%s' "${!_n}" > "$cg_vars/$_n"; done; return 0; }
-trap cg_save_vars EXIT
+AYIS_SUPERVISED=1
+ayis_vars=${AYIS_BUILD_STATE:-/var/lib/ayis-build}/vars
+for _v in "$ayis_vars"/*; do [ -f "$_v" ] && export "$(basename "$_v")=$(cat "$_v")"; done
+ayis_save_vars() { for _n in NVIDIA_ADDED DESKTOP_ADDED; do [ -n "${!_n:-}" ] && printf '%s' "${!_n}" > "$ayis_vars/$_n"; done; return 0; }
+trap ayis_save_vars EXIT
 # A package install that was cut off (a reboot, a kill) leaves the installer half-way
 # through, and refuses everything until it is finished. A stage that installs
 # packages starts by finishing it; there is nothing to finish the first time.
-if [ "${CG_STAGE_LOCK:-}" = apt ]; then dpkg --configure -a >/dev/null 2>&1 || true; fi
+if [ "${AYIS_STAGE_LOCK:-}" = apt ]; then dpkg --configure -a >/dev/null 2>&1 || true; fi
 `
 
 // Prelude is what every stage of a supervised build starts with: the header's

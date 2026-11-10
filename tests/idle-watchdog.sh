@@ -3,7 +3,7 @@
 # mirror the library FIRST.
 #
 # It used to just call `shutdown -h` and leave the upload to
-# cg-library-shutdown.service, which runs from ExecStop under TimeoutStopSec.
+# ayis-library-shutdown.service, which runs from ExecStop under TimeoutStopSec.
 # That is fine for a delta and hopeless for a first upload: measured at 104 GB
 # of egress in the 15 minutes systemd allowed, then killed with ~72 GB of a
 # 140 GB game landed and no manifest written. A whole session's download, lost
@@ -29,7 +29,7 @@ printf '#!/usr/bin/env bash\necho "SHUTDOWN" >> "$LOG"\n' > "$T/bin/shutdown"
 printf '#!/usr/bin/env bash\necho "LOG $*" >> "$LOG"\nexit 0\n' > "$T/bin/logger"
 # runuser -u ubuntu -- <cmd> push
 printf '#!/usr/bin/env bash\nshift 3\necho "PUSH" >> "$LOG"\nsleep ${PUSH_SLEEP:-0}\nexit ${PUSH_RC:-0}\n' > "$T/bin/runuser"
-printf '#!/usr/bin/env bash\ntrue\n' > "$T/bin/cg-library"
+printf '#!/usr/bin/env bash\ntrue\n' > "$T/bin/ayis-library"
 chmod +x "$T/bin"/*
 
 run() { # run <idle-start> [PUSH_RC]
@@ -43,9 +43,9 @@ run() { # run <idle-start> [PUSH_RC]
   # with loopback traffic running. These cases test what happens AT the limit.
   LOG="$T/log" PATH="$T/bin:$PATH" PUSH_RC="${2:-0}" \
   THRESHOLD=999999999999999 RX_THRESHOLD=999999999999999 \
-  CG_NOTIFY_BIN="$PWD/host/cg-notify" UPLOAD_POLL_SEC=0.1 UPLOAD_WARN_SEC="${UPLOAD_WARN_SEC:-3600}" \
+  AYIS_NOTIFY_BIN="$PWD/host/ayis-notify" UPLOAD_POLL_SEC=0.1 UPLOAD_WARN_SEC="${UPLOAD_WARN_SEC:-3600}" \
   STATE="$T/state" IDLE_LIMIT=3 BOOT_GRACE=0 IFACE=lo STEAM_LIBS="$T/lib" \
-  CG_LIBRARY_BIN="$T/bin/cg-library" SHUTDOWN_BIN="$T/bin/shutdown" \
+  AYIS_LIBRARY_BIN="$T/bin/ayis-library" SHUTDOWN_BIN="$T/bin/shutdown" \
     bash "$SRC" >/dev/null 2>&1
   grep -oE 'PUSH|SHUTDOWN' "$T/log" 2>/dev/null | tr '\n' ' '
 }
@@ -78,32 +78,32 @@ out=$(run 3 0)
 if grep -q 'mirror complete' "$T/log"; then echo "  ok   says so"; pass=$((pass+1));
 else echo "  FAIL a successful push was not reported"; fail=$((fail+1)); fi
 
-echo "4. no cg-library installed: shut down without pretending to mirror"
-rm -f "$T/bin/cg-library"
+echo "4. no ayis-library installed: shut down without pretending to mirror"
+rm -f "$T/bin/ayis-library"
 check "just shuts down" "$(run 3)" "SHUTDOWN "
 
 echo "5. a notification before shutting down - only when a URL is configured"
 printf '#!/usr/bin/env bash\necho "CURL $*" >> "$LOG"\nexit ${CURL_RC:-0}\n' > "$T/bin/curl"
-printf '#!/usr/bin/env bash\ntrue\n' > "$T/bin/cg-library"
-chmod +x "$T/bin/curl" "$T/bin/cg-library"
+printf '#!/usr/bin/env bash\ntrue\n' > "$T/bin/ayis-library"
+chmod +x "$T/bin/curl" "$T/bin/ayis-library"
 run 3 >/dev/null
 check "no URL: no request"              "$(grep -c '^CURL' "$T/log" || true)" "0"
-CG_NTFY_URL=https://ntfy.sh/t run 3 >/dev/null
+AYIS_NTFY_URL=https://ntfy.sh/t run 3 >/dev/null
 check "a good save: no message (the cloud watchdog tells the shutdown)" "$(grep -c '^CURL' "$T/log" || true)" "0"
-CG_NTFY_URL=https://ntfy.sh/t run 3 1 >/dev/null
+AYIS_NTFY_URL=https://ntfy.sh/t run 3 1 >/dev/null
 check "a failed save: one request, to the topic" "$(grep -c '^CURL.*https://ntfy.sh/t' "$T/log")" "1"
 check "  sent before the shutdown"      "$(grep -oE '^(CURL|SHUTDOWN)' "$T/log" | tr '\n' ' ')" "CURL SHUTDOWN "
 check "  and says the latest games were not saved" "$(grep -c '^CURL.*latest games were not saved' "$T/log")" "1"
-CG_NTFY_URL=https://ntfy.sh/t CURL_RC=7 run 3 1 >/dev/null
+AYIS_NTFY_URL=https://ntfy.sh/t CURL_RC=7 run 3 1 >/dev/null
 check "a failed request still shuts down" "$(grep -c '^SHUTDOWN' "$T/log")" "1"
-CG_NTFY_URL=https://ntfy.sh/t run 0 >/dev/null
+AYIS_NTFY_URL=https://ntfy.sh/t run 0 >/dev/null
 check "below the limit: nothing sent"   "$(grep -c '^CURL' "$T/log" || true)" "0"
 
 echo "6. an upload before shutdown that runs long is said out loud - and still ends in a shutdown"
-CG_NTFY_URL=https://ntfy.sh/t PUSH_SLEEP=2 UPLOAD_WARN_SEC=1 run 3 >/dev/null
+AYIS_NTFY_URL=https://ntfy.sh/t PUSH_SLEEP=2 UPLOAD_WARN_SEC=1 run 3 >/dev/null
 check "one 'still saving' notification"  "$(grep -c '^CURL.*Still saving your games' "$T/log")" "1"
 check "  then the shutdown, with no second message" "$(grep -oE '^(CURL|SHUTDOWN)' "$T/log" | tr '\n' ' ')" "CURL SHUTDOWN "
-CG_NTFY_URL=https://ntfy.sh/t run 3 >/dev/null
+AYIS_NTFY_URL=https://ntfy.sh/t run 3 >/dev/null
 check "a quick upload says nothing of the kind" "$(grep -c 'Still saving' "$T/log" || true)" "0"
 PUSH_SLEEP=2 UPLOAD_WARN_SEC=1 run 3 >/dev/null
 check "no URL: no request, however long"  "$(grep -c '^CURL' "$T/log" || true)" "0"
@@ -133,8 +133,8 @@ printf '"libraryfolders"\n{\n\t"1"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}\n' "$L2" > "
 printf '"AppState"\n{\n\t"StateFlags"\t\t"1026"\n}\n' > "$L2/steamapps/appmanifest_9.acf"; touch "$L2/steamapps/downloading/9/chunk"
 rm -f "$T/log"; echo 3 > "$T/state/idle"
 LOG="$T/log" PATH="$T/bin:$PATH" THRESHOLD=999999999999999 RX_THRESHOLD=999999999999999 \
-  CG_NOTIFY_BIN="$PWD/host/cg-notify" UPLOAD_POLL_SEC=0.1 STATE="$T/state" IDLE_LIMIT=3 BOOT_GRACE=0 IFACE=lo \
-  STEAM_VDFS="$T/libraryfolders.vdf" CG_LIBRARY_BIN="$T/bin/cg-library" SHUTDOWN_BIN="$T/bin/shutdown" \
+  AYIS_NOTIFY_BIN="$PWD/host/ayis-notify" UPLOAD_POLL_SEC=0.1 STATE="$T/state" IDLE_LIMIT=3 BOOT_GRACE=0 IFACE=lo \
+  STEAM_VDFS="$T/libraryfolders.vdf" AYIS_LIBRARY_BIN="$T/bin/ayis-library" SHUTDOWN_BIN="$T/bin/shutdown" \
   bash "$SRC" >/dev/null 2>&1
 check "downloading there: no shutdown" "$(grep -oE 'PUSH|SHUTDOWN' "$T/log" 2>/dev/null | tr '\n' ' ')" ""
 
@@ -143,8 +143,8 @@ echo "8. a machine that stopped itself at the limit does not wake up already cou
 # again at the first check after the boot grace, whatever the person was doing.
 rm -f "$T/log"; echo 3 > "$T/state/idle"
 LOG="$T/log" PATH="$T/bin:$PATH" THRESHOLD=999999999999999 RX_THRESHOLD=999999999999999 \
-  CG_NOTIFY_BIN="$PWD/host/cg-notify" UPLOAD_POLL_SEC=0.1 STATE="$T/state" IDLE_LIMIT=3 BOOT_GRACE=999999 IFACE=lo \
-  CG_LIBRARY_BIN="$T/bin/cg-library" SHUTDOWN_BIN="$T/bin/shutdown" \
+  AYIS_NOTIFY_BIN="$PWD/host/ayis-notify" UPLOAD_POLL_SEC=0.1 STATE="$T/state" IDLE_LIMIT=3 BOOT_GRACE=999999 IFACE=lo \
+  AYIS_LIBRARY_BIN="$T/bin/ayis-library" SHUTDOWN_BIN="$T/bin/shutdown" \
   bash "$SRC" >/dev/null 2>&1
 check "inside the boot grace: nothing happens"  "$(grep -oE 'PUSH|SHUTDOWN' "$T/log" 2>/dev/null | tr '\n' ' ')" ""
 check "  and the old count is cleared"           "$(cat "$T/state/idle")" "0"

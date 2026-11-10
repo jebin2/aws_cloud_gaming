@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/bucket"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/bucket"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 type marks map[string]string
@@ -22,7 +22,7 @@ type marks map[string]string
 func (k marks) Put(_ context.Context, n, v string) error { k[n] = v; return nil }
 func (k marks) Delete(_ context.Context, n string) error { delete(k, n); return nil }
 
-const bkt = "cg-acct-gamevps-hash"
+const bkt = "ayis-acct-ayis-hash"
 const idx = `{"apps":[{"appid":1091500,"name":"Cyberpunk","installdir":"Cyberpunk 2077","bytes":107374182400},{"appid":2,"name":"Diablo IV","installdir":"Diablo IV","bytes":50}]}`
 
 type rig struct {
@@ -51,7 +51,7 @@ func newRig(t *testing.T, input string, dotenv string) *rig {
 	usd, inr := 0.025, 90.0
 	r := &rig{s: s, k: k, o: &o, e: &e, set: map[string]string{}}
 	r.c = &Changer{
-		M: library.Mutator{Library: library.Library{S3: s, Host: "gamevps", Region: "ap-south-1", Account: "123", Bucket: bkt, S3USD: &usd, INR: &inr},
+		M: library.Mutator{Library: library.Library{S3: s, Host: "ayis", Region: "ap-south-1", Account: "123", Bucket: bkt, S3USD: &usd, INR: &inr},
 			W: s, Marks: k, Now: func() time.Time { return time.Date(2026, 10, 25, 1, 2, 3, 0, time.UTC) }},
 		Ask: a, Out: out, Env: env,
 		Price:     func(context.Context, string, string) *float64 { x := 0.02; return &x },
@@ -96,11 +96,11 @@ func TestForgetSaysWhyItCannot(t *testing.T) {
 	}
 	r = newRig(t, "", withBucket)
 	r.e.Reset()
-	if rc := r.c.Forget(context.Background(), nil); rc != 1 || !strings.Contains(r.e.String(), "which game? see: cg library list") {
+	if rc := r.c.Forget(context.Background(), nil); rc != 1 || !strings.Contains(r.e.String(), "which game? see: ayis library list") {
 		t.Error(r.e.String())
 	}
 	r.e.Reset()
-	if rc := r.c.Forget(context.Background(), []string{"777"}); rc != 1 || !strings.Contains(r.e.String(), "appid 777 is not in the archive (see: cg library list)") {
+	if rc := r.c.Forget(context.Background(), []string{"777"}); rc != 1 || !strings.Contains(r.e.String(), "appid 777 is not in the archive (see: ayis library list)") {
 		t.Error(r.e.String())
 	}
 	r.e.Reset()
@@ -114,7 +114,7 @@ func TestResetWritesTheMarkAndSaysWhenItEnds(t *testing.T) {
 	if rc := r.c.Reset(context.Background(), []string{"1091500"}); rc != 0 {
 		t.Fatalf("%s", r.e)
 	}
-	if r.k["/cloud-gaming/gamevps/kept/"+bkt+"/1091500"] != "2026-10-25T01:02:03Z" || !strings.Contains(r.o.String(), "kept: 1091500 is counted from today - 30 days with no machine before it is deleted") {
+	if r.k["/ayis/ayis/kept/"+bkt+"/1091500"] != "2026-10-25T01:02:03Z" || !strings.Contains(r.o.String(), "kept: 1091500 is counted from today - 30 days with no machine before it is deleted") {
 		t.Errorf("%v\n%s", r.k, r.o)
 	}
 	if r.c.Reset(context.Background(), []string{"abc"}) != 1 {
@@ -142,7 +142,7 @@ func TestKeepForSavesThenRedeploysSoTheDateIsTheOneAWSActsOn(t *testing.T) {
 	// A watchdog that could not be redeployed: the setting is saved and the user is told what is stale.
 	r = newRig(t, "", withBucket)
 	r.c.Reinstall = func(context.Context) int { return 1 }
-	if rc := r.c.KeepFor(context.Background(), []string{"7"}); rc != 1 || !strings.Contains(r.e.String(), "saved, but the cloud watchdog still counts the old days - run: cg watchdog install") {
+	if rc := r.c.KeepFor(context.Background(), []string{"7"}); rc != 1 || !strings.Contains(r.e.String(), "saved, but the cloud watchdog still counts the old days - run: ayis watchdog install") {
 		t.Error(r.e.String())
 	}
 }
@@ -185,14 +185,14 @@ func TestIEC(t *testing.T) {
 
 func TestMoveBringsAGameToTheMachineAfterTheWord(t *testing.T) {
 	r := newRig(t, "MOVE\n", withBucket)
-	src := "cg-old"
+	src := "ayis-old"
 	r.s.Add(src, "us-east-1", "steam/index.json", 0)
 	r.s.Objs[src]["steam/index.json"] = []byte(`{"apps":[{"appid":9,"name":"Moved","installdir":"Moved Game","bytes":10737418240}]}`)
 	for _, k := range []string{"steam/steamapps/common/Moved Game/a", "steam/steamapps/compatdata/9/p"} {
 		r.s.Add(src, "us-east-1", k, 10)
 	}
-	// A bucket is "ours" only under the name cg derives for its own region.
-	derived := derivedFor(t, "123", "gamevps", "us-east-1")
+	// A bucket is "ours" only under the name ayis derives for its own region.
+	derived := derivedFor(t, "123", "ayis", "us-east-1")
 	r.s.Objs[derived], r.s.Region[derived] = r.s.Objs[src], "us-east-1"
 	delete(r.s.Objs, src)
 	delete(r.s.Region, src)
@@ -220,7 +220,7 @@ func TestMoveBringsAGameToTheMachineAfterTheWord(t *testing.T) {
 	if rc := r.c.Move(context.Background(), []string{"9", "--from", derived}); rc != 1 || len(r.s.Objs[bkt]) != before || !strings.Contains(r.o.String(), "aborted - nothing was copied") {
 		t.Errorf("rc %d\n%s", rc, r.o)
 	}
-	if r.c.Move(context.Background(), []string{"9"}) != 1 || !strings.Contains(r.e.String(), "usage: cg library move <appid> --from <bucket>") {
+	if r.c.Move(context.Background(), []string{"9"}) != 1 || !strings.Contains(r.e.String(), "usage: ayis library move <appid> --from <bucket>") {
 		t.Error(r.e.String())
 	}
 	r.e.Reset()

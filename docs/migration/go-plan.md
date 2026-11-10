@@ -1,5 +1,7 @@
 # Go Migration Plan: every CLI-first command
 
+> History: written before the project was renamed to Ayis (2026-11-10). It uses the old names - `cg`, `cloud_gaming`, `gamevps` - as they were then.
+
 Revision: 7 (no legacy fallback: the port completes and the Bash CLI is deleted in this branch)
 
 Status: complete. Approved 2026-10-25; merged into `main` on 2026-10-30 (fast-forward) after the owner tested

@@ -12,12 +12,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/hosts"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/ownhost"
-	"github.com/jebin2/aws_cloud_gaming/internal/sunshine"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/hosts"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/ownhost"
+	"github.com/jebin2/ayis/internal/sunshine"
+	fx "github.com/jebin2/ayis/internal/testfixture"
 )
 
 const linuxFacts = "os=Linux\nid=ubuntu\nid_like=debian\nuser=me\nhostname=Desk-PC.local\npretty=Ubuntu 24.04 LTS\nubuntu_version=24.04\narch=x86_64\nmachine_id=m-1\nnvidia=RTX 3060\nsession=x11\nsteam=/usr/bin/steam\nsudo=nopass\n"
@@ -28,12 +28,12 @@ type rig struct {
 	o, e   *bytes.Buffer
 	out    *output.Out
 	dir    string
-	keyOn  *bool // whether cg's key lets in yet
+	keyOn  *bool // whether ayis's key lets in yet
 	pwSeen *string
 }
 
 // newRig is a laptop with ssh, and a machine whose facts are linuxFacts. Until
-// the password is given, "ssh ... exit" fails: cg's key is not on the machine.
+// the password is given, "ssh ... exit" fails: ayis's key is not on the machine.
 func newRig(t *testing.T, input string, keyAlready bool) *rig {
 	dir := t.TempDir()
 	keyOn := keyAlready
@@ -45,7 +45,7 @@ func newRig(t *testing.T, input string, keyAlready bool) *rig {
 			key := line[strings.LastIndex(line, "-f ")+3:]
 			_ = os.MkdirAll(filepath.Dir(key), 0o700)
 			_ = os.WriteFile(key, []byte("private"), 0o600)
-			_ = os.WriteFile(key+".pub", []byte("ssh-ed25519 AAAAC3Nza cg@testbox\n"), 0o644)
+			_ = os.WriteFile(key+".pub", []byte("ssh-ed25519 AAAAC3Nza ayis@testbox\n"), 0o644)
 			return true, "", nil
 		case strings.Contains(line, "PubkeyAuthentication=no"):
 			keyOn = true
@@ -65,8 +65,8 @@ func newRig(t *testing.T, input string, keyAlready bool) *rig {
 	a := &ask.Asker{Out: out, In: bufio.NewReader(strings.NewReader(input)), Prompts: &bytes.Buffer{}, TTY: true}
 	a.ReadSecret = func() (string, error) { s, err := a.In.ReadString('\n'); return strings.TrimRight(s, "\n"), err }
 	d := Deps{Store: hosts.Store{Path: filepath.Join(dir, "hosts.json")},
-		Conn: ownhost.Conn{R: r, Key: filepath.Join(dir, "cg", "ssh", "id_ed25519"), Hostname: func() string { return "testbox" }},
-		Ask:  a, Runner: r, AWSHost: "gamevps", Moonlight: true}
+		Conn: ownhost.Conn{R: r, Key: filepath.Join(dir, "ayis", "ssh", "id_ed25519"), Hostname: func() string { return "testbox" }},
+		Ask:  a, Runner: r, AWSHost: "ayis", Moonlight: true}
 	return &rig{d: d, r: r, o: &o, e: &e, out: out, dir: dir, keyOn: &keyOn}
 }
 
@@ -85,7 +85,7 @@ func TestAddAsksForThePasswordOnceAndNeverKeepsIt(t *testing.T) {
 		t.Errorf("%v", rec)
 	}
 	got := r.o.String()
-	for _, want := range []string{"==> reaching me@192.168.1.5 over ssh", "cg's key is on me@192.168.1.5: no password from now on", "Ubuntu 24.04 LTS (x86_64), signed in as me", "GPU: RTX 3060", "added 'desk-pc'. Next: cg host setup desk-pc"} {
+	for _, want := range []string{"==> reaching me@192.168.1.5 over ssh", "ayis's key is on me@192.168.1.5: no password from now on", "Ubuntu 24.04 LTS (x86_64), signed in as me", "GPU: RTX 3060", "added 'desk-pc'. Next: ayis host setup desk-pc"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}
@@ -121,9 +121,9 @@ func TestAddRefusesWhatWouldBeAddedTwice(t *testing.T) {
 		{[]string{"a", "--ssh", "me@other"}, "there is already a machine called 'a'"},
 		{[]string{"b", "--ssh", "me@100.64.0.9"}, "is a machine already added, as 'a' - the same machine, by another address"},
 		{[]string{"Bad Name", "--ssh", "me@x"}, "use lowercase letters, digits and dashes"},
-		{[]string{"gamevps-2", "--ssh", "me@x"}, "clean-up would delete it"},
-		{[]string{"b", "--ssh"}, "usage: cg host add [name] --ssh <user@address>"},
-		{[]string{"b"}, "usage: cg host add [name] --ssh <user@address>"},
+		{[]string{"ayis-2", "--ssh", "me@x"}, "clean-up would delete it"},
+		{[]string{"b", "--ssh"}, "usage: ayis host add [name] --ssh <user@address>"},
+		{[]string{"b"}, "usage: ayis host add [name] --ssh <user@address>"},
 	} {
 		r.e.Reset()
 		if rc := r.d.Add(ctx, c.args, r.out); rc != 1 || !strings.Contains(r.e.String(), c.want) {
@@ -147,7 +147,7 @@ func TestAddWithNoOneToAskSaysWhatToDoInstead(t *testing.T) {
 	}
 }
 
-func TestRemoveTakesCgsKeyOffAndForgetsTheMachine(t *testing.T) {
+func TestRemoveTakesAyissKeyOffAndForgetsTheMachine(t *testing.T) {
 	r := newRig(t, "", true)
 	ctx := context.Background()
 	_ = r.d.Add(ctx, []string{"pc", "--ssh", "me@pc"}, r.out)
@@ -155,7 +155,7 @@ func TestRemoveTakesCgsKeyOffAndForgetsTheMachine(t *testing.T) {
 	if rc := r.d.Remove(ctx, []string{"pc"}, r.out); rc != 0 || len(r.d.Store.Names()) != 0 {
 		t.Fatalf("rc %d %v", rc, r.d.Store.Names())
 	}
-	if !strings.Contains(r.o.String(), "took cg's key off it") || !strings.Contains(r.o.String(), "forgot 'pc' - nothing else on the machine was changed") {
+	if !strings.Contains(r.o.String(), "took ayis's key off it") || !strings.Contains(r.o.String(), "forgot 'pc' - nothing else on the machine was changed") {
 		t.Error(r.o.String())
 	}
 	var removal string
@@ -164,10 +164,10 @@ func TestRemoveTakesCgsKeyOffAndForgetsTheMachine(t *testing.T) {
 			removal = l
 		}
 	}
-	if !strings.Contains(removal, "ssh-ed25519 AAAAC3Nza cg@testbox") {
-		t.Errorf("only cg's own line comes off: %q", removal)
+	if !strings.Contains(removal, "ssh-ed25519 AAAAC3Nza ayis@testbox") {
+		t.Errorf("only ayis's own line comes off: %q", removal)
 	}
-	if rc := r.d.Remove(ctx, []string{"nope"}, r.out); rc != 1 || !strings.Contains(r.e.String(), "usage: cg host remove <name>") {
+	if rc := r.d.Remove(ctx, []string{"nope"}, r.out); rc != 1 || !strings.Contains(r.e.String(), "usage: ayis host remove <name>") {
 		t.Error(r.e.String())
 	}
 	// A machine that cannot be reached is still forgotten, with the line said to stay.

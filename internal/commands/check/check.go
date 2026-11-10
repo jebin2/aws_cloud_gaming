@@ -1,4 +1,4 @@
-// Package check is `cg check [--fix]`: everything a build needs, checked before
+// Package check is `ayis check [--fix]`: everything a build needs, checked before
 // anything is launched, in the order a failure is cheapest to find.
 //
 // It is NOT read-only. It can save settings to .env, and with a Tailscale API
@@ -18,15 +18,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/freetier"
 	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/creds"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/deps"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/laptop"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	"github.com/jebin2/aws_cloud_gaming/internal/sshkey"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/commands/creds"
+	"github.com/jebin2/ayis/internal/commands/deps"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/laptop"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/pricing"
+	"github.com/jebin2/ayis/internal/sshkey"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
 // Quota codes: spot and on-demand are governed by different quotas, and the
@@ -100,13 +100,13 @@ func (c *Checker) Run(ctx context.Context) (Result, int) {
 	}
 	if !deps.Report(ctx, c.Laptop, c.Out, c.Fix) {
 		if c.Fix {
-			return c.die("the laptop is still not ready - install what is left yourself (see above), then run cg check again.")
+			return c.die("the laptop is still not ready - install what is left yourself (see above), then run ayis check again.")
 		}
 		return c.die("the laptop is not ready - see above.")
 	}
 
 	// --- aws access ---
-	// The access key is pasted (cg creds set, or the AWS credentials card in the
+	// The access key is pasted (ayis creds set, or the AWS credentials card in the
 	// app), never found in a file in $HOME: a plaintext key lying in a home
 	// directory is not a supported way to carry a credential.
 	id := c.Identify(ctx)
@@ -119,12 +119,12 @@ func (c *Checker) Run(ctx context.Context) (Result, int) {
 			id = c.Identify(ctx)
 		}
 		if id.Valid == nil || !*id.Valid {
-			return c.die("AWS credentials are not working.\n       Paste a key:  cg creds set    (checked with AWS before it is saved)\n       Or configure them yourself:  aws configure")
+			return c.die("AWS credentials are not working.\n       Paste a key:  ayis creds set    (checked with AWS before it is saved)\n       Or configure them yourself:  aws configure")
 		}
 	}
 	cl, err := c.Clients(ctx)
 	if err != nil {
-		return c.die("AWS credentials are not working.\n       Paste a key:  cg creds set    (checked with AWS before it is saved)\n       Or configure them yourself:  aws configure")
+		return c.die("AWS credentials are not working.\n       Paste a key:  ayis creds set    (checked with AWS before it is saved)\n       Or configure them yourself:  aws configure")
 	}
 
 	// The account plan is a separate gate from service quotas, and it is
@@ -152,7 +152,7 @@ func (c *Checker) Run(ctx context.Context) (Result, int) {
 	if o, err := cl.EC2.DescribeInstanceTypes(ctx, &ec2.DescribeInstanceTypesInput{InstanceTypes: []ec2types.InstanceType{ec2types.InstanceType(typ)}}); err == nil && len(o.InstanceTypes) > 0 && o.InstanceTypes[0].VCpuInfo != nil {
 		vcpus = int(aws.ToInt32(o.InstanceTypes[0].VCpuInfo.DefaultVCpus))
 	} else {
-		return c.die(fmt.Sprintf("%s is not offered in %s.\n       Not every region has every GPU type - ap-south-2 has no g4dn at all, for one.\n       List what is available: cg machines %s", typ, region, region))
+		return c.die(fmt.Sprintf("%s is not offered in %s.\n       Not every region has every GPU type - ap-south-2 has no g4dn at all, for one.\n       List what is available: ayis machines %s", typ, region, region))
 	}
 
 	// Spot is the default: roughly a quarter of the on-demand price, and games
@@ -225,17 +225,17 @@ func (c *Checker) keyReport(ctx context.Context, e sshkey.EC2, host, pem string)
 	case sshkey.Match:
 		c.Out.LogAs("ok", fmt.Sprintf("ssh key %s matches the key pair", short))
 	case sshkey.None:
-		c.Out.LogAs("info", fmt.Sprintf("no key pair yet - cg init creates one, saved as %s", short))
+		c.Out.LogAs("info", fmt.Sprintf("no key pair yet - ayis init creates one, saved as %s", short))
 	case sshkey.Unknown:
 		c.Out.LogAs("warn", fmt.Sprintf("could not compare %s with the key pair - it is used as it is", short))
 	default:
 		// Stops when a box exists that this laptop cannot log in to, since
 		// replacing the pair would not change that box.
 		if sshkey.BoxExists(ctx, e, host) {
-			c.Out.Die(fmt.Sprintf("a box exists, but %s is %s, so this laptop cannot log in to it.\n       Copy %s from the laptop that built the box, then: chmod 600 %s\n       Or destroy the box from that laptop; cg init here then makes a new key.", short, sshkey.Words(st), short, short))
+			c.Out.Die(fmt.Sprintf("a box exists, but %s is %s, so this laptop cannot log in to it.\n       Copy %s from the laptop that built the box, then: chmod 600 %s\n       Or destroy the box from that laptop; ayis init here then makes a new key.", short, sshkey.Words(st), short, short))
 			return 1
 		}
-		c.Out.LogAs("warn", fmt.Sprintf("%s is %s - cg init replaces the key pair (free), and the .pem on any other laptop stops working", short, sshkey.Words(st)))
+		c.Out.LogAs("warn", fmt.Sprintf("%s is %s - ayis init replaces the key pair (free), and the .pem on any other laptop stops working", short, sshkey.Words(st)))
 	}
 	return 0
 }

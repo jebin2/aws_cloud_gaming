@@ -14,7 +14,7 @@ import (
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
+	"github.com/jebin2/ayis/internal/awscfg"
 )
 
 // AWSStore is the real Store: one client per region, because a bucket is

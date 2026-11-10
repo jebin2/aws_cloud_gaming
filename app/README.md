@@ -1,17 +1,17 @@
-# cg desktop app
+# ayis desktop app
 
-A viewer for `cg`. It runs `cg` and renders what it says - it holds no AWS logic of its
+A viewer for `ayis`. It runs `ayis` and renders what it says - it holds no AWS logic of its
 own, and `tests/app.sh` fails if any appears.
 
     cd app
     npm install     # Electron only
-    npm start       # builds ../cg first, so Go is needed
+    npm start       # builds ../ayis first, so Go is needed
 
 Screens:
 
 - **Dashboard** - box state, the archive and its countdown, guards, this laptop. Play, Build and
   Destroy, each confirming first.
-- **Build** - pick games against the disk's capacity, then watch `cg init` step by step.
+- **Build** - pick games against the disk's capacity, then watch `ayis init` step by step.
 - **Library** - the archive per game, orphans, and what fits on the box.
 - **Guards** - a card per layer, with what it catches and what it last decided.
 - **Cost** - tiles, the daily table, what still bills, the egress allowance. One Cost Explorer call
@@ -30,13 +30,13 @@ it dies with "error loading libfuse.so.2" until `pacman -S fuse2`, which is a po
 impression for something advertised as standalone. `.pacman` and `.deb` are native packages
 for the two families, and `.tar.gz` extracts and runs with no dependency at all.
 
-**cg travels with it.** The one `cg` program is copied into `resources/cg` (with `.env.example`),
+**ayis travels with it.** The one `ayis` program is copied into `resources/ayis` (with `.env.example`),
 so a download runs without a checkout. The box-side scripts and the Lambda are compiled into
-`cg`. The app still holds no AWS logic: it runs `cg`, which remains the only thing that decides
+`ayis`. The app still holds no AWS logic: it runs `ayis`, which remains the only thing that decides
 anything.
 
-It looks for them in this order: `$CG_REPO`, the parent of `app/`, the bundled copy in
-`resources/cg`, then `~/cloud_gaming`. **A checkout beside the app wins over the bundle** - anyone
+It looks for them in this order: `$AYIS_REPO`, the parent of `app/`, the bundled copy in
+`resources/ayis`, then `~/ayis`. **A checkout beside the app wins over the bundle** - anyone
 running from source is editing that one and must see their edits, not a stale copy. The same order
 means `git pull` still updates a rig that has a checkout; only a plain download relies on the
 bundle, and there a new build is the update.
@@ -56,8 +56,8 @@ builds the AppImage and the .deb, and opens a **draft** release - look at it bef
 It builds **Linux only**: an untested .exe or .dmg is worse than none, and the matrix is one line
 away from all three the day someone has actually run it there.
 
-Both scripts were run here: `npm run pack` produces `dist/linux-unpacked/cg`, and its `app.asar`
-holds `main/`, `renderer/` and `package.json` - no `cg`, no `lib/*.sh` (verified by packing it and
+Both scripts were run here: `npm run pack` produces `dist/linux-unpacked/ayis`, and its `app.asar`
+holds `main/`, `renderer/` and `package.json` - no `ayis`, no `lib/*.sh` (verified by packing it and
 listing the archive). The packed binary starts and opens its window.
 
 ## Where it has actually run
@@ -65,7 +65,7 @@ listing the archive). The packed binary starts and opens its window.
 Linux, X11 and Wayland. macOS should work and has not been tried.
 
 **Windows is written but untested.** `main/runner.js` shells through `wsl.exe`, because the
-`cg` is Go and a native Windows build is planned (see docs/migration/go-plan.md, Track W). Stopping a job uses a
+`ayis` is Go and a native Windows build is planned (see docs/migration/go-plan.md, Track W). Stopping a job uses a
 POSIX process group (`kill(-pid)`), which will not reach into WSL as it stands - expect Stop not
 to work there until someone fixes it against a real machine.
 

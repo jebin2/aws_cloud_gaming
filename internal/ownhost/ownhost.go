@@ -1,9 +1,9 @@
-// Package ownhost is a machine of yours, reached over ssh: cg's own key on it,
+// Package ownhost is a machine of yours, reached over ssh: ayis's own key on it,
 // what it is, and how it is named and told apart from the others.
 //
 // The prerequisite is a machine with its OS installed and an ssh server. The
-// first connection may use its password, once: cg puts a key of its own on it
-// and uses that from then on - the password is never saved. cg adds only what
+// first connection may use its password, once: ayis puts a key of its own on it
+// and uses that from then on - the password is never saved. ayis adds only what
 // streaming needs and touches nothing else: not the desktop, not autologin, not
 // the display, not the games. It is your machine, not a throwaway one.
 package ownhost
@@ -21,9 +21,9 @@ import (
 	"regexp"
 	"strings"
 
-	cg "github.com/jebin2/aws_cloud_gaming"
-	"github.com/jebin2/aws_cloud_gaming/internal/hosts"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	ayis "github.com/jebin2/ayis"
+	"github.com/jebin2/ayis/internal/hosts"
+	"github.com/jebin2/ayis/internal/local"
 )
 
 // factsScript asks the machine what it is: KEY=value lines, one read-only ssh.
@@ -70,18 +70,18 @@ echo "nvidia_card=$(lspci 2>/dev/null | grep -E " (VGA compatible|3D) controller
 echo "flatpak=$(command -v flatpak || true)"
 # The Sunshine login every device shares, base64 so it is one line whatever it
 # holds. Read with the rest, and never printed: facts are read a field at a time.
-echo "sunlogin=$(base64 -w0 ~/.config/cg/sunshine-login 2>/dev/null)"
+echo "sunlogin=$(base64 -w0 ~/.config/ayis/sunshine-login 2>/dev/null)"
 `
 
-// KeyPath is cg's own key for machines of yours: one per laptop, made the first
+// KeyPath is ayis's own key for machines of yours: one per laptop, made the first
 // time a machine is added, put on each machine by InstallKey. Its own, so that
-// removing a machine takes off exactly the line cg added and nothing of yours.
+// removing a machine takes off exactly the line ayis added and nothing of yours.
 func KeyPath(get func(string) (string, bool)) string {
 	base := local.ConfigBase(get)
-	return filepath.Join(base, "cg", "ssh", "id_ed25519")
+	return filepath.Join(base, "ayis", "ssh", "id_ed25519")
 }
 
-// Conn reaches machines with cg's key.
+// Conn reaches machines with ayis's key.
 type Conn struct {
 	R   local.Runner
 	Key string
@@ -103,7 +103,7 @@ func (c Conn) keyOK() bool {
 	return pubShape.Match(b)
 }
 
-// EnsureKey makes cg's key if it is not there. A .pub that is missing or empty
+// EnsureKey makes ayis's key if it is not there. A .pub that is missing or empty
 // is made again from the private key, and a pair that cannot be read is replaced
 // - an empty line is not a key, and sending one lets nothing in.
 func (c Conn) EnsureKey(ctx context.Context) error {
@@ -127,8 +127,8 @@ func (c Conn) EnsureKey(ctx context.Context) error {
 	if c.Hostname != nil {
 		host = c.Hostname()
 	}
-	if _, err := c.R.Run(ctx, local.Cmd{Name: "ssh-keygen", Args: []string{"-q", "-t", "ed25519", "-N", "", "-C", "cg@" + host, "-f", c.Key}}); err != nil || !c.keyOK() {
-		return errors.New("could not make cg's ssh key (" + c.Key + ")")
+	if _, err := c.R.Run(ctx, local.Cmd{Name: "ssh-keygen", Args: []string{"-q", "-t", "ed25519", "-N", "", "-C", "ayis@" + host, "-f", c.Key}}); err != nil || !c.keyOK() {
+		return errors.New("could not make ayis's ssh key (" + c.Key + ")")
 	}
 	return nil
 }
@@ -141,16 +141,16 @@ func (c Conn) opts(connect string) []string {
 	return o
 }
 
-// Raw runs a command as you would: your keys, your ~/.ssh/config, plus cg's own
+// Raw runs a command as you would: your keys, your ~/.ssh/config, plus ayis's own
 // key. A key, never a password: BatchMode turns a password prompt into a clear
 // failure. Standard input only when given, for data piped on purpose: otherwise
-// ssh reads cg's own, where the app's answers arrive, and would swallow the next.
+// ssh reads ayis's own, where the app's answers arrive, and would swallow the next.
 func (c Conn) Raw(ctx context.Context, target, command string, stdin io.Reader) ([]byte, error) {
 	args := append(c.opts("10"), target, command)
 	return c.R.Run(ctx, local.Cmd{Name: "ssh", Args: args, Stdin: stdin})
 }
 
-// SSH runs a command under sh whatever the login shell is - cg's one way of
+// SSH runs a command under sh whatever the login shell is - ayis's one way of
 // reaching any machine - with your own ssh setup.
 func (c Conn) SSH(ctx context.Context, target, command string, stdin io.Reader) ([]byte, error) {
 	q := "'\\''"
@@ -158,7 +158,7 @@ func (c Conn) SSH(ctx context.Context, target, command string, stdin io.Reader) 
 	return c.R.Run(ctx, local.Cmd{Name: "ssh", Args: args, Stdin: stdin})
 }
 
-// InstallKey puts cg's key on the machine, logging in once with its password.
+// InstallKey puts ayis's key on the machine, logging in once with its password.
 // The password reaches ssh through SSH_ASKPASS from this process's environment -
 // never a file of its own, never a command line - and is gone when this returns.
 // On the machine the key is appended to ~/.ssh/authorized_keys unless it is
@@ -173,12 +173,12 @@ func (c Conn) InstallKey(ctx context.Context, target, password string) int {
 		return 1
 	}
 	pub := strings.TrimSpace(strings.SplitN(string(b), "\n", 2)[0])
-	f, err := os.CreateTemp("", "cg-askpass-")
+	f, err := os.CreateTemp("", "ayis-askpass-")
 	if err != nil {
 		return 1
 	}
 	defer os.Remove(f.Name())
-	f.WriteString("#!/bin/sh\nprintf \"%s\\n\" \"$CG_SSH_PASSWORD\"\n")
+	f.WriteString("#!/bin/sh\nprintf \"%s\\n\" \"$AYIS_SSH_PASSWORD\"\n")
 	f.Close()
 	os.Chmod(f.Name(), 0o700)
 	display := os.Getenv("DISPLAY")
@@ -188,18 +188,18 @@ func (c Conn) InstallKey(ctx context.Context, target, password string) int {
 	remote := `sh -c 'umask 077; mkdir -p "$HOME/.ssh"; f="$HOME/.ssh/authorized_keys"; touch "$f"; [ -n "$1" ] || exit 3; grep -qxF "$1" "$f" || printf "%s\n" "$1" >> "$f"; grep -qxF "$1" "$f" || exit 3' _ '` + pub + `'`
 	_, err = c.R.Run(ctx, local.Cmd{Name: "ssh", Args: []string{"-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new", "-o", "PubkeyAuthentication=no",
 		"-o", "PreferredAuthentications=password,keyboard-interactive", "-o", "NumberOfPasswordPrompts=1", target, remote},
-		Env: []string{"CG_SSH_PASSWORD=" + password, "SSH_ASKPASS=" + f.Name(), "SSH_ASKPASS_REQUIRE=force", "DISPLAY=" + display}})
+		Env: []string{"AYIS_SSH_PASSWORD=" + password, "SSH_ASKPASS=" + f.Name(), "SSH_ASKPASS_REQUIRE=force", "DISPLAY=" + display}})
 	return local.ExitCode(err)
 }
 
-// RemoveKey takes cg's line off the machine, and nothing else.
+// RemoveKey takes ayis's line off the machine, and nothing else.
 func (c Conn) RemoveKey(ctx context.Context, target string) error {
 	b, err := os.ReadFile(c.Key + ".pub")
 	if err != nil {
 		return nil
 	}
 	pub := strings.TrimSpace(string(b))
-	_, err = c.Raw(ctx, target, `sh -c 'f="$HOME/.ssh/authorized_keys"; [ -f "$f" ] || exit 0; grep -vxF "$1" "$f" > "$f.cg"; cat "$f.cg" > "$f"; rm -f "$f.cg"' _ '`+pub+`'`, nil)
+	_, err = c.Raw(ctx, target, `sh -c 'f="$HOME/.ssh/authorized_keys"; [ -f "$f" ] || exit 0; grep -vxF "$1" "$f" > "$f.ayis"; cat "$f.ayis" > "$f"; rm -f "$f.ayis"' _ '`+pub+`'`, nil)
 	return err
 }
 
@@ -212,7 +212,7 @@ func (f Facts) Get(k string) string { return f[k] }
 // ReadFacts asks the machine what it is: nil when it cannot be asked. Windows
 // answers uname with an error, so it is told apart by `ver`.
 func (c Conn) ReadFacts(ctx context.Context, target string) Facts {
-	rel, _ := cg.Files.ReadFile("lib/bootstrap.d/01-release.sh")
+	rel, _ := ayis.Files.ReadFile("lib/bootstrap.d/01-release.sh")
 	var script strings.Builder
 	for _, l := range strings.Split(string(rel), "\n") {
 		if t := strings.TrimSpace(l); t != "" && !strings.HasPrefix(t, "#") {
@@ -272,7 +272,7 @@ func NameOK(name, awsHost string) string {
 		return "use lowercase letters, digits and dashes"
 	}
 	if regexp.MustCompile(`^` + regexp.QuoteMeta(awsHost) + `(-[0-9]+)?$`).MatchString(name) {
-		return fmt.Sprintf("'%s' is the name cg gives its AWS boxes, and their clean-up would delete it - pick another", name)
+		return fmt.Sprintf("'%s' is the name ayis gives its AWS boxes, and their clean-up would delete it - pick another", name)
 	}
 	return ""
 }
@@ -329,13 +329,13 @@ func Login(f Facts) (user, pass string) {
 	return l[0], l[1]
 }
 
-// ShareLogin keeps the login on the machine, in cg's folder there, readable by
+// ShareLogin keeps the login on the machine, in ayis's folder there, readable by
 // its user alone. Over stdin, so the password is in no command line there.
 func (c Conn) ShareLogin(ctx context.Context, target, user, pass string) bool {
 	if user == "" || pass == "" {
 		return false
 	}
-	_, err := c.Raw(ctx, target, "umask 077; mkdir -p ~/.config/cg && cat > ~/.config/cg/sunshine-login.new && mv -f ~/.config/cg/sunshine-login.new ~/.config/cg/sunshine-login",
+	_, err := c.Raw(ctx, target, "umask 077; mkdir -p ~/.config/ayis && cat > ~/.config/ayis/sunshine-login.new && mv -f ~/.config/ayis/sunshine-login.new ~/.config/ayis/sunshine-login",
 		strings.NewReader(user+"\n"+pass+"\n"))
 	return err == nil
 }

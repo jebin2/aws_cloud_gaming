@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 // New is the box for the settings in force.
@@ -21,7 +21,7 @@ func New(env *config.Env) Box {
 	return Box{Runner: local.Exec{}, Host: host, Node: node, Home: home}
 }
 
-// RunPing is `cg ping`.
+// RunPing is `ayis ping`.
 func RunPing(ctx context.Context, env *config.Env, args []string, jsonOut, watch bool, out *output.Out) int {
 	for _, a := range args {
 		switch a {
@@ -30,14 +30,14 @@ func RunPing(ctx context.Context, env *config.Env, args []string, jsonOut, watch
 		case "--watch":
 			watch = true
 		default:
-			out.Die(fmt.Sprintf("unknown option '%s' (see: cg help)", a))
+			out.Die(fmt.Sprintf("unknown option '%s' (see: ayis help)", a))
 			return 1
 		}
 	}
 	return New(env).Ping(ctx, jsonOut, watch, out.Stdout, out)
 }
 
-// RunLog is `cg log` (also `cg logs`).
+// RunLog is `ayis log` (also `ayis logs`).
 func RunLog(ctx context.Context, env *config.Env, args []string, out *output.Out) int {
 	what, watch := "build", false
 	var rest []string
@@ -54,7 +54,7 @@ func RunLog(ctx context.Context, env *config.Env, args []string, out *output.Out
 	return New(env).Log(ctx, what, watch, out.Stdout, out)
 }
 
-// RunSSH is `cg ssh`.
+// RunSSH is `ayis ssh`.
 func RunSSH(ctx context.Context, env *config.Env, args []string, out *output.Out) int {
 	return New(env).SSH(ctx, args, out)
 }

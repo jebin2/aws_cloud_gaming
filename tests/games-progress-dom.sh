@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # On your game PC, on the Games page: what the machine has and how far each
-# download has got, read from the machine itself (cg games --json --box), every
+# download has got, read from the machine itself (ayis games --json --box), every
 # 15 s while something downloads. Not there with no machine; a read that fails
 # keeps the last answer and says so.
 set -uo pipefail
@@ -35,10 +35,10 @@ const __st = window.setTimeout;
 window.setTimeout = (f, ms, ...a) => { if (ms >= 15000) window.__timers.push(ms); return __st(f, ms, ...a); };
 addEventListener('error', e => window.__errs.push(e.message));
 addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
-window.cg = {
+window.ayis = {
   run: (args) => { window.__ran.push(args.join(' '));
                    window.__lastId = (window.__lastId || 0) + 1;
-                   // cg disk add changes the machine, so it runs alone.
+                   // ayis disk add changes the machine, so it runs alone.
                    return Promise.resolve({ ok: true, id: window.__lastId, write: args[0] === 'disk' && args[1] === 'add' }); },
   answer: () => Promise.resolve(true), cancel: () => Promise.resolve(true),
   busy: () => Promise.resolve([]),

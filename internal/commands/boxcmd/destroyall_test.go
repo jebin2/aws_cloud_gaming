@@ -13,10 +13,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/budgets"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/storage"
-	"github.com/jebin2/aws_cloud_gaming/internal/teardown"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/storage"
+	"github.com/jebin2/ayis/internal/teardown"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
 type budgetDel struct {
@@ -74,10 +74,10 @@ func (failBucket) DeleteBucket(context.Context, string, string) error {
 func newAll(t *testing.T, input string) *allRig {
 	r, x, _, s := destroyRig(t, input)
 	r.e.state = "running"
-	r.e.sg, r.e.key = "sg-1", "gamevps"
+	r.e.sg, r.e.key = "sg-1", "ayis"
 	r.e.gamesVol, r.e.gamesState = "vol-games", "available"
 	_ = r.d.Env.Set("TAILSCALE_API_KEY", "tskey-api-abc123")
-	pem := filepath.Join(t.TempDir(), "gamevps.pem")
+	pem := filepath.Join(t.TempDir(), "ayis.pem")
 	_ = os.WriteFile(pem, []byte("k"), 0o600)
 	var calls []string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
@@ -86,7 +86,7 @@ func newAll(t *testing.T, input string) *allRig {
 			return
 		}
 		if q.Method == "GET" {
-			_, _ = w.Write([]byte(`{"devices":[{"nodeId":"n1","hostname":"gamevps"},{"nodeId":"n2","hostname":"phone"}]}`))
+			_, _ = w.Write([]byte(`{"devices":[{"nodeId":"n1","hostname":"ayis"},{"nodeId":"n2","hostname":"phone"}]}`))
 			return
 		}
 		calls = append(calls, "tailnet "+q.URL.Path)
@@ -111,7 +111,7 @@ func TestAllNeedsTheWordAndDeletesNothingWithoutIt(t *testing.T) {
 	}
 	got := a.o.String()
 	for _, want := range []string{"--all deletes the box AND every game you have.", "game archive    s3://", "2 objects, 2.1KB", "THIS IS THE ONLY COPY - no versions, no snapshot, no undo",
-		"old EBS volume  vol-games  160 GB", "instance role   gamevps-box, and its instance profile", "cloud watchdog  gamevps-cloud-watchdog", "aborted - nothing was deleted"} {
+		"old EBS volume  vol-games  160 GB", "instance role   ayis-box, and its instance profile", "cloud watchdog  ayis-cloud-watchdog", "aborted - nothing was deleted"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}
@@ -151,15 +151,15 @@ func TestAllDeletesEverythingAndForgetsTheBucketOnlyOnceItIsGone(t *testing.T) {
 		t.Errorf("only this host's tailnet node, then the role in the order IAM allows: %v", *a.calls)
 	}
 	got := a.o.String()
-	for _, want := range []string{"==> removing the budget", "==> everything deleted", "deleted tailnet node 'gamevps'", "bucket deleted - storage charges stop now", "==> removing the cloud watchdog gamevps-cloud-watchdog",
-		"deleted vol-games - storage charges stop now", "==> looking for cg's disks, images and snapshots in every region", "security group  sg-1", "key pair        gamevps  (and ~/.ssh/gamevps.pem)"} {
+	for _, want := range []string{"==> removing the budget", "==> everything deleted", "deleted tailnet node 'ayis'", "bucket deleted - storage charges stop now", "==> removing the cloud watchdog ayis-cloud-watchdog",
+		"deleted vol-games - storage charges stop now", "==> looking for ayis's disks, images and snapshots in every region", "security group  sg-1", "key pair        ayis  (and ~/.ssh/ayis.pem)"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}
 	}
 	// The mirror is not made first: the games are about to go.
 	for _, l := range a.r.Ran {
-		if strings.Contains(l, "cg-library") {
+		if strings.Contains(l, "ayis-library") {
 			t.Error("pushed an archive that is about to be deleted")
 		}
 	}
@@ -183,17 +183,17 @@ func TestABucketThatWontGoStaysInEnvAndTheRestStillRuns(t *testing.T) {
 	a := newAll(t, "")
 	a.x.All.W = failBucket{a.store}
 	bucketName := a.d.Env.Get("GAME_S3_BUCKET")
-	_ = a.d.Env.Set("GAME_S3_BUCKET", "cg-stuck-bucket")
+	_ = a.d.Env.Set("GAME_S3_BUCKET", "ayis-stuck-bucket")
 	_ = bucketName
-	a.x.Lib.Bucket = "cg-stuck-bucket"
+	a.x.Lib.Bucket = "ayis-stuck-bucket"
 	if rc := a.d.DestroyBox(context.Background(), a.x, []string{"--all", "--force"}); rc != 1 {
 		t.Fatalf("rc %d\n%s", rc, a.o)
 	}
-	if a.d.Env.Get("GAME_S3_BUCKET") != "cg-stuck-bucket" {
+	if a.d.Env.Get("GAME_S3_BUCKET") != "ayis-stuck-bucket" {
 		t.Error("it still bills, so it stays where it is still seen")
 	}
 	got := a.o.String()
-	if !strings.Contains(got, "could not delete the bucket s3://cg-stuck-bucket - it still bills, and stays in .env so it is still seen") || !strings.Contains(a.w.String(), "not everything could be deleted") {
+	if !strings.Contains(got, "could not delete the bucket s3://ayis-stuck-bucket - it still bills, and stays in .env so it is still seen") || !strings.Contains(a.w.String(), "not everything could be deleted") {
 		t.Errorf("%s\n%s", got, a.w)
 	}
 	// One failure does not stop the rest: the role, the watchdog, the disk and the sweep all ran.

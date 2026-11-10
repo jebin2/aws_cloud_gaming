@@ -202,7 +202,7 @@ func CheckShutdown(ctx context.Context, c ShutdownAPI, id string, out func(strin
 	} else {
 		lines = append(lines, "    The idle watchdog would STOP this spot instance, which can then never", "    start again while its root volume keeps billing.")
 	}
-	lines = append(lines, "    Do not leave it running. Destroy and rebuild:  cg destroy && cg init")
+	lines = append(lines, "    Do not leave it running. Destroy and rebuild:  ayis destroy && ayis init")
 	for _, l := range lines {
 		out(l)
 	}

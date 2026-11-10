@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 // The cases of tests/config.sh.
@@ -18,7 +18,7 @@ func setup(t *testing.T) (*config.Env, string, *output.Out, *bytes.Buffer, *byte
 	f := filepath.Join(t.TempDir(), ".env")
 	_ = os.WriteFile(f, []byte("GAME_DISK_GB=80\nGAME_NTFY_URL=https://ntfy.sh/topic-abc\n"), 0o600)
 	env := config.Load(func(k string) (string, bool) {
-		if k == "CG_ENV_FILE" {
+		if k == "AYIS_ENV_FILE" {
 			return f, true
 		}
 		return "", false
@@ -147,7 +147,7 @@ func TestSettingASecretSaysNothingAboutIt(t *testing.T) {
 	}
 	e.Reset()
 	_ = Set(env, "GAME_DISK_GB", "90", jout)
-	if !strings.Contains(e.String(), "applies to the next cg init") {
+	if !strings.Contains(e.String(), "applies to the next ayis init") {
 		t.Errorf("it says when it applies: %s", e.String())
 	}
 }
@@ -204,11 +204,11 @@ func padRight(s string, n int) string {
 
 func TestRun(t *testing.T) {
 	env, _, out, o, e := setup(t)
-	if rc := Run(env, []string{"get"}, false, out); rc != 1 || !strings.Contains(e.String(), "usage: cg config get <key>") {
+	if rc := Run(env, []string{"get"}, false, out); rc != 1 || !strings.Contains(e.String(), "usage: ayis config get <key>") {
 		t.Errorf("rc %d %q", rc, e.String())
 	}
 	e.Reset()
-	if rc := Run(env, []string{"bogus"}, false, out); rc != 1 || !strings.Contains(e.String(), "usage: cg config [show|--json|get <key>|set <key> [value]]") {
+	if rc := Run(env, []string{"bogus"}, false, out); rc != 1 || !strings.Contains(e.String(), "usage: ayis config [show|--json|get <key>|set <key> [value]]") {
 		t.Errorf("rc %d %q", rc, e.String())
 	}
 	o.Reset()

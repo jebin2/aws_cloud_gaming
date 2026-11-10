@@ -1,8 +1,8 @@
-// Package ask is how cg puts a question to whoever is there: a person at a
+// Package ask is how ayis puts a question to whoever is there: a person at a
 // terminal, or the app, where a question is an event on stderr and the answer
 // comes back as a line on stdin.
 //
-// CG_YES=1 takes the default for every yes/no question, for a script that must
+// AYIS_YES=1 takes the default for every yes/no question, for a script that must
 // not block. It does NOT answer a typed confirmation (DESTROY-ALL, FORGET):
 // typing the word is the confirmation, so there is nothing to assume.
 package ask
@@ -15,7 +15,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 // Asker puts questions.
@@ -26,7 +26,7 @@ type Asker struct {
 	Prompts io.Writer
 	// TTY is whether standard input is a terminal.
 	TTY bool
-	// Yes is CG_YES=1.
+	// Yes is AYIS_YES=1.
 	Yes bool
 	// ReadSecret reads a line without echoing it; nil uses the terminal.
 	ReadSecret func() (string, error)

@@ -10,7 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
+	"github.com/jebin2/ayis/internal/library"
 )
 
 const GB = 1 << 30
@@ -56,7 +56,7 @@ func TestInstalledIncompleteAndArchived(t *testing.T) {
 	archived := []library.App{{AppID: "2", Name: "Whole", Bytes: 20 * GB}, {AppID: float64(9), Name: "Left In S3", Bytes: 30 * GB}}
 	text := Render(ParseBox(raw), archived)
 	for _, want := range []string{"GAME                         STATE               SIZE", "Half Installed", "installed        40.0 GB  INCOMPLETE - 40 GB of 100 GB on disk",
-		"Whole                        installed        20.0 GB", "Playing                      RUNNING          10.0 GB", "Left In S3                   in S3 only       30.0 GB  cg init offers it",
+		"Whole                        installed        20.0 GB", "Playing                      RUNNING          10.0 GB", "Left In S3                   in S3 only       30.0 GB  ayis init offers it",
 		"disk   60 GB used, 190 GB free"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("lacks %q:\n%s", want, text)
@@ -174,18 +174,18 @@ func TestTheLegacyVolume(t *testing.T) {
 	if got := ShowVolume(nil, fl(0.0912), fl(100)); !strings.Contains(got, "no EBS game volume exists - nothing billing.") {
 		t.Errorf("%s", got)
 	}
-	v, err := FindVolume(context.Background(), volFake{[]ec2types.Volume{{VolumeId: aws.String("vol-1"), AvailabilityZone: aws.String("ap-south-1a"), Size: aws.Int32(160), State: "available"}}}, "gamevps")
+	v, err := FindVolume(context.Background(), volFake{[]ec2types.Volume{{VolumeId: aws.String("vol-1"), AvailabilityZone: aws.String("ap-south-1a"), Size: aws.Int32(160), State: "available"}}}, "ayis")
 	if err != nil || v == nil || v.GB != 160 {
 		t.Fatalf("%v %v", v, err)
 	}
 	text := ShowVolume(v, fl(0.0912), fl(100))
 	for _, want := range []string{"  volume   vol-1  (available)", "  zone     ap-south-1a", "  size     160 GB", "  cost     $14.59/month (INR 1459) - billed whether or not the box exists",
-		"cg games --volume --delete"} {
+		"ayis games --volume --delete"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("lacks %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "cg games --delete") {
+	if strings.Contains(text, "ayis games --delete") {
 		t.Error("the instruction must name a command that exists")
 	}
 	if text := ShowVolume(v, nil, nil); !strings.Contains(text, "cost     ? - the disk price could not be read from AWS") {

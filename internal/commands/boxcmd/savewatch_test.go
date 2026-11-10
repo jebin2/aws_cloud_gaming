@@ -14,7 +14,7 @@ func TestSaveSizesAreReadWithSpacesInTheFolder(t *testing.T) {
 
 func TestSoFarScriptAsksForEveryPartOfEveryGame(t *testing.T) {
 	s := saveSoFarScript([]saveGame{{"730", "CS2"}, {"1", "Ori DE"}})
-	for _, want := range []string{"du1 'common/Ori DE'", "du1 compatdata/730", "du1 shadercache/1", `echo "R $t"`, "/etc/cg-library.conf"} {
+	for _, want := range []string{"du1 'common/Ori DE'", "du1 compatdata/730", "du1 shadercache/1", `echo "R $t"`, "/etc/ayis-library.conf"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("lacks %q in\n%s", want, s)
 		}

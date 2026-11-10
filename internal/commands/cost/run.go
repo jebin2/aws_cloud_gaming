@@ -22,15 +22,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
-	"github.com/jebin2/aws_cloud_gaming/internal/costreport"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	"github.com/jebin2/aws_cloud_gaming/internal/storage"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/commands/status"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/costfacts"
+	"github.com/jebin2/ayis/internal/costreport"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/pricing"
+	"github.com/jebin2/ayis/internal/storage"
 )
 
 // Options are what the command line said.
@@ -51,19 +51,19 @@ func ParseArgs(args []string) (Options, error) {
 			o.JSON, o.Daily = true, true
 		case "--watch":
 		default:
-			return o, fmt.Errorf("unknown option '%s' (see: cg help)", a)
+			return o, fmt.Errorf("unknown option '%s' (see: ayis help)", a)
 		}
 	}
 	return o, nil
 }
 
-// Run is `cg cost`. It returns the exit code.
+// Run is `ayis cost`. It returns the exit code.
 func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, out *output.Out) int {
 	region := env.Region()
 	home, _ := os.UserHomeDir()
 	cfg, err := awscfg.New(ctx, region)
 	if err != nil {
-		out.Die("AWS is not set up on this computer: " + err.Error() + " - check the access key: cg creds")
+		out.Die("AWS is not set up on this computer: " + err.Error() + " - check the access key: ayis creds")
 		return 1
 	}
 	us, err := awscfg.New(ctx, "us-east-1") // Cost Explorer, the Free Tier and the Price List answer only there
@@ -79,7 +79,7 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, 
 	}
 	facts, err := g.Gather(ctx)
 	if err != nil {
-		out.Die(fmt.Sprintf("%v - check the access key: cg creds", firstLine(err)))
+		out.Die(fmt.Sprintf("%v - check the access key: ayis creds", firstLine(err)))
 		return 1
 	}
 
@@ -121,7 +121,7 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, 
 }
 
 // cacheEgress writes down what this command already paid Cost Explorer for, so
-// `cg status` can show the real number for free. Each call costs $0.01 and
+// `ayis status` can show the real number for free. Each call costs $0.01 and
 // status must not make one: at 20 runs a day that is more than the S3 bill.
 // Stamped with its age so it is never mistaken for live. Silent on failure -
 // a cache must never break the command. It lives in the cache directory, not
@@ -142,9 +142,9 @@ func cacheEgress(dir string) costreport.Cache {
 
 func cacheDir(get config.Lookup, home string) string {
 	if base, ok := get("XDG_CACHE_HOME"); ok && base != "" {
-		return filepath.Join(base, "cg")
+		return filepath.Join(base, "ayis")
 	}
-	return filepath.Join(home, ".cache", "cg")
+	return filepath.Join(home, ".cache", "ayis")
 }
 
 // firstLine is AWS's refusal in one line: the SDK wraps it in layers of
@@ -157,7 +157,7 @@ func firstLine(err error) string {
 	return msg
 }
 
-// otherRegions reads what cg has in the regions this report did not look at.
+// otherRegions reads what ayis has in the regions this report did not look at.
 func otherRegions(ctx context.Context, env *config.Env, get config.Lookup, cfg aws.Config, here string, rates pricing.Rates, host string) string {
 	regions := []string{here}
 	if o, err := ec2.NewFromConfig(cfg).DescribeRegions(ctx, &ec2.DescribeRegionsInput{}); err == nil {

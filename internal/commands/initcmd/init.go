@@ -1,4 +1,4 @@
-// Package initcmd is `cg init`: everything from "no box" to "ready to play". It is
+// Package initcmd is `ayis init`: everything from "no box" to "ready to play". It is
 // the largest command, and it is a sequence of steps each of which is its own
 // package - the preflight, the bucket and role, the launch, the build - so what is
 // here is the order, and what to say between them.
@@ -16,20 +16,20 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 
-	cg "github.com/jebin2/aws_cloud_gaming"
-	"github.com/jebin2/aws_cloud_gaming/internal/box"
-	"github.com/jebin2/aws_cloud_gaming/internal/build"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/check"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/provision"
-	"github.com/jebin2/aws_cloud_gaming/internal/sunshine"
-	"github.com/jebin2/aws_cloud_gaming/internal/tailnet"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	ayis "github.com/jebin2/ayis"
+	"github.com/jebin2/ayis/internal/box"
+	"github.com/jebin2/ayis/internal/build"
+	"github.com/jebin2/ayis/internal/commands/check"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/provision"
+	"github.com/jebin2/ayis/internal/sunshine"
+	"github.com/jebin2/ayis/internal/tailnet"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
-// Init is one run of cg init.
+// Init is one run of ayis init.
 type Init struct {
 	Out *output.Out
 	Env *config.Env
@@ -85,7 +85,7 @@ func (i *Init) cont(indent, line string) {
 
 var nodeName = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$`)
 
-// Run is `cg init`.
+// Run is `ayis init`.
 func (i *Init) Run(ctx context.Context) int {
 	if i.EnsureWatchdog != nil {
 		i.EnsureWatchdog(ctx)
@@ -143,7 +143,7 @@ func (i *Init) Run(ctx context.Context) int {
 	// malformed is said once, here, rather than silently sending nothing.
 	ntfy := config.NtfyURL(i.Env.Get("GAME_NTFY_URL"))
 	if i.Env.Get("GAME_NTFY_URL") != "" && ntfy == "" {
-		i.Out.Log("GAME_NTFY_URL is not a valid ntfy topic or URL - notifications are off (test with: cg notify)")
+		i.Out.Log("GAME_NTFY_URL is not a valid ntfy topic or URL - notifications are off (test with: ayis notify)")
 	}
 
 	i.Out.SayID("init.launch", "provisioning instance")
@@ -242,7 +242,7 @@ func (i *Init) provision(ctx context.Context, pre check.Result, ntfy string) (pr
 		return provision.Result{}, false
 	}
 	// Remember the bucket so every later run resolves the same name without another
-	// sts call, and so `cg library` can find it.
+	// sts call, and so `ayis library` can find it.
 	_ = i.Env.Set("GAME_S3_BUCKET", bucket)
 	i.cont("", "    s3://"+bucket)
 
@@ -338,7 +338,7 @@ func (i *Init) diskGB() int {
 // tailnet and was in the snapshot - so waiting for a *new* one would wait forever.
 func (i *Init) findNode(ctx context.Context, bx box.Box, before map[string]bool, reused bool, host, region string) (string, int) {
 	// Work out the node name for a reused box. .env is the first source but it is
-	// not reliable: `cg destroy` clears GAME_TS_NODE, and an init that aborts before
+	// not reliable: `ayis destroy` clears GAME_TS_NODE, and an init that aborts before
 	// writing it leaves nothing behind - while the box itself joined the tailnet
 	// minutes ago. So fall back to finding a node named after this host.
 	reusedNode := ""
@@ -444,7 +444,7 @@ func (i *Init) finish(ctx context.Context, bx box.Box, pre check.Result, id, nod
 	f.AfterStream = func(ctx context.Context) (string, error) {
 		i.Out.SayID("init.host-watchdog", "refreshing the on-host watchdog")
 		i.Out.Log("copying host/ ...")
-		bundle, err := provision.HostBundle(cg.Files, ntfy)
+		bundle, err := provision.HostBundle(ayis.Files, ntfy)
 		if err == nil {
 			_, err = bx.SSH(ctx, "mkdir -p host && tar -xz -C host", strings.NewReader(string(bundle)))
 		}
@@ -481,16 +481,16 @@ func (i *Init) finish(ctx context.Context, bx box.Box, pre check.Result, id, nod
 		}
 	}
 	if err := f.Finish(ctx); err != nil {
-		i.Notify(ctx, "Your game PC could not be set up", "It is still running and charging. Open the cg app to see what went wrong.", "high", "warning")
-		return i.die("the build did not finish. The instance is still running and still\n       billing - stop it with cg stop once you have looked at the log.")
+		i.Notify(ctx, "Your game PC could not be set up", "It is still running and charging. Open the ayis app to see what went wrong.", "high", "warning")
+		return i.die("the build did not finish. The instance is still running and still\n       billing - stop it with ayis stop once you have looked at the log.")
 	}
 
 	// This laptop's half of the build is done for this machine: it waited for the box
-	// and paired with it. cg status reads it (box.built), so an app closed in the
+	// and paired with it. ayis status reads it (box.built), so an app closed in the
 	// middle of a build - which ends this script, though the box carries on - knows on
 	// reopening that the build is not finished and runs it again; a re-run finds the
 	// same instance and picks up here. Written whether or not pairing stuck: a failed
-	// pairing is said above, and `cg pair` is its fix.
+	// pairing is said above, and `ayis pair` is its fix.
 	if os.MkdirAll(i.Cache, 0o755) == nil {
 		_ = os.WriteFile(filepath.Join(i.Cache, "built-"+id), nil, 0o644)
 		// How long it took, launch to ready, for every "a build takes" that follows.
@@ -539,10 +539,10 @@ func (i *Init) takes() string {
 
 var idleLimit = regexp.MustCompile(`(?m)^IDLE_LIMIT="\$\{IDLE_LIMIT:-([0-9]*)\}"`)
 
-// hostIdle is the on-host limit as its own script sets it, the same read cg watcher
+// hostIdle is the on-host limit as its own script sets it, the same read ayis watcher
 // does.
 func hostIdle() string {
-	b, err := cg.Files.ReadFile("host/idle-watchdog.sh")
+	b, err := ayis.Files.ReadFile("host/idle-watchdog.sh")
 	if err != nil {
 		return ""
 	}

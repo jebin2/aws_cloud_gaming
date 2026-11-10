@@ -21,7 +21,7 @@ mkdir -p "$T/bin"
 printf '#!/usr/bin/env bash\n[[ ${STEAM_UP:-0} == 1 ]]\n' > "$T/bin/pgrep"; chmod +x "$T/bin/pgrep"
 # Two seconds of waiting between looks is the service's pace; the test shortens it.
 sed 's/sleep 2/sleep 0.2/g' host/steam-add-extra-library > "$T/svc.sh"
-svc() { HOME="$H" CG_EXTRA_LIB="$LIB" PATH="$T/bin:$PATH" timeout "${1:-3}" bash "$T/svc.sh" >/dev/null 2>&1; }
+svc() { HOME="$H" AYIS_EXTRA_LIB="$LIB" PATH="$T/bin:$PATH" timeout "${1:-3}" bash "$T/svc.sh" >/dev/null 2>&1; }
 
 echo "1. Steam is closed: the folder is added, after the ones that are there"
 fresh; STEAM_UP=0 svc

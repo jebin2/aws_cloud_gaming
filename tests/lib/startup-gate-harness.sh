@@ -1,4 +1,4 @@
-# Shared by tests/startup-gate-*.sh: the page builder (probe), the fake cg, the
+# Shared by tests/startup-gate-*.sh: the page builder (probe), the fake ayis, the
 # canned answers, and the check helpers. Sourced, not run - it lives outside
 # tests/*.sh so that run-all.sh does not treat it as a suite.
 #
@@ -30,15 +30,15 @@ for b in chromium chromium-browser google-chrome-stable google-chrome; do
 done
 [[ -n $BROWSER ]] || { echo "  (no chromium - skipped)"; echo "$GATE_NAME: 0 passed, 0 failed"; exit 0; }
 
-# What cg says runs alone, verbatim, for the stub to answer `write` with.
-ALONE=$(./cg --contract | python3 -I -c 'import json,sys;print(json.dumps(json.load(sys.stdin)["runs_alone"]))')
+# What ayis says runs alone, verbatim, for the stub to answer `write` with.
+ALONE=$(./ayis --contract | python3 -I -c 'import json,sys;print(json.dumps(json.load(sys.stdin)["runs_alone"]))')
 
 mkdir -p "$T/r"
 cp app/renderer/index.html app/renderer/app.js "$T/r/"
 cp app/renderer/*.css "$T/r/"
 cp -r app/renderer/fonts "$T/r/" 2>/dev/null || true
 
-# cg, as a script: every command is recorded, and the three gate reads answer
+# ayis, as a script: every command is recorded, and the three gate reads answer
 # with whatever this case wants them to say. Nothing else answers at all, so a
 # read that should not have been asked for shows up as a command with no reply.
 cat > "$T/r/stub.js" <<'STUB'
@@ -48,7 +48,7 @@ addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.re
 window.__ran = [];
 window.__cancelled = [];
 window.__answers = {};     // set by the probe before the page loads
-window.cg = {
+window.ayis = {
   run: (args) => {
     const line = args.join(' ');
     window.__ran.push(line);
@@ -74,9 +74,9 @@ window.cg = {
         window.__emit(id, { t: 'exit', rc: 0 });
       }, (window.__slow || []).includes(line) ? (window.__slowMs || 600) : 0);
     }
-    // main answers with cg's own verdict, and it gets that verdict from
-    // `cg --contract`. This stub used to carry a hand-written list instead,
-    // which disagreed with cg about `creds tailscale authkey` - the very
+    // main answers with ayis's own verdict, and it gets that verdict from
+    // `ayis --contract`. This stub used to carry a hand-written list instead,
+    // which disagreed with ayis about `creds tailscale authkey` - the very
     // disagreement the contract exists to prevent - so a stage that had just
     // been fixed looked, in here, like one that would never tick.
     const cmd = args.filter(a => !a.startsWith('-'));
@@ -84,17 +84,17 @@ window.cg = {
     return Promise.resolve({ ok: true, id, write });
   },
   answer: () => Promise.resolve(true),
-  // SIGINT to cg, which dies and reports it. Without the exit the job stays in
+  // SIGINT to ayis, which dies and reports it. Without the exit the job stays in
   // the renderer's map for ever, which is the bug this models.
   cancel: id => { window.__cancelled.push(id); window.__emit(id, { t: 'exit', rc: 130 });
                   return Promise.resolve(true); },
   busy: () => Promise.resolve([]), openSignIn: () => Promise.resolve(true),
-  // main is the only place that knows whether there is a cg to talk to.
+  // main is the only place that knows whether there is an ayis to talk to.
   engine: () => Promise.resolve(window.__engine === undefined
-    ? { repo: '/home/u/cloud_gaming', cg: '/home/u/cloud_gaming/cg', found: true, contract: true }
+    ? { repo: '/home/u/ayis', ayis: '/home/u/ayis/ayis', found: true, contract: true }
     : window.__engine),
-  // The fake sends what the real cg sends: the id of each stage and the part of
-  // the machine a progress line starts. The suites write the words; this is cg's
+  // The fake sends what the real ayis sends: the id of each stage and the part of
+  // the machine a progress line starts. The suites write the words; this is ayis's
   // mapping (internal/build PartOf, and the ids on the Say calls in internal/commands).
   onEvent(cb) {
     const STAGES = [[/^preflight/, 'preflight'], [/cloud watchdog/, 'init.watchdog'], [/budget/, 'init.budget'],
@@ -171,7 +171,7 @@ JS
   }
   out.push('RAN | ' + window.__ran.join(' ;; '));
   // The pipeline: one row per stage, each carrying its verdict, and the pane
-  // beside it carrying cg's own words.
+  // beside it carrying ayis's own words.
   out.push('ONB | ' + (document.getElementById('adddlg').open ? 'shown' : 'hidden')
            + ' cards=' + (document.getElementById('d-main').hidden ? 'hidden' : 'shown'));
   out.push('TITLE2 | ' + document.getElementById('onb-title').textContent.trim());
@@ -247,7 +247,7 @@ tskey_in='{"present":true,"valid":true,"state":"ok","detail":null,"signed_in":tr
 tskey_out='{"present":false,"valid":null,"state":"absent","detail":null,"signed_in":false,"node":null,"auth_key_stored":false,"can_mint":false}'
 # Signed in, no API token, and no key for the box: nothing to mint one with.
 tskey_nokey='{"present":false,"valid":null,"state":"absent","detail":null,"signed_in":true,"node":"laptop","auth_key_stored":false,"can_mint":false}'
-# The three ways a key can fail, as cg now reports them: nothing was rejected
+# The three ways a key can fail, as ayis now reports them: nothing was rejected
 # in the first two, and the window must not say it was.
 creds_offline='{"cli":true,"source":"s","key_id":"****1234","account":null,"arn":null,"valid":false,
                 "reason":"unreachable","error":"Could not connect to the endpoint URL: \"https://sts.ap-south-2.amazonaws.com/\""}'
@@ -259,14 +259,14 @@ cfg_ok='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":true,"value
          {"key":"GAME_REGION","kind":"text","secret":false,"is_set":true,"value":"ap-south-2","default":"ap-south-2","note":"n"}]'
 cfg_noemail='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":false,"value":null,"default":null,"note":"n"},
              {"key":"GAME_REGION","kind":"text","secret":false,"is_set":true,"value":"ap-south-2","default":"ap-south-2","note":"n"}]'
-# A fresh laptop: no region written, so cg is using its default - which is not
+# A fresh laptop: no region written, so ayis is using its default - which is not
 # a choice anybody made. No AWS machine yet: these cases add one.
 cfg_noregion='[{"key":"EMAIL_ALERTS","kind":"text","secret":false,"is_set":true,"value":"a@b.c","default":null,"note":"n"},
               {"key":"GAME_REGION","kind":"text","secret":false,"is_set":false,"value":null,"default":"ap-south-2","note":"n"}]'
 
 # Signed in, with an API token the app can mint a key with.
 tskey_canmint='{"present":true,"valid":true,"state":"ok","detail":null,"signed_in":true,"node":"laptop","auth_key_stored":false,"can_mint":true}'
-# What `cg machines` says about the configured region: one machine the quota
+# What `ayis machines` says about the configured region: one machine the quota
 # covers, and - the other case - a region that rents nothing you may launch.
 machines_ok='{"region": "ap-south-2", "inr_per_usd": 88, "machines":
   [{"type": "g6.xlarge", "gpu": "L4", "vram_gib": 22.4, "fits_spot": true,

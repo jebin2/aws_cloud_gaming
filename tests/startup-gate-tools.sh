@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# What the window asks for when there is no cg, and when a tool is missing.
+# What the window asks for when there is no ayis, and when a tool is missing.
 # One of five files that were tests/startup-gate.sh; see lib/startup-gate-harness.sh.
 GATE_NAME=startup-gate-tools
 source "$(dirname "$0")/lib/startup-gate-harness.sh"
 
-echo "0. there is no cg at all"
+echo "0. there is no ayis at all"
 # Without an engine every read fails the same way - a spawn error each - and six
 # broken reads is not what happened. One thing did, and only main can see it:
 # the renderer has no filesystem.
-ENGINE="window.__engine = { repo: '/opt/nope', cg: '/opt/nope/cg', found: false, contract: false };
+ENGINE="window.__engine = { repo: '/opt/nope', ayis: '/opt/nope/ayis', found: false, contract: false };
 window.__after = async () => {
-  window.__engine = { repo: '/opt/nope', cg: '/opt/nope/cg', found: true, contract: true };
+  window.__engine = { repo: '/opt/nope', ayis: '/opt/nope/ayis', found: true, contract: true };
   document.querySelector('#onb-steps button').click();
   await new Promise(r => setTimeout(r, 20));
   return 'ran=' + window.__ran.join(' ');
@@ -18,8 +18,8 @@ window.__after = async () => {
 OUT=$(probe "{}")
 check    "nothing is asked at all"     "$(row RAN)" "RAN | "
 contains "the pipeline says so"        "$(row TITLE2)" "Scripts not found"
-contains "  and what cg is"            "$(row STAGETEXT)" "requires its scripts"
-contains "  where it looked"           "$(row STAGETEXT)" "/opt/nope/cg"
+contains "  and what ayis is"            "$(row STAGETEXT)" "requires its scripts"
+contains "  where it looked"           "$(row STAGETEXT)" "/opt/nope/ayis"
 contains "  and how to fix it"         "$(row STAGETEXT)" "Install them with"
 contains "  with something to run"     "$(row STAGETEXT)" "git clone"
 contains "the failed step is marked"   "$(row STAGES)" "engine=failed"
@@ -68,7 +68,7 @@ check    "and no step has a log yet"   "$(row LOG)" "LOG | "
 contains "Home is behind it"           "$(row ONB)" "cards=shown"
 
 echo "1a. no Tailscale installed is not signed in"
-# cg says signed_in null when it cannot tell - Tailscale is not installed - and
+# ayis says signed_in null when it cannot tell - Tailscale is not installed - and
 # the step read "not false" as signed in: an empty laptop showed "Private
 # connection ready" before it had Tailscale at all.
 tskey_none='{"present":false,"valid":null,"state":"absent","detail":null,"signed_in":null,"node":null,"auth_key_stored":false,"can_mint":false}'
@@ -76,8 +76,8 @@ OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_BAD" null), \"creds --json\": $cre
 lacks    "the private connection is not ticked" "$(row STAGES)" "tailnet=done"
 contains "  it waits behind the tools"          "$(row STAGES)" "tailnet=locked"
 
-echo "1b. pressing Install them: the step itself is where cg speaks"
-# Each step has its own log, folded under it: the line cg is on now, and the
+echo "1b. pressing Install them: the step itself is where ayis speaks"
+# Each step has its own log, folded under it: the line ayis is on now, and the
 # whole output behind Details. One shared pane meant step three's failure was
 # shown beside whatever ran last.
 ENGINE="window.__after = async () => {
@@ -100,13 +100,13 @@ ENGINE="window.__after = async () => {
            .filter(b => !b.closest('[id^=onb-unit-]')).map(b => b.textContent.trim()).join(',');
 };"
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_BAD" true), \"creds --json\": $creds_bad, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
-contains "the step shows the line cg is on" "$(row AFTER)" "live=installing aws-cli"
+contains "the step shows the line ayis is on" "$(row AFTER)" "live=installing aws-cli"
 contains "  its own log carries the output" "$(row AFTER)" "log=resolving dependencies installing aws-cli"
 contains "  folded, unless you open it"     "$(row AFTER)" "folded=true"
 contains "  counting, so it looks alive"    "$(row AFTER)" "Details · 2 lines"
 contains "  with a sweep, not a made-up %"  "$(row AFTER)" "sweep=true"
 contains "the stage says it is running"     "$(row AFTER)" "state=running"
-# Stopping has to reach cg: a package manager can be sitting on a lock.
+# Stopping has to reach ayis: a package manager can be sitting on a lock.
 check    "  and offers to stop it"          "$(row AFTER | sed 's/.*buttons=/buttons=/')" "buttons=Stop"
 ENGINE=""
 
@@ -142,7 +142,7 @@ contains "but it leaves a reader alone"    "$(row AFTER)" "stayedPut=true"
 ENGINE=""
 
 echo "1d. an install that fails opens its own log"
-# The reason is in cg's words, and nobody should have to find a toggle to read
+# The reason is in ayis's words, and nobody should have to find a toggle to read
 # why the thing they just pressed did not work.
 ENGINE="window.__after = async () => {
   document.querySelector('#onb-steps [data-stage=tools] button').click();
@@ -162,7 +162,7 @@ ENGINE="window.__after = async () => {
 OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_BAD" true), \"creds --json\": $creds_bad, \"creds tailscale --json\": $tskey_in, \"config --json\": $cfg_ok}")
 contains "the step says it failed"     "$(row AFTER)" "state=failed"
 contains "  its log is open by itself" "$(row AFTER)" "open=true"
-contains "  carrying cg's own words"   "$(row AFTER)" "failed retrieving file moonlight-qt"
+contains "  carrying ayis's own words"   "$(row AFTER)" "failed retrieving file moonlight-qt"
 contains "  under one plain sentence"  "$(row AFTER)" "Install failed"
 contains "  and the button that helps" "$(row AFTER)" "buttons=Try again"
 ENGINE=""
@@ -177,7 +177,7 @@ ENGINE="window.__after = async () => {
   window.__answers['deps --json'] = { tools: [{tool: 'python3', label: 'python3', present: true, why: 'w'},
     {tool: 'aws', label: 'AWS CLI v2', present: true, why: 'w'}], package_manager: 'pacman',
     root: 'pkexec', root_blocked: null, tailscale_signed_in: true };
-  // The AWS CLI is there now, so cg creds finds it too.
+  // The AWS CLI is there now, so ayis creds finds it too.
   window.__answers['creds --json'] = { cli: true, source: null, key_id: null, account: null,
     arn: null, valid: false, reason: 'no-key', error: 'Unable to locate credentials.' };
   window.__slow = ['deps --json']; window.__slowMs = 600;
@@ -254,7 +254,7 @@ OUT=$(probe "{\"deps --json\": $(deps "$TOOLS_BAD" true), \"creds --json\": $cre
 contains "the step says it failed"     "$(row AFTER)" "state=failed"
 contains "  naming what is still missing" "$(row AFTER)" "Still missing: Moonlight."
 contains "  with the log open"         "$(row AFTER)" "open=true"
-contains "  carrying cg's words"       "$(row AFTER)" "target not found: moonlight-qt"
+contains "  carrying ayis's words"       "$(row AFTER)" "target not found: moonlight-qt"
 ENGINE=""
 
 

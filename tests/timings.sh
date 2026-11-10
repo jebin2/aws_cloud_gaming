@@ -21,8 +21,8 @@ cat > "$T/bin/apt-get" <<'FAKE'
 #!/usr/bin/env bash
 sleep 0.2
 if [[ ${1:-} == install ]]; then
-  date +%s.%N > "$CG_DPKG_START"
-  for p in "${@:3}"; do echo "2026-11-05 10:00:00 install $p:amd64 <none> 1.0" >> "$CG_DPKG_LOG"; done
+  date +%s.%N > "$AYIS_DPKG_START"
+  for p in "${@:3}"; do echo "2026-11-05 10:00:00 install $p:amd64 <none> 1.0" >> "$AYIS_DPKG_LOG"; done
 fi
 sleep 0.2; [[ ${1:-} == fail ]] && exit 7; exit 0
 FAKE
@@ -34,8 +34,8 @@ FAKE
 chmod +x "$T/bin/apt-get" "$T/bin/dpkg-query"
 : > "$T/dpkg.log"
 FN=$(awk '/^apt-get\(\) \{/{f=1} f{print} f&&/^\}/{c++; if(c==2) exit}' lib/bootstrap.d/00-header.sh \
-     | sed "s|/run/cg-dpkg-start|$T/dpkg-start|g; s|/var/log/cg-timings.log|$LOG|g; s|/var/log/dpkg.log|$T/dpkg.log|g")
-run() { env PATH="$T/bin:$PATH" CG_DPKG_START="$T/dpkg-start" CG_DPKG_LOG="$T/dpkg.log" CG_TARGET="$1" bash -c "$FN"$'\n'"shift_args=1; apt-get $2; echo rc=\$?"; }
+     | sed "s|/run/ayis-dpkg-start|$T/dpkg-start|g; s|/var/log/ayis-timings.log|$LOG|g; s|/var/log/dpkg.log|$T/dpkg.log|g")
+run() { env PATH="$T/bin:$PATH" AYIS_DPKG_START="$T/dpkg-start" AYIS_DPKG_LOG="$T/dpkg.log" AYIS_TARGET="$1" bash -c "$FN"$'\n'"shift_args=1; apt-get $2; echo rc=\$?"; }
 out=$(run aws "install -y curl")
 contains "it passes the command through" "$out" "rc=0"
 check    "an install line and a weight line are logged" "$(wc -l < "$LOG")" "2"
@@ -58,7 +58,7 @@ cat > "$LOG" <<'D'
 pkgs 100.0 3 410 libnvidia-compute-615 212MB nvidia-firmware-615 98MB libnvidia-gl-615 61MB
 pkgs 200.0 612 1290 xfce4-goodies 4MB libgtk-3-0t64 20MB firefox 0MB
 D
-BLOCK=$(sed -n '/^if \[ -s \/var\/log\/cg-timings.log \]/,/^fi$/p' lib/bootstrap.d/99-finish.sh | sed "s|/var/log/cg-timings.log|$LOG|g")
+BLOCK=$(sed -n '/^if \[ -s \/var\/log\/ayis-timings.log \]/,/^fi$/p' lib/bootstrap.d/99-finish.sh | sed "s|/var/log/ayis-timings.log|$LOG|g")
 out=$(bash -c 'set -euo pipefail; progress() { echo ">>> $*"; }; '"$BLOCK")
 first=$(sed -n 1p <<<"$out")
 contains "the slowest comes first"            "$first" "timing: 90s (fetch 15s, dpkg 75s) apt-get install -y xfce4"
@@ -98,8 +98,8 @@ check    "  and nothing calls it bare"                 "$(grep -v '^ *#' lib/boo
 
 echo "4. the build installs and removes its timers"
 base=$(<lib/bootstrap.d/10-base.sh); fin=$(<lib/bootstrap.d/99-finish.sh)
-contains "the dpkg hook is set"            "$base" "99-cg-build-timing"
+contains "the dpkg hook is set"            "$base" "99-ayis-build-timing"
 contains "update-initramfs is timed"      "$base" "/usr/local/sbin/update-initramfs"
-contains "both are taken out at the end"  "$fin" "rm -f /etc/apt/apt.conf.d/99-cg-build-timing /usr/local/sbin/update-initramfs"
+contains "both are taken out at the end"  "$fin" "rm -f /etc/apt/apt.conf.d/99-ayis-build-timing /usr/local/sbin/update-initramfs"
 
 echo; echo "timings: $pass passed, $fail failed"; [[ $fail -eq 0 ]]

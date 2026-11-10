@@ -16,8 +16,8 @@ func out(json bool) (*Out, *bytes.Buffer) {
 
 func TestDiePlain(t *testing.T) {
 	o, e := out(false)
-	o.Die("unknown flag '--nope' (see: cg help)")
-	if got, want := e.String(), "2026-10-25T18:30:02+05:30  error: unknown flag '--nope' (see: cg help)\n"; got != want {
+	o.Die("unknown flag '--nope' (see: ayis help)")
+	if got, want := e.String(), "2026-10-25T18:30:02+05:30  error: unknown flag '--nope' (see: ayis help)\n"; got != want {
 		t.Errorf("got %q want %q", got, want)
 	}
 }

@@ -7,7 +7,7 @@ hours to diagnose.
 
 ## "the archive is empty" when it is not
 
-`cg library list` reads `s3://<bucket>/steam/index.json`. That read used to fall back to an empty
+`ayis library list` reads `s3://<bucket>/steam/index.json`. That read used to fall back to an empty
 index on **any** failure, so expired credentials, a denied bucket or no network all printed:
 
 ```
@@ -18,22 +18,22 @@ about an archive that was perfectly intact. It now says which it is:
 
 ```
   cannot read the archive: the AWS credentials are not valid - check: aws sts get-caller-identity
-  s3://cg-library-… was not readable, so nothing here is known -
+  s3://ayis-library-… was not readable, so nothing here is known -
   this is NOT the same as the archive being empty.
 ```
 
-`cg library list --json` carries the same distinction: `"error"` is set and `"games"` is `null`,
-never `[]`. `cg status` prints `UNREADABLE` rather than `EMPTY`, and if AWS rejects the credentials
+`ayis library list --json` carries the same distinction: `"error"` is set and `"games"` is `null`,
+never `[]`. `ayis status` prints `UNREADABLE` rather than `EMPTY`, and if AWS rejects the credentials
 outright it says so once, at the top, and prints nothing about resources it could not read.
 
 If you see it, check the credentials first:
 
 ```
 aws sts get-caller-identity      # InvalidClientTokenId means the key is gone
-./cg check --fix                 # asks for a key id and secret
+./ayis check --fix                 # asks for a key id and secret
 ```
 
-Nothing in S3 is touched by any of this - `cg library clean` deletes nothing while the index
+Nothing in S3 is touched by any of this - `ayis library clean` deletes nothing while the index
 cannot be read, because every game would otherwise look like an orphan.
 
 
@@ -51,8 +51,8 @@ provisioning step now asserts its effect rather than its execution.
 | "Storage is showing internal only" | Steam writes `libraryfolders.vdf` only after a sign-in, so on a fresh client there was nothing to append to and registration silently wrote nothing |
 | NVMe library vanishes after a stop | `/scratch` is reformatted at every start, destroying the marker Steam uses as proof the library is real |
 | Build hangs with no output, then "host rebooting" | A rebuilt box reclaims its hostname, and `known_hosts` still held the old key. ssh's stderr was being discarded, so a refusal looked like silence |
-| Re-running `cg init` hangs 30 minutes | It waited for a *new* tailnet node against a box that joined long ago - gated on a 2s ping that a cold WireGuard path loses |
-| CloudWatch alarm stops the box mid-build | A new alarm is evaluated against the previous 30 minutes, so it fires immediately. It was created **disarmed** and armed by `cg open`; the alarm has since been removed |
+| Re-running `ayis init` hangs 30 minutes | It waited for a *new* tailnet node against a box that joined long ago - gated on a 2s ping that a cold WireGuard path loses |
+| CloudWatch alarm stops the box mid-build | A new alarm is evaluated against the previous 30 minutes, so it fires immediately. It was created **disarmed** and armed by `ayis open`; the alarm has since been removed |
 | Billing looks like zero while spending | Credits are booked as a matching negative line; without filtering to `RECORD_TYPE=Usage` every figure nets out |
 
 ## Getting a GPU instance to launch at all
@@ -69,7 +69,7 @@ provisioning step now asserts its effect rather than its execution.
 3. **Spot quota** - `All G and VT Spot Instance Requests` (`L-3819A6DF`) is a *separate* quota
    that defaults to 0. Having on-demand approved tells you nothing; the launch fails with
    `MaxSpotInstanceCountExceeded`. The same error also appears for a few minutes after a spot box
-   terminates, with a quota that is large enough: AWS frees the allowance late. `cg init` waits
+   terminates, with a quota that is large enough: AWS frees the allowance late. `ayis init` waits
    that out (up to 6 minutes, with a line saying so) when nothing live holds the allowance; a
    machine that is still running holds it for good and fails at once.
 
@@ -100,7 +100,7 @@ The messages that worked, and the full sequence, are in
 
 ### Reading a launch failure
 
-`cg init` now prints the AWS error code and AWS's own sentence on the first line, then the one
+`ayis init` now prints the AWS error code and AWS's own sentence on the first line, then the one
 explanation that matches it:
 
 ```
@@ -110,7 +110,7 @@ explanation that matches it:
   No spare g6.xlarge spot capacity in ap-south-2 right now.
   Nothing pins the AZ any more, so this is the whole region being short,
   not one zone. On-demand usually fits:
-    GAME_SPOT=0 cg init
+    GAME_SPOT=0 ayis init
 ```
 
 It used to print AWS's message and then every cause it knew, 25 lines of them. On a terminal
@@ -119,7 +119,7 @@ ordinary continuation line, indistinguishable from build progress, so a failed b
 itself as the words "stopped (exit 1)" and nothing else. The classifier lives in
 [lib/launch-error.sh](../lib/launch-error.sh) and is tested in `tests/launch-error.sh`.
 
-The `!! ` prefix is a marker, not decoration: `cg_relay` turns it into a `fail` event, and the
+The `!! ` prefix is a marker, not decoration: `ayis_relay` turns it into a `fail` event, and the
 app shows that line and everything under it in a panel above the log. Any relayed script can
 use it.
 
@@ -136,13 +136,13 @@ your region.
 
 ### Looking at a build that is stuck or failed
 
-The AWS box builds itself with `cg-build` (docs/architecture.md, Flow 1). On the box:
+The AWS box builds itself with `ayis-build` (docs/architecture.md, Flow 1). On the box:
 
-    sudo cg-build status                       # each stage: pending, running, done, failed, blocked
-    sudo cg-build events --since 0 | tail      # the numbered record, what cg init reads
-    sudo tail -50 /var/log/cg-build/<stage>.log   # one stage's own output
-    sudo systemctl status cg-build             # the supervisor itself
-    sudo cg-build retry                        # run the failed stages again (or name them)
+    sudo ayis-build status                       # each stage: pending, running, done, failed, blocked
+    sudo ayis-build events --since 0 | tail      # the numbered record, what ayis init reads
+    sudo tail -50 /var/log/ayis-build/<stage>.log   # one stage's own output
+    sudo systemctl status ayis-build             # the supervisor itself
+    sudo ayis-build retry                        # run the failed stages again (or name them)
 
 A stage that failed is retried by itself first; `blocked` means a stage it needs failed. A reboot or a
 crash in the middle is not a failure: the stage that was running is run again.
@@ -169,7 +169,7 @@ group. Recover an existing box with `sudo tailscale set --ssh=false`.
 
 A near-zero CPU reading looked like a hang in the driver install. The driver had installed
 fine; the script had died later, at the Sunshine download. Read the actual log
-(`/var/log/cloud-gaming-bootstrap.log`) before concluding anything.
+(`/var/log/ayis-bootstrap.log`) before concluding anything.
 
 ### Sunshine's release asset name embeds the version
 
@@ -369,7 +369,7 @@ by email**. An unconfirmed subscription delivers nothing, silently.
 
 Both problems disappear with **AWS Budgets**, which emails subscribers directly - no root
 toggle, no confirmation, effective immediately, and the first two budgets are free. That is
-what `lib/aws-setup.sh` now creates. Check it with `cg status`.
+what `lib/aws-setup.sh` now creates. Check it with `ayis status`.
 
 ### Zero inbound rules silently costs half your latency
 
@@ -860,11 +860,11 @@ normally.
 ### Editing a script while it is running
 
     2026-09-13T00:01:05  ==> removing tailnet nodes
-          no gamevps nodes on the tailnet - nothing to remove
-    ./cg: line 784: /scratch/tmp: No such file or directory
+          no ayis nodes on the tailnet - nothing to remove
+    ./ayis: line 784: /scratch/tmp: No such file or directory
 
-Nothing is wrong with `/scratch/tmp`, and line 784 is a line of help text. `cg destroy` spends
-about five minutes waiting for an instance to terminate, and `cg` was **rewritten during that
+Nothing is wrong with `/scratch/tmp`, and line 784 is a line of help text. `ayis destroy` spends
+about five minutes waiting for an instance to terminate, and `ayis` was **rewritten during that
 wait**.
 
 Bash does not load a script into memory. It reads, executes, and comes back for more input at a
@@ -882,27 +882,27 @@ Edit a copy and `mv` it into place - atomic, and it swaps the inode, so the runn
 reading the file it started with. Or do not edit while a long command is in flight. Both depend
 on discipline, and discipline failed twice more in the same session, producing:
 
-    ./cg: line 944: syntax error near unexpected token `;;'
-    ./cg: line 956: syntax error near unexpected token `;'
+    ./ayis: line 944: syntax error near unexpected token `;;'
+    ./ayis: line 956: syntax error near unexpected token `;'
 
 Note the differing line numbers for the same edit - the signature of a shifting offset rather
 than a real syntax error. Both landed *after* every step of the destroy had completed.
 
 The structural fix: **end the script with an explicit `exit`.** Bash returns to read more input
 once the final command finishes, and with a dispatch as the last construct that read happens
-after a five-minute `cg destroy`. An `exit` means it never reads again. Measured, with a script
+after a five-minute `ayis destroy`. An `exit` means it never reads again. Measured, with a script
 rewritten during its last command:
 
     no trailing exit     ->  syntax error near unexpected token ';;'   exit=2
     trailing 'exit 0'    ->  exit=0
 
-This also explains why only some commands broke. `cg init` and `cg check` end in `exec`, which
+This also explains why only some commands broke. `ayis init` and `ayis check` end in `exec`, which
 replaces the process outright - those were never vulnerable. `destroy) cmd_destroy "$@" ;;`
 returns to the dispatch, and to bash's next read.
 
 One caveat found while applying it: `lib/setup`'s `case` is *not* its last construct. The
 `check)` and `rebuild)` branches deliberately fall through past `esac` into the build flow, so
-an `exit` after `esac` would have broken `cg init` entirely. It goes at the end of the file, not
+an `exit` after `esac` would have broken `ayis init` entirely. It goes at the end of the file, not
 the end of the dispatch. `tests/tail-exit.sh` checks all eight scripts and re-verifies the
 underlying bash behaviour, so the rule carries its own evidence.
 
@@ -928,7 +928,7 @@ This was already documented at one call site:
     # both. Take the first word and normalise it.
 
 and it was still written three more times in one sitting - `grep -c` in `iam_lines`, then
-`is-active` twice in `cg watcher`, both *after* fixing the first. A comment at the one site that got it right
+`is-active` twice in `ayis watcher`, both *after* fixing the first. A comment at the one site that got it right
 does not generalise; the knowledge has to be attached to the pattern, not to a location.
 
 The shape to look for is a substitution whose fallback could be *appended* rather than
@@ -968,7 +968,7 @@ problem. A *game's* prefix has no such owner: Proton reads `.update-timestamp` a
 concludes the prefix is current, and never touches `dosdevices` again. The one place with no
 repair mechanism was the one place the loss mattered.
 
-**The fix.** `push` writes `.cg-symlinks.tsv` - every symlink in the library as `path<TAB>target`
+**The fix.** `push` writes `.ayis-symlinks.tsv` - every symlink in the library as `path<TAB>target`
 - before the sync, so it travels as an ordinary file with no extra upload step and `--delete`
 cannot strip it. `pull` recreates from it afterwards, and only ever *adds*: anything already
 present, real file or link Steam rebuilt, is left alone. 5,815 links, 913 KB, one object.
@@ -983,7 +983,7 @@ was broken - the archive format simply could not represent part of what was bein
 
 ### Documented for weeks, unhandled in code
 
-    $ ./cg open
+    $ ./ayis open
     starting i-0405e5236b1f9ca12 ...
     aws: [ERROR]: An error occurred (IncorrectSpotRequestState) when calling the
     StartInstances operation: You can't start the Spot Instance ... because the
@@ -993,7 +993,7 @@ The cause was already in this file, several sections up: stopping a spot instanc
 its persistent request to `disabled`, and AWS will not start an instance whose request is not
 active. That had been tested deliberately and written down.
 
-And `cg open` still met it as a raw API error. The message names no cause, offers no way
+And `ayis open` still met it as a raw API error. The message names no cause, offers no way
 forward, and says nothing about the part that costs money - the box is now permanently
 unstartable while its root volume keeps billing, so the worst outcome is not the failed command
 but the resource left behind by it.
@@ -1004,9 +1004,9 @@ before `start-instances`.
 
 Two changes, and the second matters more:
 
-- `cg open` checks the request state first and prints the cause, the cost, and both routes out
-  (`cg destroy && cg init`, or `GAME_SPOT=0 cg init` for a restartable box).
-- the "stop instance now?" prompt at the end of `cg open` now offers **destroy as the default**
+- `ayis open` checks the request state first and prints the cause, the cost, and both routes out
+  (`ayis destroy && ayis init`, or `GAME_SPOT=0 ayis init` for a restartable box).
+- the "stop instance now?" prompt at the end of `ayis open` now offers **destroy as the default**
   on a spot instance. Handling the error well still leaves you with a wasted box; not creating
   one is better. This is only reasonable because the games are in S3 - under the old EBS design,
   stop was the only way to keep them without paying for an instance.
@@ -1069,15 +1069,15 @@ All three were wrong, none was a calculation error, and each was accurate about 
 narrower than its label claimed.
 
 **`$0.00 spent`** is what the AWS Budgets API returns. `CalculatedSpend` is populated up to 24
-hours *after a budget is created*, and `cg init` recreates this budget on every build - so it
+hours *after a budget is created*, and `ayis init` recreates this budget on every build - so it
 reads zero essentially always. Printed bare, next to a real month of $12.17, it said "nothing
 has been spent" from the one component whose entire job is noticing spend. It now says AWS has
-not calculated it yet and points at `cg cost`.
+not calculated it yet and points at `ayis cost`.
 
 **`~99 GB left`** came from the box's NIC counters *since that box booted*, subtracted from the
 100 GB monthly allowance. Every session is a new box, so the figure resets each time. Cost
 Explorer said 91 GB left. The line is gone; the traffic block already says "this boot only" and
-now refers the month to `cg cost`.
+now refers the month to `ayis cost`.
 
 **`compute 2.0 hrs`** counts CloudWatch CPUUtilization datapoints for **one instance id** - the
 current one - under a heading that read "month to date". The comment above it even claimed "a
@@ -1095,7 +1095,7 @@ moved into arithmetic: **the value answers a question nobody asked.**
 Worth noting that none of these were found by tests. They were found by a user reading two
 outputs side by side and asking why they disagreed. A number that is never compared against an
 independent source can be wrong indefinitely - which is an argument for printing the source
-(`cg cost` reads Cost Explorer, `cg status` reads the box) rather than a single blended figure.
+(`ayis cost` reads Cost Explorer, `ayis status` reads the box) rather than a single blended figure.
 
 ### The budget guard had never been able to fire
 
@@ -1104,8 +1104,8 @@ independent source can be wrong indefinitely - which is an argument for printing
 against a real month of $12.17. The first fix was to say AWS had not calculated it yet. That was
 true and still missed the point:
 
-    cg destroy  ->  aws budgets delete-budget
-    cg init     ->  aws budgets create-budget
+    ayis destroy  ->  aws budgets delete-budget
+    ayis init     ->  aws budgets create-budget
 
 AWS Budgets populates `CalculatedSpend` up to **24 hours after a budget is created**. This rig is
 destroyed and rebuilt several times a day, so the budget was deleted and recreated before it
@@ -1114,8 +1114,8 @@ a position to fire**, across the whole life of the project.
 
 A budget is not an instance resource. It guards the account, it costs nothing to keep (AWS bills
 nothing for the first two), and the moment it matters most is precisely the one `destroy` used to
-remove it in: no instance running, nobody watching. It now survives `cg destroy` and dies only
-with `cg destroy --all`.
+remove it in: no instance running, nobody watching. It now survives `ayis destroy` and dies only
+with `ayis destroy --all`.
 
 Two things about how this was found. It came from a user asking "budget is for per month cycle
 right?" - a question about semantics, not a bug report. And the earlier fix, which explained the
@@ -1131,7 +1131,7 @@ stub must return what the real thing returns for *absence* - here, nothing at al
 
 ### A test deleted a real SSH key
 
-`tests/destroy-budget.sh` needed to check which AWS calls `cg destroy` makes, so it runs the
+`tests/destroy-budget.sh` needed to check which AWS calls `ayis destroy` makes, so it runs the
 **real** `lib/setup destroy` with `aws` and `tailscale` stubbed on `PATH`. That covered every API
 call and none of the filesystem, and destroy contains:
 
@@ -1142,11 +1142,11 @@ running instance. Unrecoverably - AWS shows a key pair's public half and never t
 
 The box kept streaming, because Moonlight reaches Sunshine over Tailscale and needs no SSH, and
 the library still mirrored on shutdown, because that runs from a unit on the box rather than
-over SSH. What broke was every laptop-side operation: `cg ssh`, the disk and library sections of
-`cg status`, and the pre-destroy push.
+over SSH. What broke was every laptop-side operation: `ayis ssh`, the disk and library sections of
+`ayis status`, and the pre-destroy push.
 
 There was a second trap behind it. `provision.sh` creates a key pair only when AWS does not
-already have one, so the *next* `cg init` would have happily reused the orphaned `gamevps` pair
+already have one, so the *next* `ayis init` would have happily reused the orphaned `ayis` pair
 and built another box nobody could log into. The AWS key pair has to be deleted too, so the pair
 is regenerated together.
 
@@ -1177,7 +1177,7 @@ file, `lib/choose-games.py`, with prompts on stderr and only the answer on stdou
 through a pty, and stdin left alone for the human.
 
 **An infinite loop behind that.** With the default selection larger than the disk, an EOF meant
-re-ask, re-refuse, re-ask. It now exits and lets the caller decide, and `cg init` falls back to
+re-ask, re-refuse, re-ask. It now exits and lets the caller decide, and `ayis init` falls back to
 whatever `.env` already said rather than to `all` - "all" is only safe while the archive is
 smaller than the disk, which is precisely what stopped being true.
 
@@ -1191,7 +1191,7 @@ presigning is what makes it possible. **8,012 bytes free** instead of 68.
 under half the archive. Per-app prefixes make the catastrophic version of that impossible, so the
 check looked redundant and went - but a *single* game can still be half-present locally and
 overwrite its own complete copy. It is back, scoped to one game, and pointing at
-`cg library forget` for the case where the removal was deliberate.
+`ayis library forget` for the case where the removal was deliberate.
 
 The pattern in the last one is worth naming. Removing a guard because the architecture changed is
 usually right; the mistake is assuming the guard only ever covered the case you just eliminated.
@@ -1269,7 +1269,7 @@ The on-host watchdog waited its 15 idle minutes and called `shutdown -h`. The pr
 started the mirror. Then `TimeoutStopSec=900` expired and systemd killed it mid-upload.
 
 **The mistake was putting the upload in the shutdown path at all.** `ExecStop` is the right place
-for a *delta* - after `cg stop`, there is nothing left to send and it takes seconds. It is hopeless
+for a *delta* - after `ayis stop`, there is nothing left to send and it takes seconds. It is hopeless
 for a first upload, because the only clock that exists during shutdown is the one that kills it.
 
 The watchdog now pushes **before** calling `shutdown -h`, where the machine is fully alive and
@@ -1289,7 +1289,7 @@ And before that, the archive's 72 GB looked like the whole story. It was not: `N
 104 GB leaving the box. The gap is multipart uploads that never completed - invisible in a bucket
 listing, which is why the lifecycle rule that aborts them exists.
 
-### Thirty dead entries in Moonlight, and a box called gamevps-1
+### Thirty dead entries in Moonlight, and a box called ayis-1
 
     Qt Critical: Computer ip-172-31-34-96 has not been paired.
     Qt Info: "ip-172-31-33-167" is now offline
@@ -1305,13 +1305,13 @@ rebuilding left thirty dead entries with the live box buried among them. `sunshi
 pinned to the tailnet host name, so there is one entry that gets re-paired rather than a new one
 to hunt for each time. Pairing itself is still per Sunshine instance and still has to be redone.
 
-**Tailnet nodes were only pruned by `cg destroy`.** Which was fine when destroy was how a
+**Tailnet nodes were only pruned by `ayis destroy`.** Which was fine when destroy was how a
 session ended - but the box now terminates *itself* when it goes idle, and nothing on the box can
 delete its own tailnet entry: that needs an API token, which deliberately never leaves the
-laptop. So every auto-terminated box leaked a node, the next build found `gamevps` taken, and the
-names crept to `gamevps-1`, `-2`, `-3`.
+laptop. So every auto-terminated box leaked a node, the next build found `ayis` taken, and the
+names crept to `ayis-1`, `-2`, `-3`.
 
-Not cosmetic. A stale entry still answers DNS, so `ssh gamevps` hangs until it times out against
+Not cosmetic. A stale entry still answers DNS, so `ssh ayis` hangs until it times out against
 a machine that no longer exists - which is exactly what happened while diagnosing this, and cost
 a wrong turn. `lib/tailnet-prune.sh` now runs before each launch and deletes **offline** nodes
 matching `<host>` or `<host>-N`. Only offline ones: an online node is a box that exists.
@@ -1343,7 +1343,7 @@ Two boxes, two downloads, both terminated by layer 3. The reasoning that exonera
 sound and the conclusion was wrong, and one API call I never made would have settled it. When a
 component has an audit log, read the log before reasoning about what it would have done.
 
-**The actual bug.** `cg open` armed the alarm and *nothing ever disarmed it*, so it stayed armed
+**The actual bug.** `ayis open` armed the alarm and *nothing ever disarmed it*, so it stayed armed
 for the life of the box. It watches NetworkOut alone - CloudWatch refuses EC2 actions on a
 metric-math expression, so it cannot sum in+out - and a download is almost entirely inbound.
 Thirty minutes after a stream ended, a box busy downloading looked exactly like an idle one.
@@ -1435,7 +1435,7 @@ four unguarded verifies in a file that had none.
     disk budget 153GB (173GB free, 20GB reserved)
     SKIPPING Diablo® IV (2344520, 159GB) - only 153GB left
 
-158.7 GB of game, 229 GB of disk, and it refused. `cg games` then reported it **installed at
+158.7 GB of game, 229 GB of disk, and it refused. `ayis games` then reported it **installed at
 158.7 GB** while `df` showed 44 GB used, because the manifest is one small file that restored
 fine while the game's files did not.
 
@@ -1458,7 +1458,7 @@ in production - the reboot guarantees it. The fixture for the resume case uses a
 since the sandbox has no 120 GB to spare and `du -b` reports apparent size, which is exactly what
 the code measures.
 
-**And the skip was silent in the place people look.** `cg games` reads the manifest, so a game
+**And the skip was silent in the place people look.** `ayis games` reads the manifest, so a game
 whose manifest restored and whose files did not reads as "installed" at full size. It now has no
 way to know better; the honest fix would be for it to compare the manifest's `SizeOnDisk` against
 the bytes actually present, which is the same "measure the effect, not the intent" rule that the
@@ -1499,8 +1499,8 @@ Final: ten mutations, ten caught, 41 assertions, 1.4s.
 
 ### The tailnet prune never pruned anything, and its test agreed with it
 
-A rebuild joined the tailnet as `gamevps-1`, straight after a prune that was supposed to have
-removed the dead `gamevps` node. The prune ran, printed nothing, and deleted nothing.
+A rebuild joined the tailnet as `ayis-1`, straight after a prune that was supposed to have
+removed the dead `ayis` node. The prune ran, printed nothing, and deleted nothing.
 
 It matched nodes with `d.get("online") is False`. **The Tailscale v2 devices API has no `online`
 field** - not in the default response, not with `?fields=all`. The real field is
@@ -1509,14 +1509,14 @@ day it was written.
 
 It went unnoticed for two reasons, and both are worth keeping:
 
-1. **`cg destroy` used to delete tailnet nodes unconditionally**, so a working destroy hid a
+1. **`ayis destroy` used to delete tailnet nodes unconditionally**, so a working destroy hid a
    broken prune. The failure appeared the moment destroy stopped doing that job, which is the
    point at which the prune finally had one.
 2. **The test fixture invented the same field the code did.** It fed `"online": false` to a
    function checking `"online"`, and every case passed. A fixture written from the code proves
    only that the code agrees with itself. This one is now captured from the live API, including
    the detail that makes the prune dangerous: a live box and a dead one have the **same
-   `hostname`** (`gamevps`); only the MagicDNS `name` carries the `-1`.
+   `hostname`** (`ayis`); only the MagicDNS `name` carries the `-1`.
 
 A node that does not report the field at all is now left alone. If the API renames it again, the
 safe failure is pruning nothing - not deleting the tailnet identity of a box that may be up.
@@ -1524,22 +1524,22 @@ safe failure is pruning nothing - not deleting the tailnet identity of a box tha
 Before running the fix against the real tailnet, the new filter was run read-only over the live
 device list. It selected exactly the dead node and kept the box that was mid-build beside it.
 
-### `cg init` waited 30 minutes for a box that joined in 47 seconds
+### `ayis init` waited 30 minutes for a box that joined in 47 seconds
 
-The previous box had terminated itself, which leaves its tailnet node behind, offline. `cg init`
+The previous box had terminated itself, which leaves its tailnet node behind, offline. `ayis init`
 listed the tailnet's node **names** before launching, to recognise the new box as "a name that was
-not there before". Then the build's prune deleted that offline `gamevps` - freeing the name - and
-the new box joined as plain `gamevps`, a name already in the list. Nothing new ever appeared:
+not there before". Then the build's prune deleted that offline `ayis` - freeing the name - and
+the new box joined as plain `ayis`, a name already in the list. Nothing new ever appeared:
 
     ◌ waiting for the box to join 10m 10s
 
-while `tailscale status` showed `gamevps` online, created 47 seconds after the launch.
+while `tailscale status` showed `ayis` online, created 47 seconds after the launch.
 
 A name is not an identity; a node key is. The list is now of keys (`tailnet_node_keys`), and a new
-key under this host's name - `gamevps` or `gamevps-N` - is the box, so a phone joining meanwhile is
+key under this host's name - `ayis` or `ayis-N` - is the box, so a phone joining meanwhile is
 not mistaken for it. `tests/wait-node.sh` replays that run.
 
-A rerun of `cg init` recovers either way: it finds the running instance and the node named after
+A rerun of `ayis init` recovers either way: it finds the running instance and the node named after
 it, and continues from there.
 
 ### A test of the shutdown path failed only when the laptop was busy
@@ -1561,17 +1561,17 @@ terminated two mid-download, and the fix for those was to arm it only while a se
 Once the cloud watchdog existed, that narrow window was the only place the alarm still watched -
 and there it duplicated the Lambda on half the traffic, from the same metrics. Its one unique case
 was the Lambda failing during a session with the on-host watchdog also dead. It was removed, with
-the arming around every session, its rows in `cg status`, `cg cost` and `cg watcher`, and
+the arming around every session, its rows in `ayis status`, `ayis cost` and `ayis watcher`, and
 `tests/alarm-arming.sh`.
 
-### `cg open` looked hung at "waiting for tailscale"
+### `ayis open` looked hung at "waiting for tailscale"
 
 Found in the real-AWS lifecycle run (go-plan section 8.16). The box had joined the tailnet, but
 the first `tailscale ping` to a new node takes a few seconds while the path is negotiated, and
-`cg open` gave each try 2 seconds, so it kept failing on the first tries. It also ignored Ctrl-C
+`ayis open` gave each try 2 seconds, so it kept failing on the first tries. It also ignored Ctrl-C
 and SIGTERM until the 60 tries ended, so `timeout` could not stop it either. The ping now waits 5
 seconds and every wait loop (`open`, `destroy`, `snapshot`) stops when interrupted.
 
-Related, and by design: `cg stop` on a spot box is a destroy. A one-time spot instance cannot be
-stopped, so `stop` offers destroy and takes it by default. A test that kills `cg stop` partway
-leaves the box shutting down; run `cg destroy` to finish.
+Related, and by design: `ayis stop` on a spot box is a destroy. A one-time spot instance cannot be
+stopped, so `stop` offers destroy and takes it by default. A test that kills `ayis stop` partway
+leaves the box shutting down; run `ayis destroy` to finish.

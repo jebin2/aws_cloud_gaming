@@ -2,7 +2,7 @@
 
 **Ayis: All Yours, Instantly Streamed.**
 
-Status (2026-11-10): plan only, on branch `rename-ayis`. Nothing is renamed yet.
+Status (2026-11-10): **steps 1-8 done** on branch `rename-ayis`. The grep gate is clean, `go test`, `npm test` and the 24 local shell suites pass, and the 20 browser suites still have to run on GitHub. Step 0 (teardown with the old program) and step 9 (go live) are not done.
 
 **Decision: rename everything, with no aliases.** The project is in beta and has no users other
 than its author, so nothing needs to stay compatible. `cg`, `cloud_gaming`, `cloud-gaming`,

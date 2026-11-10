@@ -7,7 +7,7 @@
 // freezes any process that does: the window waited out the 5 s timer, painted
 // nothing, and opened late. Mesa's EGL on the Intel GPU never touches it.
 //
-// The same rule as cg's moonlight_gpu (lib/session.sh), which keeps Moonlight
+// The same rule as ayis's moonlight_gpu (lib/session.sh), which keeps Moonlight
 // off it for the same reason: both GPUs there, only what is installed set, and
 // a choice already made in the environment left alone.
 

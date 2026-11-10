@@ -12,10 +12,10 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/machines"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/commands/machines"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/pricing"
 )
 
 // AWS is the real Backend.

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/sunshine"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/sunshine"
 )
 
 // Finisher is the second half of a build, for any target. The target supplies

@@ -1,4 +1,4 @@
-// Package creds is `cg creds`: the two keys only a person can give cg - the AWS
+// Package creds is `ayis creds`: the two keys only a person can give ayis - the AWS
 // access key and the Tailscale API token - and whether each works.
 package creds
 
@@ -13,8 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/laptop"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/laptop"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 // STSAPI is the one free call that can say whether a key works.
@@ -39,7 +39,7 @@ type AWS struct {
 	// was no key, so nothing was rejected either - which is not "valid".
 	Valid *bool `json:"valid"`
 	// Reason is WHY it is not valid, because the answers are not interchangeable
-	// and only cg can tell them apart: no-key | unreachable | rejected, null when
+	// and only ayis can tell them apart: no-key | unreachable | rejected, null when
 	// the key works. A laptop with no network was once told "AWS rejected this
 	// access key", a lie about a call that never arrived.
 	Reason *string `json:"reason"`
@@ -100,7 +100,7 @@ func SourceText(source, home, profile string) string {
 	}
 	switch {
 	case strings.HasPrefix(source, "EnvConfigCredentials"):
-		// cg loads .env into the environment, so a key there would silently win.
+		// ayis loads .env into the environment, so a key there would silently win.
 		return "AWS_ACCESS_KEY_ID in the environment - it wins over ~/.aws/credentials"
 	case strings.HasPrefix(source, "SharedConfigCredentials"):
 		file := strings.TrimSpace(strings.TrimPrefix(source, "SharedConfigCredentials:"))
@@ -123,7 +123,7 @@ func ReadAWS(ctx context.Context, p Prober, s STSAPI, home, profile string) AWS 
 	c, err := p.Retrieve(ctx)
 	if err != nil {
 		reason := Classify(err)
-		msg := "Unable to locate credentials - set a working key: cg creds set"
+		msg := "Unable to locate credentials - set a working key: ayis creds set"
 		if reason != "no-key" {
 			msg = oneLine(err.Error())
 		}
@@ -155,7 +155,7 @@ func ReadAWS(ctx context.Context, p Prober, s STSAPI, home, profile string) AWS 
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// ShowAWS is `cg creds` for the access key; it returns false when something is wrong.
+// ShowAWS is `ayis creds` for the access key; it returns false when something is wrong.
 func ShowAWS(a AWS, out *output.Out) bool {
 	out.Say("aws credentials")
 	kind := "warn"
@@ -171,7 +171,7 @@ func ShowAWS(a AWS, out *output.Out) bool {
 	out.LogAs("info", "from             "+src)
 	if a.Error != nil {
 		out.LogAs("fail", "accepted         no  <- "+*a.Error)
-		out.Log("  set a working key: cg creds set   (or the Set access key button in Settings)")
+		out.Log("  set a working key: ayis creds set   (or the Set access key button in Settings)")
 		return false
 	}
 	out.LogAs("ok", "accepted         yes")
@@ -259,7 +259,7 @@ func ReadTS(ctx context.Context, l laptop.Laptop, client *http.Client, token str
 	return t
 }
 
-// ShowTS is `cg creds tailscale`; it returns false when the token is rejected.
+// ShowTS is `ayis creds tailscale`; it returns false when the token is rejected.
 func ShowTS(t TS, out *output.Out) bool {
 	out.Say("tailscale")
 	switch {

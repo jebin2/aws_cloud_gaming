@@ -13,12 +13,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/laptop"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/laptop"
+	"github.com/jebin2/ayis/internal/output"
+	fx "github.com/jebin2/ayis/internal/testfixture"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
 type rig struct {

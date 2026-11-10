@@ -22,7 +22,7 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as z:
 print(base64.b64encode(hashlib.sha256(open(out, "rb").read()).digest()).decode())
 `
 
-// The package must be byte-identical to the one the Bash cg builds with
+// The package must be byte-identical to the one the Bash ayis builds with
 // Python's zipfile: Lambda's CodeSha256 of a function it deployed is compared
 // against this, and one differing byte reads as "code changed" forever.
 func TestZipIsByteIdenticalToPythons(t *testing.T) {
@@ -56,22 +56,22 @@ func TestZipIsByteIdenticalToPythons(t *testing.T) {
 }
 
 func TestEnvAndFingerprint(t *testing.T) {
-	s := Settings{Host: "gamevps", Account: "123456789012", Bucket: "cg-library-abc", IdleMinutes: 30, StuckMinutes: 60, ExpiryDays: 14,
+	s := Settings{Host: "ayis", Account: "123456789012", Bucket: "ayis-library-abc", IdleMinutes: 30, StuckMinutes: 60, ExpiryDays: 14,
 		S3GBMonth: "0.025", INRPerUSD: "112.041", NtfyURL: "https://ntfy.sh/topic"}
-	want := "Variables={CG_TS_HOST=gamevps,CG_IDLE_MINUTES=30,CG_BOOT_GRACE_MINUTES=20,CG_STUCK_MINUTES=60,CG_BUCKET=cg-library-abc,CG_ACCOUNT=123456789012,CG_ARCHIVE_EXPIRY_DAYS=14,CG_S3_USD_GB_MONTH=0.025,CG_INR_PER_USD=112.041,CG_NTFY_URL=https://ntfy.sh/topic}"
+	want := "Variables={AYIS_TS_HOST=ayis,AYIS_IDLE_MINUTES=30,AYIS_BOOT_GRACE_MINUTES=20,AYIS_STUCK_MINUTES=60,AYIS_BUCKET=ayis-library-abc,AYIS_ACCOUNT=123456789012,AYIS_ARCHIVE_EXPIRY_DAYS=14,AYIS_S3_USD_GB_MONTH=0.025,AYIS_INR_PER_USD=112.041,AYIS_NTFY_URL=https://ntfy.sh/topic}"
 	if got := s.Env(); got != want {
 		t.Errorf("env %s", got)
 	}
 	s.S3GBMonth, s.INRPerUSD, s.NtfyURL = "", "", ""
-	if got := s.Env(); !strings.HasSuffix(got, "CG_ARCHIVE_EXPIRY_DAYS=14}") {
+	if got := s.Env(); !strings.HasSuffix(got, "AYIS_ARCHIVE_EXPIRY_DAYS=14}") {
 		t.Errorf("unset values are absent: %s", got)
 	}
-	a := s.Fingerprint("arn:aws:iam::123456789012:role/gamevps-cloud-watchdog")
+	a := s.Fingerprint("arn:aws:iam::123456789012:role/ayis-cloud-watchdog")
 	if len(a) != 12 {
 		t.Errorf("fingerprint %q", a)
 	}
 	s.IdleMinutes = 31
-	if s.Fingerprint("arn:aws:iam::123456789012:role/gamevps-cloud-watchdog") == a {
+	if s.Fingerprint("arn:aws:iam::123456789012:role/ayis-cloud-watchdog") == a {
 		t.Error("a changed setting must change the fingerprint")
 	}
 	// The same text the shell hashed: runtime|handler|role|timeout|memory|env, newline.
@@ -83,7 +83,7 @@ func TestEnvAndFingerprint(t *testing.T) {
 }
 
 func TestPolicyOnlyGrowsWithExpiry(t *testing.T) {
-	s := Settings{Host: "gamevps", Account: "1", ExpiryDays: 0}
+	s := Settings{Host: "ayis", Account: "1", ExpiryDays: 0}
 	n := func(p map[string]any) int { return len(p["Statement"].([]any)) }
 	off := n(s.Policy("ap-south-2"))
 	s.ExpiryDays = 14
@@ -95,13 +95,13 @@ func TestPolicyOnlyGrowsWithExpiry(t *testing.T) {
 	if strings.Contains(b, "s3:DeleteObject") || strings.Contains(b, "s3:DeleteBucket") {
 		t.Error("expiry 0 must not grant any delete")
 	}
-	if !strings.Contains(jsonMust(s.Policy("ap-south-2")), "cg-stopped-warned") {
+	if !strings.Contains(jsonMust(s.Policy("ap-south-2")), "ayis-stopped-warned") {
 		t.Error("the stopped-box tags must be allowed")
 	}
 }
 
 func TestPolicyComparedAsData(t *testing.T) {
-	s := Settings{Host: "gamevps", Account: "1", ExpiryDays: 14}
+	s := Settings{Host: "ayis", Account: "1", ExpiryDays: 14}
 	p := s.Policy("ap-south-2")
 	reformatted := []byte("{\n  \"Statement\": " + jsonMust(p["Statement"]) + ",\n \"Version\": \"2012-10-17\"}")
 	if !PolicyMatches(reformatted, p) {

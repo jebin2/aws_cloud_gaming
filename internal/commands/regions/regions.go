@@ -1,5 +1,5 @@
-// Package regions is `cg regions`: which regions this account may use, and
-// turning one on. What each one can actually rent you is `cg sweep`.
+// Package regions is `ayis regions`: which regions this account may use, and
+// turning one on. What each one can actually rent you is `ayis sweep`.
 package regions
 
 import (
@@ -35,7 +35,7 @@ type Region struct {
 	OptIn  *string `json:"optin"`
 }
 
-// List is `cg regions --json`: the enabled regions and nothing else. Separate
+// List is `ayis regions --json`: the enabled regions and nothing else. Separate
 // from the sweep on purpose: the app needs a region picker the moment it opens,
 // and the sweep takes minutes. Only enabled regions, because those are the ones
 // a dropdown can switch to without an opt-in this app has no business performing.
@@ -91,11 +91,11 @@ func Show(l List) string {
 		fmt.Fprintf(&b, "  %s%s\n", mark, r.Region)
 	}
 	b.WriteString("\n  * is the region in use. Only enabled regions are listed.\n")
-	b.WriteString("  What each one can actually rent you: cg sweep\n")
+	b.WriteString("  What each one can actually rent you: ayis sweep\n")
 	return b.String()
 }
 
-// OptIn is `cg regions optin --json`.
+// OptIn is `ayis regions optin --json`.
 type OptIn struct {
 	Regions  []OptRegion `json:"regions"`
 	Disabled []string    `json:"disabled"` // which ones could be turned on
@@ -186,7 +186,7 @@ func (e Enabler) status(ctx context.Context, region string) (string, error) {
 	return string(o.RegionOptStatus), nil
 }
 
-// Enable is `cg regions enable <region>`.
+// Enable is `ayis regions enable <region>`.
 func (e Enabler) Enable(ctx context.Context, region string) int {
 	st, _ := e.status(ctx, region)
 	switch st {
@@ -241,7 +241,7 @@ func (e Enabler) Enable(ctx context.Context, region string) int {
 		}
 	}
 	e.LogAs("warn", region+" is still enabling - this is normal, it can take several minutes")
-	e.Log("  check again with:  cg regions optin")
+	e.Log("  check again with:  ayis regions optin")
 	return 0
 }
 

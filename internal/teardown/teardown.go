@@ -1,4 +1,4 @@
-// Package teardown is taking away everything of cg's that is not the box: its
+// Package teardown is taking away everything of ayis's that is not the box: its
 // disks, images and snapshots in every region, machines in other regions, the
 // instance role, the settings it keeps in SSM. Every step carries on past a
 // failure and says what is left: something that stays behind still bills, so the
@@ -17,7 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/storage"
+	"github.com/jebin2/ayis/internal/storage"
 )
 
 // RegionAPI is EC2 in one region.
@@ -130,7 +130,7 @@ func (t Teardown) EndMachine(ctx context.Context, region, id string) bool {
 	return true
 }
 
-// DeleteSettings deletes cg's SSM parameters, ten names a call (the most
+// DeleteSettings deletes ayis's SSM parameters, ten names a call (the most
 // delete-parameters takes), in every region they were found in.
 func (t Teardown) DeleteSettings(ctx context.Context, byRegion map[string][]string) bool {
 	ok := true
@@ -140,7 +140,7 @@ func (t Teardown) DeleteSettings(ctx context.Context, byRegion map[string][]stri
 	}
 	sort.Strings(regions)
 	for _, r := range regions {
-		t.Say("deleting cg's settings in " + r)
+		t.Say("deleting ayis's settings in " + r)
 		names := byRegion[r]
 		for i := 0; i < len(names); i += 10 {
 			end := min(i+10, len(names))

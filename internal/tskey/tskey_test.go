@@ -66,27 +66,27 @@ func TestMint(t *testing.T) {
 		sent = string(b)
 		reply(200, `{"key":"tskey-auth-new-123"}`)(w, r)
 	}})
-	m := c.Mint(context.Background(), "gamevps")
+	m := c.Mint(context.Background(), "ayis")
 	if m.Key != "tskey-auth-new-123" || m.Code != 200 {
 		t.Fatalf("%+v", m)
 	}
 	// Not ephemeral (this box goes offline every time the watchdog stops it),
 	// preauthorized (nobody is at the box), and it says whose it is.
-	for _, want := range []string{`"ephemeral":false`, `"preauthorized":true`, `"description":"cg gamevps"`, `"expirySeconds":10800`} {
+	for _, want := range []string{`"ephemeral":false`, `"preauthorized":true`, `"description":"ayis ayis"`, `"expirySeconds":10800`} {
 		if !strings.Contains(sent, want) {
 			t.Errorf("lacks %s in %s", want, sent)
 		}
 	}
 	c = server(t, map[string]func(http.ResponseWriter, *http.Request){"POST /tailnet/-/keys": reply(400, "requested tags [] are invalid or not permitted\n")})
-	if m := c.Mint(context.Background(), "gamevps"); m.Key != "" || m.Code != 400 || m.Err != "requested tags [] are invalid or not permitted" {
+	if m := c.Mint(context.Background(), "ayis"); m.Key != "" || m.Code != 400 || m.Err != "requested tags [] are invalid or not permitted" {
 		t.Errorf("%+v", m)
 	}
 	c = server(t, map[string]func(http.ResponseWriter, *http.Request){"POST /tailnet/-/keys": reply(200, `{}`)})
-	if m := c.Mint(context.Background(), "gamevps"); m.Err != "the API answered without a key" {
+	if m := c.Mint(context.Background(), "ayis"); m.Err != "the API answered without a key" {
 		t.Errorf("%+v", m)
 	}
 	c.Base = "http://127.0.0.1:1"
-	if m := c.Mint(context.Background(), "gamevps"); m.Code != 0 || m.Key != "" {
+	if m := c.Mint(context.Background(), "ayis"); m.Code != 0 || m.Key != "" {
 		t.Errorf("no answer: %+v", m)
 	}
 	if m := (Client{}).Mint(context.Background(), "x"); m.Key != "" {
@@ -201,25 +201,25 @@ func TestPruneTouchesOnlyOfflineNodesOfThisHost(t *testing.T) {
 	deleted := []string{}
 	c := server(t, map[string]func(http.ResponseWriter, *http.Request){
 		"GET /tailnet/-/devices": reply(200, `{"devices":[
-		 {"id":"1","hostname":"gamevps","connectedToControl":false,"lastSeen":"2026-10-20T10:11:12Z"},
-		 {"id":"2","hostname":"gamevps-1","connectedToControl":true},
-		 {"id":"3","hostname":"gamevps-2"},
-		 {"id":"4","hostname":"gamevpsx","connectedToControl":false},
+		 {"id":"1","hostname":"ayis","connectedToControl":false,"lastSeen":"2026-10-20T10:11:12Z"},
+		 {"id":"2","hostname":"ayis-1","connectedToControl":true},
+		 {"id":"3","hostname":"ayis-2"},
+		 {"id":"4","hostname":"ayisx","connectedToControl":false},
 		 {"id":"5","hostname":"phone","connectedToControl":false}]}`),
 		"DELETE /device/1": func(w http.ResponseWriter, r *http.Request) {
 			deleted = append(deleted, r.URL.Path)
 			w.WriteHeader(200)
 		},
 	})
-	got := c.PruneStale(context.Background(), "gamevps")
-	if len(got) != 1 || got[0] != "    pruned stale tailnet node 'gamevps' (last seen 2026-10-20T10:11:12)" || len(deleted) != 1 {
+	got := c.PruneStale(context.Background(), "ayis")
+	if len(got) != 1 || got[0] != "    pruned stale tailnet node 'ayis' (last seen 2026-10-20T10:11:12)" || len(deleted) != 1 {
 		t.Errorf("an online node, one with no field, another name: all left alone: %v %v", got, deleted)
 	}
 	c.Token = "wrong"
-	if got := c.PruneStale(context.Background(), "gamevps"); got[0] != "    tailnet token rejected (401) - stale nodes will not be pruned" {
+	if got := c.PruneStale(context.Background(), "ayis"); got[0] != "    tailnet token rejected (401) - stale nodes will not be pruned" {
 		t.Errorf("%v", got)
 	}
-	if got := (Client{}).PruneStale(context.Background(), "gamevps"); got != nil {
+	if got := (Client{}).PruneStale(context.Background(), "ayis"); got != nil {
 		t.Error("nothing to do without a token")
 	}
 }
@@ -232,29 +232,29 @@ func TestDeleteNodesTakesEveryNodeOfThisHostAndNothingElse(t *testing.T) {
 	}
 	c := server(t, map[string]func(http.ResponseWriter, *http.Request){
 		"GET /tailnet/-/devices": reply(200, `{"devices":[
-		 {"id":"1","nodeId":"nA","hostname":"gamevps","connectedToControl":true},
-		 {"id":"2","nodeId":"nB","hostname":"gamevps-3.tail.ts.net"},
-		 {"id":"3","nodeId":"nC","hostname":"gamevpsx"},
+		 {"id":"1","nodeId":"nA","hostname":"ayis","connectedToControl":true},
+		 {"id":"2","nodeId":"nB","hostname":"ayis-3.tail.ts.net"},
+		 {"id":"3","nodeId":"nC","hostname":"ayisx"},
 		 {"id":"4","nodeId":"nD","hostname":"phone"}]}`),
 		"DELETE /device/nA": del, "DELETE /device/nB": del,
 	})
-	got := c.DeleteNodes(context.Background(), "gamevps")
-	if strings.Join(got, "|") != "deleted tailnet node 'gamevps'|deleted tailnet node 'gamevps-3'" || strings.Join(deleted, ",") != "/device/nA,/device/nB" {
+	got := c.DeleteNodes(context.Background(), "ayis")
+	if strings.Join(got, "|") != "deleted tailnet node 'ayis'|deleted tailnet node 'ayis-3'" || strings.Join(deleted, ",") != "/device/nA,/device/nB" {
 		t.Errorf("online nodes go too; a node of another name never: %v %v", got, deleted)
 	}
 	c = server(t, map[string]func(http.ResponseWriter, *http.Request){"GET /tailnet/-/devices": reply(200, `{"devices":[{"nodeId":"n","hostname":"phone"}]}`)})
-	if got := c.DeleteNodes(context.Background(), "gamevps"); got[0] != "no gamevps nodes on the tailnet - nothing to remove" {
+	if got := c.DeleteNodes(context.Background(), "ayis"); got[0] != "no ayis nodes on the tailnet - nothing to remove" {
 		t.Errorf("%v", got)
 	}
 	c.Token = "wrong"
-	if got := c.DeleteNodes(context.Background(), "gamevps"); !strings.HasPrefix(got[0], "TAILSCALE_API_KEY rejected (HTTP 401)") {
+	if got := c.DeleteNodes(context.Background(), "ayis"); !strings.HasPrefix(got[0], "TAILSCALE_API_KEY rejected (HTTP 401)") {
 		t.Errorf("an expired token is not a clean tailnet: %v", got)
 	}
-	if got := (Client{}).DeleteNodes(context.Background(), "gamevps"); !strings.Contains(strings.Join(got, "\n"), "free name (gamevps-1, -2, ...)") {
+	if got := (Client{}).DeleteNodes(context.Background(), "ayis"); !strings.Contains(strings.Join(got, "\n"), "free name (ayis-1, -2, ...)") {
 		t.Errorf("%v", got)
 	}
 	c.Token, c.Base = "tskey-api-abc123", "http://127.0.0.1:1"
-	if got := c.DeleteNodes(context.Background(), "gamevps"); got[0] != "could not reach api.tailscale.com - tailnet nodes left in place" {
+	if got := c.DeleteNodes(context.Background(), "ayis"); got[0] != "could not reach api.tailscale.com - tailnet nodes left in place" {
 		t.Errorf("%v", got)
 	}
 }

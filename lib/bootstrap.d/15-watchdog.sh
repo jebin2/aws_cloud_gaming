@@ -12,7 +12,7 @@
 # The AWS box's idle shutdown. A machine of yours must never switch itself off.
 if aws_box; then
 progress "installing the idle watchdog"
-mkdir -p /opt/cloud-gaming-host
+mkdir -p /opt/ayis-host
 # Fetched from S3 with a presigned URL rather than carried inline as base64:
 # inline cost 58% of the 16 KB user-data budget and left 68 bytes spare. The URL
 # is presigned so this works before the box has any AWS credentials configured.
@@ -21,19 +21,19 @@ mkdir -p /opt/cloud-gaming-host
 # console output - which is exactly the state a corrupted URL produced once, and
 # the hardest possible thing to debug. Carrying on costs layer 2 and leaves the
 # box reachable; the cloud watchdog and budget are armed before launch and bound the
-# spend. The verify lines below report the loss, and `cg init` streams them.
+# spend. The verify lines below report the loss, and `ayis init` streams them.
 # Already here when the supervisor started the build: it came in the same bundle.
-if [ -f /opt/cloud-gaming-host/install-watchdog.sh ]; then
+if [ -f /opt/ayis-host/install-watchdog.sh ]; then
   :
 elif curl -fsSL --retry 5 --retry-delay 3 '__HOST_TGZ_URL__' -o /tmp/host.tgz; then
-  tar -xz -C /opt/cloud-gaming-host -f /tmp/host.tgz
+  tar -xz -C /opt/ayis-host -f /tmp/host.tgz
   rm -f /tmp/host.tgz
 else
   echo ">>> FAILED: could not download the host bundle from S3"
   echo ">>>         layer 2 (on-host watchdog) and the S3 library mirror will be MISSING"
   echo ">>>         the box is still reachable; the cloud watchdog still stops it"
 fi
-( cd /opt/cloud-gaming-host && bash ./install-watchdog.sh ) >/dev/null 2>&1 \
+( cd /opt/ayis-host && bash ./install-watchdog.sh ) >/dev/null 2>&1 \
   || echo "watchdog install failed - the box is UNGUARDED"
 
 verify "idle watchdog armed" systemctl is-enabled idle-watchdog.timer

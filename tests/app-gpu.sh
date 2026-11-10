@@ -2,7 +2,7 @@
 # The app kept off the NVIDIA GPU of a laptop that has an Intel one too. Its
 # GPU process loads the system's EGL even drawing in software, and a hung
 # NVIDIA driver froze it: the window waited out its 5 s timer and opened late.
-# The same rule as cg's (tests/moonlight-gpu.sh), set before anything starts.
+# The same rule as ayis's (tests/moonlight-gpu.sh), set before anything starts.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 T=$(mktemp -d); pass=0; fail=0

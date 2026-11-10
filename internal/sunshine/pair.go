@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	"github.com/jebin2/ayis/internal/local"
 )
 
 // Pairing is Moonlight <-> Sunshine, on its own so it can be re-run.
 //
 // Success is a NEW CLIENT IN SUNSHINE'S LIST, nothing less. On 2026-09-14 this
-// returned success because Sunshine accepted the PIN - `cg init` printed
+// returned success because Sunshine accepted the PIN - `ayis init` printed
 // "paired" - while Sunshine had saved no client at all, and Moonlight then
 // refused to stream. Accepting the PIN is the request; a saved client is the
 // result.

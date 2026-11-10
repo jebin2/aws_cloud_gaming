@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// A save to Saved games is one long `cg-library push` that prints a line per game
+// A save to Saved games is one long `ayis-library push` that prints a line per game
 // and nothing in between, so a screen could only show a spinner. The bar is drawn
 // from the OUTSIDE, which also works on a machine built before this existed: a
 // second ssh asks how big each game is on the machine, once, and then, every few
@@ -19,7 +19,7 @@ const saveEvery = 5 * time.Second
 
 // saveSizesScript prints "A <appid> <installdir> <bytes>" for each game on the machine.
 //
-// Every Steam library on the machine, found as cg-library's push finds them: the
+// Every Steam library on the machine, found as ayis-library's push finds them: the
 // archive's own, the games disk, every folder Steam lists (Add Drive makes its own
 // /scratch2/SteamLibrary) and Steam's default folder on the root disk. Looking in
 // the first two only, the bar said "No games to save" over a save of a game Steam
@@ -69,8 +69,8 @@ func parseSaveSizes(out string) (games []saveGame, total int64) {
 // saveSoFarScript asks the archive how many bytes it holds of these games.
 func saveSoFarScript(games []saveGame) string {
 	var b strings.Builder
-	b.WriteString(". /etc/cg-library.conf 2>/dev/null\n")
-	b.WriteString(`S3="s3://$CG_S3_BUCKET/${CG_S3_PREFIX:-steam}/steamapps"` + "\n")
+	b.WriteString(". /etc/ayis-library.conf 2>/dev/null\n")
+	b.WriteString(`S3="s3://$AYIS_S3_BUCKET/${AYIS_S3_PREFIX:-steam}/steamapps"` + "\n")
 	b.WriteString(`t=0; du1() { b=$(/usr/local/bin/s5cmd du "$S3/$1/*" 2>/dev/null | awk 'NR==1{print $1}'); t=$((t+${b:-0})); }` + "\n")
 	for _, g := range games {
 		fmt.Fprintf(&b, "du1 %s; du1 compatdata/%s; du1 shadercache/%s\n", quote("common/"+g.dir), g.id, g.id)
@@ -146,7 +146,7 @@ func (d Deps) watchSave(ctx context.Context) func() {
 }
 
 // toSave keeps the games this save will actually copy: not the ones unticked
-// (--skip), and not Steam's own tools, which cg-library never saves. Otherwise the
+// (--skip), and not Steam's own tools, which ayis-library never saves. Otherwise the
 // bar counted gigabytes nobody was copying.
 func (d Deps) toSave(games []saveGame, _ int64, out string) ([]saveGame, int64) {
 	skip := idSet(d.Skip)
@@ -170,7 +170,7 @@ func (d Deps) toSave(games []saveGame, _ int64, out string) ([]saveGame, int64) 
 	return keep, total
 }
 
-// steamToolDir is cg-library's is_steam_tool, by folder, as that script has it.
+// steamToolDir is ayis-library's is_steam_tool, by folder, as that script has it.
 func steamToolDir(id, dir string) bool {
 	switch id {
 	case "228980", "1826330", "1161040":

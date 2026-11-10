@@ -17,14 +17,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/box"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/session"
-	"github.com/jebin2/aws_cloud_gaming/internal/stream"
-	"github.com/jebin2/aws_cloud_gaming/internal/sunshine"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/box"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/session"
+	"github.com/jebin2/ayis/internal/stream"
+	"github.com/jebin2/ayis/internal/sunshine"
+	fx "github.com/jebin2/ayis/internal/testfixture"
 )
 
 // fakeEC2 is one instance, and what is done to it.
@@ -183,12 +183,12 @@ func newRig(t *testing.T, input string) *rig {
 	r := &fx.Runner{Installed: map[string]bool{"tailscale": true, "ssh": true, "sh": true, "moonlight": true, "pgrep": true}}
 	r.Hook = func(line string) (bool, string, error) {
 		switch {
-		case line == "tailscale ip -4 gamevps":
+		case line == "tailscale ip -4 ayis":
 			return true, "100.64.0.7\n", nil
 		case strings.HasPrefix(line, "tailscale ping -c 1 --timeout"):
 			return true, "pong\n", nil
-		case line == "tailscale ping -c 1 gamevps":
-			return true, "pong from gamevps (100.64.0.7) via 203.0.113.9:41641 in 31ms\n", nil
+		case line == "tailscale ping -c 1 ayis":
+			return true, "pong from ayis (100.64.0.7) via 203.0.113.9:41641 in 31ms\n", nil
 		case strings.Contains(line, "df -h"):
 			return true, "  /   12G 50G 24%\n  /scratch 100G 250G 40%\n", nil
 		}
@@ -201,7 +201,7 @@ func newRig(t *testing.T, input string) *rig {
 	env := config.Load(func(string) (string, bool) { return "", false }, dir)
 	rg := &rig{e: e, r: r, o: &o, w: &w}
 	rg.d = Deps{
-		Box: box.Box{EC2: e, ID: "i-0abc", Host: "gamevps", Node: "gamevps", Key: filepath.Join(dir, "gamevps.pem"), R: r,
+		Box: box.Box{EC2: e, ID: "i-0abc", Host: "ayis", Node: "ayis", Key: filepath.Join(dir, "ayis.pem"), R: r,
 			Sleep: func(d time.Duration) { rg.slept += d }, Log: out.Log},
 		Out: out, Ask: a, Env: env, R: r, Sun: sunshine.Client{}, SessionFile: filepath.Join(dir, "session.pid"), Probe: session.Proc{},
 		Now: func() time.Time { return time.Unix(1700000000, 0) }, Sleep: func(d time.Duration) { rg.slept += d }, Moonlight: true,
@@ -230,12 +230,12 @@ func sshLines(r *fx.Runner) string {
 func TestLibraryOnTheBoxQuotesEveryWordAndNeedsTheBox(t *testing.T) {
 	r := newRig(t, "")
 	r.r.Hook = func(line string) (bool, string, error) {
-		if line == "tailscale ip -4 gamevps" {
+		if line == "tailscale ip -4 ayis" {
 			return true, "", &exitCode{1}
 		}
 		return false, "", nil
 	}
-	if rc := r.d.Library(context.Background(), "push", nil); rc != 1 || !strings.Contains(r.w.String(), "'gamevps' is not on the tailnet. Is the box running? Try: cg status") {
+	if rc := r.d.Library(context.Background(), "push", nil); rc != 1 || !strings.Contains(r.w.String(), "'ayis' is not on the tailnet. Is the box running? Try: ayis status") {
 		t.Fatalf("%s", r.w)
 	}
 	r = newRig(t, "")
@@ -244,12 +244,12 @@ func TestLibraryOnTheBoxQuotesEveryWordAndNeedsTheBox(t *testing.T) {
 	}
 	got := sshLines(r.r)
 	// Each word is one word on the box: what was typed cannot become a second command.
-	if !strings.Contains(got, "/usr/local/bin/cg-library pull --apps '1091500,2; rm -rf /'") {
+	if !strings.Contains(got, "/usr/local/bin/ayis-library pull --apps '1091500,2; rm -rf /'") {
 		t.Errorf("%s", got)
 	}
 	r = newRig(t, "")
 	_ = r.d.Library(context.Background(), "account", []string{"restore"})
-	if !strings.Contains(sshLines(r.r), "cg-library account pull") {
+	if !strings.Contains(sshLines(r.r), "ayis-library account pull") {
 		t.Errorf("restore is pull: %s", sshLines(r.r))
 	}
 	if rc := newRig(t, "").d.Library(context.Background(), "nonsense", nil); rc != 1 {
@@ -260,10 +260,10 @@ func TestLibraryOnTheBoxQuotesEveryWordAndNeedsTheBox(t *testing.T) {
 func TestLibraryFailureKeepsTheBoxsExitStatus(t *testing.T) {
 	r := newRig(t, "")
 	r.r.Hook = func(line string) (bool, string, error) {
-		if line == "tailscale ip -4 gamevps" {
+		if line == "tailscale ip -4 ayis" {
 			return true, "100.64.0.7\n", nil
 		}
-		if strings.Contains(line, "cg-library push") {
+		if strings.Contains(line, "ayis-library push") {
 			return true, "", &exitCode{3}
 		}
 		return false, "", nil
@@ -290,7 +290,7 @@ func TestStopMirrorsThenStopsAndSaysBillingEnded(t *testing.T) {
 	// The mirror came first.
 	push, stop := -1, -1
 	for i, l := range r.r.Ran {
-		if strings.Contains(l, "cg-library push") {
+		if strings.Contains(l, "ayis-library push") {
 			push = i
 		}
 	}
@@ -308,14 +308,14 @@ func TestStopSkipTellsTheMachineFirst(t *testing.T) {
 	prev := r.r.Hook
 	r.r.Hook = func(line string) (bool, string, error) {
 		switch {
-		case strings.Contains(line, "tee /usr/local/bin/cg-library"):
+		case strings.Contains(line, "tee /usr/local/bin/ayis-library"):
 			order = append(order, "script")
-		case strings.Contains(line, "/var/lib/cg-library/skip"):
+		case strings.Contains(line, "/var/lib/ayis-library/skip"):
 			order = append(order, "skip")
 			if !strings.Contains(line, "730,1057090") {
 				t.Errorf("the list is not written: %s", line)
 			}
-		case strings.Contains(line, "cg-library push"):
+		case strings.Contains(line, "ayis-library push"):
 			order = append(order, "push")
 		}
 		return prev(line)
@@ -336,7 +336,7 @@ func TestStopSkipThatCannotBeWrittenStopsNothing(t *testing.T) {
 	r := newRig(t, "")
 	prev := r.r.Hook
 	r.r.Hook = func(line string) (bool, string, error) {
-		if strings.Contains(line, "/var/lib/cg-library/skip") {
+		if strings.Contains(line, "/var/lib/ayis-library/skip") {
 			return true, "", errors.New("exit 1")
 		}
 		return prev(line)
@@ -346,7 +346,7 @@ func TestStopSkipThatCannotBeWrittenStopsNothing(t *testing.T) {
 	}
 }
 
-// The app asks before it stops a machine; cg must not ask a second time.
+// The app asks before it stops a machine; ayis must not ask a second time.
 func TestStopYesDoesNotAskAgain(t *testing.T) {
 	r := newRig(t, "")
 	if rc := r.d.Stop(context.Background(), []string{"--yes"}); rc != 0 || strings.Join(r.e.calls, ",") != "stop" {
@@ -361,7 +361,7 @@ func TestStopRefusesWhenTheMirrorFailsUnlessForced(t *testing.T) {
 	failPush := func(r *rig) {
 		prev := r.r.Hook
 		r.r.Hook = func(line string) (bool, string, error) {
-			if strings.Contains(line, "cg-library push") {
+			if strings.Contains(line, "ayis-library push") {
 				return true, "", &exitCode{1}
 			}
 			return prev(line)
@@ -369,7 +369,7 @@ func TestStopRefusesWhenTheMirrorFailsUnlessForced(t *testing.T) {
 	}
 	r := newRig(t, "")
 	failPush(r)
-	if rc := r.d.Stop(context.Background(), nil); rc != 1 || len(r.e.calls) != 0 || !strings.Contains(r.w.String(), "not mirrored from here - see above, then: cg stop --force") {
+	if rc := r.d.Stop(context.Background(), nil); rc != 1 || len(r.e.calls) != 0 || !strings.Contains(r.w.String(), "not mirrored from here - see above, then: ayis stop --force") {
 		t.Fatalf("rc %d %v\n%s", rc, r.e.calls, r.w)
 	}
 	if !strings.Contains(r.o.String(), "mirrors from ON the box as it shuts") {
@@ -387,7 +387,7 @@ func TestStopRefusesWhenTheMirrorFailsUnlessForced(t *testing.T) {
 	r = newRig(t, "")
 	prev := r.r.Hook
 	r.r.Hook = func(line string) (bool, string, error) {
-		if line == "tailscale ip -4 gamevps" {
+		if line == "tailscale ip -4 ayis" {
 			return true, "", &exitCode{1}
 		}
 		return prev(line)
@@ -404,7 +404,7 @@ func TestAStoppedBoxIsNotMirroredAgain(t *testing.T) {
 		t.Errorf("%s", r.o)
 	}
 	for _, l := range r.r.Ran {
-		if strings.Contains(l, "cg-library") {
+		if strings.Contains(l, "ayis-library") {
 			t.Error("mirrored a box that is not running")
 		}
 	}
@@ -433,8 +433,8 @@ func TestOpenStartsAStoppedBoxWaitsAndStreams(t *testing.T) {
 		t.Fatalf("rc %d\n%s%s", rc, r.o, r.w)
 	}
 	got := r.o.String()
-	for _, want := range []string{"starting i-0abc ...", "running after ", "waiting for tailscale ok", "pong from gamevps (100.64.0.7) via 203.0.113.9:41641 in 31ms", "waiting for sunshine ok", "disk:", "/scratch 100G 250G 40%",
-		"session ended - the machine is still running and billing until auto-stop ends it when idle, or delete it now: cg destroy"} {
+	for _, want := range []string{"starting i-0abc ...", "running after ", "waiting for tailscale ok", "pong from ayis (100.64.0.7) via 203.0.113.9:41641 in 31ms", "waiting for sunshine ok", "disk:", "/scratch 100G 250G 40%",
+		"session ended - the machine is still running and billing until auto-stop ends it when idle, or delete it now: ayis destroy"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}
@@ -456,8 +456,8 @@ func TestOpenWarnsOfARelayedPath(t *testing.T) {
 	r := newRig(t, "")
 	prev := r.r.Hook
 	r.r.Hook = func(line string) (bool, string, error) {
-		if line == "tailscale ping -c 1 gamevps" {
-			return true, "pong from gamevps (100.64.0.7) via DERP(mumbai) in 120ms\n", nil
+		if line == "tailscale ping -c 1 ayis" {
+			return true, "pong from ayis (100.64.0.7) via DERP(mumbai) in 120ms\n", nil
 		}
 		return prev(line)
 	}
@@ -491,7 +491,7 @@ func TestASpotBoxWhoseRequestIsDisabledIsExplainedNotStarted(t *testing.T) {
 	if rc := r.d.Open(context.Background()); rc != 1 || len(r.e.calls) != 0 || !strings.Contains(r.w.String(), "spot request is 'disabled'") {
 		t.Fatalf("%v\n%s", r.e.calls, r.w)
 	}
-	for _, want := range []string{"It is a SPOT instance and its spot request is 'disabled'.", "cg destroy && cg init          # rebuild (the last one took 12 min), games restored", "cg destroy && GAME_SPOT=0 cg init"} {
+	for _, want := range []string{"It is a SPOT instance and its spot request is 'disabled'.", "ayis destroy && ayis init          # rebuild (the last one took 12 min), games restored", "ayis destroy && GAME_SPOT=0 ayis init"} {
 		if !strings.Contains(r.o.String(), want) {
 			t.Errorf("lacks %q in:\n%s", want, r.o)
 		}
@@ -513,7 +513,7 @@ func TestASpotBoxWhoseRequestIsDisabledIsExplainedNotStarted(t *testing.T) {
 func TestASecondStreamIsRefusedAndSaysWhere(t *testing.T) {
 	r := newRig(t, "")
 	session.Claim(r.d.SessionFile, time.Unix(1700000000-125, 0))
-	r.d.Probe = alwaysCg{}
+	r.d.Probe = alwaysAyis{}
 	if rc := r.d.Open(context.Background()); rc != 1 || !strings.Contains(r.w.String(), "a session is already running (pid ") || len(r.e.calls) != 0 {
 		t.Fatalf("%s", r.w)
 	}
@@ -522,10 +522,10 @@ func TestASecondStreamIsRefusedAndSaysWhere(t *testing.T) {
 	}
 }
 
-type alwaysCg struct{}
+type alwaysAyis struct{}
 
-func (alwaysCg) Alive(int) bool          { return true }
-func (alwaysCg) Args(int) (string, bool) { return "cg open", true }
+func (alwaysAyis) Alive(int) bool          { return true }
+func (alwaysAyis) Args(int) (string, bool) { return "ayis open", true }
 
 func TestNoSunshineIsDiagnosedFromTheBox(t *testing.T) {
 	r := newRig(t, "")
@@ -540,7 +540,7 @@ func TestNoSunshineIsDiagnosedFromTheBox(t *testing.T) {
 	if rc := r.d.Open(context.Background()); rc != 1 || !strings.Contains(r.w.String(), "sunshine never answered on 100.64.0.7:47989") {
 		t.Fatalf("%s", r.w)
 	}
-	for _, want := range []string{"Sunshine is not installed on this box, so nothing can connect to it.", "It stopped at:  installing the driver", "ssh -i ~/.ssh/gamevps.pem ubuntu@100.64.0.7"} {
+	for _, want := range []string{"Sunshine is not installed on this box, so nothing can connect to it.", "It stopped at:  installing the driver", "ssh -i ~/.ssh/ayis.pem ubuntu@100.64.0.7"} {
 		if !strings.Contains(r.o.String(), want) {
 			t.Errorf("lacks %q in:\n%s", want, r.o)
 		}
@@ -596,7 +596,7 @@ func TestCleanNeverTouchesTheInstalledGames(t *testing.T) {
 		t.Fatalf("%s%s", r.o, r.w)
 	}
 	got := sshLines(r.r)
-	// The Bash cg clean removed every folder directly under /scratch - the games included.
+	// The Bash ayis clean removed every folder directly under /scratch - the games included.
 	for _, bad := range []string{"find /scratch", "rm -rf /scratch/*", "rm -rf /scratch/steam", "-exec rm"} {
 		if strings.Contains(got, bad) {
 			t.Errorf("a command that can delete the library: %q in\n%s", bad, got)
@@ -614,7 +614,7 @@ func TestCleanNeverTouchesTheInstalledGames(t *testing.T) {
 	}
 	r = newRig(t, "")
 	r.e.state = "stopped"
-	if rc := r.d.Clean(context.Background()); rc != 1 || !strings.Contains(r.w.String(), "box is not running; cg open first, or use: cg destroy && cg init") {
+	if rc := r.d.Clean(context.Background()); rc != 1 || !strings.Contains(r.w.String(), "box is not running; ayis open first, or use: ayis destroy && ayis init") {
 		t.Errorf("%s", r.w)
 	}
 	for _, l := range r.r.Ran {
@@ -634,7 +634,7 @@ func TestPairIsANoOpWhenPairedAndOtherwisePairs(t *testing.T) {
 	_ = r.d.Env.Set("SUNSHINE_USER", "admin")
 	_ = r.d.Env.Set("SUNSHINE_PASS", "pw")
 	r.r.Answers = map[string]string{"moonlight list 100.64.0.7": "Desktop\n"}
-	if rc := r.d.PairMoonlight(context.Background()); rc != 0 || !strings.Contains(r.o.String(), "already paired with gamevps (100.64.0.7)") {
+	if rc := r.d.PairMoonlight(context.Background()); rc != 0 || !strings.Contains(r.o.String(), "already paired with ayis (100.64.0.7)") {
 		t.Errorf("%s", r.o)
 	}
 	for _, l := range r.r.Ran {
@@ -643,7 +643,7 @@ func TestPairIsANoOpWhenPairedAndOtherwisePairs(t *testing.T) {
 		}
 	}
 	r = newRig(t, "")
-	if rc := r.d.PairMoonlight(context.Background()); rc != 1 || !strings.Contains(r.w.String(), "no Sunshine credentials in .env - they are written by cg init") {
+	if rc := r.d.PairMoonlight(context.Background()); rc != 1 || !strings.Contains(r.w.String(), "no Sunshine credentials in .env - they are written by ayis init") {
 		t.Errorf("%s", r.w)
 	}
 	r = newRig(t, "")
@@ -670,7 +670,7 @@ func TestSnapshotCreateImagesTheBoxAndWaits(t *testing.T) {
 		t.Fatalf("%s%s", r.o, r.w)
 	}
 	got := r.o.String()
-	for _, want := range []string{"note: imaging a running instance; stop it first for a consistent image", "creating image gamevps-20231114-221320 (several minutes)", "ami-new", "available after 0s", "ready - cg init will restore from it instead of rebuilding"} {
+	for _, want := range []string{"note: imaging a running instance; stop it first for a consistent image", "creating image ayis-20231114-221320 (several minutes)", "ami-new", "available after 0s", "ready - ayis init will restore from it instead of rebuilding"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}
@@ -703,7 +703,7 @@ func TestSnapshotDeleteTakesTheBackingSnapshotsToo(t *testing.T) {
 	if !strings.Contains(r.o.String(), "deregistered ami-1") || !strings.Contains(r.o.String(), "deleted snapshot snap-a") || !strings.Contains(r.o.String(), "could not delete snapshot snap-b (in use by another image?)") {
 		t.Errorf("%s", r.o)
 	}
-	if rc := r.d.SnapshotDelete(context.Background(), "", r.e); rc != 1 || !strings.Contains(r.w.String(), "which image? see: cg snapshot --list") {
+	if rc := r.d.SnapshotDelete(context.Background(), "", r.e); rc != 1 || !strings.Contains(r.w.String(), "which image? see: ayis snapshot --list") {
 		t.Error(r.w.String())
 	}
 }
@@ -737,7 +737,7 @@ func (f *fakeEC2) DeleteKeyPair(context.Context, *ec2.DeleteKeyPairInput, ...fun
 
 // A waiting loop has to notice Ctrl-C and SIGTERM: it used to run its whole
 // 60 tries (minutes) after the context was cancelled, and `timeout` could not
-// stop `cg open`.
+// stop `ayis open`.
 func TestWaitForStopsWhenInterrupted(t *testing.T) {
 	rg := newRig(t, "")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -763,7 +763,7 @@ func TestSnapshotNoWaitStartsTheImageAndReturns(t *testing.T) {
 		t.Fatalf("%s%s", r.o, r.w)
 	}
 	got := r.o.String()
-	if !strings.Contains(got, "ami-new") || !strings.Contains(got, "cg snapshot --list") || strings.Contains(got, "available after") || strings.Contains(got, "ready - cg init") {
+	if !strings.Contains(got, "ami-new") || !strings.Contains(got, "ayis snapshot --list") || strings.Contains(got, "available after") || strings.Contains(got, "ready - ayis init") {
 		t.Errorf("--no-wait must start the image and not wait for it:\n%s", got)
 	}
 }
@@ -820,7 +820,7 @@ func TestOpenStopsWhenTheBoxNeverAnswersOverTailscale(t *testing.T) {
 		}
 		return prev(line)
 	}
-	if rc := r.d.Open(context.Background()); rc != 1 || !strings.Contains(r.w.String(), "gamevps never answered over Tailscale") || strings.Contains(r.o.String(), "waiting for sunshine") {
+	if rc := r.d.Open(context.Background()); rc != 1 || !strings.Contains(r.w.String(), "ayis never answered over Tailscale") || strings.Contains(r.o.String(), "waiting for sunshine") {
 		t.Errorf("%s%s", r.o, r.w)
 	}
 }
@@ -834,13 +834,13 @@ func TestOpenWaitsForTheBootCopyOfEveryGameAndSetsItToNothing(t *testing.T) {
 	polls, sed := 0, false
 	r.r.Hook = func(line string) (bool, string, error) {
 		switch {
-		case strings.Contains(line, "systemctl is-active cg-library-restore.service"):
+		case strings.Contains(line, "systemctl is-active ayis-library-restore.service"):
 			polls++
 			if polls <= 3 {
 				return true, "activating\n", nil
 			}
 			return true, "active\n", nil
-		case strings.Contains(line, "CG_APPS=none"):
+		case strings.Contains(line, "AYIS_APPS=none"):
 			sed = true
 			return true, "", nil
 		}
@@ -885,15 +885,15 @@ func TestAWaitingTailscaleSaysWhy(t *testing.T) {
 	r.r.Hook = func(line string) (bool, string, error) {
 		switch {
 		case strings.HasPrefix(line, "tailscale ping -c 1 --timeout"):
-			return true, "ping \"gamevps\" timed out\n", errors.New("exit 1")
+			return true, "ping \"ayis\" timed out\n", errors.New("exit 1")
 		case line == "tailscale status":
-			return true, "100.64.0.7  gamevps  jebin@  linux  offline\n", nil
+			return true, "100.64.0.7  ayis  jebin@  linux  offline\n", nil
 		}
 		return prev(line)
 	}
 	r.d.Open(context.Background())
 	out := r.o.String() + r.w.String()
-	for _, want := range []string{"tailscale ping gamevps: ping \"gamevps\" timed out", "machine state at AWS: running", "this laptop's tailscale: 100.64.0.7 gamevps jebin@ linux offline"} {
+	for _, want := range []string{"tailscale ping ayis: ping \"ayis\" timed out", "machine state at AWS: running", "this laptop's tailscale: 100.64.0.7 ayis jebin@ linux offline"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("lacks %q in\n%s", want, out)
 		}
@@ -978,8 +978,8 @@ func TestTailscaleWordsSayWhereTheConnectionIs(t *testing.T) {
 			t.Errorf("%s %+v: %q", c.state, c.p, got)
 		}
 	}
-	js := []byte(`{"Peer":{"k":{"HostName":"gamevps","DNSName":"gamevps.x.ts.net.","Online":true,"Relay":"bom","LastHandshake":"0001-01-01T00:00:00Z"}}}`)
-	if p, ok := peerFacts(js, "gamevps"); !ok || !p.online || p.handshake || !strings.Contains(p.line, "last_handshake=never") {
+	js := []byte(`{"Peer":{"k":{"HostName":"ayis","DNSName":"ayis.x.ts.net.","Online":true,"Relay":"bom","LastHandshake":"0001-01-01T00:00:00Z"}}}`)
+	if p, ok := peerFacts(js, "ayis"); !ok || !p.online || p.handshake || !strings.Contains(p.line, "last_handshake=never") {
 		t.Errorf("%+v %v", p, ok)
 	}
 }
@@ -990,14 +990,14 @@ func TestPlaySyncsTheIdleMinutes(t *testing.T) {
 	var put []string
 	prev := r.r.Hook
 	r.r.Hook = func(line string) (bool, string, error) {
-		if strings.Contains(line, "idle-watchdog.sh") || strings.Contains(line, "cg-idle.conf") {
+		if strings.Contains(line, "idle-watchdog.sh") || strings.Contains(line, "ayis-idle.conf") {
 			put = append(put, line)
 		}
 		return prev(line)
 	}
 	r.d.Open(context.Background())
 	all := strings.Join(put, "\n")
-	if !strings.Contains(all, "tee /usr/local/bin/idle-watchdog.sh") || !strings.Contains(all, "IDLE_LIMIT=15 | sudo tee /etc/cg-idle.conf") {
+	if !strings.Contains(all, "tee /usr/local/bin/idle-watchdog.sh") || !strings.Contains(all, "IDLE_LIMIT=15 | sudo tee /etc/ayis-idle.conf") {
 		t.Errorf("not synced:\n%s", all)
 	}
 }
@@ -1011,11 +1011,11 @@ func TestEveryStopRefreshesTheSavingScript(t *testing.T) {
 	prev := r.r.Hook
 	r.r.Hook = func(line string) (bool, string, error) {
 		switch {
-		case strings.Contains(line, "tee /usr/local/bin/cg-library"):
+		case strings.Contains(line, "tee /usr/local/bin/ayis-library"):
 			order = append(order, "script")
-		case strings.Contains(line, "/var/lib/cg-library/skip"):
+		case strings.Contains(line, "/var/lib/ayis-library/skip"):
 			order = append(order, "skip")
-		case strings.Contains(line, "cg-library push"):
+		case strings.Contains(line, "ayis-library push"):
 			order = append(order, "push")
 		}
 		return prev(line)
@@ -1026,7 +1026,7 @@ func TestEveryStopRefreshesTheSavingScript(t *testing.T) {
 	r = newRig(t, "")
 	prev = r.r.Hook
 	r.r.Hook = func(line string) (bool, string, error) {
-		if strings.Contains(line, "tee /usr/local/bin/cg-library") {
+		if strings.Contains(line, "tee /usr/local/bin/ayis-library") {
 			return true, "", errors.New("exit 1")
 		}
 		return prev(line)

@@ -3,7 +3,7 @@
 Every charge this rig can run up, measured where possible, and why spot is the default. How the
 guards keep those charges bounded is in [cost-guards.md](cost-guards.md). The figures below are
 for `ap-south-2`, read from the AWS Pricing API on 2026-09-15, INR at 88 to the dollar - a dated
-snapshot, for the reasoning. cg itself writes no price down: every rate it and the app show is read
+snapshot, for the reasoning. ayis itself writes no price down: every rate it and the app show is read
 from the Price List API for the region in use, once a day (`internal/pricing`), at
 today's exchange rate, with the 18% GST AWS India adds. The only two figures in the code are the
 ones no AWS API reports: that GST, and the free 100 GB a month of data out.
@@ -23,7 +23,7 @@ stopped**, so a stopped box bills the full month. EBS volumes cannot be shrunk, 
 at launch.
 
 **Per hour the added disk exists, when one is added.** The machine's own NVMe is filled first; if some of the
-chosen games do not fit it, `cg init` adds a gp3 disk for those (their size plus the 20 GB kept free, rounded up to 10 GB) and
+chosen games do not fit it, `ayis init` adds a gp3 disk for those (their size plus the 20 GB kept free, rounded up to 10 GB) and
 says what it costs before launching: 100 GB is about INR 1.2/hr, 200 GB about INR 2.4/hr. Like the root
 disk it is deleted with a spot box and bills while an on-demand box is stopped. More can be added to a
 running box (Add disk on the Machine page): the same rate for the GB added, from then until the box is deleted.
@@ -35,14 +35,14 @@ a spot box**, so past the free 100 GB it is the biggest charge. Lowering Moonlig
 it proportionally.
 
 **Per month, even with no box.** The game archive in S3 is $0.025/GB-month: a 160 GB game is
-about **$4/month (INR 350)**, and it is the one thing that keeps billing after `cg destroy`. After
+about **$4/month (INR 350)**, and it is the one thing that keeps billing after `ayis destroy`. After
 **14 days with no box, the cloud watchdog deletes it** - games, the saved Steam sign-in, and saves
 of games without Steam Cloud. `GAME_ARCHIVE_EXPIRY_DAYS` sets the days, and `0` turns deletion
 off. How it decides: [cost-guards.md](cost-guards.md#game-archive-expiry).
 
 **Per request.** Two kinds of request bill; everything else this project calls is free.
 
-- **Cost Explorer, $0.01 per request.** `cg cost` is the only command that makes one, so it costs
+- **Cost Explorer, $0.01 per request.** `ayis cost` is the only command that makes one, so it costs
   about INR 0.88 to run. Measured on a real month:
 
       AWS Cost Explorer     25 requests    $0.25   (INR 22)
@@ -72,32 +72,32 @@ restore so far. The upload and the restore cost requests and nothing else.
 
 ## Seeing what you spend
 
-`cg cost` is the authoritative view. Its **billed so far** section is Cost Explorer, broken down by
+`ayis cost` is the authoritative view. Its **billed so far** section is Cost Explorer, broken down by
 usage type: the real charges, but about a day behind, and for the whole AWS account - every region,
-and anything on it that cg did not make. Above that, a **not yet billed** estimate
+and anything on it that ayis did not make. Above that, a **not yet billed** estimate
 has no lag, because it counts CloudWatch's hourly datapoints for the current instance. That
 estimate covers only the box that exists now: on a rig where every session is a new box, it
-misses the month's earlier sessions. `cg cost` also lists every volume and snapshot cg made, not
+misses the month's earlier sessions. `ayis cost` also lists every volume and snapshot ayis made, not
 just the running instance's - orphaned volumes are the usual way people keep paying for a machine they
 believe they deleted.
 
-`cg cost`'s resources block also shows what the game archive costs a month and when the cloud
+`ayis cost`'s resources block also shows what the game archive costs a month and when the cloud
 watchdog will delete it, from the watchdog's last decision - so the deadline is in front of you
 while you are looking at the money.
 
-`cg cost --daily` breaks the month into one row per day, with a column for each kind of charge -
+`ayis cost --daily` breaks the month into one row per day, with a column for each kind of charge -
 compute, S3, disk, egress, API and everything else - plus the hours a box ran that day. Days with
 nothing billed are left out and counted at the end. It asks Cost Explorer for daily figures and
-renders the monthly summary from that same answer, so it costs the same $0.01 as `cg cost`:
+renders the monthly summary from that same answer, so it costs the same $0.01 as `ayis cost`:
 
     DATE          HRS  COMPUTE       S3     DISK   EGRESS      API    OTHER    TOTAL     INR
     2026-09-14    3.3     3.20     0.07        -        -     0.01        -     3.28     289
     2026-09-16    2.0     0.42        -     0.05        -        -     0.01     0.48      42
 
-`cg status` shows traffic since the box booted, read straight off the interface counters - free,
+`ayis status` shows traffic since the box booted, read straight off the interface counters - free,
 and immediate:
 
-    TRAFFIC (this boot only - see cg cost for the billed month)
+    TRAFFIC (this boot only - see ayis cost for the billed month)
       stream out      2.59 GB   avg 2.2 Mbps over 2.8 h
       total out       5.03 GB   <- what AWS bills (adds wireguard overhead, ssh, apt)
       total in      132.31 GB   (free - game downloads land here)
@@ -111,12 +111,12 @@ downloading costs nothing.
 
 The last line is the **month**, and it comes from Cost Explorer - the only place that knows it.
 The box knows only its own boot, and every session is a new box, so subtracting boot counters
-from a monthly allowance is wrong: it read "99 GB left" while Cost Explorer said 91. `cg status`
-does not pay for a Cost Explorer call. It re-reads the figure `cg cost` last fetched, cached in
-`.cg-cache/`, and stamps it with its age. Asking every time, 20 times a day, would be about
+from a monthly allowance is wrong: it read "99 GB left" while Cost Explorer said 91. `ayis status`
+does not pay for a Cost Explorer call. It re-reads the figure `ayis cost` last fetched, cached in
+`.ayis-cache/`, and stamps it with its age. Asking every time, 20 times a day, would be about
 INR 530/month - more than the S3 archive it reports on.
 
-`cg status` also answers the other question - what state everything is in:
+`ayis status` also answers the other question - what state everything is in:
 
     ACCOUNT      account id, plan type (a FREE plan cannot launch GPUs), credits
     QUOTAS       on-demand and spot GPU quota against what your instance type needs
@@ -131,20 +131,20 @@ day you need it.
 
 ## Spot is the default
 
-When `GAME_SPOT` is unset, `cg init` uses spot if your spot quota covers the instance, and
+When `GAME_SPOT` is unset, `ayis init` uses spot if your spot quota covers the instance, and
 on-demand otherwise. Spot saves about **77%** on the box itself (INR 19.8 against 85 an hour,
 measured). It shapes how the rig is used, because a spot instance here is **use-once**: there is
 no stop, only destroy.
 
-    cg init        build the box
-    cg open        stream
+    ayis init        build the box
+    ayis open        stream
     ...play...
-    cg open's exit prompt  ->  [d] destroy (recommended)   [n] leave it running
+    ayis open's exit prompt  ->  [d] destroy (recommended)   [n] leave it running
 
 Why there is no stop. A **one-time** spot request cannot be stopped at all - AWS only allows
 stopping a *persistent* request's instance - and stopping a persistent one disables the request,
 after which the box can never start again while its root volume keeps billing. Neither is a
-useful "pause", so `cg stop` on a spot box offers destroy instead, and `cg open` refuses to
+useful "pause", so `ayis stop` on a spot box offers destroy instead, and `ayis open` refuses to
 start a stranded one and explains why.
 
 That is only acceptable because the games are in S3: destroying costs a rebuild and the S3
@@ -155,8 +155,8 @@ persistent request.
 **The guards terminate now, not stop.** They previously had to issue a stop, because a persistent
 request relaunches on termination and none of them can cancel a request first. Every guard firing
 therefore stranded a box whose root volume kept billing. A one-time request cannot relaunch, so
-they terminate, and `cg status`, `cg cost` and `cg watcher` flag any stranded box left over from
+they terminate, and `ayis status`, `ayis cost` and `ayis watcher` flag any stranded box left over from
 the old design with its monthly cost.
 
-If you want stop/start back, run on demand: `GAME_SPOT=0 cg init`. Dearer per hour, restartable
+If you want stop/start back, run on demand: `GAME_SPOT=0 ayis init`. Dearer per hour, restartable
 as often as you like, and there the guards still stop rather than terminate.

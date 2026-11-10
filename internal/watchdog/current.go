@@ -117,9 +117,9 @@ func (r *Reader) Current(ctx context.Context) State {
 			policyJSON, _ = url.QueryUnescape(aws.ToString(o.PolicyDocument))
 		}
 	})
-	run(func() { events, logErr = r.events(ctx, "cg-watchdog:", time.Hour, now) })
+	run(func() { events, logErr = r.events(ctx, "ayis-watchdog:", time.Hour, now) })
 	var arch []Event
-	run(func() { arch, _ = r.events(ctx, "cg-watchdog: archive", 2*time.Hour, now) })
+	run(func() { arch, _ = r.events(ctx, "ayis-watchdog: archive", 2*time.Hour, now) })
 	zipBytes, sha := Zip(r.Source)
 	_ = zipBytes
 	wg.Wait()
@@ -170,12 +170,12 @@ func (r *Reader) Current(ctx context.Context) State {
 		st.LogUnknown = code(logErr) != "ResourceNotFoundException"
 	}
 	if n := len(events); n > 0 {
-		st.LastMS, st.LastMsg = events[n-1].MS, strings.TrimPrefix(events[n-1].Msg, "cg-watchdog: ")
+		st.LastMS, st.LastMsg = events[n-1].MS, strings.TrimPrefix(events[n-1].Msg, "ayis-watchdog: ")
 		st.Recent = events[max(0, n-8):]
 	}
 	for i := len(arch) - 1; i >= 0; i-- {
-		if strings.HasPrefix(arch[i].Msg, "cg-watchdog: archive:") {
-			st.ArchiveMS, st.ArchiveMsg = arch[i].MS, strings.TrimPrefix(arch[i].Msg, "cg-watchdog: archive: ")
+		if strings.HasPrefix(arch[i].Msg, "ayis-watchdog: archive:") {
+			st.ArchiveMS, st.ArchiveMsg = arch[i].MS, strings.TrimPrefix(arch[i].Msg, "ayis-watchdog: archive: ")
 			break
 		}
 	}

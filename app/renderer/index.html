@@ -6,7 +6,7 @@
      CDNs, which this policy forbids, so both are vendored (npm run build:css). -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:;">
-<title>Cloud Gaming</title>
+<title>Ayis</title>
 <link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="tailwind.css">
 </head>
@@ -18,7 +18,7 @@
 <header class="topbar fixed top-0 left-0 right-0 h-16 z-50 bg-surface/95 backdrop-blur flex items-center gap-space-lg px-margin-desktop select-none border-b border-surface-variant/60">
   <div class="flex items-center gap-space-sm shrink-0">
     <span class="material-symbols-outlined text-primary text-[24px]" data-icon="sports_esports">&#xea28;</span>
-    <span class="font-headline-md text-[18px] font-semibold tracking-tight">Cloud Gaming</span>
+    <span class="font-headline-md text-[18px] font-semibold tracking-tight">Ayis</span>
   </div>
   <nav class="flex items-center gap-1 mx-auto overflow-x-auto" id="nav" aria-label="Sections">
     <a class="nav-item on" data-view="dashboard" href="#"><span>Home</span></a>
@@ -78,7 +78,7 @@
 
       <!-- The dashboard answers three questions, in order: can I play, what is
            it costing, and are my games and my money safe. Every word in it is
-           drawn by paintDash() from what cg has already said. -->
+           drawn by paintDash() from what ayis has already said. -->
 
       <!-- The machines: the AWS one (mountMachineCard - the same card as the
            Machine page's), each of yours (paintHostCards), and adding another. -->
@@ -191,7 +191,7 @@
         <p class="font-body-lg text-body-lg text-on-surface-variant mt-space-sm" id="b-run-step"></p>
       </div>
       <!-- Time against the usual length of a build - never a share of steps,
-           which cg does not announce in advance. -->
+           which ayis does not announce in advance. -->
       <div class="h-2 rounded-full bg-surface-container overflow-hidden mt-space-md" id="b-bar-track">
         <div class="h-full bg-primary rounded-full" id="b-prog" style="width:0%"></div>
       </div>
@@ -211,7 +211,7 @@
 
       <div class="flex flex-col mt-space-lg" id="b-steps"></div>
 
-      <!-- A failure, as something to act on: cg's headline, whether anything is
+      <!-- A failure, as something to act on: ayis's headline, whether anything is
            billing, and the two or three things worth doing, as buttons. Drawn
            inside the step that failed. -->
       <div class="hidden" id="b-fail">
@@ -271,7 +271,7 @@
     </div>
     </div>
 
-    <!-- One of your machines: everything cg read about it, its log, and what
+    <!-- One of your machines: everything ayis read about it, its log, and what
          can be done to it. -->
     <div class="fit-view flex flex-col gap-space-md" id="b-own" hidden>
       <div class="flex flex-col gap-space-md" id="b-hosts"></div>
@@ -291,7 +291,7 @@
       <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-gutter-desktop items-start">
         <div class="flex flex-col gap-space-sm min-w-0">
           <!-- What is on the game PC right now, and how far each download has got:
-               read from the machine itself (cg games --json --box), every 15 s while
+               read from the machine itself (ayis games --json --box), every 15 s while
                something downloads. Not there when there is no machine. -->
           <div class="p-space-lg rounded-xl bg-surface-container-low mb-space-md" id="lib-pc" hidden>
             <div class="flex flex-wrap items-baseline justify-between gap-x-space-md">
@@ -362,7 +362,7 @@
   <section data-view="guards" hidden>
     <!-- The three safety nets, a card each in the order they act; beside them,
          whether anything is running and what last happened, and the alerts and
-         timings behind it all. Every name, minute and state here is cg's; the
+         timings behind it all. Every name, minute and state here is ayis's; the
          markup only has places. -->
     <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-gutter-desktop items-start">
       <div class="flex flex-col gap-space-sm">
@@ -389,8 +389,8 @@
   <!-- Cost -->
   <section data-view="cost" hidden>
     <!-- In rupees, in the words the rest of the app uses. Every figure is from
-         the one paid call, `cg cost --json`, made only when Refresh is pressed;
-         every rate is cg's. -->
+         the one paid call, `ayis cost --json`, made only when Refresh is pressed;
+         every rate is ayis's. -->
     <div class="flex flex-col gap-space-md">
       <!-- The month large, beside the credits it comes out of; where it went
            beside what bills every month and the free streaming left; and the
@@ -534,7 +534,7 @@
   <section data-view="logs" hidden>
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-gutter-desktop">
 
-      <!-- everything this window has heard from cg -->
+      <!-- everything this window has heard from ayis -->
       <div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col">
         <div class="flex items-center justify-between pb-space-md gap-space-sm">
           <div>
@@ -600,8 +600,8 @@
   <form method="dialog">
     <p class="dlg-title" id="confirm-title"></p>
     <p class="dlg-sub whitespace-pre-line" id="confirm-body"></p>
-    <!-- For what cannot be undone: the word cg would ask for, typed here once -
-         and handed to cg, so there is one question and not two. -->
+    <!-- For what cannot be undone: the word ayis would ask for, typed here once -
+         and handed to ayis, so there is one question and not two. -->
     <label class="block mt-space-md" id="confirm-word-row" hidden>
       <span class="font-code-sm text-code-sm text-outline" id="confirm-word-label"></span>
       <input class="mt-space-xs field" id="confirm-word" autocomplete="off" spellcheck="false">
@@ -614,8 +614,8 @@
 </dialog>
 
 <!-- More room for the games on a machine that is running. What it will do
-     (make the disk bigger, or move the games onto a new one) is cg's to say:
-     cg disk --json. -->
+     (make the disk bigger, or move the games onto a new one) is ayis's to say:
+     ayis disk --json. -->
 <dialog id="diskdlg" class="dlg min-w-[460px] max-w-[560px]">
   <form method="dialog">
     <p class="dlg-title" id="diskdlg-title">Add disk</p>
@@ -630,7 +630,7 @@
       <ol class="mt-space-sm list-decimal pl-space-lg font-body-md text-body-md text-on-surface">
         <li>Open Steam &gt; Settings &gt; Storage</li>
         <li>Open the drive menu and press Add Drive</li>
-        <li>Pick the drive at <span class="font-code-sm text-code-sm" id="diskdlg-steam-path">/scratch2</span> (named cgextra): the games disk</li>
+        <li>Pick the drive at <span class="font-code-sm text-code-sm" id="diskdlg-steam-path">/scratch2</span> (named ayisextra): the games disk</li>
         <li>Come back here and press Done</li>
       </ol>
       <p class="mt-space-sm font-code-sm text-code-sm text-on-surface-variant">Steam does not need to be restarted. Games you install after this can go on the new drive.</p>
@@ -736,7 +736,7 @@
     <p class="dlg-title mb-space-md" id="ask-prompt"></p>
     <input id="ask-input" autocomplete="off" spellcheck="false"
            class="field">
-    <!-- cg says in the ask event which answers it will accept. When it does,
+    <!-- ayis says in the ask event which answers it will accept. When it does,
          the answer is a CHOICE and typing it into a free-text box is both
          harder and easier to get wrong - a build asking "choice [1]:" with a
          text field is not a thing anyone can see the options in. -->
@@ -807,7 +807,7 @@ The ids are the old first-run screen's, whose steps these are. -->
   <pre class="font-code-sm text-code-sm whitespace-pre-wrap text-on-surface-variant max-h-[32vh] overflow-auto" id="rundlg-log"></pre>
   <menu class="dlg-actions">
     <!-- Cancel is not decoration: `tailscale up` waits for a browser and a
-         package manager can sit on a lock, and closing a dialog tells cg
+         package manager can sit on a lock, and closing a dialog tells ayis
          nothing. -->
     <button class="btn" id="rundlg-cancel">Cancel</button>
     <button class="btn" id="rundlg-retry" hidden>Try again</button>

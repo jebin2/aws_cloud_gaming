@@ -306,8 +306,8 @@ func installer(t *testing.T, c *cloud) (*Installer, *[]string) {
 	var said []string
 	return &Installer{
 		Lambda: c, Events: c, IAM: c, Logs: logsClient{c}, SSM: c,
-		Host: "gamevps", Region: c.region, Account: c.account, Source: src,
-		Settings: Settings{Host: "gamevps", Account: c.account, Bucket: "cg-library-x", IdleMinutes: 30, StuckMinutes: 60, ExpiryDays: 14, S3GBMonth: "0.025"},
+		Host: "ayis", Region: c.region, Account: c.account, Source: src,
+		Settings: Settings{Host: "ayis", Account: c.account, Bucket: "ayis-library-x", IdleMinutes: 30, StuckMinutes: 60, ExpiryDays: 14, S3GBMonth: "0.025"},
 		LambdaIn: func(_ context.Context, r string) (bool, error) { return c.others[r], c.otherErr[r] },
 		Regions: func(context.Context) ([]string, error) {
 			return []string{"us-east-1", c.region, "eu-west-1"}, c.regionsErr
@@ -331,11 +331,11 @@ func TestAFreshInstallReadsAsCurrent(t *testing.T) {
 	if len(st.Drift) != 0 {
 		t.Fatalf("what the installer wrote does not read as current: %v", st.Drift)
 	}
-	if !strings.Contains(strings.Join(*said, "\n"), "creating the role gamevps-cloud-watchdog") ||
-		!strings.Contains(strings.Join(*said, "\n"), "armed: gamevps-cloud-watchdog runs every 5 minutes, and hears when a box stops or terminates") {
+	if !strings.Contains(strings.Join(*said, "\n"), "creating the role ayis-cloud-watchdog") ||
+		!strings.Contains(strings.Join(*said, "\n"), "armed: ayis-cloud-watchdog runs every 5 minutes, and hears when a box stops or terminates") {
 		t.Errorf("%v", *said)
 	}
-	if c.retention != 14 || c.called("LambdaTagResource") != 1 || c.called("LogsTagResource") != 1 || c.permissions["cg-schedule"] == "" || c.permissions["cg-state"] == "" {
+	if c.retention != 14 || c.called("LambdaTagResource") != 1 || c.called("LogsTagResource") != 1 || c.permissions["ayis-schedule"] == "" || c.permissions["ayis-state"] == "" {
 		t.Errorf("retention %d permissions %v", c.retention, c.permissions)
 	}
 }
@@ -383,7 +383,7 @@ func TestADriftedFunctionIsRepairedAndOnlyThatPiece(t *testing.T) {
 		t.Errorf("after repair: %v", st.Drift)
 	}
 	// A policy edited by hand is put back.
-	c.roles["gamevps-cloud-watchdog"] = `{"Statement":[]}`
+	c.roles["ayis-cloud-watchdog"] = `{"Statement":[]}`
 	_ = i3.Install(context.Background())
 	if st := reader(t, c, i3).Current(context.Background()); len(st.Drift) != 0 {
 		t.Errorf("policy: %v", st.Drift)
@@ -402,7 +402,7 @@ func TestARoleThatIsNotYetAssumableIsWaitedOut(t *testing.T) {
 	c = newCloud()
 	c.createFails = 20
 	i, said = installer(t, c)
-	if err := i.Install(context.Background()); !errors.Is(err, ErrNotInstalled) || c.called("CreateFunction") != 12 || !strings.Contains(strings.Join(*said, "|"), "could not create gamevps-cloud-watchdog: InvalidParameterValueException") {
+	if err := i.Install(context.Background()); !errors.Is(err, ErrNotInstalled) || c.called("CreateFunction") != 12 || !strings.Contains(strings.Join(*said, "|"), "could not create ayis-cloud-watchdog: InvalidParameterValueException") {
 		t.Errorf("%v %d %v", err, c.called("CreateFunction"), *said)
 	}
 }
@@ -412,12 +412,12 @@ func TestEachFailureIsNamedAndStopsTheInstall(t *testing.T) {
 		set  func(*cloud)
 		want string
 	}{
-		"role":       {func(c *cloud) { c.failOn["CreateRole"] = errors.New("denied") }, "could not create the role gamevps-cloud-watchdog (needs iam:CreateRole)"},
-		"policy":     {func(c *cloud) { c.failOn["PutRolePolicy"] = errors.New("denied") }, "could not attach the policy to gamevps-cloud-watchdog"},
-		"schedule":   {func(c *cloud) { c.failOn["PutRule:gamevps-cloud-watchdog"] = errors.New("denied") }, "could not create the schedule gamevps-cloud-watchdog"},
-		"target":     {func(c *cloud) { c.failedEntry = true }, "could not point the schedule at gamevps-cloud-watchdog"},
-		"permission": {func(c *cloud) { c.failOn["AddPermission"] = errors.New("denied") }, "could not let the schedule invoke gamevps-cloud-watchdog"},
-		"state rule": {func(c *cloud) { c.failOn["PutRule:gamevps-cloud-watchdog-state"] = errors.New("denied") }, "could not create the rule gamevps-cloud-watchdog-state"},
+		"role":       {func(c *cloud) { c.failOn["CreateRole"] = errors.New("denied") }, "could not create the role ayis-cloud-watchdog (needs iam:CreateRole)"},
+		"policy":     {func(c *cloud) { c.failOn["PutRolePolicy"] = errors.New("denied") }, "could not attach the policy to ayis-cloud-watchdog"},
+		"schedule":   {func(c *cloud) { c.failOn["PutRule:ayis-cloud-watchdog"] = errors.New("denied") }, "could not create the schedule ayis-cloud-watchdog"},
+		"target":     {func(c *cloud) { c.failedEntry = true }, "could not point the schedule at ayis-cloud-watchdog"},
+		"permission": {func(c *cloud) { c.failOn["AddPermission"] = errors.New("denied") }, "could not let the schedule invoke ayis-cloud-watchdog"},
+		"state rule": {func(c *cloud) { c.failOn["PutRule:ayis-cloud-watchdog-state"] = errors.New("denied") }, "could not create the rule ayis-cloud-watchdog-state"},
 	} {
 		cl := newCloud()
 		c.set(cl)
@@ -443,31 +443,31 @@ func logResult(lines ...string) *string {
 func TestProve(t *testing.T) {
 	c := newCloud()
 	i, said := installer(t, c)
-	c.invoke = &lambda.InvokeOutput{LogResult: logResult("START RequestId: x", "2026 cg-watchdog: no running instance tagged gamevps - nothing to do", "2026 cg-watchdog: archive: kept - ok", "END")}
+	c.invoke = &lambda.InvokeOutput{LogResult: logResult("START RequestId: x", "2026 ayis-watchdog: no running instance tagged ayis - nothing to do", "2026 ayis-watchdog: archive: kept - ok", "END")}
 	p := i.Prove(context.Background())
 	i.Report(p)
-	if len(p.Lines) != 2 || p.Lines[0] != "no running instance tagged gamevps - nothing to do" {
+	if len(p.Lines) != 2 || p.Lines[0] != "no running instance tagged ayis - nothing to do" {
 		t.Fatalf("%+v", p)
 	}
-	if got := strings.Join(*said, "\n"); !strings.Contains(got, "cloud watchdog: no running instance tagged gamevps - nothing to do") || strings.Contains(got, "FAILED") {
+	if got := strings.Join(*said, "\n"); !strings.Contains(got, "cloud watchdog: no running instance tagged ayis - nothing to do") || strings.Contains(got, "FAILED") {
 		t.Errorf("%s", got)
 	}
 	// It logged nothing.
 	c.invoke = &lambda.InvokeOutput{LogResult: logResult("START", "END")}
 	*said = nil
 	i.Report(i.Prove(context.Background()))
-	if !strings.Contains(strings.Join(*said, "\n"), "the check logged nothing - see: cg watchdog logs") {
+	if !strings.Contains(strings.Join(*said, "\n"), "the check logged nothing - see: ayis watchdog logs") {
 		t.Errorf("%v", *said)
 	}
 	// It failed.
-	c.invoke = &lambda.InvokeOutput{FunctionError: aws.String("Unhandled"), LogResult: logResult("cg-watchdog: boom")}
+	c.invoke = &lambda.InvokeOutput{FunctionError: aws.String("Unhandled"), LogResult: logResult("ayis-watchdog: boom")}
 	*said = nil
 	i.Report(i.Prove(context.Background()))
-	if !strings.Contains(strings.Join(*said, "\n"), "  ^ the check FAILED (Unhandled) - see: cg watchdog logs") {
+	if !strings.Contains(strings.Join(*said, "\n"), "  ^ the check FAILED (Unhandled) - see: ayis watchdog logs") {
 		t.Errorf("%v", *said)
 	}
 	// It cannot act on the account: tried three times (a new role takes a moment), then said.
-	c.invoke = &lambda.InvokeOutput{LogResult: logResult("cg-watchdog: CANNOT QUERY AWS: denied")}
+	c.invoke = &lambda.InvokeOutput{LogResult: logResult("ayis-watchdog: CANNOT QUERY AWS: denied")}
 	c.calls = nil
 	*said = nil
 	i.Report(i.Prove(context.Background()))
@@ -497,7 +497,7 @@ func TestRemoveEverythingThereWas(t *testing.T) {
 	c, i, said := installed(t)
 	i.Remove(context.Background())
 	got := strings.Join(*said, "\n")
-	for _, want := range []string{"deleted the schedule gamevps-cloud-watchdog", "deleted the rule gamevps-cloud-watchdog-state", "deleted the function gamevps-cloud-watchdog", "deleted its logs", "deleted the role gamevps-cloud-watchdog"} {
+	for _, want := range []string{"deleted the schedule ayis-cloud-watchdog", "deleted the rule ayis-cloud-watchdog-state", "deleted the function ayis-cloud-watchdog", "deleted its logs", "deleted the role ayis-cloud-watchdog"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q:\n%s", want, got)
 		}
@@ -519,7 +519,7 @@ func TestTheRoleOutlivesAWatchdogElsewhere(t *testing.T) {
 	c, i, said := installed(t)
 	c.others["eu-west-1"] = true
 	i.Remove(context.Background())
-	if _, ok := c.roles["gamevps-cloud-watchdog"]; !ok || !strings.Contains(strings.Join(*said, "|"), "kept the role gamevps-cloud-watchdog - a watchdog in another region still uses it") {
+	if _, ok := c.roles["ayis-cloud-watchdog"]; !ok || !strings.Contains(strings.Join(*said, "|"), "kept the role ayis-cloud-watchdog - a watchdog in another region still uses it") {
 		t.Errorf("%v %v", c.roles, *said)
 	}
 }
@@ -529,13 +529,13 @@ func TestTheRoleIsKeptWhenAnotherRegionCannotBeAsked(t *testing.T) {
 	c, i, said := installed(t)
 	c.otherErr["us-east-1"] = errors.New("denied")
 	i.Remove(context.Background())
-	if _, ok := c.roles["gamevps-cloud-watchdog"]; !ok || !strings.Contains(strings.Join(*said, "|"), "could not check whether a watchdog in another region still uses it") {
+	if _, ok := c.roles["ayis-cloud-watchdog"]; !ok || !strings.Contains(strings.Join(*said, "|"), "could not check whether a watchdog in another region still uses it") {
 		t.Errorf("%v %v", c.roles, *said)
 	}
 	c, i, said = installed(t)
 	c.regionsErr = errors.New("denied")
 	i.Remove(context.Background())
-	if _, ok := c.roles["gamevps-cloud-watchdog"]; !ok {
+	if _, ok := c.roles["ayis-cloud-watchdog"]; !ok {
 		t.Errorf("a region list that failed must not delete the role: %v", *said)
 	}
 }

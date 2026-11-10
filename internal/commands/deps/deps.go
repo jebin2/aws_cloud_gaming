@@ -1,4 +1,4 @@
-// Package deps is `cg deps`: the tools this computer needs, and what is missing.
+// Package deps is `ayis deps`: the tools this computer needs, and what is missing.
 package deps
 
 import (
@@ -8,13 +8,13 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/laptop"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/laptop"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 // Tool is one row of the dependency list, as data. The app draws a page from
-// this; `cg check` says the same thing in prose.
+// this; `ayis check` says the same thing in prose.
 type Tool struct {
 	Tool    string  `json:"tool"`
 	Label   string  `json:"label"`
@@ -25,7 +25,7 @@ type Tool struct {
 	For     string  `json:"for"`
 }
 
-// Status is `cg deps --json`.
+// Status is `ayis deps --json`.
 type Status struct {
 	Tools          []Tool  `json:"tools"`
 	PackageManager *string `json:"package_manager"`
@@ -70,10 +70,10 @@ func Read(ctx context.Context, l laptop.Laptop) Status {
 	return s
 }
 
-// JSON is `cg deps --json`.
+// JSON is `ayis deps --json`.
 func JSON(s Status) ([]byte, error) { return json.MarshalIndent(s, "", "  ") }
 
-// Report is `cg deps` in words, and whether everything is ready. after is true
+// Report is `ayis deps` in words, and whether everything is ready. after is true
 // after --fix: what is left is for you to install, and suggesting --fix again
 // would only send you round in a loop.
 func Report(ctx context.Context, l laptop.Laptop, out *output.Out, afterFix bool) (ready bool) {
@@ -109,12 +109,12 @@ func Report(ctx context.Context, l laptop.Laptop, out *output.Out, afterFix bool
 	}
 	// --fix can sign Tailscale in with no package manager, so offer it for that too.
 	if !ready && !afterFix && (pm != "" || len(missing) == 0) {
-		out.Log("cg check --fix installs and signs in what is missing, after asking")
+		out.Log("ayis check --fix installs and signs in what is missing, after asking")
 	}
 	return ready
 }
 
-// Run is `cg deps [status|install [tool...]|--json]`.
+// Run is `ayis deps [status|install [tool...]|--json]`.
 func Run(ctx context.Context, l laptop.Laptop, args []string, jsonFlag bool, out *output.Out) int {
 	sub := "status"
 	if len(args) > 0 {
@@ -145,7 +145,7 @@ func Run(ctx context.Context, l laptop.Laptop, args []string, jsonFlag bool, out
 	return 1
 }
 
-// Main is `cg deps` against this computer.
+// Main is `ayis deps` against this computer.
 func Main(ctx context.Context, args []string, jsonFlag bool, out *output.Out) int {
 	return Run(ctx, laptop.New(local.Exec{}), args, jsonFlag, out)
 }
@@ -160,11 +160,11 @@ func sayTo(out *output.Out) laptop.Say {
 	}
 }
 
-// Install is `cg deps install [tool...]`: what is missing, or just the tools named.
+// Install is `ayis deps install [tool...]`: what is missing, or just the tools named.
 func Install(ctx context.Context, l laptop.Laptop, in *laptop.Installer, want []string, out *output.Out) int {
 	missing := l.Missing()
 	if len(missing) == 0 {
-		out.LogAs("ok", "nothing to install - every tool cg needs is here")
+		out.LogAs("ok", "nothing to install - every tool ayis needs is here")
 		// Installed but signed out is the other half of being ready.
 		if !l.TailscaleDown(ctx) {
 			return 0

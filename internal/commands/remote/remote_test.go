@@ -6,28 +6,28 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
+	"github.com/jebin2/ayis/internal/output"
+	fx "github.com/jebin2/ayis/internal/testfixture"
 )
 
-const direct = `pong from gamevps (100.64.0.9) via 13.1.1.1:41641 in 28ms
-pong from gamevps (100.64.0.9) via 13.1.1.1:41641 in 31ms
-pong from gamevps (100.64.0.9) via 13.1.1.1:41641 in 29ms
-pong from gamevps (100.64.0.9) via 13.1.1.1:41641 in 120ms
-pong from gamevps (100.64.0.9) via 13.1.1.1:41641 in 30ms
+const direct = `pong from ayis (100.64.0.9) via 13.1.1.1:41641 in 28ms
+pong from ayis (100.64.0.9) via 13.1.1.1:41641 in 31ms
+pong from ayis (100.64.0.9) via 13.1.1.1:41641 in 29ms
+pong from ayis (100.64.0.9) via 13.1.1.1:41641 in 120ms
+pong from ayis (100.64.0.9) via 13.1.1.1:41641 in 30ms
 `
 
-const derp = `pong from gamevps (100.64.0.9) via DERP(blr) in 45ms
-pong from gamevps (100.64.0.9) via DERP(blr) in 47ms
+const derp = `pong from ayis (100.64.0.9) via DERP(blr) in 45ms
+pong from ayis (100.64.0.9) via DERP(blr) in 47ms
 `
 
 func newBox(answers map[string]string) (Box, *fx.Runner) {
 	r := &fx.Runner{Installed: map[string]bool{"tailscale": true, "ssh": true},
-		Answers: map[string]string{"tailscale ip -4 gamevps": "100.64.0.9\n"}, Contains: map[string]string{}}
+		Answers: map[string]string{"tailscale ip -4 ayis": "100.64.0.9\n"}, Contains: map[string]string{}}
 	for k, v := range answers {
 		r.Contains[k] = v
 	}
-	return Box{Runner: r, Host: "gamevps", Node: "gamevps", Home: "/h", KeyExists: func(string) bool { return true }}, r
+	return Box{Runner: r, Host: "ayis", Node: "ayis", Home: "/h", KeyExists: func(string) bool { return true }}, r
 }
 
 func outs() (*output.Out, *bytes.Buffer, *bytes.Buffer) {
@@ -61,13 +61,13 @@ func TestPingJSONAndReport(t *testing.T) {
 	if rc := b.Ping(context.Background(), true, false, o, out); rc != 0 {
 		t.Fatal(rc)
 	}
-	if o.String() != `{"node":"gamevps","path":"direct","median_ms":30}`+"\n" {
+	if o.String() != `{"node":"ayis","path":"direct","median_ms":30}`+"\n" {
 		t.Errorf("%q", o.String())
 	}
 	b, _ = newBox(map[string]string{"ping -c 5": derp})
 	out, o, _ = outs()
 	b.Ping(context.Background(), false, false, o, out)
-	for _, want := range []string{"\n  node    gamevps (100.64.0.9)\n", "  path    DERP relay (slower - UDP 41641 may be blocked)\n",
+	for _, want := range []string{"\n  node    ayis (100.64.0.9)\n", "  path    DERP relay (slower - UDP 41641 may be blocked)\n",
 		"  latency 45ms median\n", "Check the security group still allows inbound UDP 41641."} {
 		if !strings.Contains(o.String(), want) {
 			t.Errorf("lacks %q:\n%s", want, o.String())
@@ -75,7 +75,7 @@ func TestPingJSONAndReport(t *testing.T) {
 	}
 	// No reply is null, never zero.
 	b, r := newBox(map[string]string{"ping -c 5": ""})
-	r.Failing = map[string]bool{"tailscale ping -c 5 --timeout 3s gamevps": true}
+	r.Failing = map[string]bool{"tailscale ping -c 5 --timeout 3s ayis": true}
 	out, o, _ = outs()
 	b.Ping(context.Background(), true, false, o, out)
 	if !strings.Contains(o.String(), `"path":"unknown","median_ms":null`) {
@@ -95,14 +95,14 @@ func TestNotOnTheTailnet(t *testing.T) {
 	if rc := b.Ping(context.Background(), false, false, out.Stdout, out); rc != 1 {
 		t.Errorf("rc %d", rc)
 	}
-	if !strings.Contains(e.String(), "'gamevps' is not on the tailnet. Is the box running? Try: cg status") {
+	if !strings.Contains(e.String(), "'ayis' is not on the tailnet. Is the box running? Try: ayis status") {
 		t.Errorf("%q", e.String())
 	}
 }
 
 func TestLogCommandsAreTheBoxsOwn(t *testing.T) {
 	for what, want := range map[string]string{
-		"build":    "sudo tail -n 200 /var/log/cloud-gaming-bootstrap.log",
+		"build":    "sudo tail -n 200 /var/log/ayis-bootstrap.log",
 		"steam":    "tail -n 200 ~/steam-prewarm.log",
 		"watchdog": "journalctl -t idle-watchdog -n 50 --no-pager",
 		"disk":     "journalctl -t disk-monitor -n 50 --no-pager",
@@ -124,7 +124,7 @@ func TestLogCommandsAreTheBoxsOwn(t *testing.T) {
 		t.Errorf("%v", r.Ran)
 	}
 	out, _, e := outs()
-	if rc := b.Log(context.Background(), "nope", false, out.Stdout, out); rc != 1 || !strings.Contains(e.String(), "usage: cg log [build|steam|watchdog|disk|sunshine] [--watch]") {
+	if rc := b.Log(context.Background(), "nope", false, out.Stdout, out); rc != 1 || !strings.Contains(e.String(), "usage: ayis log [build|steam|watchdog|disk|sunshine] [--watch]") {
 		t.Errorf("rc %d %q", rc, e.String())
 	}
 }
@@ -139,10 +139,10 @@ func TestSSH(t *testing.T) {
 		t.Errorf("%v", r.Ran)
 	}
 	b.SSH(context.Background(), nil, out)
-	if got := r.Ran[len(r.Ran)-1]; got != "ssh -i /h/.ssh/gamevps.pem -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o ServerAliveCountMax=4 ubuntu@100.64.0.9" {
+	if got := r.Ran[len(r.Ran)-1]; got != "ssh -i /h/.ssh/ayis.pem -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o ServerAliveCountMax=4 ubuntu@100.64.0.9" {
 		t.Errorf("a shell: %q", got)
 	}
-	// The remote's exit status is cg's.
+	// The remote's exit status is ayis's.
 	r.Failing = map[string]bool{"ssh": true}
 	if rc := b.SSH(context.Background(), []string{"false"}, out); rc != 255 {
 		t.Errorf("rc %d", rc)
@@ -153,7 +153,7 @@ func TestSSHWithoutTheBoxKeyNamesTheMissingKeyNotSSHsWarning(t *testing.T) {
 	b, r := newBox(nil)
 	b.KeyExists = func(string) bool { return false }
 	out, o, e := outs()
-	if rc := b.SSH(context.Background(), []string{"true"}, out); rc != 1 || !strings.Contains(o.String()+e.String(), "no key for the box (/h/.ssh/gamevps.pem is missing)") {
+	if rc := b.SSH(context.Background(), []string{"true"}, out); rc != 1 || !strings.Contains(o.String()+e.String(), "no key for the box (/h/.ssh/ayis.pem is missing)") {
 		t.Errorf("rc %d: %s%s", rc, o, e)
 	}
 	for _, c := range r.Ran {

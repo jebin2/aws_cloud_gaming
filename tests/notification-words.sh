@@ -5,7 +5,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 fail=0
-BAD='S3|EC2|GAME_[A-Z_]+|instance|mirror|\bcg (init|destroy|check|open)|\bi-[0-9a-f]|OS shutdown|compute'
+BAD='S3|EC2|GAME_[A-Z_]+|instance|mirror|\bayis (init|destroy|check|open)|\bi-[0-9a-f]|OS shutdown|compute'
 
 echo "1. lambda/cloud_watchdog.py: every notify() title and text"
 out=$(python3 -I - "$BAD" <<'PY'
@@ -26,7 +26,7 @@ PY
 echo "$out"
 
 echo "2. host scripts: every notify call"
-for f in host/idle-watchdog.sh host/cg-shutdown-push.sh; do
+for f in host/idle-watchdog.sh host/ayis-shutdown-push.sh; do
   if grep -E '^\s*(\[\[.*\|\| )?notify ' -A1 "$f" | grep -E "$BAD"; then
     echo "  FAIL $f"; fail=1
   else echo "  ok   $f"; fi

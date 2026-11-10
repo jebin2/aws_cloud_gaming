@@ -12,13 +12,13 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/configcmd"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/watchdog"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/commands/configcmd"
+	"github.com/jebin2/ayis/internal/commands/watchdog"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 // Changer is the archive's mutations with the questions they ask. None needs the box.
@@ -44,7 +44,7 @@ func NewChanger(ctx context.Context, r *Reader, env *config.Env, out *output.Out
 		return nil, err
 	}
 	m := library.Mutator{Library: r.Lib, W: store, Marks: library.SSMMarks{Client: ssm.NewFromConfig(cfg)}}
-	return &Changer{M: m, Ask: ask.New(out, os.Getenv("CG_YES") == "1"), Out: out, Env: env, Price: r.Prices,
+	return &Changer{M: m, Ask: ask.New(out, os.Getenv("AYIS_YES") == "1"), Out: out, Env: env, Price: r.Prices,
 		Reinstall: func(ctx context.Context) int { return watchdog.Reinstall(ctx, env, out) },
 		Set:       func(k, v string) error { return configcmd.Set(env, k, v, out) }}, nil
 }
@@ -73,14 +73,14 @@ func flags(args []string) (id, from string) {
 	return
 }
 
-// Forget is `cg library forget <appid> [--from <bucket>]`.
+// Forget is `ayis library forget <appid> [--from <bucket>]`.
 func (c *Changer) Forget(ctx context.Context, args []string) int {
 	id, from := flags(args)
 	if id == "" {
-		return c.die("which game? see: cg library list")
+		return c.die("which game? see: ayis library list")
 	}
 	// The bucket in use must be named in .env to be deleted from - a derived name
-	// is fine to read, not to delete in. Another bucket is checked as cg's instead.
+	// is fine to read, not to delete in. Another bucket is checked as ayis's instead.
 	if from == "" && c.Env.Get("GAME_S3_BUCKET") == "" {
 		return c.die("no bucket configured")
 	}
@@ -94,7 +94,7 @@ func (c *Changer) Forget(ctx context.Context, args []string) int {
 	}
 	g, ok := library.Lookup(apps, id)
 	if !ok {
-		return c.die(fmt.Sprintf("appid %s is not in the archive (see: cg library list)", id))
+		return c.die(fmt.Sprintf("appid %s is not in the archive (see: ayis library list)", id))
 	}
 	c.Out.Echo(fmt.Sprintf("This permanently deletes %s (%s, %.1f GB) from the archive in %s.", g.Name, id, gb(g.Bytes), region))
 	c.Out.Echo("No undo, no versioning. Playing it again means downloading it from Steam.")
@@ -116,12 +116,12 @@ func (c *Changer) Forget(ctx context.Context, args []string) int {
 	return 0
 }
 
-// Reset is `cg library reset|keep <appid> [--from <bucket>]`: start a game's
+// Reset is `ayis library reset|keep <appid> [--from <bucket>]`: start a game's
 // countdown again today.
 func (c *Changer) Reset(ctx context.Context, args []string) int {
 	id, from := flags(args)
 	if !regexp.MustCompile(`^[0-9]+$`).MatchString(id) {
-		return c.die("which game? see: cg library list")
+		return c.die("which game? see: ayis library list")
 	}
 	bucket, _, err := c.M.Place(ctx, from)
 	if err != nil {
@@ -135,7 +135,7 @@ func (c *Changer) Reset(ctx context.Context, args []string) int {
 	return 0
 }
 
-// KeepFor is `cg library keep-for <days>`: how long saved games are kept with no
+// KeepFor is `ayis library keep-for <days>`: how long saved games are kept with no
 // machine, applied now. The setting alone changes nothing until the cloud
 // watchdog is redeployed with it, so this does both, and the date the app shows
 // is the date AWS will act on.
@@ -148,7 +148,7 @@ func (c *Changer) KeepFor(ctx context.Context, args []string) int {
 		d = "0"
 	}
 	if !regexp.MustCompile(`^[0-9]+$`).MatchString(d) {
-		return c.die("how many days? e.g. cg library keep-for 14 (0 keeps them until you forget them)")
+		return c.die("how many days? e.g. ayis library keep-for 14 (0 keeps them until you forget them)")
 	}
 	n, _ := strconv.Atoi(d)
 	d = strconv.Itoa(n)
@@ -158,7 +158,7 @@ func (c *Changer) KeepFor(ctx context.Context, args []string) int {
 	}
 	c.Out.Say("updating auto-stop")
 	if c.Reinstall(ctx) != 0 {
-		return c.die("saved, but the cloud watchdog still counts the old days - run: cg watchdog install")
+		return c.die("saved, but the cloud watchdog still counts the old days - run: ayis watchdog install")
 	}
 	if n == 0 {
 		c.Out.Log("saved games are kept until you forget them")
@@ -186,7 +186,7 @@ func iec(b int64) string {
 	return ""
 }
 
-// Clean is `cg library clean`: delete the objects of pushes that never finished.
+// Clean is `ayis library clean`: delete the objects of pushes that never finished.
 func (c *Changer) Clean(ctx context.Context) int {
 	if c.Env.Get("GAME_S3_BUCKET") == "" {
 		return c.die("no bucket configured")
@@ -238,7 +238,7 @@ func (c *Changer) Clean(ctx context.Context) int {
 	return 0
 }
 
-// Move is `cg library move <appid> --from <bucket>`: bring a game left in another
+// Move is `ayis library move <appid> --from <bucket>`: bring a game left in another
 // region to the one the machine is built in. Copied server to server, checked
 // file for file, and only then deleted at the source. AWS bills the copy once,
 // between regions; after it a build downloads the game in its own region, which
@@ -246,7 +246,7 @@ func (c *Changer) Clean(ctx context.Context) int {
 func (c *Changer) Move(ctx context.Context, args []string) int {
 	id, from := flags(args)
 	if !regexp.MustCompile(`^[0-9]+$`).MatchString(id) || from == "" {
-		return c.die("usage: cg library move <appid> --from <bucket>")
+		return c.die("usage: ayis library move <appid> --from <bucket>")
 	}
 	sb, sr, err := c.M.Place(ctx, from)
 	if err != nil {
@@ -273,7 +273,7 @@ func (c *Changer) Move(ctx context.Context, args []string) int {
 	}
 	g, ok := library.Lookup(sidx, id)
 	if !ok {
-		return c.die(fmt.Sprintf("appid %s is not saved in %s (see: cg library elsewhere)", id, sr))
+		return c.die(fmt.Sprintf("appid %s is not saved in %s (see: ayis library elsewhere)", id, sr))
 	}
 	if !library.SafeDir(g.InstallDir) {
 		return c.die(fmt.Sprintf("refusing to move %s: its install folder is '%s'", id, g.InstallDir))
@@ -285,7 +285,7 @@ func (c *Changer) Move(ctx context.Context, args []string) int {
 	case sr == dr:
 		c.Out.Echo(fmt.Sprintf("Both are in %s, so there is no transfer charge - only a few rupees of requests.", dr))
 	default:
-		if p := c.Price(ctx, sr, "CG_XREGION_USD_GB"); p != nil && c.M.INR != nil {
+		if p := c.Price(ctx, sr, "AYIS_XREGION_USD_GB"); p != nil && c.M.INR != nil {
 			c.Out.Echo(fmt.Sprintf("AWS charges about INR %.0f once to copy between regions.", gb(g.Bytes)**p**c.M.INR))
 		} else {
 			c.Out.Echo("AWS charges once, by the GB, to copy between regions - the price could not be read.")
@@ -322,7 +322,7 @@ func (c *Changer) Move(ctx context.Context, args []string) int {
 	return 0
 }
 
-// ForgetLogin is `cg library account forget [--from <bucket>]`. Deleting is
+// ForgetLogin is `ayis library account forget [--from <bucket>]`. Deleting is
 // all-or-nothing on purpose: replacing the blob is the supported way to change
 // accounts.
 func (c *Changer) ForgetLogin(ctx context.Context, args []string, cache library.NamesCache) int {

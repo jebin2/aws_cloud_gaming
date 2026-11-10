@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// testdata/contract/contract.json is what `cg --contract` prints: the frozen contract, changed only on purpose.
+// testdata/contract/contract.json is what `ayis --contract` prints: the frozen contract, changed only on purpose.
 func TestContractMatchesTheBashOne(t *testing.T) {
 	want, err := os.ReadFile("../../testdata/contract/contract.json")
 	if err != nil {

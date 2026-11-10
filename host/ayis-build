@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cg-build: runs the build's stages on the box, in parallel where the plan allows.
+"""ayis-build: runs the build's stages on the box, in parallel where the plan allows.
 
 The build used to be one long script that cloud-init ran once, top to bottom: a
 failed step ended it, a reboot at the wrong moment ended it, and nothing could run
@@ -16,14 +16,14 @@ that says what each one needs, and keeps going whatever happens to it:
   * stages that take the same lock (the package installer) run one at a time, in
     the plan's order; the rest run together.
 
-What it writes, for cg and for a person:
+What it writes, for ayis and for a person:
   state.json    which stages are pending, running, done, failed or blocked
-  events.jsonl  every change, numbered, in order: `cg-build events --since N`
+  events.jsonl  every change, numbered, in order: `ayis-build events --since N`
                 gives what is new, so a reader that was cut off resumes exactly
   logs/<stage>.log   each stage's own output
   and, so a reader that knows only the old single-script build still works, the
-  progress lines it printed in /var/log/cloud-gaming-bootstrap.log and its result
-  in /var/lib/cloud-gaming-bootstrap.rc.
+  progress lines it printed in /var/log/ayis-bootstrap.log and its result
+  in /var/lib/ayis-bootstrap.rc.
 """
 import argparse
 import fcntl
@@ -39,25 +39,25 @@ import time
 from datetime import datetime, timezone
 
 # Tests move the whole tree into a sandbox by setting this.
-ROOT = os.environ.get("CG_BUILD_ROOT", "")
+ROOT = os.environ.get("AYIS_BUILD_ROOT", "")
 
 
 def at(p):
     return ROOT + p
 
 
-STATE_DIR = at("/var/lib/cg-build")
-LOG_DIR = at("/var/log/cg-build")
-RUN_DIR = at("/run/cg-build")
-HOST_DIR = at("/opt/cloud-gaming-host")
-PLAN_FILE = os.environ.get("CG_BUILD_PLAN", HOST_DIR + "/plan.json")
-ENV_FILE = at("/etc/cg-build/env")
-COMPAT_LOG = at("/var/log/cloud-gaming-bootstrap.log")
-COMPAT_RC = at("/var/lib/cloud-gaming-bootstrap.rc")
-BASH = os.environ.get("CG_BUILD_BASH", "/bin/bash")
-REBOOT = os.environ.get("CG_BUILD_REBOOT", "systemctl reboot")
-BACKOFF = float(os.environ.get("CG_BUILD_BACKOFF", "10"))
-TICK = float(os.environ.get("CG_BUILD_TICK", "0.2"))
+STATE_DIR = at("/var/lib/ayis-build")
+LOG_DIR = at("/var/log/ayis-build")
+RUN_DIR = at("/run/ayis-build")
+HOST_DIR = at("/opt/ayis-host")
+PLAN_FILE = os.environ.get("AYIS_BUILD_PLAN", HOST_DIR + "/plan.json")
+ENV_FILE = at("/etc/ayis-build/env")
+COMPAT_LOG = at("/var/log/ayis-bootstrap.log")
+COMPAT_RC = at("/var/lib/ayis-bootstrap.rc")
+BASH = os.environ.get("AYIS_BUILD_BASH", "/bin/bash")
+REBOOT = os.environ.get("AYIS_BUILD_REBOOT", "systemctl reboot")
+BACKOFF = float(os.environ.get("AYIS_BUILD_BACKOFF", "10"))
+TICK = float(os.environ.get("AYIS_BUILD_TICK", "0.2"))
 # Lines of a stage's output that the old reader looked for: its own markers and
 # anything that reads as a failure. Anchored, as there: a bare /error/ matches
 # package names like libgpg-error0.
@@ -70,8 +70,8 @@ def now():
 
 
 def boot_id():
-    if os.environ.get("CG_BUILD_BOOT_ID"):
-        return os.environ["CG_BUILD_BOOT_ID"]
+    if os.environ.get("AYIS_BUILD_BOOT_ID"):
+        return os.environ["AYIS_BUILD_BOOT_ID"]
     try:
         with open("/proc/sys/kernel/random/boot_id") as f:
             return f.read().strip()
@@ -237,11 +237,11 @@ class Supervisor:
         penv = dict(os.environ)
         penv.update({
             "DEBIAN_FRONTEND": "noninteractive",
-            "CG_SUPERVISED": "1",
-            "CG_STAGE": name,
-            "CG_STAGE_LOCK": stage["lock"],
-            "CG_BUILD_STATE": STATE_DIR,
-            "HOME": os.environ.get("CG_BUILD_HOME", "/root"),
+            "AYIS_SUPERVISED": "1",
+            "AYIS_STAGE": name,
+            "AYIS_STAGE_LOCK": stage["lock"],
+            "AYIS_BUILD_STATE": STATE_DIR,
+            "HOME": os.environ.get("AYIS_BUILD_HOME", "/root"),
         })
         started, timed_out = time.time(), False
         try:
@@ -319,7 +319,7 @@ class Supervisor:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            print("cg-build is already running", file=sys.stderr)
+            print("ayis-build is already running", file=sys.stderr)
             return 0
         plan = load_plan(PLAN_FILE)
         env = load_env(ENV_FILE)
@@ -439,7 +439,7 @@ class Supervisor:
             self.events.emit("fail", name, "the reboot command failed (%d)" % rc, rc=rc)
             return
         # systemd ends this when the machine goes down; waiting is the whole job.
-        while not os.environ.get("CG_BUILD_NO_WAIT"):
+        while not os.environ.get("AYIS_BUILD_NO_WAIT"):
             time.sleep(60)
         sys.exit(0)
 
@@ -470,7 +470,7 @@ class Supervisor:
         st.save()
         for n in failed:
             rec = st.stage(n)
-            self.compat(">>> FAILED: %s %s (its log: /var/log/cg-build/%s.log)" % (n, "did not finish", n))
+            self.compat(">>> FAILED: %s %s (its log: /var/log/ayis-build/%s.log)" % (n, "did not finish", n))
             for l in (self.last_tail(n) or []):
                 self.compat("    " + l)
         self.events.emit("failed", "", "failed: %s; not run: %s" % (", ".join(failed) or "-", ", ".join(blocked) or "-"))
@@ -494,7 +494,7 @@ class Supervisor:
         self.compat(">>> " + text)
 
 
-# -- the commands cg and a person use --------------------------------------------
+# -- the commands ayis and a person use --------------------------------------------
 def cmd_events(args):
     path = STATE_DIR + "/events.jsonl"
     try:
@@ -529,13 +529,13 @@ def cmd_retry(args):
             rec.pop("not_before", None)
     st.data.pop("reported", None)
     st.save()
-    if not os.environ.get("CG_BUILD_NO_SYSTEMD"):
-        subprocess.call(["systemctl", "restart", "cg-build.service"])
+    if not os.environ.get("AYIS_BUILD_NO_SYSTEMD"):
+        subprocess.call(["systemctl", "restart", "ayis-build.service"])
     return 0
 
 
 def main():
-    ap = argparse.ArgumentParser(prog="cg-build")
+    ap = argparse.ArgumentParser(prog="ayis-build")
     sub = ap.add_subparsers(dest="cmd")
     sub.add_parser("run")
     e = sub.add_parser("events")
@@ -551,7 +551,7 @@ def main():
             import traceback
             msg = "".join(traceback.format_exception_only(type(e), e)).strip()
             try:
-                Events(STATE_DIR + "/events.jsonl").emit("supervisor", "", "stopped by a fault in cg-build itself: " + msg)
+                Events(STATE_DIR + "/events.jsonl").emit("supervisor", "", "stopped by a fault in ayis-build itself: " + msg)
                 append_line(COMPAT_LOG, ">>> FAILED: the build supervisor stopped: " + msg)
             except OSError:
                 pass

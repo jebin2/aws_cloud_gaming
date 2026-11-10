@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/bucket"
+	"github.com/jebin2/ayis/internal/bucket"
 )
 
 // App is a game in the archive's index.
@@ -37,7 +37,7 @@ type Library struct {
 	INR     *float64
 }
 
-// BucketName is the bucket in use: .env's, else the one cg derives for this
+// BucketName is the bucket in use: .env's, else the one ayis derives for this
 // account, host and region - the same function the creation script uses. It was
 // required to be in .env, which made every library read fail until an init had
 // written it, and clearing it to move region did exactly that.
@@ -51,7 +51,7 @@ func (l Library) BucketName() (string, bool) {
 	return bucket.Name(l.Account, l.Host, l.Region), true
 }
 
-// Ours reports whether a bucket is one cg made for this account and host: the
+// Ours reports whether a bucket is one ayis made for this account and host: the
 // name it derives for the bucket's own region, or the form it used before the
 // region was in the hash. Never anything merely named like them.
 func Ours(name, region, account, host string) bool {
@@ -60,7 +60,7 @@ func Ours(name, region, account, host string) bool {
 
 // Index reads steam/index.json from a bucket. A bucket we can read that holds no
 // index really is an empty archive, and so is a bucket that is not there yet: it is
-// made by the first cg init, and until then nothing can have been archived in it
+// made by the first ayis init, and until then nothing can have been archived in it
 // (the AWS CLI could not tell the two apart either - a HEAD answers 404 for both).
 // Anything else is an error with its reason.
 func (l Library) Index(ctx context.Context, b, region string) ([]App, error) {
@@ -126,7 +126,7 @@ type Orphan struct {
 //
 // A push that dies leaves files with no manifest and no index entry - by design,
 // so a half-uploaded game is never mistaken for a complete one. But nothing
-// could then SEE them: `cg library list` read the index and reported an empty
+// could then SEE them: `ayis library list` read the index and reported an empty
 // archive while 76 GB of a dead download sat there billing, and `forget` could
 // not touch it because forget works off the index too.
 func Orphans(objs []Object, apps []App) []Orphan {

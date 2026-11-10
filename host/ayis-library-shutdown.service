@@ -13,7 +13,7 @@ Description=Mirror the Steam library to S3 before the machine goes down
 # shutdown targets it has to run before.
 DefaultDependencies=no
 Requires=scratch-disk.service
-After=scratch-disk.service network-online.target cg-library-restore.service
+After=scratch-disk.service network-online.target ayis-library-restore.service
 Before=shutdown.target umount.target
 
 [Service]
@@ -23,11 +23,11 @@ User=ubuntu
 Group=ubuntu
 # The ntfy URL, when notifications are configured - for a push that fails or is
 # cut off as the box goes down.
-EnvironmentFile=-/etc/cg-notify.conf
+EnvironmentFile=-/etc/ayis-notify.conf
 # Nothing happens at start. The work is in ExecStop, which systemd runs as the
 # machine goes down, while the network is still up.
 ExecStart=/bin/true
-ExecStop=/usr/local/bin/cg-shutdown-push
+ExecStop=/usr/local/bin/ayis-shutdown-push
 # The backstop, for stops this box did not initiate - an external StopInstances,
 # a console terminate. The on-host watchdog now pushes BEFORE calling shutdown,
 # where there is no timeout at all, because a first upload of a 140 GB game
@@ -35,14 +35,14 @@ ExecStop=/usr/local/bin/cg-shutdown-push
 # systemd allowed, then killed with ~72 GB of 140 landed.
 #
 # Still bounded, because a doomed upload should not hang a shutdown forever, and
-# after an explicit `cg stop` or a watchdog push there is nothing left to send -
+# after an explicit `ayis stop` or a watchdog push there is nothing left to send -
 # seconds, not minutes. 30 minutes is room for a session's worth of new files
 # when an external guard terminates the box. AWS may power off an instance it
 # was asked to terminate before this runs out, and a spot interruption gives
 # two minutes whatever this says.
 #
 # If the idle watchdog's own push is still running when the shutdown begins,
-# systemd stops it and this push waits on cg-library's lock, then carries on
+# systemd stops it and this push waits on ayis-library's lock, then carries on
 # from the files already uploaded.
 #
 # A box still going down an hour later, whatever started it, is forced by the

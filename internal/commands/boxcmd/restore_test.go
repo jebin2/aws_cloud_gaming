@@ -66,8 +66,8 @@ func TestJudge(t *testing.T) {
 
 // While a game is still "waiting" the copy's own last line is what tells why.
 func TestTheProbeAsksForTheCopysLastLine(t *testing.T) {
-	s := probeScript([]want{{ID: "1", Bytes: 5}}, nil, "cg-restore-play-9")
-	if !strings.Contains(s, "journalctl -u cg-restore-play-9 -n 1") {
+	s := probeScript([]want{{ID: "1", Bytes: 5}}, nil, "ayis-restore-play-9")
+	if !strings.Contains(s, "journalctl -u ayis-restore-play-9 -n 1") {
 		t.Errorf("no journal in\n%s", s)
 	}
 	if got := parseJournal("G 1 0\nJ restoring Ori (1, 11 GB)\nU active running\n"); got != "restoring Ori (1, 11 GB)" {

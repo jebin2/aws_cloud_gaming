@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/format"
+	"github.com/jebin2/ayis/internal/format"
 )
 
-// want is one game cg open brings onto the machine: its id, and how many bytes
+// want is one game ayis open brings onto the machine: its id, and how many bytes
 // Saved games holds for it (0 when not known, which turns the percentage off).
 type want struct {
 	ID    string
@@ -71,8 +71,8 @@ func idSet(csv string) map[string]bool {
 // prefix and its shader cache, not what Steam is still downloading.
 func probeScript(ws []want, extra map[string]bool, unit string) string {
 	var b strings.Builder
-	b.WriteString(". /etc/cg-library.conf 2>/dev/null\n")
-	b.WriteString("L=${CG_LIB_DIR:-/scratch/steam}; X=${CG_EXTRA_LIB:-/scratch2/steam}\n")
+	b.WriteString(". /etc/ayis-library.conf 2>/dev/null\n")
+	b.WriteString("L=${AYIS_LIB_DIR:-/scratch/steam}; X=${AYIS_EXTRA_LIB:-/scratch2/steam}\n")
 	b.WriteString(`g() { m="$2/steamapps/appmanifest_$1.acf"; d=""; [ -f "$m" ] && d=$(sed -n 's/.*"installdir"[[:space:]]*"\([^"]*\)".*/\1/p' "$m" | head -1)
   n=0; [ -n "$d" ] && n=$(du -sb --exclude=downloading --exclude=temp "$2/steamapps/common/$d" "$2/steamapps/compatdata/$1" "$2/steamapps/shadercache/$1" 2>/dev/null | awk '{t+=$1} END{print t+0}')
   echo "G $1 $n"; }` + "\n")
@@ -184,9 +184,9 @@ func (d Deps) restoreGames(ctx context.Context) int {
 	}
 	csv := strings.Join(ids, ",")
 	d.Out.SayID("open.restore", "Copying your games from Saved games")
-	unit := "cg-restore-play-" + strconv.FormatInt(d.Now().Unix(), 10)
-	cmd := "set -a; . /etc/cg-library.conf; set +a; export CG_EXTRA_APPS=" + d.ExtraApps +
-		"; exec /usr/local/bin/cg-library pull --apps " + csv
+	unit := "ayis-restore-play-" + strconv.FormatInt(d.Now().Unix(), 10)
+	cmd := "set -a; . /etc/ayis-library.conf; set +a; export AYIS_EXTRA_APPS=" + d.ExtraApps +
+		"; exec /usr/local/bin/ayis-library pull --apps " + csv
 	run := remote("sudo", "systemd-run", "--quiet", "--remain-after-exit", "--unit="+unit,
 		"--uid=ubuntu", "--gid=ubuntu", "/bin/bash", "-c", cmd)
 	if err := d.relay(ctx, run); err != nil {

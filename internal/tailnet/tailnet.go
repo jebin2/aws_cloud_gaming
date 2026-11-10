@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	"github.com/jebin2/ayis/internal/local"
 )
 
 // Node is a peer: its key is its identity, its name is not.

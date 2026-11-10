@@ -12,8 +12,8 @@
 set -euo pipefail
 
 IFACE="${IFACE:-tailscale0}"          # the tunnel: streaming shows up here
-# The idle minutes chosen in the app (GAME_IDLE_MIN), written here by cg open.
-if [[ -r /etc/cg-idle.conf ]]; then . /etc/cg-idle.conf; fi
+# The idle minutes chosen in the app (GAME_IDLE_MIN), written here by ayis open.
+if [[ -r /etc/ayis-idle.conf ]]; then . /etc/ayis-idle.conf; fi
 IDLE_LIMIT="${IDLE_LIMIT:-15}"        # consecutive idle minutes before shutdown
 THRESHOLD="${THRESHOLD:-204800}"      # bytes/min of stream traffic below which we call it idle (200 KB)
 RX_THRESHOLD="${RX_THRESHOLD:-10485760}"  # bytes/min inbound that counts as a real download (10 MB)
@@ -22,11 +22,11 @@ BOOT_GRACE="${BOOT_GRACE:-20}"        # minutes after boot before the switch arm
 STATE="${STATE:-/var/lib/idle-watchdog}"
 # Overridable so the shutdown path can be tested. A watchdog whose only job is
 # to power off a machine is not something to verify by running it for real.
-CG_LIBRARY_BIN="${CG_LIBRARY_BIN:-/usr/local/bin/cg-library}"
+AYIS_LIBRARY_BIN="${AYIS_LIBRARY_BIN:-/usr/local/bin/ayis-library}"
 SHUTDOWN_BIN="${SHUTDOWN_BIN:-/sbin/shutdown}"
-# Notifications go through cg-notify, which is off unless CG_NTFY_URL is set
-# (from /etc/cg-notify.conf, via the unit's EnvironmentFile).
-CG_NOTIFY_BIN="${CG_NOTIFY_BIN:-/usr/local/bin/cg-notify}"
+# Notifications go through ayis-notify, which is off unless AYIS_NTFY_URL is set
+# (from /etc/ayis-notify.conf, via the unit's EnvironmentFile).
+AYIS_NOTIFY_BIN="${AYIS_NOTIFY_BIN:-/usr/local/bin/ayis-notify}"
 # The push before shutdown has no clock, but it is watched: still running after
 # this long, and every hour after that, it sends a notification.
 UPLOAD_WARN_SEC="${UPLOAD_WARN_SEC:-3600}"
@@ -72,7 +72,7 @@ steam_working() {
 
 # Best effort, never fatal: nothing about a notification may stop a shutdown.
 notify() { # notify <title> <message>
-  [[ -x $CG_NOTIFY_BIN ]] && "$CG_NOTIFY_BIN" "$1" "$2" high zzz
+  [[ -x $AYIS_NOTIFY_BIN ]] && "$AYIS_NOTIFY_BIN" "$1" "$2" high zzz
   return 0
 }
 
@@ -124,7 +124,7 @@ logger -t idle-watchdog \
 if (( idle >= IDLE_LIMIT )); then
   # Mirror BEFORE shutting down, not on the way out.
   #
-  # cg-library-shutdown.service exists and works, but it runs from ExecStop
+  # ayis-library-shutdown.service exists and works, but it runs from ExecStop
   # under TimeoutStopSec - and a first upload of a 140 GB game does not fit in
   # any shutdown window. Measured: 104 GB of egress in the 15 minutes systemd
   # allowed, then the push was killed with ~72 GB of 140 landed and no manifest
@@ -136,7 +136,7 @@ if (( idle >= IDLE_LIMIT )); then
   # re-download measured in hours. ExecStop stays as the backstop for stops this
   # watchdog did not initiate.
   unsaved=""
-  if [[ -x $CG_LIBRARY_BIN ]]; then
+  if [[ -x $AYIS_LIBRARY_BIN ]]; then
     logger -t idle-watchdog "idle limit reached - mirroring the library before shutdown"
     # In the background, so it can be watched. A push that hangs keeps the box
     # up and billing - and its own traffic looks like use to the cloud watchdog -
@@ -147,7 +147,7 @@ if (( idle >= IDLE_LIMIT )); then
     # then ends early and a good push reads as failed. The exit status goes to a
     # file for the same reason a pipeline's would be logger's.
     rcfile="$STATE/mirror.rc"; rm -f "$rcfile"
-    { if runuser -u ubuntu -- "$CG_LIBRARY_BIN" push 2>&1; then echo 0 > "$rcfile"; else echo 1 > "$rcfile"; fi; } \
+    { if runuser -u ubuntu -- "$AYIS_LIBRARY_BIN" push 2>&1; then echo 0 > "$rcfile"; else echo 1 > "$rcfile"; fi; } \
       > >(logger -t idle-watchdog) 2>&1 &
     pushjob=$! started=$SECONDS next_warn=$UPLOAD_WARN_SEC
     while kill -0 "$pushjob" 2>/dev/null; do

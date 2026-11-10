@@ -29,7 +29,7 @@ cat > "$T/r/stub.js" <<'STUB'
 window.__errs = [];
 addEventListener('error', e => window.__errs.push(e.message));
 window.__ran = [];
-window.cg = {
+window.ayis = {
   run: (args) => { window.__ran.push(args.join(' '));
                    window.__lastId = (window.__lastId || 0) + 1;
                    return Promise.resolve({ ok: true, id: window.__lastId }); },
@@ -64,8 +64,8 @@ cat > "$T/r/probe.js" <<'PROBE'
       + ' stop=' + !document.getElementById('cancel').hidden + ' ran=' + window.__ran.join(';'));
     const lines = [];
     for (let h = 14; h <= 16; h++) for (let m = 2; m < 60; m += 5) {
-      lines.push(`2026-10-16T${h}:${String(m).padStart(2, '0')}:12 cg-watchdog: no running instance tagged gamevps - nothing to do`);
-      if (m === 2 && h > 14) lines.push(`2026-10-16T${h}:02:12 cg-watchdog: archive: kept - last used ${h - 10}h ago; deleted in 6d ${26 - h}h unless a box is launched`);
+      lines.push(`2026-10-16T${h}:${String(m).padStart(2, '0')}:12 ayis-watchdog: no running instance tagged ayis - nothing to do`);
+      if (m === 2 && h > 14) lines.push(`2026-10-16T${h}:02:12 ayis-watchdog: archive: kept - last used ${h - 10}h ago; deleted in 6d ${26 - h}h unless a box is launched`);
     }
     window.__emit(window.__lastId, { t: 'raw', stream: 'stdout', text: lines.join('\n') });
     window.__emit(window.__lastId, { t: 'exit', rc: 0 });
@@ -74,14 +74,14 @@ cat > "$T/r/probe.js" <<'PROBE'
       + ' disabled=' + document.getElementById('log-cloud').disabled);
     out.push('DIGEST | ' + document.getElementById('log-cloud-out').textContent.replace(/\n/g, ' // '));
     // Refused - a build runs alone - is not an empty log.
-    const run0 = window.cg.run;
-    window.cg.run = () => Promise.resolve({ ok: false, reason: 'busy', args: ['init'] });
+    const run0 = window.ayis.run;
+    window.ayis.run = () => Promise.resolve({ ok: false, reason: 'busy', args: ['init'] });
     jobs.set(9999, { cmd: ['init'], view: 'build', write: true, out: [] });
     document.getElementById('log-cloud').click();
     await sleep(); await sleep();
     out.push('REFUSED | ' + document.getElementById('log-cloud-out').textContent);
     jobs.delete(9999);
-    window.cg.run = run0;
+    window.ayis.run = run0;
   } catch (e) { out.push('THREW | ' + e.message); }
   out.push('ERRS | ' + (window.__errs || []).join(' ;; '));
   const pre = document.createElement('pre');
@@ -128,7 +128,7 @@ contains "  it reads the watchdog's log" "$(row FETCHING)" "ran=watchdog logs"
 contains "and is back when done"         "$(row FETCHED)"  "label=Load disabled=false"
 
 echo "3. the log reads as what was decided"
-contains "the 5-minute checks are one line" "$(row DIGEST)" "no running instance tagged gamevps - nothing to do  (36 checks)"
+contains "the 5-minute checks are one line" "$(row DIGEST)" "no running instance tagged ayis - nothing to do  (36 checks)"
 check    "  said once"                   "$(row DIGEST | grep -o 'nothing to do' | wc -l)" "1"
 contains "a refused load says why, not nothing" "$(row REFUSED)" "Not loaded: waits for"
 lacks    "  never 'nothing in the last 3 hours'" "$(row REFUSED)" "Nothing in the last"

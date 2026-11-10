@@ -1,5 +1,5 @@
 // Package library is the game archive in S3: what is in it, what it costs, and
-// where else cg has left games. Everything here is read-only and answers
+// where else ayis has left games. Everything here is read-only and answers
 // without the box - the archive outlives every box, so "what is saved, and as
 // whom would a new box sign in" has to be answerable when there is none.
 package library

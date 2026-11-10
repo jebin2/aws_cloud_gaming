@@ -19,7 +19,7 @@ func (f fake) Alive(p int) bool          { return f.alive[p] }
 func (f fake) Args(p int) (string, bool) { a, ok := f.args[p]; return a, ok }
 
 func write(t *testing.T, body string) string {
-	p := filepath.Join(t.TempDir(), "cg-session-1000.pid")
+	p := filepath.Join(t.TempDir(), "ayis-session-1000.pid")
 	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func write(t *testing.T, body string) string {
 }
 
 func TestARunningSession(t *testing.T) {
-	f := fake{alive: map[int]bool{42: true}, args: map[int]string{42: "bash /home/u/cg open"}}
+	f := fake{alive: map[int]bool{42: true}, args: map[int]string{42: "bash /home/u/ayis open"}}
 	l, ok := Running(write(t, "42 1000\n"), f)
 	if !ok || l.PID != 42 || l.Started != 1000 {
 		t.Fatalf("got %+v %v", l, ok)
@@ -67,18 +67,18 @@ func TestFileLocation(t *testing.T) {
 		env  map[string]string
 		want string
 	}{
-		{map[string]string{"XDG_RUNTIME_DIR": "/run/user/1000", "TMPDIR": "/t"}, "/run/user/1000/cg-session-1000.pid"},
-		{map[string]string{"TMPDIR": "/t"}, "/t/cg-session-1000.pid"},
-		{map[string]string{}, "/tmp/cg-session-1000.pid"},
+		{map[string]string{"XDG_RUNTIME_DIR": "/run/user/1000", "TMPDIR": "/t"}, "/run/user/1000/ayis-session-1000.pid"},
+		{map[string]string{"TMPDIR": "/t"}, "/t/ayis-session-1000.pid"},
+		{map[string]string{}, "/tmp/ayis-session-1000.pid"},
 	} {
-		if got := File(get(c.env), 1000); filepath.ToSlash(got) != c.want && !(runtime.GOOS == "windows" && c.want == "/tmp/cg-session-1000.pid") {
+		if got := File(get(c.env), 1000); filepath.ToSlash(got) != c.want && !(runtime.GOOS == "windows" && c.want == "/tmp/ayis-session-1000.pid") {
 			t.Errorf("got %s want %s", got, c.want)
 		}
 	}
 }
 
 func TestClaimAndReleaseOnlyDropTheirOwn(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "cg-session-1.pid")
+	p := filepath.Join(t.TempDir(), "ayis-session-1.pid")
 	Claim(p, time.Unix(1700000000, 0))
 	b, _ := os.ReadFile(p)
 	if string(b) != fmt.Sprintf("%d 1700000000\n", os.Getpid()) {
@@ -103,7 +103,7 @@ func TestEndAsksPolitelyThenInsists(t *testing.T) {
 	_ = os.WriteFile(p, []byte("4242 1\n"), 0o644)
 	var sent []string
 	alive := true
-	probe := fake{alive: map[int]bool{}, args: map[int]string{4242: "cg open"}}
+	probe := fake{alive: map[int]bool{}, args: map[int]string{4242: "ayis open"}}
 	live := func() fake { probe.alive[4242] = alive; return probe }
 	e := Ender{Path: p, Sleep: func(time.Duration) {},
 		Signal: func(pid int, s syscall.Signal) {

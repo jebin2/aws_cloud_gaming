@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# host/cg-build: the supervisor that runs the build's stages on the box. Run here
+# host/ayis-build: the supervisor that runs the build's stages on the box. Run here
 # against a sandbox with fake stages - kill it, fail them, race them - since a
 # real box is about fifteen minutes and some rupees a try.
 #
 # Only processes this script started are ever killed, by the pid it was given.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-SRC=$PWD/host/cg-build
+SRC=$PWD/host/ayis-build
 T=$(mktemp -d); pass=0; fail=0
 SUPPID=""
 trap '[[ -n $SUPPID ]] && kill -9 "$SUPPID" 2>/dev/null; rm -rf "$T"' EXIT
@@ -17,24 +17,24 @@ contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
 
 # A fresh sandbox with a prelude the stages share.
 fresh() {
-  rm -rf "$T/r" "$T/stages.list"; mkdir -p "$T/r/opt/cloud-gaming-host/stages" "$T/r/etc/cg-build" "$T/home"
+  rm -rf "$T/r" "$T/stages.list"; mkdir -p "$T/r/opt/ayis-host/stages" "$T/r/etc/ayis-build" "$T/home"
   : > "$T/order"; : > "$T/reboot.log"
   {
     echo "ORDER=$T/order; FLAG=$T/flag; PIDFILE=$T/slowpid"
     echo 'progress() { set +x; echo ">>> $*"; set -x; }'
     echo 'verify() { set +x; if "${@:2}" >/dev/null 2>&1; then echo ">>> ok: $1"; else echo ">>> FAILED: $1"; set -x; return 1; fi; set -x; }'
-  } > "$T/r/opt/cloud-gaming-host/prelude.sh"
-  printf 'NAME=world\n' > "$T/r/etc/cg-build/env"
+  } > "$T/r/opt/ayis-host/prelude.sh"
+  printf 'NAME=world\n' > "$T/r/etc/ayis-build/env"
   rm -f "$T/flag"
 }
 # stage name needs lock retries timeout reboot   (the script is on stdin)
 stage() {
   local name=$1 needs=${2:-} lock=${3:-} retries=${4:-0} timeout=${5:-30} reboot=${6:-0}
-  cat > "$T/r/opt/cloud-gaming-host/stages/$name.sh"
+  cat > "$T/r/opt/ayis-host/stages/$name.sh"
   echo "$name|$needs|$lock|$retries|$timeout|$reboot" >> "$T/stages.list"
 }
 writeplan() {
-  python3 - "$T/stages.list" "$T/r/opt/cloud-gaming-host/plan.json" <<'PY'
+  python3 - "$T/stages.list" "$T/r/opt/ayis-host/plan.json" <<'PY'
 import json, sys
 out = []
 for line in open(sys.argv[1]).read().splitlines():
@@ -45,22 +45,22 @@ json.dump({"version": 1, "max_parallel": 4, "stages": out}, open(sys.argv[2], "w
 PY
 }
 supenv() {
-  CG_BUILD_ROOT=$T/r CG_BUILD_BACKOFF=0 CG_BUILD_TICK=0.05 CG_BUILD_HOME=$T/home CG_BUILD_NO_WAIT=1 CG_BUILD_NO_SYSTEMD=1 \
-  CG_BUILD_BOOT_ID=${BOOT:-boot1} CG_BUILD_REBOOT="echo REBOOT >> $T/reboot.log" "$@"
+  AYIS_BUILD_ROOT=$T/r AYIS_BUILD_BACKOFF=0 AYIS_BUILD_TICK=0.05 AYIS_BUILD_HOME=$T/home AYIS_BUILD_NO_WAIT=1 AYIS_BUILD_NO_SYSTEMD=1 \
+  AYIS_BUILD_BOOT_ID=${BOOT:-boot1} AYIS_BUILD_REBOOT="echo REBOOT >> $T/reboot.log" "$@"
 }
 sup() { supenv python3 "$SRC" "$@" 2>&1; }
 # The supervisor itself, in the background: the pid kept IS python's (exec, not a
 # function's subshell), so killing that pid is killing it.
 bg_sup() {
-  ( export CG_BUILD_ROOT=$T/r CG_BUILD_BACKOFF=0 CG_BUILD_TICK=0.05 CG_BUILD_HOME=$T/home CG_BUILD_NO_WAIT=1 CG_BUILD_NO_SYSTEMD=1 \
-      CG_BUILD_BOOT_ID=boot1 CG_BUILD_REBOOT="echo REBOOT >> $T/reboot.log"
+  ( export AYIS_BUILD_ROOT=$T/r AYIS_BUILD_BACKOFF=0 AYIS_BUILD_TICK=0.05 AYIS_BUILD_HOME=$T/home AYIS_BUILD_NO_WAIT=1 AYIS_BUILD_NO_SYSTEMD=1 \
+      AYIS_BUILD_BOOT_ID=boot1 AYIS_BUILD_REBOOT="echo REBOOT >> $T/reboot.log"
     exec setsid python3 "$SRC" run >/dev/null 2>&1 ) &
   SUPPID=$!
 }
-st() { python3 -c "import json;d=json.load(open('$T/r/var/lib/cg-build/state.json'))['stages'];print(d['$1']['state'], d['$1']['attempts'])"; }
-rc() { tr -d '\n' < "$T/r/var/lib/cloud-gaming-bootstrap.rc" 2>/dev/null; }
+st() { python3 -c "import json;d=json.load(open('$T/r/var/lib/ayis-build/state.json'))['stages'];print(d['$1']['state'], d['$1']['attempts'])"; }
+rc() { tr -d '\n' < "$T/r/var/lib/ayis-bootstrap.rc" 2>/dev/null; }
 now_ms() { python3 -c 'import time;print(int(time.time()*1000))'; }
-compat() { cat "$T/r/var/log/cloud-gaming-bootstrap.log" 2>/dev/null; }
+compat() { cat "$T/r/var/log/ayis-bootstrap.log" 2>/dev/null; }
 
 echo "1. stages run in the order they need, and finish the build"
 fresh
@@ -85,7 +85,7 @@ echo "2. stages that need nothing from each other run together"
 fresh
 for n in p q; do
 stage $n "" "" 0 30 <<'S'
-echo "start $CG_STAGE $(python3 -c 'import time;print(int(time.time()*1000))')" >> "$ORDER"; sleep 1.2; echo "end $CG_STAGE $(python3 -c 'import time;print(int(time.time()*1000))')" >> "$ORDER"
+echo "start $AYIS_STAGE $(python3 -c 'import time;print(int(time.time()*1000))')" >> "$ORDER"; sleep 1.2; echo "end $AYIS_STAGE $(python3 -c 'import time;print(int(time.time()*1000))')" >> "$ORDER"
 S
 done
 writeplan
@@ -99,7 +99,7 @@ echo "3. stages that share a lock never overlap, and go in the plan's order"
 fresh
 for n in l1 l2 l3; do
 stage $n "" apt 0 30 <<'S'
-echo "start $CG_STAGE" >> "$ORDER"; sleep 0.4; echo "end $CG_STAGE" >> "$ORDER"
+echo "start $AYIS_STAGE" >> "$ORDER"; sleep 0.4; echo "end $AYIS_STAGE" >> "$ORDER"
 S
 done
 writeplan; sup run >/dev/null

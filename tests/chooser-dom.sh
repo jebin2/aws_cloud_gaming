@@ -3,17 +3,17 @@
 #
 # Every other renderer test in here reads app.js as text. That is why three UI
 # bugs shipped: a picker that was below the fold at narrow widths, a packaged
-# app that could not spawn cg, and - found by writing this file - a paint that
+# app that could not spawn ayis, and - found by writing this file - a paint that
 # threw and was silent because updateHeader() overwrote the error in the same
 # tick. Source assertions cannot see any of those. This loads the real page in
-# headless chromium, feeds it recorded `cg --json` answers, and reads the table
+# headless chromium, feeds it recorded `ayis --json` answers, and reads the table
 # back out of the DOM.
 #
 # Two things it pins that only a render can show:
 #   * a price cell is DISABLED for a stated reason - no quota, needs opt-in, no
 #     spot market - because "why can I not pick this" was half the confusion the
 #     table was built to remove;
-#   * the radio that is checked matches what cg says is configured, across all
+#   * the radio that is checked matches what ayis says is configured, across all
 #     three settings at once. A table that quietly disagrees with .env would be
 #     worse than the dropdowns it replaced.
 set -uo pipefail
@@ -95,7 +95,7 @@ const MACHINES = {
   { type: 'g6e.48xlarge', vcpu: 192, gpu: 'L40S', vram_gib: 384, ram_gib: 1536, store_gb: 7600,
     inr_hour_spot: 800, inr_hour_ondemand: 2400, fits_spot: false, fits_ondemand: false }],
 };
-// The real shape of `cg status --json`, with every identifier replaced. Built
+// The real shape of `ayis status --json`, with every identifier replaced. Built
 // from the live command rather than written by hand, because hand-written
 // fixtures only contain the fields whoever wrote them remembered - and the two
 // painter crashes that reached a user's machine were both a field this file did
@@ -107,7 +107,7 @@ const STATUS = {
       "plan": "PAID"
     },
     "archive": {
-      "bucket": "cg-library-test",
+      "bucket": "ayis-library-test",
       "bytes": 174813455930,
       "decision": "kept - a box exists (i-0123456789abcdef0)  (checked 2 min ago)",
       "expiry_days": 14,
@@ -128,7 +128,7 @@ const STATUS = {
       "spot": "0",
       "tailscale_api_key": "yes"
     },
-    "host": "gamevps",
+    "host": "ayis",
     "instance_type": "g4dn.xlarge",
     "local": {
       "auth_key": true,
@@ -145,7 +145,7 @@ const STATUS = {
     "res": {
       "elastic_ips": 0,
       "images": 0,
-      "key_pair": "gamevps",
+      "key_pair": "ayis",
       "security_group": "sg-0123456789abcdef0",
       "snapshots": 0,
       "volumes_gb": 50
@@ -158,7 +158,7 @@ const STATUS = {
       "vcpus": 4
     },
     "tailnet": {
-      "node": "gamevps",
+      "node": "ayis",
       "online": false
     }
   };
@@ -167,7 +167,7 @@ const STATUS = {
 // never ran in here at all - and paintSpec, which paintStatus calls on its
 // first line, was deleted and shipped.
 const LIBRARY = {
-  bucket: 'cg-library-test', games: [], total_bytes: 0, usd_month: 0,
+  bucket: 'ayis-library-test', games: [], total_bytes: 0, usd_month: 0,
   orphan_bytes: 0, orphan_usd_month: 0, disk_gb: 50, selectable_gb: 209,
   usd_per_gb_month: 0.025,
 };
@@ -180,11 +180,11 @@ const MAP = [[['sweep'], 'sweep'], [['config'], 'config'],
              [['machines'], 'machines'], [['status'], 'status'],
              [['library', 'list'], 'library'], [['watcher'], 'guards']];
 let nextId = 1; const handlers = [];
-window.cg = {
+window.ayis = {
   run(args) {
     const id = nextId++;
     const hit = MAP.find(([a]) => a.every((v, i) => args[i] === v));
-    // 60ms, not 0: runCg registers the job only AFTER awaiting run(), so events
+    // 60ms, not 0: runAyis registers the job only AFTER awaiting run(), so events
     // fired in the same tick arrive for an id it has not stored and vanish.
     setTimeout(() => {
       if (hit) for (const h of handlers)
@@ -382,7 +382,7 @@ d = sys.stdin.read()
 m = re.search(r"<pre id=\"probe-out\">(.*?)</pre>", d, re.S)
 print(html.unescape(m.group(1)) if m else "PROBE DID NOT RUN")')
 
-[[ -n ${CG_DOM_DUMP:-} ]] && { printf '%s\n' "$OUT"; exit 0; }
+[[ -n ${AYIS_DOM_DUMP:-} ]] && { printf '%s\n' "$OUT"; exit 0; }
 if [[ $OUT == "PROBE DID NOT RUN" || -z $OUT ]]; then
   echo "  FAIL the page did not render at all"
   echo ""; echo "chooser-dom: $pass passed, 1 failed"; exit 1
@@ -394,7 +394,7 @@ lacks    "no uncaught error" "$OUT" "ERRORS:"
 # and updateHeader overwrote it - first in the same tick, then when any OTHER
 # read finished. A read failure is sticky now, so an empty map really does mean
 # all six reads worked.
-lacks    "no painter failed"  "$OUT" "could not show cg"
+lacks    "no painter failed"  "$OUT" "could not show ayis"
 lacks    "  nor could not run"  "$OUT" "could not run:"
 contains "and no read failed at all" "$OUT" "FAILURES: "
 # Named effects, because "no error" is what passed while paintSpec was missing.
@@ -406,7 +406,7 @@ contains "paintGuards drew a net"           "$OUT" "PAINTED | guards | 1"
 check    "number headings are right-aligned, over their numbers" "$(grep '^HEADALIGN' <<<"$OUT")" "HEADALIGN | right,right"
 contains "the machine card says how much room it has" "$(grep '^BPICK' <<<"$OUT")" " GB"
 # The same numbers as provision's ExtraDiskGB test: one rule, two places.
-contains "the app and cg size the disk alike" "$OUT" "EXTRADISK | 0,0,240,160,190,70,0,0"
+contains "the app and ayis size the disk alike" "$OUT" "EXTRADISK | 0,0,240,160,190,70,0,0"
 
 echo "2. the table lives on Settings, and only there"
 contains "the Settings screen has it"  "$OUT" "TABLE s-chooser"

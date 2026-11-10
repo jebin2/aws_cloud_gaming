@@ -8,27 +8,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
-	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
+	"github.com/jebin2/ayis/internal/commands/status"
+	"github.com/jebin2/ayis/internal/costfacts"
+	"github.com/jebin2/ayis/internal/pricing"
+	fx "github.com/jebin2/ayis/internal/testfixture"
 )
 
-const host = "gamevps"
+const host = "ayis"
 
 var now = time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 
 // box is tests/cost-estimate.sh's account: one g6.xlarge (spot, or on demand),
-// its 100 GB disk made on the 1st, a 50 GB cg leftover made today, and another
+// its 100 GB disk made on the 1st, a 50 GB ayis leftover made today, and another
 // project's 500 GB disk.
 func box(onDemand bool) *fx.Scenario {
 	s := &fx.Scenario{
 		Account: "123456789012", KeyPair: true, SecGroup: true, SpotPrice: "0.2000", CPUHours: 10,
-		Credits: 122.29, Budget: "50", Bucket: "cg-library-test",
+		Credits: 122.29, Budget: "50", Bucket: "ayis-library-test",
 		Instances: []fx.Instance{{ID: "i-box", State: "running", Type: "g6.xlarge", Lifecycle: "spot", AZ: "ap-south-2a", Name: host}},
 		Volumes: []fx.Volume{
 			{ID: "vol-root", State: "in-use", GB: 100, Instance: "i-box", Created: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)},
-			{ID: "vol-left", State: "available", GB: 50, Created: now.Truncate(24 * time.Hour), Tags: map[string]string{"cg:host": host}},
+			{ID: "vol-left", State: "available", GB: 50, Created: now.Truncate(24 * time.Hour), Tags: map[string]string{"ayis:host": host}},
 			{ID: "vol-theirs", State: "available", GB: 500, Created: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
 		},
 	}
@@ -91,7 +91,7 @@ func TestTheMachineAsItIs(t *testing.T) {
 	lacks(t, out, "9.71")
 }
 
-func TestOnlyCgsDisksAreCounted(t *testing.T) {
+func TestOnlyAyissDisksAreCounted(t *testing.T) {
 	out := inputs(gather(t, box(false)), fl(0.9664)).Human(false, "")
 	has(t, out, "volumes         150 GB")
 	lacks(t, out, "650 GB")
@@ -107,15 +107,15 @@ func TestStorageAccruesEachDiskFromWhenItWasMade(t *testing.T) {
 
 func TestResourcesBlock(t *testing.T) {
 	out := inputs(gather(t, box(false)), fl(0.9664)).Human(false, "")
-	has(t, out, "resources in ap-south-2:", "instance        i-box  (running)", "key pair        gamevps",
-		"security group  gamevps-sg", "budget          $50/month", "credits remaining: $122.29",
-		"game library    s3://cg-library-test  EMPTY") // the bucket exists and holds nothing
+	has(t, out, "resources in ap-south-2:", "instance        i-box  (running)", "key pair        ayis",
+		"security group  ayis-sg", "budget          $50/month", "credits remaining: $122.29",
+		"game library    s3://ayis-library-test  EMPTY") // the bucket exists and holds nothing
 }
 
 func TestNoMachineSaysWhatItCoversAndOrphansAreFlagged(t *testing.T) {
 	s := box(false)
 	s.Instances = nil
-	s.Volumes = []fx.Volume{{ID: "vol-left", State: "available", GB: 50, Created: now, Tags: map[string]string{"cg:host": host}}}
+	s.Volumes = []fx.Volume{{ID: "vol-left", State: "available", GB: 50, Created: now, Tags: map[string]string{"ayis:host": host}}}
 	out := inputs(gather(t, s), fl(0.9664)).Human(false, "")
 	has(t, out, "instance        none", "<- ORPHANED, still billing", "no instance exists")
 	s.Volumes = nil
@@ -150,7 +150,7 @@ func TestTheArchiveIsTheGamesOnly(t *testing.T) {
 	s := box(false)
 	s.Objects = []fx.Object{{Key: "steam/account/login.tar", Size: 22645}}
 	out := inputs(gather(t, s), nil).Human(false, "")
-	has(t, out, "game library    s3://cg-library-test  EMPTY - no games archived")
+	has(t, out, "game library    s3://ayis-library-test  EMPTY - no games archived")
 	s.Objects = append(s.Objects, fx.Object{Key: "steam/steamapps/common/g/a.bin", Size: 171986001052})
 	out = inputs(gather(t, s), nil).Human(false, "")
 	has(t, out, "1 objects, 161GB  ($4.00/mo)")
@@ -159,7 +159,7 @@ func TestTheArchiveIsTheGamesOnly(t *testing.T) {
 func TestABucketThatCannotBeReadIsNotEmpty(t *testing.T) {
 	s := box(false)
 	s.BucketGone = true
-	has(t, inputs(gather(t, s), nil).Human(false, ""), "none - s3://cg-library-test does not exist")
+	has(t, inputs(gather(t, s), nil).Human(false, ""), "none - s3://ayis-library-test does not exist")
 	s = box(false)
 	s.Denied = true
 	out := inputs(gather(t, s), nil).Human(false, "")
@@ -185,7 +185,7 @@ func TestAWSRefusingEndsItWithItsOwnWords(t *testing.T) {
 }
 
 // tests/cost-daily.sh "4e. storage as the bill sees it": a region move left the
-// games in a bucket cg no longer looks at.
+// games in a bucket ayis no longer looks at.
 func TestStorageAsTheBillSeesIt(t *testing.T) {
 	d := func(back int) string { return now.AddDate(0, 0, -back).Format("2006-01-02") }
 	s := &fx.Scenario{Account: "1", Bucket: "", Month: []fx.Day{
@@ -251,7 +251,7 @@ func TestTheLinesBorrowedFromStatus(t *testing.T) {
 	out := in.Human(false, "")
 	has(t, out, "steam login     none archived - a new box will ask you to sign in",
 		"game archive    kept - last used 16h ago; deleted in 6d 7h unless a box is launched  (checked 6 min ago)",
-		"instance role   gamevps-box", "watchdog role   gamevps-cloud-watchdog")
+		"instance role   ayis-box", "watchdog role   ayis-cloud-watchdog")
 	// In the order the Bash printed them: library, login, countdown, roles, budget.
 	order := []string{"game library", "steam login", "game archive", "instance role", "watchdog role", "budget"}
 	last := -1

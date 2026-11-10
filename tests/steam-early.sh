@@ -17,21 +17,21 @@ unit=$(sed -n "/steam-prewarm.service <<'EOF'/,/^EOF$/p" $M)
 line() { grep -n "$1" $M | head -1 | cut -d: -f1; }
 
 echo "1. the update is not held up by the game restore"
-lacks    "the unit is not ordered after it" "$unit" "After=graphical.target cg-library-restore.service"
-lacks    "  nor does it require it"        "$unit" "Requires=cg-library-restore.service"
+lacks    "the unit is not ordered after it" "$unit" "After=graphical.target ayis-library-restore.service"
+lacks    "  nor does it require it"        "$unit" "Requires=ayis-library-restore.service"
 contains "  and has the time to wait for a long restore" "$unit" "TimeoutStartSec=7200"
 
 echo "2. what does need the games waits for them, inside the script"
 contains "it waits for the restore before registering the library" "$mod" 'phase "waiting for your games to finish restoring"'
 check    "  and that comes before the library is registered" "$(( $(line 'waiting for your games to finish restoring') < $(line 'phase "registering NVMe library"') ))" "1"
-contains "the saved login is waited for before Steam starts" "$mod" '/var/lib/cg-library/account-done'
+contains "the saved login is waited for before Steam starts" "$mod" '/var/lib/ayis-library/account-done'
 check    "  and that comes before the client is started"   "$(( $(line 'account-done') < $(line 'phase "unpacking client and downloading update"') ))" "1"
 
 echo "3. the early run stops after the client is installed"
-check    "it leaves before the library, the dock and the marker" "$(( $(line '\[\[ -n \${CG_EARLY:-} \]\] && exit 0') < $(line 'phase "registering NVMe library"') ))" "1"
-check    "  and before the marker is written"  "$(( $(line 'CG_EARLY:-} \]\] && exit 0') < $(line 'touch "\$MARK"') ))" "1"
-contains "it uses a virtual screen"            "$mod" 'export DISPLAY="${CG_DISPLAY:-:0}"'
-contains "  on its own screen"                  "$mod" 'CG_EARLY=1 CG_DISPLAY=:99'
+check    "it leaves before the library, the dock and the marker" "$(( $(line '\[\[ -n \${AYIS_EARLY:-} \]\] && exit 0') < $(line 'phase "registering NVMe library"') ))" "1"
+check    "  and before the marker is written"  "$(( $(line 'AYIS_EARLY:-} \]\] && exit 0') < $(line 'touch "\$MARK"') ))" "1"
+contains "it uses a virtual screen"            "$mod" 'export DISPLAY="${AYIS_DISPLAY:-:0}"'
+contains "  on its own screen"                  "$mod" 'AYIS_EARLY=1 AYIS_DISPLAY=:99'
 upd=$(cat lib/bootstrap.d/73-steam-update.sh)
 contains "its own stage runs it, as the user"  "$upd" 'sudo -u "$USER_NAME" -H /usr/local/bin/steam-prewarm-early.sh'
 contains "  and never fails the build over it"   "$upd" '|| echo "note: the Steam client update did not finish here'

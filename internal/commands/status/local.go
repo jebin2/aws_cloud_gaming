@@ -57,7 +57,7 @@ func (g *Gatherer) ready(ctx context.Context, b *Box, online bool, ip string) {
 		out, err := g.Runner.Output(ctx, "ssh", "-i", filepath.Join(g.Home, ".ssh", g.Host+".pem"),
 			"-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes",
 			"ubuntu@"+ip,
-			`r=no; test -f /var/lib/cloud-gaming-ready && r=yes
+			`r=no; test -f /var/lib/ayis-ready && r=yes
 echo "$r $(mountpoint -q /scratch && df -B1 --output=used,avail /scratch | tail -1 | awk "{print \$1+\$2}")"`)
 		if err != nil {
 			r = ""

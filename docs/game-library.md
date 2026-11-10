@@ -14,38 +14,38 @@ the Steam login is still restored. Pressing Play lists the saved games; the tick
 first, each on the NVMe if it still fits what is left (less room kept free for later downloads: a fifth of
 the games, at least 30 GB), otherwise on a disk added for the purpose at `/scratch2/steam`. The disk is sized
 from the overflow only, so a selection that fits adds no disk, and the size can be changed before Play. The
-app hands `cg open` the list (`--games id:bytes,…`, `--extra-gb N`, `--extra-apps ids` for the ones on the
-added disk); `cg open` copies them and reports each one's progress (`restore` events) before the stream
+app hands `ayis open` the list (`--games id:bytes,…`, `--extra-gb N`, `--extra-apps ids` for the ones on the
+added disk); `ayis open` copies them and reports each one's progress (`restore` events) before the stream
 starts. Games on the added disk survive a stop, so they are not copied again; games on the NVMe are, every
 start. Pushing never deletes a game that is not on the machine: leaving one unticked keeps its saved copy.
 
 Games are not always in that one place. A disk added later is `/scratch2/steam`, and a game installed
-from Steam's own default folder lands on the root disk. **Push, check and `cg games` look in every library
+from Steam's own default folder lands on the root disk. **Push, check and `ayis games` look in every library
 on the box**: `/scratch/steam`, `/scratch2/steam`, and each folder Steam lists in `libraryfolders.vdf` (the
 log says `also in <folder>` for any but the first). A game found in two is archived once. **Restore** puts each
 game where the build said (above), and skips what does not fit its library.
 
 The restore starts at the **top** of the build and runs in the background while everything else
 installs, so it overlaps the NVIDIA driver rather than being a wait of its own. The readiness
-marker waits for it, so `cg init` reports the box ready when the games are actually there.
+marker waits for it, so `ayis init` reports the box ready when the games are actually there.
 
-    cg library              what is local, what is archived, what it costs
-    cg library push         mirror now  (--verify for a full comparison)
-    cg library pull         restore now
-    cg library --bucket     the bucket name, answerable with the box gone
+    ayis library              what is local, what is archived, what it costs
+    ayis library push         mirror now  (--verify for a full comparison)
+    ayis library pull         restore now
+    ayis library --bucket     the bucket name, answerable with the box gone
 
-`cg destroy --no-push` exists for the case where the box's local copy is **worse** than what is
+`ayis destroy --no-push` exists for the case where the box's local copy is **worse** than what is
 archived - a half-finished restore, a game mid-repair, a disk you do not trust. Skipping this
-end's push is only half the job, because `cg-library-shutdown.service` runs on the box and fires
+end's push is only half the job, because `ayis-library-shutdown.service` runs on the box and fires
 on any graceful shutdown, so `--no-push` **revokes the box's S3 write access** first. That works
 even when the box is too busy to answer ssh, which is usually why you wanted it. Access is
-restored immediately afterwards, and `cg init` rewrites the policy on every build in any case.
+restored immediately afterwards, and `ayis init` rewrites the policy on every build in any case.
 
 **The archive is the only copy.** It is written in three places, and not a fourth:
 
-1. **`cg stop`** - and the "stop instance now?" prompt at the end of `cg open`
-2. **`cg destroy`**
-3. **`cg-library-shutdown.service`**, from `ExecStop`, as the machine goes down
+1. **`ayis stop`** - and the "stop instance now?" prompt at the end of `ayis open`
+2. **`ayis destroy`**
+3. **`ayis-library-shutdown.service`**, from `ExecStop`, as the machine goes down
 
 (1) and (2) **refuse to proceed** if the push fails, rather than printing a warning next to the
 thing that just lost your games; `--force` overrides and says what it costs.
@@ -58,12 +58,12 @@ wipe the instance store and lose whatever was installed since the last explicit 
 
 That push is allowed **30 minutes** (`TimeoutStopSec=1800`). AWS may power off a box it was asked
 to terminate before then, which is why the on-host watchdog pushes *before* it shuts down, where
-no timeout applies, and why `cg destroy` pushes before it deletes anything. A box still going down
+no timeout applies, and why `ayis destroy` pushes before it deletes anything. A box still going down
 an hour later is forced by the cloud watchdog.
 
-**Only one push runs at a time.** `cg-library push` takes a lock in `/var/lib/cg-library`, and a
+**Only one push runs at a time.** `ayis-library push` takes a lock in `/var/lib/ayis-library`, and a
 second push waits for the first instead of racing it. Two can otherwise meet - AWS terminating the
-box while the watchdog is mid-push, or `cg destroy` pushing at the same moment - and both would
+box while the watchdog is mid-push, or `ayis destroy` pushing at the same moment - and both would
 upload the same files and rewrite `index.json` from their own stale copies, losing an entry. The
 waiting push skips whatever the first already uploaded.
 
@@ -71,12 +71,12 @@ There is deliberately **no periodic timer**. An earlier version pushed every 10 
 should be uploading a game library, and propagating deletions while doing it, while you are
 playing. The remaining exposure is a stop that is not graceful - a **spot interruption** gives
 about two minutes, which will not upload a large library, and a hard power-off gives none.
-`cg library push` takes a checkpoint whenever you want one, and `cg library check` asks whether
+`ayis library push` takes a checkpoint whenever you want one, and `ayis library check` asks whether
 the disk matches the archive without uploading anything.
 
-The explicit push is wired into `lib/game`'s `down()`, not into `cg stop`, because the "stop
-instance now?" prompt at the end of `cg open` calls `down()` directly and never comes back
-through `cg`. Putting the gate in the CLI would have meant two pushes on `cg stop` and none on
+The explicit push is wired into `lib/game`'s `down()`, not into `ayis stop`, because the "stop
+instance now?" prompt at the end of `ayis open` calls `down()` directly and never comes back
+through `ayis`. Putting the gate in the CLI would have meant two pushes on `ayis stop` and none on
 the path people actually use.
 
 ## Measured numbers
@@ -120,7 +120,7 @@ improves the odds on a spot launch. The cost is the ~10 minute restore, which is
 worth the work to hide it inside the build.
 
 If you still have that volume, it is **not** attached or mounted any more, and it is **not**
-deleted either - `cg games --volume` shows what it still costs and `cg games --volume --delete` reclaims it.
+deleted either - `ayis games --volume` shows what it still costs and `ayis games --volume --delete` reclaims it.
 
 ## The guards, and why they exist
 
@@ -159,7 +159,7 @@ empties the archive" **impossible by construction**, where the whole-tree sync n
 guard to catch it - the same failure that removed Shakes & Fidget when it was uninstalled and
 Proton when Steam moved it to another library.
 
-`cg init` asks which to restore, before the instance launches - the restore runs at boot with no
+`ayis init` asks which to restore, before the instance launches - the restore runs at boot with no
 terminal, and has to start early to overlap the build:
 
     Archive (209 GB selectable of 229 GB - 20 GB reserved for Proton, shaders, headroom):
@@ -185,23 +185,23 @@ decision a tool should make for you.
 **Enter means `none`.** Enter is what people press to get past a prompt, and defaulting to `all`
 would start a 158 GB transfer for a box they might have wanted empty. Restoring a game is cheap
 to ask for and annoying to undo, so it costs one deliberate keystroke; the archive is untouched
-either way and `cg library pull --apps <id>` fetches it later. The choice is still remembered in
+either way and `ayis library pull --apps <id>` fetches it later. The choice is still remembered in
 `.env` as `GAME_APPS`, which is what non-interactive runs use.
 
-The box enforces the same arithmetic independently, because `CG_APPS` can still say `all` from an
+The box enforces the same arithmetic independently, because `AYIS_APPS` can still say `all` from an
 old `.env` or a run where the prompt never happened. It skips what will not fit and says so,
 rather than filling `/scratch` mid-restore - which fails in the least legible way available, as a
 half-restored game that Steam reports as installed.
 
-    cg library list            what is archived, per game, and the monthly cost
-    cg library pull --apps <csv|all|none>
-    cg library forget <appid>  delete one game from the archive (type FORGET)
+    ayis library list            what is archived, per game, and the monthly cost
+    ayis library pull --apps <csv|all|none>
+    ayis library forget <appid>  delete one game from the archive (type FORGET)
 
 A push that dies leaves files with no manifest and no index entry - deliberately, so a
 half-uploaded game is never mistaken for a complete one. Nothing could then *see* them:
-`cg library list` read the index and reported an empty archive while 76 GB of a dead download
-sat there costing INR 167/month, and `forget` could not reach it either. `cg library list` now
-reports orphaned objects and `cg library clean` removes them, behind a typed `CLEAN`.
+`ayis library list` read the index and reported an empty archive while 76 GB of a dead download
+sat there costing INR 167/month, and `forget` could not reach it either. `ayis library list` now
+reports orphaned objects and `ayis library clean` removes them, behind a typed `CLEAN`.
 
 **The archive no longer shrinks on its own**, which is the price of never deleting an absent
 game. `forget` is how a game leaves it - with a typed word, because there is no versioning behind
@@ -211,7 +211,7 @@ the bucket. Both games archived is 288 GB, **$7.20/month (INR 634)**; one is $4.
 
 S3 cannot store a symlink, and `--no-follow-symlinks` is what keeps the uploader from recursing
 into `/` through a Proton prefix's `dosdevices/z:`. So `push` records every symlink in the
-library into `.cg-symlinks.tsv` (`path<TAB>target`) before the sync, and `pull` recreates them
+library into `.ayis-symlinks.tsv` (`path<TAB>target`) before the sync, and `pull` recreates them
 afterwards - additively, never overwriting anything already there.
 
 This is not cosmetic. A restored game whose `dosdevices` is empty passes every check - manifest
@@ -222,7 +222,7 @@ runtime recovers on its own; a *game's* prefix has no such owner and never self-
 ## Proton and the Steam runtime are deliberately not mirrored
 
 Steam installs compatibility tools into whichever library it likes - usually the client's own,
-on the root disk, which `cg destroy` deletes. They are therefore re-downloaded on each rebuild
+on the root disk, which `ayis destroy` deletes. They are therefore re-downloaded on each rebuild
 rather than restored from S3.
 
 This was measured and left alone: **under a minute**. Mirroring them would add ~2 GB to the
@@ -241,7 +241,7 @@ became necessary on 2026-09-14, when one push archived four of them as if they w
 The old whole-tree sync would have deleted them again the next time they were absent. Per-game
 archiving deliberately never removes an app that is not installed - the property that stops an
 empty disk emptying the archive - so once in, they would have stayed. They were removed with
-`cg library forget`, and `is_steam_tool` in `host/cg-library` now keeps them out:
+`ayis library forget`, and `is_steam_tool` in `host/ayis-library` now keeps them out:
 
 - installdir `Proton <anything>` or `SteamLinuxRuntime*` - with the space, so a game installed
   as `ProtonHunter` is still archived
@@ -249,7 +249,7 @@ empty disk emptying the archive - so once in, they would have stayed. They were 
   1161040 (Proton BattlEye Runtime)
 
 Push logs each skip (`not archiving Proton Experimental (1493710) - a Steam tool`). If a new tool
-ever slips through, extend that function and `cg library forget` its appid.
+ever slips through, extend that function and `ayis library forget` its appid.
 
 ## The Steam login is not in the library
 
@@ -294,7 +294,7 @@ handling earn their place. Links are stored as links, and the tar is bounded by 
 
 The token is a credential in your bucket. It is private and reached through the instance role,
 but anyone who can read the bucket holds an encrypted copy of your Steam session.
-`cg destroy --no-push` skips it along with everything else.
+`ayis destroy --no-push` skips it along with everything else.
 
 ## Comparison is size-only
 
@@ -304,12 +304,12 @@ every session. Both directions use `--size-only`, which makes them idempotent (v
 straight after a pull transfers nothing).
 
 The trade-off is real: a game patch that rewrites a file to exactly the same length is not
-noticed. `cg library push --verify` does a full comparison; run it after a big game update if
+noticed. `ayis library push --verify` does a full comparison; run it after a big game update if
 you want certainty.
 
 ## What `/scratch` also holds
 
-Browser downloads and temp files, in `/scratch/tmp` and `/scratch/downloads`. `cg clean` clears
+Browser downloads and temp files, in `/scratch/tmp` and `/scratch/downloads`. `ayis clean` clears
 **only those two directories** by name - it used to wipe everything directly under `/scratch`,
 which was safe when the games were on a separate volume and is now the fastest way to delete a
 140 GB library and have the mirror faithfully propagate the deletion.
@@ -322,21 +322,21 @@ but not a destroy. The Fossilize cache that matters most is *inside* the library
 
 With no box, the archive is the only thing that bills - about INR 350 a month for 160 GB. After
 14 days with no box launched or running, the cloud watchdog empties and deletes the bucket. The
-next `cg init` recreates it empty: Steam downloads the games fresh, and asks you to sign in again
+next `ayis init` recreates it empty: Steam downloads the games fresh, and asks you to sign in again
 because the saved login lived in the archive too. `GAME_ARCHIVE_EXPIRY_DAYS=0` in `.env` keeps it
-forever. `cg status` shows the countdown. How it decides, and why it errs towards keeping:
+forever. `ayis status` shows the countdown. How it decides, and why it errs towards keeping:
 [cost-guards.md](cost-guards.md#game-archive-expiry).
 
 ## Watching a download
 
 The Games page has an **On your game PC** card above the saved games: each game the box has, and for a download
 the percentage, GB done of the whole, speed and minutes left, with a warning and an Add disk button when the
-downloads need more room than is free. It reads `cg games --json --box` (the box only: no look at S3, nothing
+downloads need more room than is free. It reads `ayis games --json --box` (the box only: no look at S3, nothing
 asked of AWS), every 15 s while something downloads and every minute while nothing does, only while the Games
 page is open and the machine runs. It is the one read the app makes on a timer.
 
 When a download finishes, the phone is told once ("Game ready"): `game-notify.timer` on the box looks at the
-manifests every minute, remembers each game it saw downloading, and sends through `cg-notify` when that game
+manifests every minute, remembers each game it saw downloading, and sends through `ayis-notify` when that game
 is fully installed and neither paused nor waiting for an update. A game that was simply there says nothing.
 Off without `GAME_NTFY_URL`, like the box's other notifications.
 
@@ -344,12 +344,12 @@ Off without `GAME_NTFY_URL`, like the box's other notifications.
 
 An on-demand machine that stops keeps its root disk, and its added games disk if it has one. The
 added disk is $0.0912 a GB-month and holds nothing that Saved games does not, so a stopped machine
-may drop it: the app's **Remove game disk** (`cg disk remove`). Playing again asks which of the
+may drop it: the app's **Remove game disk** (`ayis disk remove`). Playing again asks which of the
 saved games to bring back, makes a disk sized for them (their size plus 20 GB, to 10 GB steps) and
-connects it before the machine starts (`cg open --extra-gb N --extra-apps ids`). AWS allows
+connects it before the machine starts (`ayis open --extra-gb N --extra-apps ids`). AWS allows
 attaching a disk to a stopped machine, and nothing bills for it until the machine runs.
 
-What makes deleting safe is one small object, `steam/pushed.json`. `cg-library push` removes it
+What makes deleting safe is one small object, `steam/pushed.json`. `ayis-library push` removes it
 before it starts and writes it only when it ends having saved every game it found; a game skipped
 (Steam still working on it, a broken install) or a push that dies leaves none. The laptop deletes
 the disk only when the marker is newer than the machine's last start, and reads anything else, an

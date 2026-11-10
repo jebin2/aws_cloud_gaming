@@ -3,7 +3,7 @@
 //
 // AWS hands a key pair's private key out once, when the pair is created. A second
 // laptop, or a lost .pem, therefore had no way in to a box launched with that
-// pair: `cg init` reused the pair, and every ssh step of the build failed. The
+// pair: `ayis init` reused the pair, and every ssh step of the build failed. The
 // pair is now reused only when the .pem here is its private key.
 package sshkey
 
@@ -166,7 +166,7 @@ func Ensure(ctx context.Context, c KeyAdmin, name, pem, tagKey string, say func(
 	}
 	say("==> creating key pair -> " + pem)
 	if tagKey == "" {
-		tagKey = "cg:host"
+		tagKey = "ayis:host"
 	}
 	o, err := c.CreateKeyPair(ctx, &ec2.CreateKeyPairInput{KeyName: aws.String(name), TagSpecifications: []types.TagSpecification{
 		{ResourceType: types.ResourceTypeKeyPair, Tags: []types.Tag{{Key: aws.String(tagKey), Value: aws.String(name)}}}}})

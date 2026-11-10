@@ -6,7 +6,7 @@ import (
 )
 
 // Windows has no sh: a streamed command ran `sh`, failed to start, and exited 1 with
-// not one word said (cg library push on a real Windows PC).
+// not one word said (ayis library push on a real Windows PC).
 func TestStreamingNeedsNoShellOnWindows(t *testing.T) {
 	ssh := []string{"-i", "k", "ubuntu@1.2.3.4", "echo hi"}
 	if name, args := streamCommand("windows", ssh); name != "ssh" || strings.Join(args, " ") != strings.Join(ssh, " ") {

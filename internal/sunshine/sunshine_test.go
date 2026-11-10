@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
+	fx "github.com/jebin2/ayis/internal/testfixture"
 )
 
 // server behaves as Sunshine does: /welcome is 200 until an account exists,

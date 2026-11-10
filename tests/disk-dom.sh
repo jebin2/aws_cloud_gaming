@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Add disk, on the Machine page: how much room there is, what adding does (make
 # the disk bigger while the game runs, or move the games onto a new disk and
-# close Steam), what it costs an hour, and the one command it runs. cg says which
-# of the two it is (cg disk --json); the window only asks how much.
+# close Steam), what it costs an hour, and the one command it runs. ayis says which
+# of the two it is (ayis disk --json); the window only asks how much.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 T=$(mktemp -d); pass=0; fail=0
@@ -32,10 +32,10 @@ window.__errs = [];
 window.__ran = [];
 addEventListener('error', e => window.__errs.push(e.message));
 addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
-window.cg = {
+window.ayis = {
   run: (args) => { window.__ran.push(args.join(' '));
                    window.__lastId = (window.__lastId || 0) + 1;
-                   // cg disk add changes the machine, so it runs alone.
+                   // ayis disk add changes the machine, so it runs alone.
                    return Promise.resolve({ ok: true, id: window.__lastId, write: args[0] === 'disk' && args[1] === 'add' }); },
   answer: () => Promise.resolve(true), cancel: () => Promise.resolve(true),
   busy: () => Promise.resolve([]),
@@ -175,7 +175,7 @@ print(html.unescape(m.group(1)) if m else "NO PROBE OUTPUT")')
 [[ $OUT == *"NO PROBE OUTPUT"* ]] && { echo "  FAIL the page did not render"; echo "disk-dom: 0 passed, 1 failed"; exit 1; }
 row() { grep -m1 "^$1 " <<<"$OUT" || true; }
 
-echo "1. asking cg, not guessing"
+echo "1. asking ayis, not guessing"
 check    "it reads the disk first"        "$(row ASKED)" "ASKED | disk --json"
 contains "  and waits, with nothing to press" "$(row LOOKING)" "yes disabled=true"
 
@@ -204,7 +204,7 @@ lacks    "  without the six-hour rule that does not apply" "$(row 'MOVE WARN')" 
 echo "4b. the one step left, in Steam"
 contains "the window comes back, saying the disk is added" "$(row STEP)" "open=true | Disk added: 100 GB"
 contains "  and where to click"            "$(row STEP)" "Settings > Storage"
-contains "  and which drive to pick, by the name Steam shows" "$(row STEP)" "the drive at /scratch2 (named cgextra): the games disk"
+contains "  and which drive to pick, by the name Steam shows" "$(row STEP)" "the drive at /scratch2 (named ayisextra): the games disk"
 check    "  only Done is left to press"    "$(row 'STEP BUTTONS')" "STEP BUTTONS | done hidden=false cancel hidden=true add hidden=true sizes hidden=true"
 check    "Esc does nothing"               "$(row 'STEP ESC')" "STEP ESC | key prevented=true cancel prevented=true open=true"
 contains "Done asks the machine"          "$(row CHECKING)" "CHECKING | disk --json"

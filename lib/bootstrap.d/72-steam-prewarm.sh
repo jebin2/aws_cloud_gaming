@@ -178,7 +178,7 @@ chmod 755 /usr/local/bin/steam-ensure-library.sh
 cat > /etc/systemd/system/steam-library.service <<'EOF'
 [Unit]
 Description=Keep the game library registered with Steam
-After=graphical.target steam-prewarm.service cg-library-restore.service
+After=graphical.target steam-prewarm.service ayis-library-restore.service
 
 [Service]
 Type=oneshot
@@ -202,9 +202,9 @@ MARK="$HOME/.steam-prewarmed"
 LOG="$HOME/steam-prewarm.log"
 PHASE="$HOME/.steam-phase"
 phase() { echo "$*" > "$PHASE"; }
-# CG_EARLY=1 is the run started during the build, on a virtual screen (CG_DISPLAY),
+# AYIS_EARLY=1 is the run started during the build, on a virtual screen (AYIS_DISPLAY),
 # that only unpacks and updates the client: see steam-prewarm-early.sh below.
-export DISPLAY="${CG_DISPLAY:-:0}"
+export DISPLAY="${AYIS_DISPLAY:-:0}"
 export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
 # Steam's first run puts up a zenity dialog. Without a session bus zenity dies
 # and Steam reports "Installation cancelled" - a systemd User= service gets no
@@ -275,10 +275,10 @@ client_installed() {
 # The client update does not touch the games, so it does not wait for them. It does
 # wait for the saved Steam login to be put back (the restore's first, small step):
 # a Steam that starts while that is being unpacked would write over it.
-if [[ -z ${CG_EARLY:-} ]]; then
+if [[ -z ${AYIS_EARLY:-} ]]; then
   for _ in $(seq 1 36); do
-    [[ -f /var/lib/cg-library/account-done ]] && break
-    [[ $(systemctl is-active cg-library-restore.service 2>/dev/null) != activating ]] && break
+    [[ -f /var/lib/ayis-library/account-done ]] && break
+    [[ $(systemctl is-active ayis-library-restore.service 2>/dev/null) != activating ]] && break
     sleep 5
   done
 fi
@@ -320,14 +320,14 @@ ROOT=$(readlink -f "$HOME/.steam/steam" 2>/dev/null || echo "")
 
 # The run started during the build stops here: the client is unpacked and updated,
 # and everything below needs the desktop and the restored games.
-[[ -n ${CG_EARLY:-} ]] && exit 0
+[[ -n ${AYIS_EARLY:-} ]] && exit 0
 
 # Only now does it need the games: Steam must not adopt a library that is still
 # being filled, or it decides the games are damaged. The client update above
 # ran beside the restore; this waits for the rest of it.
-if [[ $(systemctl is-active cg-library-restore.service 2>/dev/null) == activating ]]; then
+if [[ $(systemctl is-active ayis-library-restore.service 2>/dev/null) == activating ]]; then
   phase "waiting for your games to finish restoring"
-  while [[ $(systemctl is-active cg-library-restore.service 2>/dev/null) == activating ]]; do sleep 5; done
+  while [[ $(systemctl is-active ayis-library-restore.service 2>/dev/null) == activating ]]; do sleep 5; done
 fi
 
 # Registering the NVMe library is an invariant that must survive stops and
@@ -376,7 +376,7 @@ set -uo pipefail
 Xvfb :99 -screen 0 1280x720x24 -nolisten tcp >/dev/null 2>&1 &
 XPID=$!
 trap 'kill $XPID 2>/dev/null' EXIT
-CG_EARLY=1 CG_DISPLAY=:99 /usr/local/bin/steam-prewarm.sh
+AYIS_EARLY=1 AYIS_DISPLAY=:99 /usr/local/bin/steam-prewarm.sh
 EOF
 chmod 755 /usr/local/bin/steam-prewarm-early.sh
 else

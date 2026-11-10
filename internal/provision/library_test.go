@@ -103,7 +103,7 @@ func (i *iamFake) GetInstanceProfile(context.Context, *iam.GetInstanceProfileInp
 	}
 	p := &iamtypes.InstanceProfile{}
 	if i.wrapped {
-		p.Roles = []iamtypes.Role{{RoleName: aws.String("gamevps-box")}}
+		p.Roles = []iamtypes.Role{{RoleName: aws.String("ayis-box")}}
 	}
 	return &iam.GetInstanceProfileOutput{InstanceProfile: p}, nil
 }
@@ -124,7 +124,7 @@ func (i *iamFake) AddRoleToInstanceProfile(context.Context, *iam.AddRoleToInstan
 func lib(s *s3Fake, i *iamFake) (Library, *[]string, *time.Duration) {
 	var notes []string
 	var slept time.Duration
-	return Library{S3: s, IAM: i, Account: "123456789012", Host: "gamevps", Region: "ap-south-1",
+	return Library{S3: s, IAM: i, Account: "123456789012", Host: "ayis", Region: "ap-south-1",
 		Note: func(x string) { notes = append(notes, x) }, Sleep: func(d time.Duration) { slept += d }}, &notes, &slept
 }
 
@@ -190,7 +190,7 @@ func TestEnsureWaitsOutTheNameBeingHeldAfterADeleteAndGivesUpSaying(t *testing.T
 	s = &s3Fake{createFail: 100}
 	l, _, _ = lib(s, &iamFake{})
 	_, err := l.Ensure(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "after 8 attempts") || !strings.Contains(err.Error(), "cg destroy --all") {
+	if err == nil || !strings.Contains(err.Error(), "after 8 attempts") || !strings.Contains(err.Error(), "ayis destroy --all") {
 		t.Errorf("%v", err)
 	}
 	// A hardening that cannot be set is said and does not stop the build.
@@ -253,12 +253,12 @@ func TestBudgetIsInRupeesAtTodaysRateAndAlertsEveryone(t *testing.T) {
 	fx := 94.0
 	c := &budgetsFake{}
 	var out []string
-	b := Budget{C: c, Account: "123", Host: "gamevps", INR: 5000, FX: &fx, Email: "a@b.c, d@e.f ,", Out: func(s string) { out = append(out, s) }}
+	b := Budget{C: c, Account: "123", Host: "ayis", INR: 5000, FX: &fx, Email: "a@b.c, d@e.f ,", Out: func(s string) { out = append(out, s) }}
 	if err := b.Arm(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	bud := c.created.Budget
-	if aws.ToString(bud.BudgetName) != "gamevps-monthly" || aws.ToString(bud.BudgetLimit.Amount) != "53.19" || aws.ToBool(bud.CostTypes.IncludeCredit) || !aws.ToBool(bud.CostTypes.IncludeTax) {
+	if aws.ToString(bud.BudgetName) != "ayis-monthly" || aws.ToString(bud.BudgetLimit.Amount) != "53.19" || aws.ToBool(bud.CostTypes.IncludeCredit) || !aws.ToBool(bud.CostTypes.IncludeTax) {
 		t.Errorf("%+v %+v", bud, bud.CostTypes)
 	}
 	n := c.created.NotificationsWithSubscribers
@@ -364,7 +364,7 @@ func TestEnsureRetriesOnlyTheDelayAndAnswersTheRestAtOnce(t *testing.T) {
 	s := &s3Fake{createErr: errors.New("AccessDenied: Access Denied")}
 	l, _, slept := lib(s, &iamFake{})
 	_, err := l.Ensure(context.Background())
-	if err == nil || s.creates != 1 || *slept != 0 || !strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "cg destroy --all") {
+	if err == nil || s.creates != 1 || *slept != 0 || !strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "ayis destroy --all") {
 		t.Errorf("err %v creates %d slept %v", err, s.creates, *slept)
 	}
 	s = &s3Fake{createErr: errors.New("BucketAlreadyExists: The requested bucket name is not available")}
@@ -394,7 +394,7 @@ func (i *iamNoWrap) AddRoleToInstanceProfile(context.Context, *iam.AddRoleToInst
 func TestEnsureFailsWhenTheRoleCannotGoInTheProfile(t *testing.T) {
 	l, _, _ := lib(&s3Fake{}, &iamFake{})
 	l.IAM = &iamNoWrap{}
-	if _, err := l.Ensure(context.Background()); err == nil || !strings.Contains(err.Error(), "could not put the role gamevps-box in its instance profile: AccessDenied") {
+	if _, err := l.Ensure(context.Background()); err == nil || !strings.Contains(err.Error(), "could not put the role ayis-box in its instance profile: AccessDenied") {
 		t.Errorf("%v", err)
 	}
 }

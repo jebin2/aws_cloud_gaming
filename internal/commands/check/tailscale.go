@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
 // ensureAuthKey: use what is stored if it is still good; replace it when it is
@@ -55,7 +55,7 @@ func EnsureAuthKey(ctx context.Context, env *config.Env, out *output.Out, tsFor 
 		if m.Err != "" {
 			c.Out.Log("  " + m.Err)
 		}
-		// Tags are the usual reason, and it is not something cg can guess at.
+		// Tags are the usual reason, and it is not something ayis can guess at.
 		c.Out.Log("  make one yourself: https://login.tailscale.com/admin/settings/keys")
 		return "", false
 	}
@@ -78,7 +78,7 @@ func (c *Checker) needToken() bool {
 	if c.Env.Get("TAILSCALE_API_KEY") != "" {
 		return false
 	}
-	c.Out.Die("cannot check the Tailscale auth key: no Tailscale API token is saved.\n       Nothing was launched. Without the check, a key that no longer works is found\n       out only after the machine is billing. Add an access token in\n       Settings > Private network, or with cg creds tailscale - with one, cg also\n       makes and replaces the box's auth key itself.")
+	c.Out.Die("cannot check the Tailscale auth key: no Tailscale API token is saved.\n       Nothing was launched. Without the check, a key that no longer works is found\n       out only after the machine is billing. Add an access token in\n       Settings > Private network, or with ayis creds tailscale - with one, ayis also\n       makes and replaces the box's auth key itself.")
 	return true
 }
 
@@ -93,11 +93,11 @@ func (c *Checker) authKeyPreflight(ctx context.Context, key string) bool {
 		c.Out.LogAs("ok", "the Tailscale auth key works")
 		return true
 	case r == "expired" || r == "gone":
-		c.Out.Die("the Tailscale auth key for the box has expired or been revoked, and could not be replaced.\n       Nothing was launched. Save a new one: Settings > Private network in the app,\n       or cg creds tailscale authkey.")
+		c.Out.Die("the Tailscale auth key for the box has expired or been revoked, and could not be replaced.\n       Nothing was launched. Save a new one: Settings > Private network in the app,\n       or ayis creds tailscale authkey.")
 	case r == "unknown no-token":
 		c.needToken()
 	case r == "unknown refused":
-		c.Out.Die("cannot check the Tailscale auth key: Tailscale refused the API token.\n       Nothing was launched. The token has probably been revoked or has expired -\n       make a new one at https://login.tailscale.com/admin/settings/keys and save\n       it in Settings > Private network (or cg creds tailscale).")
+		c.Out.Die("cannot check the Tailscale auth key: Tailscale refused the API token.\n       Nothing was launched. The token has probably been revoked or has expired -\n       make a new one at https://login.tailscale.com/admin/settings/keys and save\n       it in Settings > Private network (or ayis creds tailscale).")
 	case r == "unknown no-key":
 		c.Out.Die("no Tailscale auth key for the box. Nothing was launched.")
 	case r == "unknown unreadable":

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 func asker(input string, jsonMode bool) (*Asker, *bytes.Buffer, *bytes.Buffer) {
@@ -85,11 +85,11 @@ func TestConfirmAndTypedWords(t *testing.T) {
 	if !a.Confirm("go", "go? ", "Y") || a.Confirm("go", "go? ", "N") && false {
 		t.Error("the default stands")
 	}
-	// CG_YES takes the default, asks nothing.
+	// AYIS_YES takes the default, asks nothing.
 	a, e, p := asker("", false)
 	a.Yes = true
 	if !a.Confirm("go", "go? ", "Y") || a.Confirm("go", "go? ", "N") || e.Len() != 0 || p.Len() != 0 {
-		t.Error("CG_YES answers a yes/no question with its default")
+		t.Error("AYIS_YES answers a yes/no question with its default")
 	}
 	// ...but never a typed confirmation.
 	a, _, _ = asker("", false)

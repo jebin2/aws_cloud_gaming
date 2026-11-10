@@ -83,7 +83,7 @@ func sortedMap(d map[string]Record) map[string]Record {
 	return d
 }
 
-// lock is an exclusive lock held by creating a file, which works wherever cg
+// lock is an exclusive lock held by creating a file, which works wherever ayis
 // runs. One left behind by a crash is broken after half a minute.
 func lock(path string) (func(), error) {
 	deadline := time.Now().Add(10 * time.Second)
@@ -107,7 +107,7 @@ func lock(path string) (func(), error) {
 			if denied {
 				return nil, err
 			}
-			return nil, errors.New("hosts.json is locked by another cg")
+			return nil, errors.New("hosts.json is locked by another ayis")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

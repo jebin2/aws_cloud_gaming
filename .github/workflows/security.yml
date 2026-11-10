@@ -1,4 +1,4 @@
-# Known vulnerabilities in what cg is built from, checked on every push to main and
+# Known vulnerabilities in what ayis is built from, checked on every push to main and
 # once a week - a new advisory lands without any commit of ours, which is why it is
 # not part of the Tests workflow: a CVE published on a Tuesday should not turn an
 # unrelated change red.

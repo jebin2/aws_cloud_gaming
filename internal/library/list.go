@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/format"
+	"github.com/jebin2/ayis/internal/format"
 )
 
 // Disk is the game disk the NEXT build gets: the configured type's, measured
@@ -19,7 +19,7 @@ type Disk struct {
 	ReserveGB *int
 }
 
-// Listing is `cg library list --json`: the index and the orphan scan, as data.
+// Listing is `ayis library list --json`: the index and the orphan scan, as data.
 // When the index could not be read it is still data - a program reading this
 // must be able to tell the difference between "no games" and "I could not look".
 type Listing struct {
@@ -118,7 +118,7 @@ func (l Library) regionOf(ctx context.Context, b string) string {
 	return l.Region
 }
 
-// Human is `cg library list` for a person: every sentence is said only about
+// Human is `ayis library list` for a person: every sentence is said only about
 // what was actually established. Before anything is said about what is IN the
 // archive, it is established that it can be read at all.
 func (l Library) Human(ctx context.Context, p Params, disk Disk) (text string, ok bool) {
@@ -203,7 +203,7 @@ func (l Library) Human(ctx context.Context, p Params, disk Disk) (text string, o
 			}
 			fmt.Fprintf(&w, "  %d GB fits on a %s at once (%d GB selectable, %d GB kept free%s)\n", *disk.GB, t, sel, derefInt(disk.ReserveGB), note)
 			if g > float64(sel) {
-				w.WriteString("  the archive is larger than that - cg init asks which to restore\n")
+				w.WriteString("  the archive is larger than that - ayis init asks which to restore\n")
 			}
 		} else {
 			fmt.Fprintf(&w, "  how much a %s holds could not be read - the box restores what fits\n", t)
@@ -215,7 +215,7 @@ func (l Library) Human(ctx context.Context, p Params, disk Disk) (text string, o
 			t += o.Bytes
 		}
 		if t > 0 && l.S3USD != nil {
-			fmt.Fprintf(&w, "\n  plus %.1f GB of ORPHANED objects from an unfinished push\n  costing $%.2f/month and unusable - remove them: cg library clean\n",
+			fmt.Fprintf(&w, "\n  plus %.1f GB of ORPHANED objects from an unfinished push\n  costing $%.2f/month and unusable - remove them: ayis library clean\n",
 				float64(t)/gib, float64(t)/gib**l.S3USD)
 		}
 	}

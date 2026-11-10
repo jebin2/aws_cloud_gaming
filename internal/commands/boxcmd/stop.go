@@ -6,7 +6,7 @@ import (
 	"regexp"
 
 	"fmt"
-	cg "github.com/jebin2/aws_cloud_gaming"
+	ayis "github.com/jebin2/ayis"
 	"strings"
 	"time"
 )
@@ -40,7 +40,7 @@ func (d Deps) steamShutdown(ctx context.Context) {
 	}
 }
 
-// Stop is `cg stop [--force]`.
+// Stop is `ayis stop [--force]`.
 //
 // Stopping wipes the instance store, exactly like destroying does, so it gets the
 // same gate. The push is here and in destroy and nowhere else: there is no timer
@@ -67,7 +67,7 @@ func (d Deps) Stop(ctx context.Context, args []string) int {
 	return d.endSession(ctx)
 }
 
-// endSession is how `cg stop` ends a session.
+// endSession is how `ayis stop` ends a session.
 //
 // On spot there is no stop worth offering. A one-time request cannot be stopped
 // at all (AWS only allows it for persistent requests), and a persistent one that
@@ -103,8 +103,8 @@ func (d Deps) endSession(ctx context.Context) int {
 }
 
 // down stops the box after mirroring the library. The mirror is written HERE, in
-// the one function every stop path goes through: `cg stop`, the "stop instance
-// now?" prompt at the end of `cg open`, and the pre-image stop in destroy.
+// the one function every stop path goes through: `ayis stop`, the "stop instance
+// now?" prompt at the end of `ayis open`, and the pre-image stop in destroy.
 func (d Deps) down(ctx context.Context) int {
 	if s, _ := d.Box.State(ctx); s == "stopped" {
 		d.Out.Echo("already stopped")
@@ -118,11 +118,11 @@ func (d Deps) down(ctx context.Context) int {
 			d.block("The push from here failed",
 				"",
 				"  The push from here failed - usually ssh cannot reach the box.",
-				"  cg-library-shutdown.service mirrors from ON the box as it shuts",
+				"  ayis-library-shutdown.service mirrors from ON the box as it shuts",
 				"  down and needs no ssh, so --force is usually safe. Check after:",
-				"      cg library list",
+				"      ayis library list",
 				"")
-			return d.die("not mirrored from here - see above, then: cg stop --force")
+			return d.die("not mirrored from here - see above, then: ayis stop --force")
 		}
 		d.Out.Log("WARNING: stopping without a mirror (--force) - games will be re-downloaded")
 	}
@@ -139,7 +139,7 @@ func (d Deps) down(ctx context.Context) int {
 	stopped := d.Box.WaitState(ctx, "stopped", 600*time.Second)
 	quiet()
 	if !stopped {
-		return d.die("the box was asked to stop but is not confirmed stopped - it may still be billing; check: cg status")
+		return d.die("the box was asked to stop but is not confirmed stopped - it may still be billing; check: ayis status")
 	}
 	d.Out.Log("billing has ended")
 	return 0
@@ -148,7 +148,7 @@ func (d Deps) down(ctx context.Context) int {
 var appids = regexp.MustCompile(`^[0-9]+(,[0-9]+)*$`)
 
 // leaveOut tells the machine which games not to save on this boot: the saving
-// script as this cg knows it (a machine built earlier has one that cannot skip),
+// script as this ayis knows it (a machine built earlier has one that cannot skip),
 // then the list, marked with the boot it is for. Both the save from here and the
 // one the machine makes on its way down read it. If either cannot be written the
 // stop does not go ahead: the games would be saved after all, and a game just
@@ -159,11 +159,11 @@ func (d Deps) leaveOut(ctx context.Context) int {
 	if d.Skip != "" {
 		d.Out.Say("Leaving out the games you unticked")
 	}
-	script, err := cg.Files.ReadFile("host/cg-library")
+	script, err := ayis.Files.ReadFile("host/ayis-library")
 	if err != nil {
-		return d.die("the saving script is missing from this cg: " + err.Error())
+		return d.die("the saving script is missing from this ayis: " + err.Error())
 	}
-	if _, err := d.Box.SSH(ctx, "sudo tee "+cgLibrary+" >/dev/null && sudo chmod 755 "+cgLibrary, bytes.NewReader(script)); err != nil {
+	if _, err := d.Box.SSH(ctx, "sudo tee "+ayisLibrary+" >/dev/null && sudo chmod 755 "+ayisLibrary, bytes.NewReader(script)); err != nil {
 		// With games to leave out, the old script would save them anyway: stop here.
 		// Without, the old one saves everything as it always did - only slower.
 		if d.Skip == "" {
@@ -176,7 +176,7 @@ func (d Deps) leaveOut(ctx context.Context) int {
 	if d.Skip == "" {
 		return 0
 	}
-	if _, err := d.Box.SSH(ctx, "printf '%s %s\\n' \"$(cat /proc/sys/kernel/random/boot_id)\" "+quote(d.Skip)+" > /var/lib/cg-library/skip", nil); err != nil {
+	if _, err := d.Box.SSH(ctx, "printf '%s %s\\n' \"$(cat /proc/sys/kernel/random/boot_id)\" "+quote(d.Skip)+" > /var/lib/ayis-library/skip", nil); err != nil {
 		d.said(err)
 		return d.die("could not tell the machine which games to leave out - nothing was stopped")
 	}

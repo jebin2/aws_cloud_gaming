@@ -21,14 +21,14 @@ import (
 	sqtypes "github.com/aws/aws-sdk-go-v2/service/servicequotas/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/creds"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/laptop"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/commands/creds"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/laptop"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/pricing"
+	fx "github.com/jebin2/ayis/internal/testfixture"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
 // ec2Fake answers the preflight's questions and, having no create method,
@@ -171,7 +171,7 @@ func TestAGoodSetupPassesAndChangesNothing(t *testing.T) {
 	}
 	got := r.o.String()
 	for _, want := range []string{"AWS credentials work (~/.aws/credentials, profile default)", "account plan: PAID", "spot quota 4 vCPU covers g6.xlarge (4)",
-		"no key pair yet - cg init creates one", "the stored Tailscale auth key is still valid", "the Tailscale auth key works", "notifications off", "root disk 50 GB (the default)"} {
+		"no key pair yet - ayis init creates one", "the stored Tailscale auth key is still valid", "the Tailscale auth key works", "notifications off", "root disk 50 GB (the default)"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}
@@ -232,7 +232,7 @@ func TestBadRegionAndMissingTypeSayWhatToChange(t *testing.T) {
 func TestWorkingCredentialsAreRequired(t *testing.T) {
 	r := newRig(t, good, "", false)
 	r.c.Identify = func(context.Context) creds.AWS { return creds.AWS{} }
-	if _, rc := r.c.Run(context.Background()); rc != 1 || !strings.Contains(r.e2.String(), "AWS credentials are not working.") || !strings.Contains(r.e2.String(), "cg creds set") {
+	if _, rc := r.c.Run(context.Background()); rc != 1 || !strings.Contains(r.e2.String(), "AWS credentials are not working.") || !strings.Contains(r.e2.String(), "ayis creds set") {
 		t.Errorf("%s", r.e2)
 	}
 }
@@ -292,16 +292,16 @@ func TestAKeyThatIsNotTheBoxsStopsABuildWhenABoxExists(t *testing.T) {
 	r.e.keyGone, r.e.keyFP, r.e.box = false, strings.Repeat("ab:", 19)+"ab", true
 	// A pem that exists but is not this pair's.
 	_ = os.MkdirAll(filepath.Join(r.home, ".ssh"), 0o700)
-	_ = os.WriteFile(filepath.Join(r.home, ".ssh", "gamevps.pem"), []byte("not a key"), 0o600)
-	if _, rc := r.c.Run(context.Background()); rc != 1 || !strings.Contains(r.e2.String(), "a box exists, but ~/.ssh/gamevps.pem is not the key pair's private key") {
+	_ = os.WriteFile(filepath.Join(r.home, ".ssh", "ayis.pem"), []byte("not a key"), 0o600)
+	if _, rc := r.c.Run(context.Background()); rc != 1 || !strings.Contains(r.e2.String(), "a box exists, but ~/.ssh/ayis.pem is not the key pair's private key") {
 		t.Errorf("%s", r.e2)
 	}
-	// With no box, it is only a warning: cg init replaces the pair.
+	// With no box, it is only a warning: ayis init replaces the pair.
 	r = newRig(t, good, "", false)
 	r.e.keyGone, r.e.keyFP = false, strings.Repeat("ab:", 19)+"ab"
 	_ = os.MkdirAll(filepath.Join(r.home, ".ssh"), 0o700)
-	_ = os.WriteFile(filepath.Join(r.home, ".ssh", "gamevps.pem"), []byte("not a key"), 0o600)
-	if _, rc := r.c.Run(context.Background()); rc != 0 || !strings.Contains(r.o.String(), "cg init replaces the key pair (free)") {
+	_ = os.WriteFile(filepath.Join(r.home, ".ssh", "ayis.pem"), []byte("not a key"), 0o600)
+	if _, rc := r.c.Run(context.Background()); rc != 0 || !strings.Contains(r.o.String(), "ayis init replaces the key pair (free)") {
 		t.Errorf("rc %d\n%s", rc, r.o)
 	}
 }

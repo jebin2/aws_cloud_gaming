@@ -10,7 +10,7 @@
 # broken as one that never does.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-SRC=host/cg-library
+SRC=host/ayis-library
 T=$(mktemp -d); pass=0; fail=0
 trap 'rm -rf "$T"' EXIT
 
@@ -58,8 +58,8 @@ chmod +x "$T/bin/mountpoint"
 
 run() { # run <args...>
   S5LOG="$T/s5.log" PATH="$T/bin:$PATH" \
-  CG_EXTRA_LIBS="${CG_EXTRA_LIBS-}" CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam \
-  CG_STATE_DIR="$T/state" CG_S5CMD="$T/bin/s5cmd" CG_BOOT_ID_FILE="$T/bootid" \
+  AYIS_EXTRA_LIBS="${AYIS_EXTRA_LIBS-}" AYIS_LIB_DIR="$T/scratch/steam" AYIS_S3_BUCKET=b AYIS_S3_PREFIX=steam \
+  AYIS_STATE_DIR="$T/state" AYIS_S5CMD="$T/bin/s5cmd" AYIS_BOOT_ID_FILE="$T/bootid" \
   REMOTE_BYTES="${REMOTE_BYTES:-0}" REMOTE_OBJECTS="${REMOTE_OBJECTS:-0}" \
   SYNC_FAILS="${SYNC_FAILS:-0}" MOUNTED="${MOUNTED:-1}" \
     bash "$SRC" "$@" 2>&1
@@ -104,8 +104,8 @@ check "exits non-zero" "$rc" "1"
 contains "names the reason" "$out" "not a mountpoint"
 
 echo "5. an unconfigured bucket is an error, not a silent no-op"
-out=$(S5LOG="$T/s5.log" PATH="$T/bin:$PATH" CG_S3_BUCKET= CG_STATE_DIR="$T/state" \
-      CG_S5CMD="$T/bin/s5cmd" bash "$SRC" status 2>&1); rc=$?
+out=$(S5LOG="$T/s5.log" PATH="$T/bin:$PATH" AYIS_S3_BUCKET= AYIS_STATE_DIR="$T/state" \
+      AYIS_S5CMD="$T/bin/s5cmd" bash "$SRC" status 2>&1); rc=$?
 check "exits non-zero" "$rc" "1"
 contains "names what is missing" "$out" "no bucket configured"
 
@@ -126,7 +126,7 @@ n=$(grep -c 'downloading - excluded' <<<"$out" || true)
 check "stays quiet" "${n:-0}" "0"
 
 echo "8. a second push waits for the push already running, then runs"
-# AWS can terminate the box while the idle watchdog is mid-push, and cg destroy
+# AWS can terminate the box while the idle watchdog is mid-push, and ayis destroy
 # can push over ssh at the same moment. Unserialised, both upload the same files
 # and each rewrites index.json from its own stale read. The second must WAIT -
 # not skip - because the shutdown push is the one that has to finish.
@@ -136,7 +136,7 @@ rm -f "$T/held"
 holder=$!
 while [[ ! -e $T/held ]]; do sleep 0.05; done
 t0=$(date +%s%N)
-out=$(HOME="$T/home" CG_STEAM_SHUTDOWN=0 run push); rc=$?
+out=$(HOME="$T/home" AYIS_STEAM_SHUTDOWN=0 run push); rc=$?
 waited=$(( ($(date +%s%N) - t0) / 1000000 ))
 wait "$holder"
 contains "says it is waiting" "$out" "another push is running"
@@ -146,7 +146,7 @@ check "did not start until the first let go" "$(( waited >= 1500 ))" "1"
 
 echo "9. a push with nobody else running does not wait"
 reset; echo "boot-aaaa" > "$T/state/restored"; fill 0
-out=$(HOME="$T/home" CG_STEAM_SHUTDOWN=0 run push); rc=$?
+out=$(HOME="$T/home" AYIS_STEAM_SHUTDOWN=0 run push); rc=$?
 check "exits cleanly" "$rc" "0"
 n=$(grep -c 'another push is running' <<<"$out" || true)
 check "does not claim to wait" "${n:-0}" "0"

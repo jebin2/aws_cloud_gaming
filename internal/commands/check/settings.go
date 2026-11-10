@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/pricing"
 )
 
 var (
@@ -103,7 +103,7 @@ func (c *Checker) settings(ctx context.Context) (string, bool) {
 	// before the build starts.
 	if authKey == "" {
 		if out.JSON && !staleKey {
-			out.Die("no Tailscale auth key for the box.\n       Settings > Tailscale has it, and with an API token set cg makes one itself.")
+			out.Die("no Tailscale auth key for the box.\n       Settings > Tailscale has it, and with an API token set ayis makes one itself.")
 			return "", false
 		}
 		out.Gap()
@@ -137,13 +137,13 @@ func (c *Checker) settings(ctx context.Context) (string, bool) {
 	interactive := c.Fix && c.Ask.TTY
 	if !c.Env.Has("TAILSCALE_API_KEY") && interactive {
 		out.Gap()
-		out.Echo("Optional: a Tailscale API access token - not the auth key. With it, cg init removes old")
+		out.Echo("Optional: a Tailscale API access token - not the auth key. With it, ayis init removes old")
 		out.Echo("box entries, so the box keeps its name, and turns off the box's key expiry.")
 		out.Echo("Generate one at: https://login.tailscale.com/admin/settings/keys")
 		if v, ok := c.secret("tailscale-api-token", "  paste API token (Enter to skip): ", keyShape, "Tailscale API token", true); ok {
 			_ = c.Env.Set("TAILSCALE_API_KEY", v)
 		} else {
-			out.LogAs("fail", "no valid API token - not saved, so cg check --fix asks again")
+			out.LogAs("fail", "no valid API token - not saved, so ayis check --fix asks again")
 		}
 	}
 	if c.Env.Get("TAILSCALE_API_KEY") != "" {
@@ -166,7 +166,7 @@ func (c *Checker) settings(ctx context.Context) (string, bool) {
 			out.Echo("Billed by the GB, every month the box exists, and it cannot be shrunk later.")
 		}
 		if !c.number("GAME_DISK_GB", "50", 30, "  root disk GB") {
-			out.LogAs("fail", "no disk size saved - the default, 50 GB, is used, and cg check --fix asks again")
+			out.LogAs("fail", "no disk size saved - the default, 50 GB, is used, and ayis check --fix asks again")
 		}
 	}
 	disk, def := c.Env.Get("GAME_DISK_GB"), ""
@@ -182,9 +182,9 @@ func (c *Checker) settings(ctx context.Context) (string, bool) {
 			cost = fmt.Sprintf(" (about INR %.0f a month for 100 GB)", 100**rates.S3GBMonth**rates.INRPerUSD)
 		}
 		out.Echo("Days with no box before the cloud watchdog deletes your game archive in S3" + cost + ".")
-		out.Echo("0 keeps it forever. The next cg init applies a change.")
+		out.Echo("0 keeps it forever. The next ayis init applies a change.")
 		if !c.number("GAME_ARCHIVE_EXPIRY_DAYS", "14", 0, "  delete the archive after how many days") {
-			out.LogAs("fail", "no expiry saved - the default, 14 days, is used, and cg check --fix asks again")
+			out.LogAs("fail", "no expiry saved - the default, 14 days, is used, and ayis check --fix asks again")
 		}
 	}
 	days := c.Env.Get("GAME_ARCHIVE_EXPIRY_DAYS")
@@ -206,7 +206,7 @@ func (c *Checker) settings(ctx context.Context) (string, bool) {
 		out.Echo("topic name, and paste that name (or a full ntfy URL) here. Enter skips.")
 		v, ok := c.secret("ntfy-topic-or-url", "  ntfy topic or URL (Enter to skip): ", ntfyShape, "ntfy topic or URL", true)
 		if !ok || (v != "" && config.NtfyURL(v) == "") {
-			out.LogAs("fail", "that is not a valid ntfy topic or URL - not saved, so cg check --fix asks again")
+			out.LogAs("fail", "that is not a valid ntfy topic or URL - not saved, so ayis check --fix asks again")
 		} else {
 			_ = c.Env.Set("GAME_NTFY_URL", v)
 		}

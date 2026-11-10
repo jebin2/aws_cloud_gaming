@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/costdaily"
-	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
+	"github.com/jebin2/ayis/internal/costdaily"
+	"github.com/jebin2/ayis/internal/costfacts"
 )
 
 type obj = map[string]any
@@ -55,7 +55,7 @@ func r2(v *float64, n int) any {
 	return round(*v, n)
 }
 
-// JSON is `cg cost --json`: the resources that still bill, plus everything the
+// JSON is `ayis cost --json`: the resources that still bill, plus everything the
 // one Cost Explorer call knows. Same call, same price. Keys sort, and an
 // unreadable fact is null - never 0 or false.
 func (in Inputs) JSON() ([]byte, error) {
@@ -140,7 +140,7 @@ func (in Inputs) JSON() ([]byte, error) {
 		standby = &total
 	}
 
-	// Storage as the BILL sees it, beside storage as cg sees it. cg only knows
+	// Storage as the BILL sees it, beside storage as ayis sees it. ayis only knows
 	// the bucket in .env; a region move left games in another one, billing,
 	// while this said the archive was empty. The most recent whole day that
 	// billed any S3 is the rate: today is partial, and Cost Explorer lags, so

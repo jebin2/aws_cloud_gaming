@@ -13,16 +13,16 @@
 # committed - a leaked access key is an open door to the whole account.
 *.csv
 
-# The cg program, built from cmd/cg (go build -o cg ./cmd/cg).
-/cg
-/cg.exe
+# The ayis program, built from cmd/ayis (go build -o ayis ./cmd/ayis).
+/ayis
+/ayis.exe
 
 # Personal scratch.
 clauderesumeid.txt
 
-# Cached Cost Explorer figures, so cg status can show the month without
+# Cached Cost Explorer figures, so ayis status can show the month without
 # paying $0.01 per call. Local, regenerable, and account-specific.
-.cg-cache/
+.ayis-cache/
 
 # The ntfy URL, written beside the host scripts for a box. Never in the repo: on
 # ntfy.sh the topic is all it takes to read and post.

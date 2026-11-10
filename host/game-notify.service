@@ -4,5 +4,5 @@ Description=Tell the phone when a game has finished downloading
 [Service]
 Type=oneshot
 # Written by install-watchdog.sh only when notifications are configured.
-EnvironmentFile=-/etc/cg-notify.conf
+EnvironmentFile=-/etc/ayis-notify.conf
 ExecStart=/usr/local/bin/game-notify.sh

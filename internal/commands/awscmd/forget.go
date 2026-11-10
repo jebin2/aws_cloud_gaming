@@ -4,14 +4,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/output"
 )
 
-// Forgetter is `cg aws forget [--anyway]`: this laptop stops playing on AWS. The
+// Forgetter is `ayis aws forget [--anyway]`: this laptop stops playing on AWS. The
 // region it was set up in leaves .env, which is what "an AWS machine" means here:
-// the app then shows none and asks AWS nothing. Only when nothing cg made there
+// the app then shows none and asks AWS nothing. Only when nothing ayis made there
 // still bills: no machine, and no saved games in any region. Nothing in AWS is
 // deleted, and the access key stays in ~/.aws/credentials - other tools on this
 // laptop may use it. Exit 3 when AWS could not be asked, so whether anything bills
@@ -50,7 +50,7 @@ func (f Forgetter) Run(ctx context.Context, args []string) int {
 			f.Out.Die("AWS could not be asked whether a machine is still there")
 			return 3
 		default:
-			f.Out.Die(fmt.Sprintf("a machine is still on AWS (%s) - delete it first: cg destroy", st))
+			f.Out.Die(fmt.Sprintf("a machine is still on AWS (%s) - delete it first: ayis destroy", st))
 			return 1
 		}
 		n, err := f.Games(ctx)
@@ -59,7 +59,7 @@ func (f Forgetter) Run(ctx context.Context, args []string) int {
 			return 3
 		}
 		if n != 0 {
-			f.Out.Die(fmt.Sprintf("%d game%s still saved in AWS - delete them first, or keep using AWS: cg library list", n, plural(n)))
+			f.Out.Die(fmt.Sprintf("%d game%s still saved in AWS - delete them first, or keep using AWS: ayis library list", n, plural(n)))
 			return 1
 		}
 		o, err := f.Elsewhere(ctx)
@@ -68,7 +68,7 @@ func (f Forgetter) Run(ctx context.Context, args []string) int {
 			return 3
 		}
 		if o != 0 {
-			f.Out.Die(fmt.Sprintf("%d game%s still saved in another AWS region - see cg library elsewhere", o, plural(o)))
+			f.Out.Die(fmt.Sprintf("%d game%s still saved in another AWS region - see ayis library elsewhere", o, plural(o)))
 			return 1
 		}
 	}

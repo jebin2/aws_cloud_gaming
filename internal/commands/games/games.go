@@ -1,4 +1,4 @@
-// Package games is `cg games`: what Steam has on the box - installed,
+// Package games is `ayis games`: what Steam has on the box - installed,
 // downloading, running, archived - and the old EBS volume if you still have one.
 package games
 
@@ -13,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
+	"github.com/jebin2/ayis/internal/library"
 )
 
 const gib = 1073741824.0
@@ -224,7 +224,7 @@ func rowsOf(b Box, archived []library.App) []row {
 			if name == "" {
 				name = "?"
 			}
-			rows = append(rows, row{name: clip(name, 28), state: "in S3 only", gb: float64(a.Bytes) / gib, extra: "cg init offers it",
+			rows = append(rows, row{name: clip(name, 28), state: "in S3 only", gb: float64(a.Bytes) / gib, extra: "ayis init offers it",
 				full: name, id: id, bytes: a.Bytes, pct: -1})
 			delete(arch, id)
 		}
@@ -253,7 +253,7 @@ func Render(b Box, archived []library.App) string {
 	return w.String()
 }
 
-// JSON is the same report as data: cg games --json.
+// JSON is the same report as data: ayis games --json.
 func JSON(b Box, archived []library.App) ([]byte, error) {
 	type game struct {
 		AppID       string   `json:"appid"`
@@ -324,12 +324,12 @@ func FindVolume(ctx context.Context, c interface {
 	return &Volume{aws.ToString(v.VolumeId), aws.ToString(v.AvailabilityZone), string(v.State), aws.ToInt32(v.Size)}, nil
 }
 
-// ShowVolume is `cg games --volume`: legacy, and the only thing worth saying is
+// ShowVolume is `ayis games --volume`: legacy, and the only thing worth saying is
 // that it still bills. Delete is a separate port, and the command it names is
-// one that exists (the Bash named `cg games --delete`, which does not).
+// one that exists (the Bash named `ayis games --delete`, which does not).
 func ShowVolume(v *Volume, ebs, inr *float64) string {
 	if v == nil {
-		return "no EBS game volume exists - nothing billing.\nthe game library lives in S3 now: cg library\n"
+		return "no EBS game volume exists - nothing billing.\nthe game library lives in S3 now: ayis library\n"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "  volume   %s  (%s)\n", v.ID, v.State)
@@ -346,12 +346,12 @@ func ShowVolume(v *Volume, ebs, inr *float64) string {
 		b.WriteString("  cost     ? - the disk price could not be read from AWS\n")
 	}
 	b.WriteString("  status   LEGACY - nothing mounts or attaches this any more.\n")
-	b.WriteString("           the library is in S3: cg library\n")
-	b.WriteString("  delete   cg games --volume --delete   (permanent; anything left on it goes too)\n")
+	b.WriteString("           the library is in S3: ayis library\n")
+	b.WriteString("  delete   ayis games --volume --delete   (permanent; anything left on it goes too)\n")
 	return b.String()
 }
 
-// IsSteamTool is the rule cg-library's is_steam_tool applies, by what the machine
+// IsSteamTool is the rule ayis-library's is_steam_tool applies, by what the machine
 // reports here (the name, not the folder): Proton and Steam's Linux runtime, and
 // the redistributables. They are never saved - Steam fetches them again in under
 // a minute - so nothing offers to save or delete them.

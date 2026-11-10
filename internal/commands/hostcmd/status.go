@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/ownhost"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/ownhost"
 )
 
 // State is every fact the Machine page needs. Free.
@@ -94,7 +94,7 @@ func (d Deps) Read(ctx context.Context, name string) State {
 	return s
 }
 
-// Status is `cg host status <name> [--json]`.
+// Status is `ayis host status <name> [--json]`.
 func (d Deps) Status(ctx context.Context, args []string, jsonOut bool, out *output.Out) int {
 	var name string
 	for _, a := range args {
@@ -104,7 +104,7 @@ func (d Deps) Status(ctx context.Context, args []string, jsonOut bool, out *outp
 		}
 	}
 	if name == "" {
-		out.Die("usage: cg host status <name>")
+		out.Die("usage: ayis host status <name>")
 		return 1
 	}
 	if d.Store.Get(name).Field("ssh") == "" {

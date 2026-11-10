@@ -12,9 +12,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/laptop"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
+	"github.com/jebin2/ayis/internal/laptop"
+	"github.com/jebin2/ayis/internal/output"
+	fx "github.com/jebin2/ayis/internal/testfixture"
 )
 
 type prober struct {
@@ -107,7 +107,7 @@ func TestRejectedAndUnreachable(t *testing.T) {
 	if ShowAWS(a, out) {
 		t.Error("not ok")
 	}
-	if !strings.Contains(o.String(), "accepted         no  <- ") || !strings.Contains(o.String(), "set a working key: cg creds set") {
+	if !strings.Contains(o.String(), "accepted         no  <- ") || !strings.Contains(o.String(), "set a working key: ayis creds set") {
 		t.Errorf("%s", o.String())
 	}
 }

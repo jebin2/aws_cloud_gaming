@@ -1,5 +1,5 @@
-// Package configcmd is `cg config`: the settings in .env, with the rules in one
-// place. The app never writes .env itself - it asks cg, so a disk that cannot
+// Package configcmd is `ayis config`: the settings in .env, with the rules in one
+// place. The app never writes .env itself - it asks ayis, so a disk that cannot
 // be shrunk, an expiry of 0 meaning "keep forever" and a token that must look
 // like a token are enforced once, here, rather than in a renderer.
 package configcmd
@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 // Row is one setting as the app reads it. A secret's value is never printed:
@@ -62,7 +62,7 @@ func Rows(env *config.Env) []Row {
 	return rows
 }
 
-// JSON is `cg config --json`.
+// JSON is `ayis config --json`.
 func JSON(env *config.Env) ([]byte, error) { return json.MarshalIndent(Rows(env), "", "  ") }
 
 // Show is the human view.
@@ -74,7 +74,7 @@ func Show(env *config.Env) string {
 		switch {
 		// The ntfy topic is a secret on ntfy.sh - anyone who knows it can read and post
 		// - and this view is the one that ends up pasted into chats and issues. The
-		// app's own JSON still carries it, for its edit field; `cg config get` prints it.
+		// app's own JSON still carries it, for its edit field; `ayis config get` prints it.
 		case s.Kind == "secret" || s.Kind == "ntfy":
 			v = "not set"
 			if env.Get(s.Key) != "" {
@@ -120,16 +120,16 @@ func Set(env *config.Env, key, value string, out *output.Out) error {
 	out.LogAs("ok", fmt.Sprintf("%s = %s", key, shown))
 	switch key {
 	case "GAME_DISK_GB", "GAME_DISK_RESERVE_GB", "GAME_INSTANCE_TYPE", "GAME_REGION", "GAME_SPOT":
-		out.LogAs("info", "applies to the next cg init")
+		out.LogAs("info", "applies to the next ayis init")
 	case "GAME_ARCHIVE_EXPIRY_DAYS", "GAME_WATCHDOG_IDLE_MIN", "GAME_WATCHDOG_STUCK_MIN", "GAME_NTFY_URL":
-		out.LogAs("info", "applies when the cloud watchdog is next deployed: cg watchdog install")
+		out.LogAs("info", "applies when the cloud watchdog is next deployed: ayis watchdog install")
 	case "GAME_BUDGET_INR", "EMAIL_ALERTS":
-		out.LogAs("info", "applies at the next cg init, which rewrites the budget")
+		out.LogAs("info", "applies at the next ayis init, which rewrites the budget")
 	}
 	return nil
 }
 
-// Run is `cg config`.
+// Run is `ayis config`.
 func Run(env *config.Env, args []string, jsonFlag bool, out *output.Out) int {
 	sub := "show"
 	if len(args) > 0 {
@@ -146,7 +146,7 @@ func Run(env *config.Env, args []string, jsonFlag bool, out *output.Out) int {
 		return printJSON(env, out)
 	case "set":
 		if len(args) < 1 {
-			out.Die("usage: cg config set <key> [value]")
+			out.Die("usage: ayis config set <key> [value]")
 			return 1
 		}
 		value := ""
@@ -160,7 +160,7 @@ func Run(env *config.Env, args []string, jsonFlag bool, out *output.Out) int {
 		return 0
 	case "get":
 		if len(args) < 1 {
-			out.Die("usage: cg config get <key>")
+			out.Die("usage: ayis config get <key>")
 			return 1
 		}
 		v, err := Get(env, args[0])
@@ -171,7 +171,7 @@ func Run(env *config.Env, args []string, jsonFlag bool, out *output.Out) int {
 		fmt.Fprintf(out.Stdout, "%s\n", v)
 		return 0
 	}
-	out.Die("usage: cg config [show|--json|get <key>|set <key> [value]]")
+	out.Die("usage: ayis config [show|--json|get <key>|set <key> [value]]")
 	return 1
 }
 

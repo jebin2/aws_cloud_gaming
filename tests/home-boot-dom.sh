@@ -43,7 +43,7 @@ addEventListener('error', e => window.__errs.push(e.message));
 addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
 if (!sessionStorage.getItem('seeded')) {
   sessionStorage.setItem('seeded', '1');
-  localStorage.setItem('cg.home', JSON.stringify({ aws: false,
+  localStorage.setItem('ayis.home', JSON.stringify({ aws: false,
     hosts: [{ name: 'homebox', ssh: 'me@10.0.0.5', os: 'Linux', family: 'ubuntu', user: 'me' },
             { name: 'attic', ssh: 'me@10.0.0.6', os: 'Linux', family: 'arch', user: 'me' }],
     identity: { homebox: { os_name: 'Linux Mint 22.2', gpu: 'NVIDIA GeForce RTX 3060' } } }));
@@ -68,7 +68,7 @@ function reply(a) {
 let handler = null, next = 0;
 const emit = (id, event) => handler && handler({ id, event });
 window.__release = {};
-window.cg = {
+window.ayis = {
   run: args => {
     const a = args.join(' '); window.__ran.push(a);
     const id = ++next, r = reply(a);
@@ -128,7 +128,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     await wait(50);
     out.push('FAILED | ' + card('attic').dataset.state + ' / ' + txt(card('attic')));
     out.push('FAILED BUTTONS | ' + buttons(card('attic')));
-    const kept = JSON.parse(localStorage.getItem('cg.home'));
+    const kept = JSON.parse(localStorage.getItem('ayis.home'));
     out.push('KEPT | ' + kept.hosts.map(h => h.name).join(',') + ' gpu=' + kept.identity.homebox.gpu
              + ' status=' + JSON.stringify(kept).includes('set_up'));
   } catch (e) { out.push('THREW | ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
@@ -157,7 +157,7 @@ d = open(sys.argv[1]).read()
 m = re.search(r"<pre id=\"probe-out\">(.*?)</pre>", d, re.S)
 print(html.unescape(m.group(1)) if m else "PROBE DID NOT RUN")' "$T/dom.html")
 
-[[ -n ${CG_DOM_DUMP:-} ]] && { printf '%s\n' "$OUT"; exit 0; }
+[[ -n ${AYIS_DOM_DUMP:-} ]] && { printf '%s\n' "$OUT"; exit 0; }
 if [[ $OUT == "PROBE DID NOT RUN" || -z $OUT ]]; then
   echo "  FAIL the page did not render at all"; echo; echo "home-boot-dom: $pass passed, 1 failed"; exit 1
 fi
@@ -178,11 +178,11 @@ check    "  and does not ask a second time"       "$(row 'ASKED ONCE')" "ASKED O
 echo "3. the answer, in place"
 contains "the status replaces the loading state" "$(row 'ANSWERED')" "ANSWERED | Ready to play fade=true"
 lacks    "  and the loading line is gone"         "$(row 'ANSWERED')" "Connecting to"
-contains "  with what cg says the machine is now" "$(row 'ANSWERED')" "NVIDIA GeForce RTX 3070"
+contains "  with what ayis says the machine is now" "$(row 'ANSWERED')" "NVIDIA GeForce RTX 3070"
 check    "  and only now its buttons"             "$(row 'ANSWERED BUTTONS' | tr -cd '[:print:]')" "ANSWERED BUTTONS | Play, Details"
 check    "a card still checking is untouched"     "$(row 'OTHER STILL')" "OTHER STILL | loading buttons="
 contains "a failed check says so"                 "$(row 'FAILED')" "Check failed"
-contains "  with cg's reason"                     "$(row 'FAILED')" "attic did not answer over ssh"
+contains "  with ayis's reason"                     "$(row 'FAILED')" "attic did not answer over ssh"
 check    "  and only Try again, and its details"  "$(row 'FAILED BUTTONS' | tr -cd '[:print:]')" "FAILED BUTTONS | Try again, Details"
 lacks    "  the reason, not a prefix"            "$(row 'FAILED')" "could not run:"
 

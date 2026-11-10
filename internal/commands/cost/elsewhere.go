@@ -5,16 +5,16 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	"github.com/jebin2/aws_cloud_gaming/internal/storage"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/pricing"
+	"github.com/jebin2/ayis/internal/storage"
 )
 
-// OtherRegions is what cg has in OTHER regions, which the report of this one
-// never looked at: saved games a region move left behind, and cg's disks,
+// OtherRegions is what ayis has in OTHER regions, which the report of this one
+// never looked at: saved games a region move left behind, and ayis's disks,
 // images and snapshots - each with its monthly cost where it is known.
 //
-// A read that failed is said, never "nothing of cg's": the Bash treated an error
+// A read that failed is said, never "nothing of ayis's": the Bash treated an error
 // answer from the library scan as an empty one and still printed that false
 // reassurance, and read a failed region list as "none".
 func OtherRegions(el library.Elsewhere, st storage.Everywhere, here string, r pricing.Rates) string {
@@ -81,7 +81,7 @@ func OtherRegions(el library.Elsewhere, st storage.Everywhere, here string, r pr
 	b.WriteString("other regions:\n")
 	switch {
 	case len(out) > 0:
-		b.WriteString(strings.Join(out, "\n") + "\n  removed by: cg aws disconnect\n")
+		b.WriteString(strings.Join(out, "\n") + "\n  removed by: ayis aws disconnect\n")
 	case el.Error != nil || len(st.Failed) > 0:
 		why := ""
 		if len(st.Failed) > 0 {
@@ -92,7 +92,7 @@ func OtherRegions(el library.Elsewhere, st storage.Everywhere, here string, r pr
 		}
 		fmt.Fprintf(&b, "  could not be read%s\n", why)
 	default:
-		b.WriteString("  nothing of cg's\n")
+		b.WriteString("  nothing of ayis's\n")
 	}
 	// Whatever was found, a region AWS would not answer for is still unknown.
 	if len(out) > 0 && len(st.Failed) > 0 {

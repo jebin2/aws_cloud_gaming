@@ -11,7 +11,7 @@ import (
 
 func TestSetAndForget(t *testing.T) {
 	dir := t.TempDir()
-	s := Store{Path: filepath.Join(dir, "cg", "hosts.json")}
+	s := Store{Path: filepath.Join(dir, "ayis", "hosts.json")}
 	if err := s.Set("pc", "ssh", "me@pc", "os", "Linux"); err != nil {
 		t.Fatal(err)
 	}

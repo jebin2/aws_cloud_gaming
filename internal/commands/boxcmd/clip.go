@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	"github.com/jebin2/ayis/internal/local"
 )
 
 // clipMax is the most text carried across. A clipboard is a sentence or a
@@ -71,7 +71,7 @@ const boxClipEnv = `export DISPLAY=:0 XAUTHORITY="$HOME/.Xauthority"; `
 // existed, once. It is small, and from Ubuntu's own list.
 const boxClipReady = `command -v xclip >/dev/null 2>&1 || { sudo apt-get install -y -qq xclip >/dev/null 2>&1; }; command -v xclip >/dev/null 2>&1 || { echo "the game PC could not install its clipboard program" >&2; exit 3; }; `
 
-// ClipSend is `cg clip send`: this computer's clipboard, as text, onto the game
+// ClipSend is `ayis clip send`: this computer's clipboard, as text, onto the game
 // PC's. Ctrl+V on the game PC then pastes it.
 func (d Deps) ClipSend(ctx context.Context) int {
 	if d.Box.ID == "" {
@@ -102,7 +102,7 @@ func (d Deps) ClipSend(ctx context.Context) int {
 	return 0
 }
 
-// ClipGet is `cg clip get`: the game PC's clipboard, as text, onto this
+// ClipGet is `ayis clip get`: the game PC's clipboard, as text, onto this
 // computer's.
 func (d Deps) ClipGet(ctx context.Context) int {
 	if d.Box.ID == "" {

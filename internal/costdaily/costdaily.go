@@ -310,7 +310,7 @@ type Egress struct {
 	GBLeft *float64 `json:"gb_left"`
 }
 
-// Summary is `cg cost --json`'s "month" object: everything the answer holds.
+// Summary is `ayis cost --json`'s "month" object: everything the answer holds.
 type Summary struct {
 	Days     []DayJSON   `json:"days"`
 	Usage    []UsageJSON `json:"usage"`

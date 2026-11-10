@@ -1,4 +1,4 @@
-// Package status is `cg status`: what exists in the account and on this
+// Package status is `ayis status`: what exists in the account and on this
 // computer, and whether every safeguard is on. One round of queries fills the
 // facts; the report and --json both render from them, so an app reading the
 // JSON is reading exactly what the report shows and the two cannot drift.
@@ -31,10 +31,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/session"
-	"github.com/jebin2/aws_cloud_gaming/internal/watchdog"
+	"github.com/jebin2/ayis/internal/costfacts"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/session"
+	"github.com/jebin2/ayis/internal/watchdog"
 )
 
 // Known is a value and whether it could be read; the same type cost uses.
@@ -94,7 +94,7 @@ type Gatherer struct {
 	Bucket                   string
 	EnvInstanceID            string
 	Home                     string // for ~/.ssh
-	CacheDir                 string // XDG_CACHE_HOME/cg
+	CacheDir                 string // XDG_CACHE_HOME/ayis
 	LockFile                 string
 	ExpiryDays               int
 	Now                      func() time.Time
@@ -521,7 +521,7 @@ func (g *Gatherer) budget(ctx context.Context, account string, out *Facts) {
 			out.BudgetLimit = ok(v)
 		}
 		// AWS Budgets populates CalculatedSpend up to 24h AFTER a budget is
-		// created, and `cg init` recreates this budget on every build.
+		// created, and `ayis init` recreates this budget on every build.
 		out.BudgetSpent = ok(0.0)
 		if r.Budget.CalculatedSpend != nil && r.Budget.CalculatedSpend.ActualSpend != nil {
 			if v, err := strconv.ParseFloat(aws.ToString(r.Budget.CalculatedSpend.ActualSpend.Amount), 64); err == nil {
@@ -550,7 +550,7 @@ func (g *Gatherer) role(ctx context.Context, name string) Known[bool] {
 // guard leaves exactly this state: the on-host `shutdown -h` and the external
 // guards' ec2:stop cannot terminate instead - a persistent spot request
 // relaunches the moment its instance dies - so stop is right, and this is the
-// leak it leaves. Nothing reported it; `cg status` said "stopped", which reads
+// leak it leaves. Nothing reported it; `ayis status` said "stopped", which reads
 // as normal and recoverable.
 func (g *Gatherer) stranded(ctx context.Context, b *Box) *Stranded {
 	if b.State != "stopped" || b.Lifecycle != "spot" {

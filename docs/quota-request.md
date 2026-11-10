@@ -10,9 +10,9 @@ A new AWS account can launch **zero** GPU instances. Both numbers start at 0:
 They are separate. Having one does not give you the other, and a build needs
 whichever purchase model it is using.
 
-    cg quota                     what you have, and whether it covers one box
-    cg quota request ondemand    ask for exactly what one box needs
-    cg quota appeal ondemand     the text that gets it approved
+    ayis quota                     what you have, and whether it covers one box
+    ayis quota request ondemand    ask for exactly what one box needs
+    ayis quota appeal ondemand     the text that gets it approved
 
 ## What actually happens
 
@@ -41,21 +41,21 @@ process. Nothing is wrong with your account, and asking again from scratch does
 not help - AWS refuses duplicate requests. The appeal on the open case is the
 step that gets a human involved, and a human is who approves it.
 
-## What cg can and cannot do
+## What ayis can and cannot do
 
-`cg quota request` submits through the Service Quotas API, which is free and
+`ayis quota request` submits through the Service Quotas API, which is free and
 works on any support plan. It cannot post the appeal: that is a support case
 correspondence, and the Support API needs a Business or Enterprise plan. On the
 Basic plan the API answers `SubscriptionRequiredException`.
 
-So cg writes the appeal and opens the case; you paste and send. That is also
+So ayis writes the appeal and opens the case; you paste and send. That is also
 the right division of labour - the appeal is a letter to a person, and it works
 because it is specific.
 
 ## The appeal that worked
 
-`cg quota appeal` fills this in from your own rig: the instance type, the
-measured latency from `cg sweep`, your budget, your watchdog timeouts. Every
+`ayis quota appeal` fills this in from your own rig: the instance type, the
+measured latency from `ayis sweep`, your budget, your watchdog timeouts. Every
 number in it is checkable, which is why the agent escalated it.
 
 ```

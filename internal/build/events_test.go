@@ -20,7 +20,7 @@ func (exit127) ExitCode() int { return 127 }
 type evRemote struct {
 	log        []string
 	events     []event
-	supervisor int // the polls after which cg-build exists (1: from the start)
+	supervisor int // the polls after which ayis-build exists (1: from the start)
 	polls      int
 	ready      bool
 	dropAt     int // this poll's connection fails
@@ -32,7 +32,7 @@ type evRemote struct {
 
 func (r *evRemote) SSH(_ context.Context, cmd string) ([]byte, error) {
 	switch {
-	case strings.HasPrefix(cmd, "cg-build events --since "):
+	case strings.HasPrefix(cmd, "ayis-build events --since "):
 		r.polls++
 		if r.dropAt > 0 && r.polls == r.dropAt {
 			return nil, errors.New("connection reset")
@@ -41,7 +41,7 @@ func (r *evRemote) SSH(_ context.Context, cmd string) ([]byte, error) {
 			return nil, exit127{}
 		}
 		var since int
-		_, _ = fmt.Sscanf(cmd, "cg-build events --since %d", &since)
+		_, _ = fmt.Sscanf(cmd, "ayis-build events --since %d", &since)
 		var b strings.Builder
 		for _, e := range r.events {
 			if e.Seq > since && r.polls >= r.hold[e.Seq] {
@@ -58,7 +58,7 @@ func (r *evRemote) SSH(_ context.Context, cmd string) ([]byte, error) {
 			return nil, nil
 		}
 		return []byte(strings.Join(r.log[n-1:], "\n") + "\n"), nil
-	case cmd == "test -f /var/lib/cloud-gaming-ready":
+	case cmd == "test -f /var/lib/ayis-ready":
 		if r.ready && r.polls >= r.readyAfter {
 			return nil, nil
 		}

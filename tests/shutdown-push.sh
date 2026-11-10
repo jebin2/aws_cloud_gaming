@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The shutdown push's wrapper (host/cg-shutdown-push.sh): the last upload before
+# The shutdown push's wrapper (host/ayis-shutdown-push.sh): the last upload before
 # the box goes, and the last chance anything on the box has to say games were
 # lost - when the push fails, or when TimeoutStopSec cuts it off.
 set -uo pipefail
@@ -13,7 +13,7 @@ contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
              else echo "  FAIL $1: '$2' lacks '$3'"; fail=$((fail+1)); fi; }
 
 mkdir -p "$T/bin"
-cat > "$T/bin/cg-library" <<'FAKE'
+cat > "$T/bin/ayis-library" <<'FAKE'
 #!/usr/bin/env bash
 echo "pushing Diablo IV"
 echo "error: the library was not restored on this boot" >&2
@@ -22,17 +22,17 @@ echo "error: the library was not restored on this boot" >&2
 [[ ${PUSH_SLEEP:-0} != 0 ]] && exec sleep "$PUSH_SLEEP"
 exit "${PUSH_RC:-0}"
 FAKE
-cat > "$T/bin/cg-notify" <<'FAKE'
+cat > "$T/bin/ayis-notify" <<'FAKE'
 #!/usr/bin/env bash
 echo "NOTIFY [$1] [$2]" >> "$LOG"
 FAKE
 chmod +x "$T/bin"/*
 
 # `env`, so callers can add VAR=value pairs before the command.
-env_() { env LOG="$T/log" CG_LIBRARY_BIN="$T/bin/cg-library" CG_NOTIFY_BIN="$T/bin/cg-notify" "$@"; }
+env_() { env LOG="$T/log" AYIS_LIBRARY_BIN="$T/bin/ayis-library" AYIS_NOTIFY_BIN="$T/bin/ayis-notify" "$@"; }
 run() { # run  -> "rc=<n>", output of the wrapper in $T/out
   rm -f "$T/log"; touch "$T/log"
-  env_ PUSH_RC="${PUSH_RC:-0}" bash host/cg-shutdown-push.sh > "$T/out" 2>&1
+  env_ PUSH_RC="${PUSH_RC:-0}" bash host/ayis-shutdown-push.sh > "$T/out" 2>&1
   echo "rc=$?"
 }
 
@@ -54,8 +54,8 @@ rm -f "$T/log"; touch "$T/log"
 # `env` directly, not through env_: a shell function run in the background is a
 # forked subshell, so $! would be that subshell and the signal would miss the wrapper.
 rm -f "$T/push.pid"
-env LOG="$T/log" CG_LIBRARY_BIN="$T/bin/cg-library" CG_NOTIFY_BIN="$T/bin/cg-notify" PUSH_SLEEP=30 \
-  PIDFILE="$T/push.pid" bash host/cg-shutdown-push.sh > "$T/out" 2>&1 &
+env LOG="$T/log" AYIS_LIBRARY_BIN="$T/bin/ayis-library" AYIS_NOTIFY_BIN="$T/bin/ayis-notify" PUSH_SLEEP=30 \
+  PIDFILE="$T/push.pid" bash host/ayis-shutdown-push.sh > "$T/out" 2>&1 &
 wrapper=$!
 # Wait for the push itself, by pid - matching a command line with pgrep -f also
 # matched whatever shell happened to have that text in its own command.
@@ -67,10 +67,10 @@ contains "notified"                      "$(cat "$T/log")" "[Your latest games w
 for _ in $(seq 1 20); do kill -0 "$pushpid" 2>/dev/null || break; sleep 0.1; done
 check    "the push is not left running"  "$(kill -0 "$pushpid" 2>/dev/null && echo running || echo gone)" "gone"
 
-echo "4. no cg-notify installed: still pushes, still exits with the push's status"
+echo "4. no ayis-notify installed: still pushes, still exits with the push's status"
 rm -f "$T/log"; touch "$T/log"
-LOG="$T/log" CG_LIBRARY_BIN="$T/bin/cg-library" CG_NOTIFY_BIN=/nonexistent PUSH_RC=2 \
-  bash host/cg-shutdown-push.sh > "$T/out" 2>&1; rc=$?
+LOG="$T/log" AYIS_LIBRARY_BIN="$T/bin/ayis-library" AYIS_NOTIFY_BIN=/nonexistent PUSH_RC=2 \
+  bash host/ayis-shutdown-push.sh > "$T/out" 2>&1; rc=$?
 check    "exit status kept"              "rc=$rc" "rc=2"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

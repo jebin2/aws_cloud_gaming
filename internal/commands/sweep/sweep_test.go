@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/machines"
+	"github.com/jebin2/ayis/internal/commands/machines"
 )
 
 type fake struct {
@@ -125,7 +125,7 @@ func TestTheShortlistIsTheSmallestOfEachFamily(t *testing.T) {
 	}
 	r = scan(t, world(), func(o *Options) { o.Types = []string{"g6.xlarge"} })
 	if strings.Join(r.Types, ",") != "g6.xlarge" {
-		t.Errorf("CG_SWEEP_TYPES wins: %v", r.Types)
+		t.Errorf("AYIS_SWEEP_TYPES wins: %v", r.Types)
 	}
 }
 
@@ -242,7 +242,7 @@ func TestTheCallsAreMadeFromARegionWhereTheyExist(t *testing.T) {
 	}
 	opts.From = "eu-west-1"
 	if opts.from(context.Background(), f) != "eu-west-1" {
-		t.Error("CG_SWEEP_FROM wins")
+		t.Error("AYIS_SWEEP_FROM wins")
 	}
 	f.placement = nil
 	opts.From = ""
@@ -269,7 +269,7 @@ func TestErrors(t *testing.T) {
 
 func TestShow(t *testing.T) {
 	txt := Show(scan(t, world(), nil), false)
-	for _, want := range []string{"the budget is 80ms", "REGION", "ap-south-1", "19 ms", "2 more regions are over 80ms and were skipped: cg sweep --all",
+	for _, want := range []string{"the budget is 80ms", "REGION", "ap-south-1", "19 ms", "2 more regions are over 80ms and were skipped: ayis sweep --all",
 		"1 regions did not answer a latency probe", "no GPU machine"[:0], "* is the region in use."} {
 		if !strings.Contains(txt, want) {
 			t.Errorf("lacks %q:\n%s", want, txt)

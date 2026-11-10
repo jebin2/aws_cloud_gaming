@@ -3,7 +3,7 @@
 #
 # It used to read "tier 2", "armed", "dies with: a deleted schedule" and
 # "$57 a month", and wrote "30 min" and "1 h" whatever the watchdog was set to.
-# Everything here is fed the way `cg watcher --json` and `cg config --json`
+# Everything here is fed the way `ayis watcher --json` and `ayis config --json`
 # answer, and read back as the person sees it.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -33,7 +33,7 @@ cat > "$T/r/stub.js" <<'STUB'
 window.__errs = [];
 addEventListener('error', e => window.__errs.push(e.message));
 window.__ran = [];
-window.cg = {
+window.ayis = {
   run: (args) => { window.__ran.push(args.join(' '));
                    window.__lastId = (window.__lastId || 0) + 1;
                    return Promise.resolve({ ok: true, id: window.__lastId }); },
@@ -114,8 +114,8 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('NTFY EDIT | ' + ni.type + ' ' + ni.value);
     [...ntfyRow.querySelectorAll('button')].find(b => b.textContent === 'Cancel').click();
 
-    // Save: a refusal stays on the row with cg's words; a good value comes back
-    // as the new value, read again from cg - not the old one left showing.
+    // Save: a refusal stays on the row with ayis's words; a good value comes back
+    // as the new value, read again from ayis - not the old one left showing.
     const idleRow = () => [...document.getElementById('g-knobs').children]
       .find(r => r.innerText.includes('Stop after idle'));
     window.__ran = [];
@@ -235,9 +235,9 @@ check    "  with no Refresh popup"       "$(row 'CANCEL POPUP')" "CANCEL POPUP |
 check    "Esc does the same"             "$(row 'ESC ROW')" "ESC ROW | true 0"
 
 echo "2c. Save on this page"
-check    "Save runs cg config set"       "$(row 'SAVE RAN')" "SAVE RAN | config set GAME_WATCHDOG_IDLE_MIN 5"
+check    "Save runs ayis config set"       "$(row 'SAVE RAN')" "SAVE RAN | config set GAME_WATCHDOG_IDLE_MIN 5"
 contains "a refusal keeps the row open"  "$(row REFUSED)" "editing=true"
-contains "  with cg's words under it"    "$(row REFUSED)" "reply=GAME_WATCHDOG_IDLE_MIN must be at least 10"
+contains "  with ayis's words under it"    "$(row REFUSED)" "reply=GAME_WATCHDOG_IDLE_MIN must be at least 10"
 contains "  reads nothing"               "$(row REFUSED)" "reads=0"
 contains "  and Save works again"        "$(row REFUSED)" "save=true"
 contains "Enter saves"                   "$(row 'SAVED RAN')" "config set GAME_WATCHDOG_IDLE_MIN 50"

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	"github.com/jebin2/ayis/internal/local"
 )
 
 // GPU is the environment that keeps Moonlight off a hung NVIDIA driver, and the
@@ -31,7 +31,7 @@ func GPU(root string, get func(string) string, arch string) (env []string, label
 	for _, k := range []string{"__GLX_VENDOR_LIBRARY_NAME", "__EGL_VENDOR_LIBRARY_FILENAMES", "LIBVA_DRIVER_NAME", "VK_DRIVER_FILES", "VK_ICD_FILENAMES"} {
 		if get(k) != "" {
 			// Chosen already - by you, or by the app, which makes the same choice
-			// for itself before it starts cg. Said when it is this one.
+			// for itself before it starts ayis. Said when it is this one.
 			if get("__GLX_VENDOR_LIBRARY_NAME") == "mesa" {
 				label = "the Intel GPU (NVIDIA left alone)"
 			}
@@ -121,7 +121,7 @@ var (
 )
 
 // Play streams, and returns how long it lasted. Moonlight's own output goes to a
-// file of its own, not into cg's: it is a debug log - every decoder it tried,
+// file of its own, not into ayis's: it is a debug log - every decoder it tried,
 // every packet format - thousands of lines that buried the one worth reading. A
 // stream that ends within seconds did not end by choice, so then its last
 // warnings are said, and where the rest is.

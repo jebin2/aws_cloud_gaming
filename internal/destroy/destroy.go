@@ -1,7 +1,7 @@
 // Package destroy is taking the box away: the instance, the images of it and the
-// disks it left, and nothing that is not cg's. A plain destroy removes only what
+// disks it left, and nothing that is not ayis's. A plain destroy removes only what
 // BILLS. The security group, the key pair and the tailnet node cost nothing, and
-// cg init reuses every one of them.
+// ayis init reuses every one of them.
 package destroy
 
 import (
@@ -34,7 +34,7 @@ type Plan struct {
 	Instances []string
 	Images    []string
 	Volumes   []string
-	// Others are images and unattached disks that are not cg's: said, never touched.
+	// Others are images and unattached disks that are not ayis's: said, never touched.
 	Others []string
 	// With --all, the free things too: the security group and the key pair.
 	SecurityGroup, KeyPair string
@@ -51,7 +51,7 @@ func add(list *[]string, seen map[string]bool, id string) {
 	}
 }
 
-// Read finds what is cg's: by the tag cg puts on everything it makes
+// Read finds what is ayis's: by the tag ayis puts on everything it makes
 // (<host>-image for an image, <host>-games for the old games volume), or by the
 // exact name it gave them before that tag existed. Nothing else, whatever its Name
 // says. It fails when AWS cannot be asked - a plan made from half an answer would
@@ -90,7 +90,7 @@ func Read(ctx context.Context, c EC2, host, tagKey string) (Plan, error) {
 		for _, v := range o.Volumes {
 			id := aws.ToString(v.VolumeId)
 			mine[id] = true
-			// The games volume is kept, as before: cg games --volume --delete.
+			// The games volume is kept, as before: ayis games --volume --delete.
 			if f.Values[0] == host+"-games" {
 				continue
 			}
@@ -126,7 +126,7 @@ func none(l []string) string {
 }
 
 // AllEC2 is what --all adds: the security group and the key pair, which a plain
-// destroy keeps because they cost nothing and cg init reuses them.
+// destroy keeps because they cost nothing and ayis init reuses them.
 type AllEC2 interface {
 	EC2
 	DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGroupsInput, ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
@@ -164,7 +164,7 @@ func DescribeAll(p Plan, host string) string {
 	b.WriteString("The desktop, its configuration AND the S3 game archive all go.\nThere is no undo, no image and no versioning behind the archive.\n\n")
 	if len(p.Others) > 0 {
 		sort.Strings(p.Others)
-		fmt.Fprintf(&b, "Left alone - not cg's: %s\n\n", strings.Join(p.Others, " "))
+		fmt.Fprintf(&b, "Left alone - not ayis's: %s\n\n", strings.Join(p.Others, " "))
 	}
 	return b.String()
 }
@@ -184,13 +184,13 @@ func Describe(p Plan, host string, keepDays int, now time.Time) string {
 	fmt.Fprintf(&b, "  instances       %s\n", none(p.Instances))
 	fmt.Fprintf(&b, "  images          %s\n", none(p.Images))
 	fmt.Fprintf(&b, "  volumes         %s\n", none(p.Volumes))
-	b.WriteString("\nKept, because they are free and cg init reuses them:\n")
+	b.WriteString("\nKept, because they are free and ayis init reuses them:\n")
 	fmt.Fprintf(&b, "  security group  %s-sg\n", host)
 	fmt.Fprintf(&b, "  key pair        %s, with ~/.ssh/%s.pem\n", host, host)
 	b.WriteString("  tailnet node    left offline - pruned before the next launch\n")
 	b.WriteString("  budget          guards the account, not the box\n")
-	b.WriteString("  (cg destroy --all removes all of these)\n\n")
-	b.WriteString("The desktop and its configuration go. The GAMES stay in S3: they were\nmirrored before this started, and the next cg init restores them.\nCheck with: cg library\n")
+	b.WriteString("  (ayis destroy --all removes all of these)\n\n")
+	b.WriteString("The desktop and its configuration go. The GAMES stay in S3: they were\nmirrored before this started, and the next ayis init restores them.\nCheck with: ayis library\n")
 	// The archive is not kept for good: the cloud watchdog deletes it after the
 	// expiry window with no box. Saying "nothing touches it" here was true until
 	// that existed, and is the sentence someone would rely on.
@@ -203,7 +203,7 @@ func Describe(p Plan, host string, keepDays int, now time.Time) string {
 	b.WriteString("\n")
 	if len(p.Others) > 0 {
 		sort.Strings(p.Others)
-		fmt.Fprintf(&b, "Left alone - not cg's: %s\n\n", strings.Join(p.Others, " "))
+		fmt.Fprintf(&b, "Left alone - not ayis's: %s\n\n", strings.Join(p.Others, " "))
 	}
 	return b.String()
 }

@@ -1,4 +1,4 @@
-// Package format is how cg writes sizes and durations.
+// Package format is how ayis writes sizes and durations.
 package format
 
 import (

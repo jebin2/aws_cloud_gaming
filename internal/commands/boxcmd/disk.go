@@ -14,8 +14,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	cg "github.com/jebin2/aws_cloud_gaming"
-	"github.com/jebin2/aws_cloud_gaming/internal/provision"
+	ayis "github.com/jebin2/ayis"
+	"github.com/jebin2/ayis/internal/provision"
 )
 
 // DiskAPI is what adding space to the games disk asks of AWS. It is its own
@@ -44,7 +44,7 @@ const (
 	extraMount  = "/scratch2"
 )
 
-// DiskStatus is `cg disk --json`: how full the games' space is, and what adding
+// DiskStatus is `ayis disk --json`: how full the games' space is, and what adding
 // to it would do. It is the one place the app learns whether Add disk grows a
 // disk that is already there (the game keeps running) or has to move the games
 // puts a second disk beside the machine's drive (Steam is closed and opened
@@ -182,14 +182,14 @@ func (d Deps) df(ctx context.Context) (total, used float64, ok bool) {
 // extraInSteam is whether Steam's list of folders, as the machine has it, holds a
 // library on the disk added beside the machine's own drive.
 func (d Deps) extraInSteam(ctx context.Context) bool {
-	// Steam's Add Drive does not use the folder cg made: it lists the drives and
+	// Steam's Add Drive does not use the folder ayis made: it lists the drives and
 	// creates its own folder on the one picked (/scratch2/SteamLibrary), so any
 	// library on the added disk counts, wherever Steam put it.
 	out, err := d.Box.SSH(ctx, `grep -qsE '"path"[[:space:]]*"`+extraMount+`(/[^"]*)?"' /home/ubuntu/.local/share/Steam/config/libraryfolders.vdf && echo yes`, nil)
 	return err == nil && strings.TrimSpace(string(out)) == "yes"
 }
 
-// Disk is `cg disk`.
+// Disk is `ayis disk`.
 func (d Deps) Disk(ctx context.Context, c DiskAPI, asJSON bool) int {
 	if d.Box.ID == "" {
 		return d.die("there is no game PC yet")
@@ -259,7 +259,7 @@ func (d Deps) Disk(ctx context.Context, c DiskAPI, asJSON bool) int {
 	return 0
 }
 
-// AddDisk is `cg disk add <GB>`: more room for the games on a machine that is
+// AddDisk is `ayis disk add <GB>`: more room for the games on a machine that is
 // running. A machine with a games disk gets it made bigger - AWS does that while
 // it is in use, and the games, their archive and Steam never notice. A machine
 // whose games sit on its own drive, which cannot grow, gets a new disk and the
@@ -269,7 +269,7 @@ func (d Deps) AddDisk(ctx context.Context, c DiskAPI, gb int) int {
 		return d.die("there is no game PC yet")
 	}
 	if gb < 1 {
-		return d.die("how much space? For example: cg disk add 100")
+		return d.die("how much space? For example: ayis disk add 100")
 	}
 	if s, err := d.Box.State(ctx); err != nil || s != "running" {
 		return d.die("the game PC is not running; start it first")
@@ -382,7 +382,7 @@ func (d Deps) makeAndAttach(ctx context.Context, c DiskAPI, zone string, gb int)
 	d.Out.SayID("disk.make", fmt.Sprintf("Making a %d GB disk", gb))
 	tagKey := d.Box.TagKey
 	if tagKey == "" {
-		tagKey = "cg:host"
+		tagKey = "ayis:host"
 	}
 	tags := []ec2types.Tag{{Key: aws.String("Name"), Value: aws.String(d.Box.Host)}, {Key: aws.String(tagKey), Value: aws.String(d.Box.Host)}}
 	cv, err := c.CreateVolume(ctx, &ec2.CreateVolumeInput{
@@ -406,14 +406,14 @@ func (d Deps) makeAndAttach(ctx context.Context, c DiskAPI, zone string, gb int)
 		return fail("AWS would not connect the disk: " + firstErrorLine(err.Error()))
 	}
 	if !d.waitVolume(ctx, c, vol, "in-use") {
-		return "", d.die("the new disk is made but did not connect; cg destroy removes it, or try again")
+		return "", d.die("the new disk is made but did not connect; ayis destroy removes it, or try again")
 	}
 	// So that it goes with the machine and stops billing when the machine goes.
 	if _, err := c.ModifyInstanceAttribute(ctx, &ec2.ModifyInstanceAttributeInput{
 		InstanceId: aws.String(d.Box.ID),
 		BlockDeviceMappings: []ec2types.InstanceBlockDeviceMappingSpecification{{
 			DeviceName: aws.String(extraDevice), Ebs: &ec2types.EbsInstanceBlockDeviceSpecification{VolumeId: aws.String(vol), DeleteOnTermination: aws.Bool(true)}}}}); err != nil {
-		d.Out.LogAs("warn", "the disk was not marked to go with the machine; cg destroy still removes it")
+		d.Out.LogAs("warn", "the disk was not marked to go with the machine; ayis destroy still removes it")
 	}
 	return vol, 0
 }
@@ -421,7 +421,7 @@ func (d Deps) makeAndAttach(ctx context.Context, c DiskAPI, zone string, gb int)
 // dropVolume deletes a disk that could not be put to use, rather than leave it billing.
 func (d Deps) dropVolume(ctx context.Context, c DiskAPI, vol string) {
 	if _, err := c.DeleteVolume(context.WithoutCancel(ctx), &ec2.DeleteVolumeInput{VolumeId: aws.String(vol)}); err != nil {
-		d.Out.LogAs("warn", "the new disk could not be removed again; it is tagged for cg, and cg destroy takes it")
+		d.Out.LogAs("warn", "the new disk could not be removed again; it is tagged for ayis, and ayis destroy takes it")
 	}
 }
 
@@ -437,7 +437,7 @@ func (d Deps) setUpExtra(ctx context.Context, c DiskAPI, vol string, gb int) int
 		d.said(err)
 		return d.die("the new disk could not be set up. Your games are untouched; the new disk bills until the machine goes. Try again.")
 	}
-	d.Out.SayID("disk.done", fmt.Sprintf("Done: %d GB added. In Steam: Settings > Storage > Add Drive > pick the drive at /scratch2 (named cgextra)", gb))
+	d.Out.SayID("disk.done", fmt.Sprintf("Done: %d GB added. In Steam: Settings > Storage > Add Drive > pick the drive at /scratch2 (named ayisextra)", gb))
 	return 0
 }
 
@@ -470,11 +470,11 @@ func (d Deps) waitVolume(ctx context.Context, c DiskAPI, vol, want string) bool 
 // exits, and an entry added while it runs is thrown away. Its files are the ones
 // a new build installs (host/), carried over here so there is one copy of them.
 func extraScript() (string, error) {
-	helper, err := cg.Files.ReadFile("host/steam-add-extra-library")
+	helper, err := ayis.Files.ReadFile("host/steam-add-extra-library")
 	if err != nil {
 		return "", err
 	}
-	unit, err := cg.Files.ReadFile("host/cg-extra-library.service")
+	unit, err := ayis.Files.ReadFile("host/ayis-extra-library.service")
 	if err != nil {
 		return "", err
 	}
@@ -482,10 +482,10 @@ func extraScript() (string, error) {
 	return fmt.Sprintf(extraScriptHead+`
 echo '%s' | base64 -d | sudo tee /usr/local/bin/steam-add-extra-library >/dev/null
 sudo chmod 755 /usr/local/bin/steam-add-extra-library
-echo '%s' | base64 -d | sudo tee /etc/systemd/system/cg-extra-library.service >/dev/null
+echo '%s' | base64 -d | sudo tee /etc/systemd/system/ayis-extra-library.service >/dev/null
 sudo systemctl daemon-reload
-sudo systemctl enable cg-extra-library >/dev/null 2>&1
-sudo systemctl restart cg-extra-library
+sudo systemctl enable ayis-extra-library >/dev/null 2>&1
+sudo systemctl restart ayis-extra-library
 df -h /scratch2 | tail -1
 echo "the new disk is ready"`, b64(helper), b64(unit)), nil
 }
@@ -500,14 +500,14 @@ for i in $(seq 1 30); do
   sleep 2
 done
 [ -n "$dev" ] || { echo "the new disk did not show up on the game PC"; exit 1; }
-sudo blkid "$dev" >/dev/null 2>&1 || sudo mkfs.ext4 -q -F -m 0 -L cgextra "$dev"
+sudo blkid "$dev" >/dev/null 2>&1 || sudo mkfs.ext4 -q -F -m 0 -L ayisextra "$dev"
 sudo mkdir -p /scratch2
-grep -q '^LABEL=cgextra ' /etc/fstab || echo 'LABEL=cgextra /scratch2 ext4 defaults,noatime,nofail 0 2' | sudo tee -a /etc/fstab >/dev/null
+grep -q '^LABEL=ayisextra ' /etc/fstab || echo 'LABEL=ayisextra /scratch2 ext4 defaults,noatime,nofail 0 2' | sudo tee -a /etc/fstab >/dev/null
 mountpoint -q /scratch2 || sudo mount /scratch2
 sudo mkdir -p /scratch2/steam/steamapps/common
 sudo chown -R ubuntu:ubuntu /scratch2`
 
-// RemoveDisk is `cg disk remove`: delete the games disk of a STOPPED machine.
+// RemoveDisk is `ayis disk remove`: delete the games disk of a STOPPED machine.
 // The games are in Saved games, and the disk is $0.0912 a GB-month for nothing.
 // It refuses unless the archive says everything was saved since the machine
 // last started, because this deletes the only other copy of whatever was not.

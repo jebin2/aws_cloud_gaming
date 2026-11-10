@@ -5,7 +5,7 @@ import "math"
 const (
 	// ExtraDiskStepGB is what an added games disk is rounded up to.
 	ExtraDiskStepGB = 10
-	// MaxExtraDiskGB is the most cg adds on its own. A bigger library is a
+	// MaxExtraDiskGB is the most ayis adds on its own. A bigger library is a
 	// decision for a person, not an arithmetic result.
 	MaxExtraDiskGB = 1000
 )

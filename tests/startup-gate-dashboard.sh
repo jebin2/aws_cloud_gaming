@@ -14,7 +14,7 @@ contains "  naming the place, not a code" "$(row STAGETEXT)" "Hyderabad has no G
 contains "  offering the choice"       "$(row BUTTONS)" "where=Choose region"
 
 echo "4d2. a region nobody chose is not a choice"
-# A fresh laptop names no region, cg falls back to its default, the default
+# A fresh laptop names no region, ayis falls back to its default, the default
 # rents the machine - and the stage used to tick itself. The pipeline finished
 # and vanished without ever showing the list to choose from.
 ENGINE="window.__after = async () => {
@@ -23,7 +23,7 @@ ENGINE="window.__after = async () => {
   const popup = document.getElementById('whereto').open;
   const usable = !document.getElementById('whereto-use').disabled;
   const useLabel = document.getElementById('whereto-use').textContent.trim();
-  // From here on cg reports the region as written, the way the real one would.
+  // From here on ayis reports the region as written, the way the real one would.
   window.__answers['config --json'] = [
     {key: 'EMAIL_ALERTS', kind: 'text', secret: false, is_set: true, value: 'a@b.c'},
     {key: 'GAME_REGION', kind: 'text', secret: false, is_set: true, value: 'ap-south-2'}];
@@ -71,15 +71,15 @@ contains "saving the region offers no Stop" "$(row AFTER)" "during=running:stop=
 contains "  nor Close while it runs"        "$(row AFTER)" ":close=off"
 contains "  and Close is back once it is done" "$(row AFTER)" "closeAfter=on"
 lacks    "  and no region is accused"   "$(row STAGETEXT)" "no GPU quota"
-# The stage is judged on cg machines, which is behind the gate: it must not
+# The stage is judged on ayis machines, which is behind the gate: it must not
 # be what keeps the gate shut, or the list it opens has nothing in it.
 contains "the reads behind the gate ran" "$(row RAN)" "machines --json"
 contains "  and so did the scan"        "$(row RAN)" "sweep --cached --json"
 contains "its button opens the list"    "$(row AFTER)" "popup=true"
 contains "  with the region in use offered" "$(row AFTER)" "usable=true"
 contains "  on a button that names it"  "$(row AFTER)" "use=Use Hyderabad"
-contains "using it reaches cg"          "$(row AFTER)" "saved=true"
-# Not a write by cg's contract, so the popup has to ask for the read itself -
+contains "using it reaches ayis"          "$(row AFTER)" "saved=true"
+# Not a write by ayis's contract, so the popup has to ask for the read itself -
 # without it the stage sat on "Pick where it runs" after you had picked.
 contains "  and the setting is re-read" "$(row AFTER)" "reread=true"
 contains "  so the stage is done"       "$(row AFTER)" "where=done"
@@ -202,7 +202,7 @@ window.__after = async () => {
 OUT=$(probe "{$READY, \"config --json\": $cfg_noregion, \"sweep --cached --json\": $EMPTY_SWEEP}")
 contains "it stops saying measuring"      "$(row AFTER)" "busy=hidden"
 contains "  says it failed"               "$(row AFTER)" "err=shown"
-contains "  in cg's words"                "$(row AFTER)" "could not reach AWS"
+contains "  in ayis's words"                "$(row AFTER)" "could not reach AWS"
 contains "  and offers another go"        "$(row AFTER)" "measure=Try again/shown"
 ENGINE=""
 
@@ -294,7 +294,7 @@ HOMEGAMES="window.__after = async () => {
   const remembered = 'bill=' + t('d-recurring-card') + ' | month=' + q('#d-month-card [data-f=total]')
     + ' | monthsub=' + q('#d-month-card [data-f=sub]') + ' | src=' + t('d-month-src');
   costNow = null; costNowAt = null;
-  localStorage.setItem('cg.lastCost', JSON.stringify({ total_inr: 999, at: '2020-01-05T10:00:00Z' }));
+  localStorage.setItem('ayis.lastCost', JSON.stringify({ total_inr: 999, at: '2020-01-05T10:00:00Z' }));
   paintDash();
   const stale = 'month=' + q('#d-month-card [data-f=total]');
   document.getElementById('d-bill-more').click();
@@ -311,7 +311,7 @@ HOMEGAMES="window.__after = async () => {
 };"
 ENGINE="$HOMEGAMES"
 HG_ELSE='{"error": null, "region": "ap-south-1", "inr_per_usd": 88, "expiry_days": 14, "places": [
-  {"bucket": "cg-library-old", "region": "ap-south-2", "error": null, "bytes": 174813455930, "usd_month": 4.07,
+  {"bucket": "ayis-library-old", "region": "ap-south-2", "error": null, "bytes": 174813455930, "usd_month": 4.07,
    "games": [{"appid": "2344520", "name": "Diablo IV", "bytes": 174813206488}], "login": false}]}'
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"library list --json\": {\"games\": [], \"total_bytes\": 0, \"bucket\": \"b\", \"login\": {\"present\": false}},
@@ -337,19 +337,19 @@ contains "  and no path to measure"        "$(row AFTER)" "pings=0"
 contains "  nothing to sign in to"         "$(row AFTER)" "signin=false"
 
 ONLINE=$(st '{"id": "i-1", "state": "running", "type": "g6.xlarge", "lifecycle": "spot", "launched": "2026-01-01T00:00:00Z"}' '{"bytes": 0}' '{"volumes_gb": 50}' '{"limit": 57}' \
-  | python3 -c 'import json,sys; d=json.load(sys.stdin); d["tailnet"]={"node":"gamevps","online":True}; print(json.dumps(d))')
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); d["tailnet"]={"node":"ayis","online":True}; print(json.dumps(d))')
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP, \"status --json\": $ONLINE,
-  \"ping --json\": {\"node\": \"gamevps\", \"path\": \"direct\", \"median_ms\": 18}}")
+  \"ping --json\": {\"node\": \"ayis\", \"path\": \"direct\", \"median_ms\": 18}}")
 contains "a running machine, online"       "$(row AFTER)" "Machine: connected"
 contains "  the path, measured once"       "$(row AFTER)" "Direct connection · 18 ms"
 contains "  only once"                     "$(row AFTER)" "pings=1"
 
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP, \"status --json\": $ONLINE,
-  \"ping --json\": {\"node\": \"gamevps\", \"path\": \"DERP\", \"median_ms\": 74}}")
+  \"ping --json\": {\"node\": \"ayis\", \"path\": \"DERP\", \"median_ms\": 74}}")
 contains "a relayed path says it is slower" "$(row AFTER)" "Relayed · 74 ms · higher latency"
 
 ENGINE="$DASH"
-# An older cg sends no price table: every figure is unknown, never ₹0.
+# An older ayis sends no price table: every figure is unknown, never ₹0.
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
   \"status --json\": {\"box\": null, \"region\": \"ap-south-2\", \"instance_type\": \"g6.xlarge\",
      \"archive\": {\"bytes\": 1073741824, \"usd_month\": 0.03}, \"res\": {\"volumes_gb\": 0},

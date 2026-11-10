@@ -1,5 +1,5 @@
 // Package remote is the commands that talk to the box over the tailnet and
-// change nothing: cg ping, cg log and cg ssh.
+// change nothing: ayis ping, ayis log and ayis ssh.
 package remote
 
 import (
@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 // Box is the machine and how to reach it.
@@ -36,7 +36,7 @@ func (b Box) IP(ctx context.Context) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("'%s' is not on the tailnet. Is the box running? Try: cg status", b.Node)
+	return "", fmt.Errorf("'%s' is not on the tailnet. Is the box running? Try: ayis status", b.Node)
 }
 
 // SSHIP is the node's address for a command that needs ssh: it also needs the
@@ -53,7 +53,7 @@ func (b Box) SSHIP(ctx context.Context) (string, error) {
 		exists = func(p string) bool { _, e := os.Stat(p); return e == nil }
 	}
 	if !exists(pem) {
-		return "", fmt.Errorf("no key for the box (%s is missing), so this computer has no box to reach. cg init builds one", pem)
+		return "", fmt.Errorf("no key for the box (%s is missing), so this computer has no box to reach. ayis init builds one", pem)
 	}
 	return ip, nil
 }
@@ -68,11 +68,11 @@ func (b Box) sshArgs(ip string, command ...string) []string {
 	return append(a, command...)
 }
 
-// Log is `cg log [what] [--watch]`: the build, Steam's prewarm, the watchdog,
+// Log is `ayis log [what] [--watch]`: the build, Steam's prewarm, the watchdog,
 // the disk monitor or Sunshine, on the box.
 func (b Box) Log(ctx context.Context, what string, watch bool, w io.Writer, out *output.Out) int {
 	cmds := map[string][2]string{ // what -> {once, follow}
-		"build":    {"sudo tail -n 200 /var/log/cloud-gaming-bootstrap.log", "sudo tail -f /var/log/cloud-gaming-bootstrap.log"},
+		"build":    {"sudo tail -n 200 /var/log/ayis-bootstrap.log", "sudo tail -f /var/log/ayis-bootstrap.log"},
 		"steam":    {"tail -n 200 ~/steam-prewarm.log", "tail -f ~/steam-prewarm.log"},
 		"watchdog": {"journalctl -t idle-watchdog -n 50 --no-pager", "journalctl -t idle-watchdog -f"},
 		"disk":     {"journalctl -t disk-monitor -n 50 --no-pager", "journalctl -t disk-monitor -f"},
@@ -80,7 +80,7 @@ func (b Box) Log(ctx context.Context, what string, watch bool, w io.Writer, out 
 	}
 	c, ok := cmds[what]
 	if !ok {
-		out.Die("usage: cg log [build|steam|watchdog|disk|sunshine] [--watch]")
+		out.Die("usage: ayis log [build|steam|watchdog|disk|sunshine] [--watch]")
 		return 1
 	}
 	command := c[0]
@@ -98,7 +98,7 @@ func (b Box) Log(ctx context.Context, what string, watch bool, w io.Writer, out 
 	return 0
 }
 
-// SSH is `cg ssh [command...]`: a shell on the box, or one command, with the
+// SSH is `ayis ssh [command...]`: a shell on the box, or one command, with the
 // remote's exit status. OpenSSH joins the arguments with spaces, as before.
 func (b Box) SSH(ctx context.Context, args []string, out *output.Out) int {
 	ip, err := b.SSHIP(ctx)
@@ -146,7 +146,7 @@ func MedianMS(output string) int {
 	return ms[(len(ms)+1)/2-1]
 }
 
-// Ping is `cg ping [--json] [--watch]`.
+// Ping is `ayis ping [--json] [--watch]`.
 func (b Box) Ping(ctx context.Context, jsonOut, watch bool, w io.Writer, out *output.Out) int {
 	ip, err := b.IP(ctx)
 	if err != nil {

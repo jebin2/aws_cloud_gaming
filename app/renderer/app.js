@@ -1,6 +1,6 @@
 'use strict';
-// The view. It knows which cg command fills which panel, and renders the fields
-// cg hands it - no AWS, no prices of its own, and no parsing of the human
+// The view. It knows which ayis command fills which panel, and renders the fields
+// ayis hands it - no AWS, no prices of its own, and no parsing of the human
 // tables that arrive inside a report event.
 
 const $ = id => document.getElementById(id);
@@ -12,10 +12,10 @@ const jobs = new Map();          // id -> { cmd, view, json, panel, collect, age
 let view = 'dashboard';
 
 // What a run is called, so a button can say what it stops rather than "Stop".
-// A command is more than its first word. `cg library list` reads an index;
-// `cg library push` spends ten minutes uploading your games - and this table
+// A command is more than its first word. `ayis library list` reads an index;
+// `ayis library push` spends ten minutes uploading your games - and this table
 // used to be keyed on `library` alone, TWICE, so the second one won and a
-// mirror to S3 was called a refresh: "running: cg refresh" in the header and
+// mirror to S3 was called a refresh: "running: ayis refresh" in the header and
 // "Stop refresh" on the button that would abandon it.
 //
 // Longest match first, and flags are not part of the name.
@@ -28,7 +28,7 @@ const byCommand = (table, cmd) => {
   return undefined;
 };
 
-// The header groups runs rather than listing them: `cg status` and `cg watcher`
+// The header groups runs rather than listing them: `ayis status` and `ayis watcher`
 // are two commands and one refresh to whoever clicked it.
 const RUN_NAME = {
   init: 'the build', destroy: 'deleting', open: 'the session', check: 'the check',
@@ -50,7 +50,7 @@ const runName = cmd => byCommand(RUN_NAME, cmd) || cmd[0];
 //
 //   name  what it is called, as a NOUN, so it can be the subject of a sentence:
 //         "the build is still running", "the mirror to S3 finished".
-const CG_WORDS = {
+const AYIS_WORDS = {
   deps: { name: 'the tool check' },
   creds: { name: 'the AWS key check' },
   'creds tailscale': { name: 'the Tailscale check' },
@@ -65,7 +65,7 @@ const CG_WORDS = {
   check:             { name: 'the laptop check' },
   'watchdog logs':   { name: 'loading the auto-stop history' },
   'config set':      { name: 'saving a setting' },
-  // Everything cg says runs alone - see `cg --contract`, and the test that
+  // Everything ayis says runs alone - see `ayis --contract`, and the test that
   // holds this list to it. These are the ones whose name ends up on a Stop
   // button, so none of them may read as something cheap.
   init:                      { name: 'the build' },
@@ -97,12 +97,12 @@ const CG_WORDS = {
   'host setup':              { name: 'setting up your machine' },
   'host open':               { name: 'the game session on your machine' },
 };
-const cgWords = cmd => byCommand(CG_WORDS, cmd) || {};
+const ayisWords = cmd => byCommand(AYIS_WORDS, cmd) || {};
 // Falls back to the command itself: a name nobody wrote down is better said in
-// cg's words than guessed at.
-const cgName = cmd => cgWords(cmd).name || 'a background task';
+// ayis's words than guessed at.
+const ayisName = cmd => ayisWords(cmd).name || 'a background task';
 // The same, to start a sentence with.
-const CgName = cmd => { const s = cgName(cmd); return s.charAt(0).toUpperCase() + s.slice(1); };
+const AyisName = cmd => { const s = ayisName(cmd); return s.charAt(0).toUpperCase() + s.slice(1); };
 // Runs long enough to be worth going back to.
 const WATCHABLE = new Set(['init', 'destroy', 'open']);
 const LONG_LIBRARY = new Set(['push', 'pull', 'clean']);
@@ -110,32 +110,32 @@ const watchable = cmd => WATCHABLE.has(cmd[0]) || (cmd[0] === 'library' && LONG_
 const jobsHere = () => [...jobs.values()].filter(j => j.view === view);
 
 // A screen's button answers for that screen. The one real dependency is that a
-// build or a destroy runs alone - cg refuses anything else while one is in
+// build or a destroy runs alone - ayis refuses anything else while one is in
 // flight - so those disable the rest. Reads never block each other.
 //
 // WHICH commands those are is not written down here any more. It used to be,
 // in two places - this file and the main process - and the two disagreed three
 // times, silently, because a command that is never started looks exactly like
-// one that returned nothing. cg publishes the rule (cg --contract), the main
+// one that returned nothing. ayis publishes the rule (ayis --contract), the main
 // process applies it, and the answer comes back with the job as job.write.
 const writing = () => [...jobs.values()].some(j => j.write);
-// Why a read was refused: the run cg is doing alone, by name.
+// Why a read was refused: the run ayis is doing alone, by name.
 const busyWhy = () => {
   const alone = [...jobs.values()].find(j => j.write);
-  return alone ? `waits for ${cgName(alone.cmd)} to finish.` : 'another task is running.';
+  return alone ? `waits for ${ayisName(alone.cmd)} to finish.` : 'another task is running.';
 };
 const runningHere = cmd => jobsHere().some(j => j.cmd[0] === cmd);
 const jobsFor = cmd => [...jobs.values()].some(j => j.cmd[0] === cmd);
 // The AWS machine's game session (or its start), as [id, job] pairs.
 const openJobs = () => [...jobs].filter(([, j]) => j.cmd[0] === 'open');
-// A machine of yours waits while cg runs something alone - an AWS build, a
-// delete, a session: cg refuses its setup or stream at the start, and pressed
+// A machine of yours waits while ayis runs something alone - an AWS build, a
+// delete, a session: ayis refuses its setup or stream at the start, and pressed
 // anyway, the step read as failed with "Waiting for the build to finish."
 // Greyed instead, saying what it waits for, and back the moment that ends.
 // dataset.off is what the card itself decided; this only adds the wait.
 function lockHostButtons() {
   const alone = [...jobs.values()].find(j => j.write);
-  const why = alone ? `Waits for ${cgName(alone.cmd)} to finish` : '';
+  const why = alone ? `Waits for ${ayisName(alone.cmd)} to finish` : '';
   for (const b of document.querySelectorAll('[data-host] button[data-f=play], [data-host] button[data-f=setup]')) {
     b.disabled = b.dataset.off === '1' || !!alone;
     if (alone) b.title = why;
@@ -151,7 +151,7 @@ const hostRun = j => j.cmd[0] === 'host' && (j.cmd[1] === 'setup' || j.cmd[1] ==
 const headerSpares = j => hostRun(j) || j.cmd[0] === 'init' || j.cmd[0] === 'open';
 // Woken each time a job ends - see readsSettled.
 const jobEnded = [];
-// Until the reads in flight have landed. A step's own command runs alone (cg
+// Until the reads in flight have landed. A step's own command runs alone (ayis
 // --contract), so it is refused while anything else runs - and a step's button
 // is offered the moment its own read lands, with the rest still landing: the
 // Tailscale sign-in after an install was refused that way, every time, by the
@@ -177,7 +177,7 @@ function updateHeader() {
   // Refresh popup, a Fetch button); a Stop appearing for it was noise.
   lockHostButtons();
   // A build is not stopped here: its card has Cancel, which also deletes the
-  // machine. A second button beside it that stopped cg and left the machine
+  // machine. A second button beside it that stopped ayis and left the machine
   // billing was the same click with a worse ending.
   const stoppable = mine.filter(j => j.write && !headerSpares(j));
   const hereNames = [...new Set(stoppable.map(j => j.group || runName(j.cmd)))];
@@ -193,7 +193,7 @@ function updateHeader() {
   if (elsewhere) {
     // Named in full here, not grouped: this points at one run, and what it is
     // decides whether you want to go and watch it.
-    $('goto-label').textContent = `${CgName(elsewhere.cmd)} is running · show it`;
+    $('goto-label').textContent = `${AyisName(elsewhere.cmd)} is running · show it`;
     $('goto').dataset.view = elsewhere.view;
   }
 
@@ -214,7 +214,7 @@ function updateHeader() {
   paintDash();
 }
 
-// The dashboard's activity list: what cg did in this window. The app keeps no
+// The dashboard's activity list: what ayis did in this window. The app keeps no
 // history beyond it - the durable record is the watchdog's own log, shown on
 // the Guards screen.
 // A dialog leaves the way it came in - sinking a little and fading, the room
@@ -375,15 +375,15 @@ function askConfirm({ title, body, yes = 'Continue', no = 'Cancel', danger = fal
 }
 
 function ask(id, event) {
-  // A question the app knows is asked in its own words; cg's prompt is written
+  // A question the app knows is asked in its own words; ayis's prompt is written
   // for a terminal ("[d] destroy  [n] leave it running:").
   $('ask-prompt').textContent = ASK_QUESTION[event.id] || event.prompt || event.id;
   const input = $('ask-input');
   const box = $('ask-choices');
-  // cg states the answers it accepts. When it does, this is a CHOICE, and a
+  // ayis states the answers it accepts. When it does, this is a CHOICE, and a
   // free-text field is the wrong control for one: the build sat on a dialog
   // reading "choice [1]:" with no sign of what the choices were, because the
-  // options cg had printed went to the log pane behind the modal.
+  // options ayis had printed went to the log pane behind the modal.
   const choices = (event.choices || '').split(',').map(c => c.trim()).filter(Boolean);
   box.textContent = '';
   box.hidden = choices.length === 0;
@@ -413,11 +413,11 @@ function ask(id, event) {
     const picked = choices.length
       ? (box.querySelector('input:checked')?.value ?? event.default ?? '')
       : input.value;
-    window.cg.answer(id, picked);
+    window.ayis.answer(id, picked);
   };
 }
 
-// A bare "1" or "2" in a dialog says nothing. cg prints the meaning to the log,
+// A bare "1" or "2" in a dialog says nothing. ayis prints the meaning to the log,
 // which is behind the modal, so the words are repeated here for the prompts
 // where the answer is a number. Anything not listed falls back to the raw
 // value, so a new prompt is terse rather than broken.
@@ -425,9 +425,9 @@ function ask(id, event) {
 // a SETTING to labels for its values - same idea, different shape, and sharing
 // one name for both silently shadowed the other.
 // The ask ids this window knows by name: the ones it answers from a dialog it
-// has already shown, and the one whose answers it spells out below. cg owns
+// has already shown, and the one whose answers it spells out below. ayis owns
 // these ids; they are written here only to be matched, and checkAsks() holds
-// the two lists against each other at startup so a rename in cg is loud.
+// the two lists against each other at startup so a rename in ayis is loud.
 const ASK = {
   awsId:      'aws-access-key-id',
   awsSecret:  'aws-secret-access-key',
@@ -441,16 +441,16 @@ const ASK_QUESTION = {
   [ASK.hostSudo]: 'Sudo password for this machine. Used once for setup. Not stored.',
   [ASK.hostSshPw]: 'SSH password. Used once to install a key. Not stored.',
 };
-// A choice cg offers, in plain words, by "<ask>:<answer>". None at present:
+// A choice ayis offers, in plain words, by "<ask>:<answer>". None at present:
 // the one there was - keep or delete the machine when a session ended - is
 // no longer asked; closing Moonlight just ends the session.
 const ASK_CHOICE_LABEL = {};
-// Any id the window pre-answers but cg no longer asks under is a modal waiting
+// Any id the window pre-answers but ayis no longer asks under is a modal waiting
 // to appear in the middle of a build - which is exactly what this replaced.
 async function checkAsks() {
   let asks;
-  try { asks = await window.cg.asks(); } catch { return; }
-  if (!Array.isArray(asks) || !asks.length) return;   // cg could not be asked
+  try { asks = await window.ayis.asks(); } catch { return; }
+  if (!Array.isArray(asks) || !asks.length) return;   // ayis could not be asked
   const gone = Object.values(ASK).filter(id => !asks.includes(id));
   if (gone.length) {
     console.error('This app and its scripts are different versions. The scripts no longer ask: ' + gone.join(', ')
@@ -469,8 +469,8 @@ function buildRate() {
 }
 // A machine's hourly price as billed: the machine, its public address and its
 // disk, which all bill by the hour while it exists. Every rate is AWS's, read by
-// cg; the rupee rate has GST in it. A GB-month is the hours of this month, as
-// cg says them.
+// ayis; the rupee rate has GST in it. A GB-month is the hours of this month, as
+// ayis says them.
 function perHour(h, diskGb) {
   const r = (statusNow && statusNow.rates) || {};
   if (h == null || !r.inr_per_usd) return h ?? null;
@@ -478,7 +478,7 @@ function perHour(h, diskGb) {
   return h + (r.ipv4_hour ? r.ipv4_hour * r.inr_per_usd : 0)
            + (gb && r.ebs_gb_month && r.month_hours ? gb * r.ebs_gb_month / r.month_hours * r.inr_per_usd : 0);
 }
-// Dollars to rupees at cg's rate today. A saved scan carries the rupees of
+// Dollars to rupees at ayis's rate today. A saved scan carries the rupees of
 // the day it ran; the dollars are AWS's, so they are converted again.
 function inrNow(usd, given) {
   const k = statusNow && statusNow.rates && statusNow.rates.inr_per_usd;
@@ -509,8 +509,8 @@ function pill(parent, text, tone, icon) {
   parent.append(el);
 }
 
-// Everything below reads fields from `cg status --json`. If a screen ever wants
-// something that is not there, the fix is a field in cg - never a regex here.
+// Everything below reads fields from `ayis status --json`. If a screen ever wants
+// something that is not there, the fix is a field in ayis - never a regex here.
 function paintPing(d) { pingNow = d; paintDash(); }
 function askPing(s) {
   const online = !!(s.box && s.box.state === 'running' && s.tailnet && s.tailnet.online);
@@ -518,12 +518,12 @@ function askPing(s) {
   if (pingBusy || Date.now() - pingAt < 60000) return;
   pingBusy = true;
   pingAt = Date.now();
-  runCg(['ping', '--json'], { json: 'ping', group: 'refresh' }).then(() => { pingBusy = false; });
+  runAyis(['ping', '--json'], { json: 'ping', group: 'refresh' }).then(() => { pingBusy = false; });
 }
 
 // A stopped machine's added games disk, read once per machine: how big it is and
 // whether Saved games has everything on it (so deleting it loses nothing).
-// A disk's rupees a month, from the rate cg read. null when it has not been read.
+// A disk's rupees a month, from the rate ayis read. null when it has not been read.
 const diskMonthInr = gb => {
   const r = (statusNow && statusNow.rates) || {};
   return r.ebs_gb_month && r.inr_per_usd ? gb * r.ebs_gb_month * r.inr_per_usd : null;
@@ -534,19 +534,19 @@ async function readStoppedDisk(s) {
   if (!b || b.state !== 'stopped') { stoppedDisk = null; stoppedDiskFor = ''; return; }
   if (stoppedDiskFor === b.id) return;
   stoppedDiskFor = b.id;
-  try { stoppedDisk = JSON.parse(await runCg(['disk', '--json'], { capture: true })); }
+  try { stoppedDisk = JSON.parse(await runAyis(['disk', '--json'], { capture: true })); }
   catch { stoppedDisk = null; stoppedDiskFor = ''; }
   paintMachineCards();
 }
 // The machines whose games disk this app removed: playing one asks which games
 // to bring back, because they are no longer on it.
 const diskRemoved = {
-  has(id) { try { return (JSON.parse(localStorage.getItem('cg-disk-removed') || '{}'))[id] === 1; } catch { return false; } },
+  has(id) { try { return (JSON.parse(localStorage.getItem('ayis-disk-removed') || '{}'))[id] === 1; } catch { return false; } },
   set(id, on) {
     try {
-      const m = JSON.parse(localStorage.getItem('cg-disk-removed') || '{}');
+      const m = JSON.parse(localStorage.getItem('ayis-disk-removed') || '{}');
       if (on) m[id] = 1; else delete m[id];
-      localStorage.setItem('cg-disk-removed', JSON.stringify(m));
+      localStorage.setItem('ayis-disk-removed', JSON.stringify(m));
     } catch { /* a convenience: playing without the question still works */ }
   },
 };
@@ -568,7 +568,7 @@ function paintStatus(s) {
   statusBudget = s.budget || null;
   // What the app may do with the box that exists. A stream can be running that
   // this window never started - closing the app does not end it - so Play asks
-  // cg rather than remembering, and refuses to start a second Moonlight.
+  // ayis rather than remembering, and refuses to start a second Moonlight.
   sessionNow = s.session || null;
   paintSession();
   paintDash();
@@ -578,10 +578,10 @@ function paintStatus(s) {
 // ── The dashboard ───────────────────────────────────────────────────────────
 //
 // Three questions, in order: can I play right now, what is it costing, and are
-// my games and my money safe. Drawn whole from what cg has already said -
+// my games and my money safe. Drawn whole from what ayis has already said -
 // status, the machines, the archive, the guards - and redrawn when any of them
-// lands. Money is in rupees only; every price is cg's (status carries the
-// table), and the rate for a machine is `cg machines`'s.
+// lands. Money is in rupees only; every price is ayis's (status carries the
+// table), and the rate for a machine is `ayis machines`'s.
 
 // Rupees, with paise only where they matter.
 const rs = n => n == null || !isFinite(n) ? '—'
@@ -589,7 +589,7 @@ const rs = n => n == null || !isFinite(n) ? '—'
 // An hourly figure keeps its paise when it has any: ₹20 + ₹0.44 has to read as
 // ₹20.44, or the total does not add up to the lines above it.
 const rsh = n => n != null && isFinite(n) && n < 100 && Math.round(n * 100) % 100 ? '₹' + n.toFixed(2) : rs(n);
-// NaN, not 0, when cg sent no price table (an older cg): every figure then reads
+// NaN, not 0, when ayis sent no price table (an older ayis): every figure then reads
 // "—", which is true, instead of ₹0, which is not.
 const inrRate = () => (statusNow && statusNow.rates && statusNow.rates.inr_per_usd) || NaN;
 
@@ -637,7 +637,7 @@ function machineFacts() {
   }
   const price = perHour(lo, disk), priceMax = perHour(hi, disk);
   const priceText = hourText(price, priceMax);
-  // Room for games, in the same number the Build page's meter uses: cg's
+  // Room for games, in the same number the Build page's meter uses: ayis's
   // figure for this machine type, less the space kept free. Before that is
   // read, the type's disk as AWS sizes it.
   const lib = libNow || {};
@@ -670,7 +670,7 @@ function renderMachineCard(card) {
     sub = 'AWS is unreachable.';
   } else if (building) {
     title = 'Building';
-    // How long the last build took, as cg measured it; no number until one has.
+    // How long the last build took, as ayis measured it; no number until one has.
     const took = (s.build || {}).last_min;
     const last = took != null ? `last build took ${took} min` : '';
     sub = box && box.launched ? [`Started ${uptime(box.launched)} ago`, last].filter(Boolean).join(' · ')
@@ -826,7 +826,7 @@ function mountMachineCard(box, p) {
 // A stop or delete begun on this laptop and not seen through: kept in this
 // window's storage from the click until the run ends (well or not), so only one
 // that was cut off - the app closed, the laptop slept - is still there next time.
-const FLOW_KEY = 'cg-flow-pending';
+const FLOW_KEY = 'ayis-flow-pending';
 const flowPending = {
   get() { try { return JSON.parse(localStorage.getItem(FLOW_KEY) || 'null'); } catch { return null; } },
   set(v) { try { localStorage.setItem(FLOW_KEY, JSON.stringify(v)); } catch { /* a convenience */ } },
@@ -907,7 +907,7 @@ function paintMachineCards() {
     const running = !!(box && box.state === 'running');
     $(`${p}-busy`).hidden = !building;
     $(`${p}-build`).hidden = !!box || building || !!(s.error && s.error.credentials);
-    // A stopped machine is started by Play too: cg open starts it first.
+    // A stopped machine is started by Play too: ayis open starts it first.
     const stopped = !!(box && box.state === 'stopped');
     // Playing, or starting to: Play gives way to Stop session and Stop machine.
     const sessionJob = openJobs().length > 0;
@@ -1090,7 +1090,7 @@ function paintNetwork(s) {
 }
 
 // Play, on both screens, says what it would do - and says no when a stream is
-// already up, which is what cg itself does.
+// already up, which is what ayis itself does.
 function paintSession() {
   const live = !!sessionNow;
   for (const id of ['d-open', 'b-open']) {
@@ -1115,7 +1115,7 @@ function cell(row, text, cls) {
   return td;
 }
 
-// Rendered from `cg cost --json`: the same single Cost Explorer call the CLI makes.
+// Rendered from `ayis cost --json`: the same single Cost Explorer call the CLI makes.
 function setting(key, fallback) {
   const r = config.find(x => x.key === key);
   return (r && (r.effective ?? r.value)) || fallback;
@@ -1128,7 +1128,7 @@ function setting(key, fallback) {
 function restoreBill() {
   if (costNow) return;
   try {
-    const kept = JSON.parse(localStorage.getItem('cg.lastCost') || 'null');
+    const kept = JSON.parse(localStorage.getItem('ayis.lastCost') || 'null');
     if (!kept || !kept.bill) return;
     const at = new Date(kept.at), now = new Date();
     if (at.getFullYear() !== now.getFullYear() || at.getMonth() !== now.getMonth()) return;
@@ -1142,7 +1142,7 @@ function lastCost() {
   const m = costNow && costNow.month;
   if (m && m.total_inr != null) return { total_inr: m.total_inr, projected_inr: m.projected_inr ?? null, at: costNowAt.toISOString() };
   try {
-    const kept = JSON.parse(localStorage.getItem('cg.lastCost') || 'null');
+    const kept = JSON.parse(localStorage.getItem('ayis.lastCost') || 'null');
     const at = kept && new Date(kept.at), now = new Date();
     if (at && at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth()) return kept;
   } catch { /* nothing remembered */ }
@@ -1175,7 +1175,7 @@ const BILL_CHANGE = {
   'disk add': 'you added disk space',
 };
 function billChanges() {
-  try { return JSON.parse(localStorage.getItem('cg.billChanges') || '[]'); } catch { return []; }
+  try { return JSON.parse(localStorage.getItem('ayis.billChanges') || '[]'); } catch { return []; }
 }
 // At or after: the list is cleared when a check is made, so anything in it
 // came after that check - even within the same millisecond.
@@ -1196,7 +1196,7 @@ function noteBillChange(what) {
   if (!lastCost()) return;              // nothing checked yet: nothing to go out of date
   const list = billChanges();
   list.push({ what, at: new Date().toISOString() });
-  try { localStorage.setItem('cg.billChanges', JSON.stringify(list.slice(-20))); } catch { /* this window only */ }
+  try { localStorage.setItem('ayis.billChanges', JSON.stringify(list.slice(-20))); } catch { /* this window only */ }
   paintDash();
   paintRefreshAge();
 }
@@ -1214,10 +1214,10 @@ function paintSpend(d) {
   // Kept on this laptop, so Home is not empty again after a restart; it is
   // shown with when it was checked, never as if it were live.
   const m = d.month || {};
-  try { localStorage.removeItem('cg.billChanges'); } catch { /* nothing kept */ }
+  try { localStorage.removeItem('ayis.billChanges'); } catch { /* nothing kept */ }
   if (m.total_inr != null) {
     try {
-      localStorage.setItem('cg.lastCost', JSON.stringify({
+      localStorage.setItem('ayis.lastCost', JSON.stringify({
         total_inr: m.total_inr, projected_inr: m.projected_inr ?? null, at: costNowAt.toISOString(), bill: d }));
     } catch { /* storage unavailable: this window still has it */ }
   }
@@ -1271,7 +1271,7 @@ function renderMonth(box, { hint } = {}) {
   const now = new Date();
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
   total.textContent = m.total_usd != null ? r(m.total_usd) : '—';
-  // AWS's bill is the account's - every region, and anything not cg's.
+  // AWS's bill is the account's - every region, and anything not ayis's.
   sub.textContent = m.total_usd == null ? 'No response from AWS.'
     : `so far on the whole AWS account${(d.rates || {}).tax_pct ? `, with ${d.rates.tax_pct}% GST` : ''} · ${hours.toFixed(1)} h runtime`
       + (projected != null ? ` · projected ${r(projected)} by ${monthEnd.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : '');
@@ -1312,7 +1312,7 @@ function renderRecurring(box, { hint } = {}) {
   if (!p) { head.textContent = '—'; sub.textContent = hint || ''; return; }
   const { d, inr, r } = p;
   const standby = d.standby || {}, res = d.resources || {}, arch = d.archive || {};
-  // Games cg found in other places bill like any others. What the bill says
+  // Games ayis found in other places bill like any others. What the bill says
   // beyond those is not guessed at here: the bill runs days behind, so a game
   // just deleted read as "storage this app cannot find" for three days.
   const away = elsewherePlaces().filter(x => x.usd_month);
@@ -1367,8 +1367,8 @@ function paintCostPage() {
   const d = costNow;
   if (!d) return;
   const m = d.month || {};
-  // Every rate on this screen comes from cg, and one rupee rate converts all
-  // of it - cg's own, so the rows add up to the total under them.
+  // Every rate on this screen comes from ayis, and one rupee rate converts all
+  // of it - ayis's own, so the rows add up to the total under them.
   const rate = d.rates || {};
   const inr = rate.inr_per_usd || m.inr_per_usd;
   const r = usd => (usd == null || !isFinite(usd) || !inr ? '—' : rs(usd * inr));
@@ -1470,7 +1470,7 @@ function paintCostPage() {
       : `Free ${e.gb_free} GB used. Streaming costs ${r(rate.egress_gb)}/GB, up to ${r(gbPerHour * rate.egress_gb)}/hour at ${quality}.`;
   }
 }
-// Games cg saved in a region the machine is no longer built in. They bill like
+// Games ayis saved in a region the machine is no longer built in. They bill like
 // any others; they are rows of the one Games table, with their place beside them.
 let elsewhereNow = null;
 function paintElsewhere(d) {
@@ -1487,16 +1487,16 @@ function paintLibrary(d) {
   if (d.last_seen) noteMachineRan(d.last_seen);
   paintPicker(d);
   paintArchiveCard(d);
-  // cg says which it is; the app must never turn "I could not look" into
+  // ayis says which it is; the app must never turn "I could not look" into
   // "there is nothing there".
   paintLogin(d.login);
   paintLibraryPage();
 }
-let libNow = null;   // the last `cg library list`, for repainting when status lands
+let libNow = null;   // the last `ayis library list`, for repainting when status lands
 
 // ── On your game PC ──────────────────────────────────────────────────────────
 // What the machine has right now and how far each download has got, on the Games
-// page. Read from the machine itself (cg games --json --box: no look at S3, so it
+// page. Read from the machine itself (ayis games --json --box: no look at S3, so it
 // costs AWS nothing), every 15 s while something downloads and every minute while
 // nothing does, and only while that page is open and the machine runs. A read that
 // fails keeps the last answer on the screen, with the time it was given.
@@ -1590,7 +1590,7 @@ async function readBoxGames() {
   // last answer stays, and it is asked again on the next beat.
   let turnedAway = false;
   try {
-    const raw = await runCg(['games', '--json', '--box'], { capture: true });
+    const raw = await runAyis(['games', '--json', '--box'], { capture: true });
     if (raw === undefined) turnedAway = true; else d = JSON.parse(raw);
   } catch { /* said below */ }
   pcReading = false;
@@ -1614,7 +1614,7 @@ function boxGamesStart() {
 }
 
 // The Library page: in rupees, in the words the rest of the app uses, and with
-// where the games are kept and for how long - which come from `cg status`, so
+// where the games are kept and for how long - which come from `ayis status`, so
 // this repaints when either answer lands.
 function paintLibraryPage() {
   paintLoginTable();        // its other places arrive with the games' read
@@ -1622,7 +1622,7 @@ function paintLibraryPage() {
   const d = libNow;
   if (!d || !$('lib-rows')) return;
   const e = elsewhereNow || {};
-  // cg's own rate and place ride in these answers, so this never waits for
+  // ayis's own rate and place ride in these answers, so this never waits for
   // another read - it did, and drew "another place" and "— a month".
   const inr = d.inr_per_usd || e.inr_per_usd || inrRate();
   const r = usd => (usd == null || !isFinite(inr) ? '—' : rs(usd * inr));
@@ -1668,7 +1668,7 @@ function paintLibraryPage() {
     if (g.bucket && here) card.append(el('p', 'font-body-sm text-body-sm text-tertiary',
       `Not where your machine builds (${placeName(here)}). A build there will not have it.`));
     const acts = f('div', 'flex flex-wrap gap-space-sm mt-space-sm', '', 'acts');
-    // A game found only by its folder has no id, and cg acts on ids.
+    // A game found only by its folder has no id, and ayis acts on ids.
     if (g.appid) {
       const btn = (label, cls, fn) => { const b = el('button', cls, label); b.onclick = fn; acts.append(b); };
       if (g.bucket) btn(`Move to ${here ? placeName(here) : 'the machine region'}`, 'btn btn-primary', () => moveGame(g, here, inr));
@@ -1687,7 +1687,7 @@ function paintLibraryPage() {
       + `${GB(games.reduce((a, g) => a + (g.bytes || 0), 0))} · ${r(usd)} a month`;
   }
 
-  // How long: one setting, chosen here and applied at once (cg library keep-for),
+  // How long: one setting, chosen here and applied at once (ayis library keep-for),
   // a pill per choice. The one in force does nothing when pressed again.
   const pills = $('lib-keepfor');
   $('lib-keepfor-row').hidden = days == null;
@@ -1739,7 +1739,7 @@ function deleteWords(when) {
   return `Deleted on ${when} unless you play it or keep it`;
 }
 
-// --from names the place for a game kept outside the machine's own; cg checks
+// --from names the place for a game kept outside the machine's own; ayis checks
 // it is one of this rig's before it touches anything.
 const fromArgs = g => (g.bucket ? ['--from', g.bucket] : []);
 
@@ -1771,12 +1771,12 @@ async function moveGame(g, here, inr) {
 const ago = s => s == null ? '' : s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)}m ago`
   : s < 172800 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`;
 
-// Rendered from `cg watcher --json`: one card per layer, in the order they fire.
+// Rendered from `ayis watcher --json`: one card per layer, in the order they fire.
 // The guard strip on the dashboard: one card per layer, in the order they fire,
-// said the way cg says it. Nothing here is invented - a layer the app does not
+// said the way ayis says it. Nothing here is invented - a layer the app does not
 // hear about is a layer it does not draw.
 // The dashboard's archive card lists what is actually in there, biggest first.
-// One game, deleted from the archive for good. cg does the asking - it prints
+// One game, deleted from the archive for good. ayis does the asking - it prints
 // what it costs to re-download and demands the word FORGET - so the app's own
 // dialog only has to be honest about which game is going.
 async function forgetGame(g) {
@@ -1787,23 +1787,23 @@ async function forgetGame(g) {
         + 'Steam will re-download it next time.',
     yes: 'Delete', danger: true, word: 'DELETE',
   });
-  // cg asks for FORGET; the word typed here is the app's own, and the answer
-  // handed to cg is cg's.
+  // ayis asks for FORGET; the word typed here is the app's own, and the answer
+  // handed to ayis is ayis's.
   if (ok) await libraryRun(['library', 'forget', String(g.appid), ...fromArgs(g)], `Deleting ${name}`, 'forget-game', 'FORGET');
 }
 
-// The word typed in the app's own dialog, handed to cg when it asks for it.
+// The word typed in the app's own dialog, handed to ayis when it asks for it.
 let typedPending = null;
 const typedAnswer = askId => (typedPending && typedPending.askId === askId ? typedPending.word : null);
 
 // A change to the saved games, run where you asked for it. The popup says what
-// is happening; when cg is done the same popup reads everything again and
+// is happening; when ayis is done the same popup reads everything again and
 // closes (afterWrite), and you are still on Library. Only a refusal keeps it
-// open, with cg's reason.
-// What a failed change left behind, from cg's own words. Most of them fail
+// open, with ayis's reason.
+// What a failed change left behind, from ayis's own words. Most of them fail
 // before they touch anything - reset, delete, clean up and the Steam login
 // each stop at the first thing that goes wrong - so "nothing was changed" is
-// true of them, unless AWS refused part of a delete, which cg says. A move that
+// true of them, unless AWS refused part of a delete, which ayis says. A move that
 // stops part-way has copied some of the game already, and Keep saved games
 // saves the setting before it updates auto-stop.
 function libraryLeft(err) {
@@ -1840,7 +1840,7 @@ async function libraryRun(args, doing, askId, word, left = libraryLeft, opts = {
   if (!append) $('refdlg-title').textContent = doing;
   $('refdlg-sub').textContent = '';
   $('refdlg-menu').hidden = true;
-  // Under the title, what cg is doing - its own steps as they arrive, each
+  // Under the title, what ayis is doing - its own steps as they arrive, each
   // ticked when the next begins. It used to repeat the title, word for word.
   const list = $('refdlg-list');
   // Appending: the step in progress (still spinning) is the one this command
@@ -1864,16 +1864,16 @@ async function libraryRun(args, doing, askId, word, left = libraryLeft, opts = {
     const plain = text.replace(/\b(?:af|ap|ca|eu|il|me|mx|sa|us)-[a-z]+-\d\b/g, code => placeName(code));
     const said = plain.charAt(0).toUpperCase() + plain.slice(1);
     $('refdlg-save')?.remove();   // a new step: the save's bar belonged to the one before
-    // The placeholder gives way to cg's first real step rather than being ticked.
+    // The placeholder gives way to ayis's first real step rather than being ticked.
     if (first) { first = false; list.textContent = ''; current = null; }
     step(said);
   };
   if (!dlg.open) dlg.showModal();
-  const { rc, err } = await runCg(args, { wantRc: true, onStep, aside: args[0] !== 'library' });
+  const { rc, err } = await runAyis(args, { wantRc: true, onStep, aside: args[0] !== 'library' });
   typedPending = null;
   if (rc === 0) return true;
   const why = (err || '').trim().split('\n').filter(Boolean).slice(-2).join(' ')
-    || `cg ${args.join(' ')} stopped (exit ${rc})`;
+    || `ayis ${args.join(' ')} stopped (exit ${rc})`;
   $('refdlg-title').textContent = `${append ? $('refdlg-title').textContent : doing} - not done`;
   $('refdlg-sub').textContent = left(err || '');
   // Appending, the steps that did finish stay on screen; the one that failed is crossed.
@@ -2032,10 +2032,10 @@ function paintArchiveCard() { paintDash(); }
 
 function paintGuardStrip() { paintDash(); }
 
-// The three nets in plain words. The minutes are cg's, read from the settings
+// The three nets in plain words. The minutes are ayis's, read from the settings
 // the watchdogs run with; the wording around them is the page's.
 // Which machine is said: with machines of your own beside it, "the machine"
-// read as homeserver. These guard the AWS one; yours are not stopped by cg.
+// read as homeserver. These guard the AWS one; yours are not stopped by ayis.
 const NET_NAME = { 1: 'When you quit', 2: 'On the AWS machine', 3: 'In AWS' };
 function netWords(g, d) {
   if (g.layer === 1) return ['Closing Moonlight ends the session.', 'Runs on this device.'];
@@ -2043,7 +2043,7 @@ function netWords(g, d) {
     const sd = d.shutdown_action || {};
     const end = sd.expected
       ? ` Then ${sd.value === 'terminate' ? 'deleted' : 'stopped'}.` : '';
-    // Every number is cg's (cg watcher), none is a fallback written here.
+    // Every number is ayis's (ayis watcher), none is a fallback written here.
     return [`Shuts down after ${g.idle_min != null ? `${g.idle_min} min` : 'a period'} with no connection.${end}`,
             'Runs on the AWS machine itself, so it works with this device off.'];
   }
@@ -2124,7 +2124,7 @@ function paintGuards(d) {
   }
 
   // The settings behind them, read from the settings registry and edited
-  // through cg like every other setting.
+  // through ayis like every other setting.
   const knobs = $('g-knobs');
   knobs.textContent = '';
   const WANT = ['GAME_BUDGET_INR', 'EMAIL_ALERTS', 'GAME_WATCHDOG_IDLE_MIN',
@@ -2166,16 +2166,16 @@ function paintGuards(d) {
 }
 
 // --- Settings ----------------------------------------------------------------
-// Every row comes from `cg config --json`, and every change goes back through
-// `cg config set`, which validates it and writes .env. The app never touches
+// Every row comes from `ayis config --json`, and every change goes back through
+// `ayis config set`, which validates it and writes .env. The app never touches
 // the file, and never sees a secret: it can replace one, not read it.
-// A setting's name is cg's to give: `cg config --json` carries `label` and
-// `group`. This file kept its own table of both, so a setting cg grew appeared
+// A setting's name is ayis's to give: `ayis config --json` carries `label` and
+// `group`. This file kept its own table of both, so a setting ayis grew appeared
 // in the window as a raw GAME_SHOUTING_KEY until someone added it here too.
 const label = r => r.label || r.key;
 
 // --- Tools on this laptop ---------------------------------------------------
-// What cg needs here. There is no page for it: setup lists what is missing and
+// What ayis needs here. There is no page for it: setup lists what is missing and
 // installs it in place, and anything that goes missing later is offered as an
 // Install button where it is noticed. A page of green ticks was all that was
 // left of it once setup could do its job.
@@ -2193,7 +2193,7 @@ function toolAction(tools) {
   const all = (depsNow && depsNow.tools) || [];
   const rows = tools.map(t => all.find(x => x.tool === t) || { tool: t, label: t === 'aws' ? 'the AWS CLI' : t });
   const names = rows.map(x => x.label || x.tool).join(', ');
-  // Not read yet: offer it, and cg says so if it cannot.
+  // Not read yet: offer it, and ayis says so if it cannot.
   if (!depsNow || (depsNow.package_manager && depsNow.root)) {
     return { label: `Install ${names}`, go: () => installDeps(tools) };
   }
@@ -2250,11 +2250,11 @@ function paintCreds(c) {
   detail.textContent = c.error || 'Rejected by AWS.';
 }
 
-// cg asks for the two halves of the key as events; the dialog answers them, and
+// ayis asks for the two halves of the key as events; the dialog answers them, and
 // the secret one renders as a password field. Nothing is typed into the app's
-// own storage - cg writes ~/.aws/credentials.
+// own storage - ayis writes ~/.aws/credentials.
 // The Tailscale card. Two facts, and they fail independently: this laptop can
-// be signed in with no API token (normal, and cg says what it gives up), or
+// be signed in with no API token (normal, and ayis says what it gives up), or
 // hold a token while being signed out (nothing works, and no token helps).
 function paintTskey(ts) {
   paintOnboardSoon();
@@ -2315,10 +2315,10 @@ function runDlgStatus(text, tone) {
     + (tone === 'bad' ? 'text-error' : tone === 'ok' ? 'text-on-surface' : 'text-outline');
 }
 
-// runInDialog({...}) - run a cg command in front of the person.
+// runInDialog({...}) - run an ayis command in front of the person.
 //   title    what is happening, in two or three words
-//   args     the cg command
-//   starting the first status line, before cg has said anything
+//   args     the ayis command
+//   starting the first status line, before ayis has said anything
 //   done     the status when it succeeds (a string, or a function for one that
 //            has to be read off the state the run just changed)
 //   fail     the status when it does not, given the exit code
@@ -2327,17 +2327,17 @@ function runDlgStatus(text, tone) {
 //            nothing. `word` must be typed before yes can be pressed. Given as
 //            an async function, it is read first, the dialog loading meanwhile
 //            (`checking` says what with), and { error } stops there.
-//   close    on success, close after a beat (given cg's output: false keeps it
+//   close    on success, close after a beat (given ayis's output: false keeps it
 //            open, for a result worth reading)
 //   stoppable false for a run that is over in seconds and must not be left
 //            half done: no Cancel while it runs
 //   after    on success, what has to happen before it is shown as done -
-//            re-reading what the change touched - given cg's output; the
+//            re-reading what the change touched - given ayis's output; the
 //            dialog keeps loading until it has
 // Resolves true on success; `false` when it failed or was not confirmed.
 async function runInDialog(opts) {
   const { title, args, starting, done, fail, close, stoppable = true, after, checking } = opts;
-  // typed: { askId, word } - cg's own typed confirmation, answered with the
+  // typed: { askId, word } - ayis's own typed confirmation, answered with the
   // word already typed in this dialog rather than asked a second time.
   const { typed } = opts;
   let asking = opts.confirm;
@@ -2410,7 +2410,7 @@ async function runInDialog(opts) {
   $('rundlg-retry').hidden = true;
   $('rundlg-cancel').hidden = !stoppable;
   log.textContent = '';
-  // The first line cg sends replaces the placeholder rather than appending
+  // The first line ayis sends replaces the placeholder rather than appending
   // under it - see the collect handler.
   log.dataset.fresh = 'yes';
   runDlgStatus(starting);
@@ -2418,7 +2418,7 @@ async function runInDialog(opts) {
   keepOpen($('rundlg'));
   if (!$('rundlg').open) $('rundlg').showModal();
   if (typed) typedPending = typed;
-  const { rc, err } = await runCg(args, { collect: 'rundlg-log', wantRc: true,
+  const { rc, err } = await runAyis(args, { collect: 'rundlg-log', wantRc: true,
                                           onStart: id => { runDlgJob = id; } });
   if (typed) typedPending = null;
   runDlgJob = null;
@@ -2459,13 +2459,13 @@ $('rundlg-done').onclick = e => { e.preventDefault(); closeDialog($('rundlg')); 
 // to ask afresh is not a no to that.
 $('rundlg').addEventListener('close', () => { if (runDlgConfirm && !$('rundlg').open) runDlgConfirm(false); });
 $('rundlg-retry').onclick = e => { e.preventDefault(); if (runDlgRetry) runDlgRetry(); };
-// Cancelling has to reach cg: `tailscale up` is waiting on a browser that is
+// Cancelling has to reach ayis: `tailscale up` is waiting on a browser that is
 // never going to answer, and a package manager can be sitting on a lock.
 // Closing a dialog does not tell either of them that.
 $('rundlg-cancel').onclick = e => {
   e.preventDefault();
   if (runDlgConfirm) runDlgConfirm(false);
-  if (runDlgJob !== null) window.cg.cancel(runDlgJob);
+  if (runDlgJob !== null) window.ayis.cancel(runDlgJob);
   runDlgJob = null;
   $('rundlg').close();
 };
@@ -2480,7 +2480,7 @@ function signInTailscale() {
 }
 $('tskey-signin-go').onclick = signInTailscale;
 
-// The link, lifted out of whatever cg relayed. Only this host, and the main
+// The link, lifted out of whatever ayis relayed. Only this host, and the main
 // process checks it again before anything opens.
 // A sign-in waiting on a browser is login.tailscale.com/a/<code>, as
 // `tailscale up` prints it. Not any page there: a delete that tells you where to
@@ -2495,7 +2495,7 @@ function watchForSignInLink(text) {
   if (!m) return;
   const link = $(runSurface.link);
   link.hidden = false;
-  link.onclick = () => window.cg.openSignIn(m[0]);
+  link.onclick = () => window.ayis.openSignIn(m[0]);
   // What is being waited for, in words: the command is not stuck, it is
   // waiting for a browser - and that distinction is the whole dialog.
   runSurface.status('Complete sign-in in your browser.');
@@ -2565,7 +2565,7 @@ function quotaSay(state, explain, tone) {
 const quotaCmd = (...rest) => (quotaWhere ? ['--region', quotaWhere, ...rest] : rest);
 
 async function quotaRead() {
-  const out = await runCg(quotaCmd('quota', '--json'), { capture: true });
+  const out = await runAyis(quotaCmd('quota', '--json'), { capture: true });
   try { quotaNow = JSON.parse(out); } catch { quotaNow = null; }
   $('quota-region').textContent = quotaNow ? quotaNow.region : '';
   return quotaNow;
@@ -2614,7 +2614,7 @@ async function quotaRender() {
     $('quota-go').hidden = r.status !== 'CASE_CLOSED';
     $('quota-go').disabled = r.status !== 'CASE_CLOSED';
     if (r.status === 'CASE_CLOSED') $('quota-go').textContent = 'Resubmit';
-    const appeal = await runCg(quotaCmd('quota', 'appeal', kind), { capture: true });
+    const appeal = await runAyis(quotaCmd('quota', 'appeal', kind), { capture: true });
     quotaAppeal = (appeal || '').trim();
     $('quota-copy').hidden = !quotaAppeal;
     if (quotaAppeal) {
@@ -2716,7 +2716,7 @@ $('quota-copy').onclick = async e => {
 };
 $('quota-case').onclick = e => {
   e.preventDefault();
-  if (quotaCase) window.cg.openSignIn(quotaCaseUrl(quotaCase));
+  if (quotaCase) window.ayis.openSignIn(quotaCaseUrl(quotaCase));
 };
 $('quota-go').onclick = async e => {
   e.preventDefault();
@@ -2726,7 +2726,7 @@ $('quota-go').onclick = async e => {
   $('quota-kind').disabled = true;
   quotaSay('Submitting\u2026', '');
   $('quota-pre-label').hidden = true;
-  const { rc, err } = await runCg(quotaCmd('quota', 'request', quotaKind), { wantRc: true });
+  const { rc, err } = await runAyis(quotaCmd('quota', 'request', quotaKind), { wantRc: true });
   $('quota-kind').disabled = false;
   if (rc !== 0) {
     quotaSay('Request not submitted', (err || '').trim().split('\n')[0]
@@ -2776,7 +2776,7 @@ function optinSay(state, why, tone) {
 }
 
 async function optinRead() {
-  const out = await runCg(['regions', 'optin', '--json'], { capture: true });
+  const out = await runAyis(['regions', 'optin', '--json'], { capture: true });
   try { optinNow = JSON.parse(out); } catch { optinNow = null; }
   return optinNow;
 }
@@ -2924,7 +2924,7 @@ $('optin-go').onclick = async e => {
   optinBusy(true);
   optinSay(`Enabling ${code}\u2026`, 'Takes a few minutes.');
   $('optin-log').textContent = '';
-  const { rc, err } = await runCg(['regions', 'enable', code], { wantRc: true });
+  const { rc, err } = await runAyis(['regions', 'enable', code], { wantRc: true });
   $('optin-log').textContent = (err || '').trim();
   optinBusy(false);
   if (rc !== 0) {
@@ -2940,7 +2940,7 @@ $('optin-go').onclick = async e => {
 
 // One secret, typed once and checked before it is kept: the Tailscale API
 // token and the box's own auth key are the same dialog with different words.
-// cg still asks its question - that is the protocol, and both commands work in
+// ayis still asks its question - that is the protocol, and both commands work in
 // a terminal unchanged - and this answers it from the field.
 let oneFieldPending = null;
 function oneFieldAnswer(askId) {
@@ -2956,8 +2956,8 @@ function oneFieldFail(text, go) {
   oneFieldPending = null;
 }
 // `args` is either the command, or a function of the typed value for a command
-// that takes it as an argument rather than answering a question - `cg config
-// set` is the second kind. `after` is for those: cg does not list them as
+// that takes it as an argument rather than answering a question - `ayis config
+// set` is the second kind. `after` is for those: ayis does not list them as
 // running alone, so the window does not count them as writes and nothing
 // re-reads by itself.
 // `secret` is what the field is for, not how long it is: a key is bulleted
@@ -2965,7 +2965,7 @@ function oneFieldFail(text, go) {
 // wrong constantly and must be readable. The field was hard-coded to a
 // password because for a while every caller was a key.
 // `log` is a step's log in the first-run pipeline, when it was opened from
-// there: what cg said while checking lands under the step, folded.
+// there: what ayis said while checking lands under the step, folded.
 // `readBack` is the read that shows what was saved, [args, json]: the dialog
 // stays, saying so, until it has answered - as the AWS key's does - so it
 // closes onto the step already ticked, not onto its button for a moment.
@@ -2997,10 +2997,10 @@ function openOneField({ title, note, label, placeholder, args, askId, save = 'Sa
     $('onefield-err').hidden = true;
     $('onefield-go').disabled = true;
     $('onefield-go').textContent = working;
-    // Closing does not stop cg: the value would be saved behind a Cancel, or
-    // cg would ask for it again in a popup of its own. A few seconds; wait.
+    // Closing does not stop ayis: the value would be saved behind a Cancel, or
+    // ayis would ask for it again in a popup of its own. A few seconds; wait.
     $('onefield-cancel').disabled = true;
-    const { rc, err } = await runCg(argv, { wantRc: true, collect: log });
+    const { rc, err } = await runAyis(argv, { wantRc: true, collect: log });
     oneFieldPending = null;
     if (rc === 0) {
       $('onefield-go').textContent = 'Saved. Checking\u2026';
@@ -3009,11 +3009,11 @@ function openOneField({ title, note, label, placeholder, args, askId, save = 'Sa
       if (mine === oneFieldOpens) closeDialog($('onefield'));
       return;
     }
-    // cg's own words, minus the lines that only say where to make one - you
+    // ayis's own words, minus the lines that only say where to make one - you
     // are holding one.
-    oneFieldFail((err || `cg ${argv.join(' ')} exited ${rc}`).split('\n')
+    oneFieldFail((err || `ayis ${argv.join(' ')} exited ${rc}`).split('\n')
       .filter(l => l.trim() && !(strip && l.includes(strip)))
-      .join('\n').trim() || `cg ${argv.join(' ')} exited ${rc}`, save);
+      .join('\n').trim() || `ayis ${argv.join(' ')} exited ${rc}`, save);
   };
   // Opened again while the last one is still fading out: keep it, not a throw.
   keepOpen($('onefield'));
@@ -3057,11 +3057,11 @@ function setAuthKey(log) {
 }
 
 // Where the billing alert goes, asked where it is needed. It is one line of
-// text and cg validates it, so it is the same dialog as the keys - and the
+// text and ayis validates it, so it is the same dialog as the keys - and the
 // alternative was sending someone to Settings to find the row and edit it in
 // place, which is the detour the key stage used to make.
 //
-// Not a secret, and not an ask either: `cg config set` takes the value as an
+// Not a secret, and not an ask either: `ayis config set` takes the value as an
 // argument, validates it against the registry rule and writes .env.
 function openAlertEmail(log) {
   openOneField({
@@ -3070,9 +3070,9 @@ function openAlertEmail(log) {
     label: 'Email', placeholder: 'you@example.com', secret: false, log,
     args: v => ['config', 'set', 'EMAIL_ALERTS', v],
     save: 'Save address', working: 'Saving\u2026',
-    // `cg config set` is not a command cg says runs alone, so no re-read
+    // `ayis config set` is not a command ayis says runs alone, so no re-read
     // follows it on its own: the stage would stay exactly as it was.
-    after: () => runCg(['config', '--json'], { json: 'config' }),
+    after: () => runAyis(['config', '--json'], { json: 'config' }),
   });
 }
 
@@ -3118,9 +3118,9 @@ $('awskey-go').onclick = async e => {
   $('awskey-err').hidden = true;
   $('awskey-go').disabled = true;
   $('awskey-go').textContent = 'Checking with AWS\u2026';
-  // As the one-field dialog: closing would not stop cg saving the key.
+  // As the one-field dialog: closing would not stop ayis saving the key.
   $('awskey-cancel').disabled = true;
-  const { rc, err } = await runCg(['creds', 'set'], { wantRc: true, collect: awsKeyLog });
+  const { rc, err } = await runAyis(['creds', 'set'], { wantRc: true, collect: awsKeyLog });
   awsKeyPending = null;
   if (rc === 0) {
     // Saved. The dialog stays until the key has been read back, so what it
@@ -3130,7 +3130,7 @@ $('awskey-go').onclick = async e => {
     closeDialog($('awskey'));
     return;
   }
-  // cg's own words, minus the line that only tells you where to find a key -
+  // ayis's own words, minus the line that only tells you where to find a key -
   // you are holding one.
   awsKeyFail((err || 'Could not save the key.').split('\n')
     .filter(l => l.trim() && !l.startsWith('AWS credentials: paste'))
@@ -3154,7 +3154,7 @@ function settingValue(r) {
 }
 
 // Settings: only what this page sets (SETTINGS_CARDS). Every rule and value is
-// cg's; the names and the cards are the app's.
+// ayis's; the names and the cards are the app's.
 function paintConfig(rows) {
   paintOnboardSoon();
   config = rows;
@@ -3257,7 +3257,7 @@ addEventListener('scroll', () => {
   requestAnimationFrame(() => { settingsMarkQueued = false; markSettingsNav(); });
 }, { passive: true });
 
-// What only Settings sets. The rest of cg's settings each have one home on the
+// What only Settings sets. The rest of ayis's settings each have one home on the
 // page they are about - the machine on Build, the guards and alerts on Guards,
 // how long games are kept on Library - and three copies of one setting is how
 // this page used to read.
@@ -3266,7 +3266,7 @@ const SETTINGS_CARDS = [
    ['GAME_RES', 'GAME_FPS', 'GAME_BITRATE_KBPS']],
   ['Machine disk', '', ['GAME_DISK_GB']],
 ];
-// The names a person uses; cg's own labels are for the terminal.
+// The names a person uses; ayis's own labels are for the terminal.
 const PLAIN = { GAME_RES: 'Resolution', GAME_FPS: 'Frame rate', GAME_BITRATE_KBPS: 'Quality',
                 GAME_DISK_GB: 'System disk',
                 GAME_BUDGET_INR: 'Monthly budget', EMAIL_ALERTS: 'Alert email',
@@ -3338,7 +3338,7 @@ function settingRow(r) {
   // launch. The value is still shown here - it is still a setting - but there
   // is exactly one place to change it.
   // ...but only while the table can actually offer something. With no scan and
-  // a failing `cg machines` - no credentials, no aws binary - the table is
+  // a failing `ayis machines` - no credentials, no aws binary - the table is
   // empty, and locking the only other way to set a region would leave no way at
   // all. Then the plain editor comes back.
   if (CHOSEN_IN_TABLE.has(r.key) && !chooserDead()) {
@@ -3357,7 +3357,7 @@ function settingRow(r) {
 
   if (r.secret && r.is_set) {
     // Secrets are withheld everywhere else. Showing one is a deliberate act,
-    // so it takes a click, asks cg for it, and hides again.
+    // so it takes a click, asks ayis for it, and hides again.
     const eye = document.createElement('button');
     eye.className = 'btn';
     eye.title = 'Show the value';
@@ -3373,7 +3373,7 @@ function settingRow(r) {
         shown = false;
         return;
       }
-      const out = await runCg(['config', 'get', r.key], { capture: true });
+      const out = await runAyis(['config', 'get', r.key], { capture: true });
       val.textContent = out === undefined ? `Not read: ${busyWhy()}` : out.trim() || '(empty)';
       glyph.textContent = ICON.visibility_off;   // click again to hide it
       shown = true;
@@ -3433,7 +3433,7 @@ function editSetting(r, row) {
           yes: 'Clear', danger: true,
         }))) return;
     save.disabled = true;
-    // cg's answer goes where the row is: Settings has its panel for it, and
+    // ayis's answer goes where the row is: Settings has its panel for it, and
     // anywhere else it goes under the row - a refusal sent to another page
     // read as a save that did nothing.
     let reply = row.querySelector('.edit-reply');
@@ -3444,7 +3444,7 @@ function editSetting(r, row) {
       row.firstElementChild.append(reply);
     }
     reply.textContent = '';
-    const { rc } = await runCg(['config', 'set', r.key, value], { collect: 'edit-reply', wantRc: true });
+    const { rc } = await runAyis(['config', 'set', r.key, value], { collect: 'edit-reply', wantRc: true });
     if (rc !== 0) { save.disabled = false; input.focus(); return; }
     // refresh() re-reads config, machines AND regions for this screen, so a new
     // region repaints the Build picker too - different regions rent different
@@ -3457,24 +3457,24 @@ function editSetting(r, row) {
 }
 
 // --- Build -------------------------------------------------------------------
-// The picker mirrors cg's own arithmetic so the button can be refused early;
+// The picker mirrors ayis's own arithmetic so the button can be refused early;
 // the box enforces it again at boot, which is where it must be enforced.
 let archive = { games: [], selectable_gb: null };
 let boxSeenAt = 0;   // when it was read
-let boxNow = null;   // the box `cg status` last reported, or null
-let sessionNow = null; // a `cg open` streaming from this laptop, per cg status
-let config = [];     // the settings registry, as `cg config --json` last gave it
-let watcher = null;  // `cg watcher --json`, for the guard strip and the Guards screen
+let boxNow = null;   // the box `ayis status` last reported, or null
+let sessionNow = null; // a `ayis open` streaming from this laptop, per ayis status
+let config = [];     // the settings registry, as `ayis config --json` last gave it
+let watcher = null;  // `ayis watcher --json`, for the guard strip and the Guards screen
 let statusBudget = null;
 let costNow = null;  // the last paid cost fetch, if one was made in this window
 let costNowAt = null;
-let statusNow = null; // `cg status --json`, as last read
+let statusNow = null; // `ayis status --json`, as last read
 let statusAt = null;   // when it was
-// `cg ping --json` - direct or relayed, and the latency - asked only while the
+// `ayis ping --json` - direct or relayed, and the latency - asked only while the
 // machine is online, and at most once a minute: it is a local tailscale ping,
 // free, but it takes a few seconds and means nothing with no machine.
 let pingNow = null, pingAt = 0, pingBusy = false;
-const activity = [];  // what cg has done in this window, newest first
+const activity = [];  // what ayis has done in this window, newest first
 function daysAgo(iso) {
   if (!iso) return 'never';
   const days = Math.floor((Date.now() - new Date(iso)) / 86400000);
@@ -3489,7 +3489,7 @@ function paintPicker(d) {
   paintFit();
 }
 
-// The disk cg adds when the games do not fit the machine's own drive - the same
+// The disk ayis adds when the games do not fit the machine's own drive - the same
 // rule as provision.ExtraDiskGB, so the price shown is the disk that is made. null
 // when the drive is not known: nothing is sized on a guess.
 const EXTRA_DISK_STEP_GB = 10, MAX_EXTRA_DISK_GB = 1000;
@@ -3497,7 +3497,7 @@ function extraDiskGb(need, reserve, store) {
   if (store == null || need <= 0 || need + reserve <= store) return 0;
   return Math.ceil((need + reserve) / EXTRA_DISK_STEP_GB) * EXTRA_DISK_STEP_GB;
 }
-// What a GB of added disk costs an hour, in rupees, from cg's rates; null when
+// What a GB of added disk costs an hour, in rupees, from ayis's rates; null when
 // they are not read yet.
 function diskInrPerGbHour() {
   const r = (statusNow && statusNow.rates) || {};
@@ -3524,10 +3524,10 @@ function paintFit() {
 }
 
 // The machine strip: the type you asked for, and what AWS says that type is.
-// Every number here comes from `cg status --json`; nothing is hardcoded.
+// Every number here comes from `ayis status --json`; nothing is hardcoded.
 // The instance-type picker. Everything shown - the types, their GPUs, their
-// prices - is `cg machines --json`; nothing about any machine is written down
-// in this file. Choosing one writes GAME_INSTANCE_TYPE through `cg config set`,
+// prices - is `ayis machines --json`; nothing about any machine is written down
+// in this file. Choosing one writes GAME_INSTANCE_TYPE through `ayis config set`,
 // so .env stays the single source of truth and the next build agrees with the
 // picker without being told.
 // The machine chooser: ONE table, rendered into both the Build and the Settings
@@ -3536,10 +3536,10 @@ function paintFit() {
 // COMBINATION to run, and a dropdown per axis hid exactly the comparison that
 // matters. Picking a price picks all three.
 //
-// Rows come from `cg sweep`, which is free but takes about 90 seconds, so the
-// app reads the remembered scan (`cg sweep --cached`, instant) and rescans only
+// Rows come from `ayis sweep`, which is free but takes about 90 seconds, so the
+// app reads the remembered scan (`ayis sweep --cached`, instant) and rescans only
 // when asked. With no scan yet there is still a table: the current region's
-// machines, from `cg machines`, with a line saying what a scan would add.
+// machines, from `ayis machines`, with a line saying what a scan would add.
 let sweepNow = null;
 // A scan in flight. The table shows one region until it lands, and saying why
 // is the difference between "still working" and "the other regions are gone".
@@ -3554,7 +3554,7 @@ let sweepAnswered = false;
 function paintSweep(d) { sweepNow = d; sweepAnswered = true; paintChooser(); paintOnboardSoon(); paintDash(); paintLibraryPage(); }
 
 // The settings rows defer to the table - but they are painted by whichever read
-// lands first, and `cg config` usually beats `cg machines` and `cg sweep`. So
+// lands first, and `ayis config` usually beats `ayis machines` and `ayis sweep`. So
 // they default to deferring, and only get their own editor back once BOTH
 // answers are in AND neither produced a row, which means AWS is unreadable and
 // the table can offer nothing.
@@ -3570,7 +3570,7 @@ const MOUNTS = [
     legend: 's-chooser-legend', name: 'mach-s' },
 ];
 
-// What is in force, read from cg's own answer rather than remembered here.
+// What is in force, read from ayis's own answer rather than remembered here.
 // GAME_SPOT 'auto' means spot wherever the quota allows, so it reads as spot -
 // the same rule the old picker used.
 function cfgVal(key) {
@@ -3628,7 +3628,7 @@ function chooserRows() {
         .map(m => ({
           region: machinesNow.region, city: '', rtt: null, enabled: true,
           type: m.type, gpu: m.gpu, vram: m.vram_gib, score: null, store: m.store_gb ?? null,
-          // No rate from cg, no rupee figure. The app holds no exchange rate.
+          // No rate from ayis, no rupee figure. The app holds no exchange rate.
           spot: inrNow(m.usd_hour_spot, m.inr_hour_spot),
           spotMax: inrNow(m.usd_hour_spot_max, m.inr_hour_spot_max),
           od: inrNow(m.usd_hour_ondemand, m.inr_hour_ondemand),
@@ -3674,7 +3674,7 @@ function priceCell(tr, mount, row, spot, inr, cur) {
   label.append(radio);
 
   // The cheapest zone, and nothing pins the zone: show the spread when the
-  // zones disagree, because the cheap number alone is a promise cg cannot keep.
+  // zones disagree, because the cheap number alone is a promise ayis cannot keep.
   // The same price the machine card shows: the address and the disk included.
   const range = hourText(perHour(inr), spot && row.spotMax != null ? perHour(row.spotMax) : null);
   const amount = document.createElement('span');
@@ -3953,7 +3953,7 @@ function lockMachines() {
 function paintBuildPick() { paintMachineCards(); }
 
 let machinesNow = null;
-// Just the store now. `cg machines` is still read - it is the only answer for
+// Just the store now. `ayis machines` is still read - it is the only answer for
 // the region in force, and the table falls back to it before any sweep - but
 // the single <select> it used to fill is gone, replaced by the chooser table.
 let machinesAnswered = false;
@@ -3972,7 +3972,7 @@ function paintSpec(s) {
   paintLibraryPage();       // where the games are kept, and for how long
 }
 
-// Numbered steps, the way cg reports them: the one running is marked, the ones
+// Numbered steps, the way ayis reports them: the one running is marked, the ones
 // before it carry how long they took. No timer - each event repaints.
 let buildStarted = 0;
 // How long a run is expected to take, in minutes, so the bar means something.
@@ -3983,13 +3983,13 @@ let buildSteps = 0;
 
 // ── A run, as steps ─────────────────────────────────────────────────────────
 //
-// cg reports about twelve steps for a build, in its own words, and the box adds
+// ayis reports about twelve steps for a build, in its own words, and the box adds
 // a dozen more of its own ("installing nvidia driver", "configuring headless X").
 // Someone building a games machine needs eight, in plain words - so each step
-// cg announces is placed in one of these, and only ever moves the run forwards.
-// A step cg announces that matches none of them belongs to the one in progress,
+// ayis announces is placed in one of these, and only ever moves the run forwards.
+// A step ayis announces that matches none of them belongs to the one in progress,
 // and shows as its current line. A delete or a session has no such list: each
-// of cg's steps is its own row.
+// of ayis's steps is its own row.
 const BUILD_STEPS = [
   { doing: 'Checking your setup', done: 'Checked your setup', ids: ['preflight', 'init.watchdog'] },
   { doing: 'Setting the budget alert', done: 'Budget alert set', ids: ['init.budget'] },
@@ -4000,7 +4000,7 @@ const BUILD_STEPS = [
   { doing: 'Connecting Moonlight', done: 'Moonlight connected', ids: ['init.host-watchdog', 'init.sunshine-account', 'init.pair'] },
   { doing: 'Starting Steam', done: 'Steam started', ids: ['init.steam'] },
 ];
-// A session, as steps. cg announces each by id (open.start ... open.play), and
+// A session, as steps. ayis announces each by id (open.start ... open.play), and
 // open.ended once Moonlight has closed.
 const OPEN_STEPS = [
   { doing: 'Starting the machine', done: 'Machine started', id: 'open.start' },
@@ -4011,7 +4011,7 @@ const OPEN_STEPS = [
     note: 'Close Moonlight to end the session. The machine keeps running until auto-stop or Delete.' },
 ];
 // A session on a machine of yours: nothing to start and nothing billed, so two
-// steps - cg host open announces each - where the AWS machine has four.
+// steps - ayis host open announces each - where the AWS machine has four.
 const HOST_OPEN_STEPS = [
   { doing: 'Checking the machine', done: 'Machine ready', id: 'host.check' },
   { doing: 'Playing', done: 'Played', id: 'host.play', stream: true,
@@ -4039,7 +4039,7 @@ const BUILD_PARTS = [
   ['Sunshine', 'sunshine'],
 ];
 // Each part: not started, started (the latest one to start is in progress), or
-// done - because a later one has started, or the whole step has finished. cg
+// done - because a later one has started, or the whole step has finished. ayis
 // names each piece as the box starts it (a "part" event); `seen` is those ids in
 // the order they came.
 function partStates(seen, stepDone, finished = null) {
@@ -4086,7 +4086,7 @@ function runBegin(kind, opts = {}) {
   }
 }
 // Moving to a step: the ones before it are over, it is the one in progress. Only
-// ever forwards - a stage cg names twice (init.launch, then init.launch.reused)
+// ever forwards - a stage ayis names twice (init.launch, then init.launch.reused)
 // does not move the run back.
 function runEnter(defs, at) {
   if (at <= run.idx) return false;
@@ -4106,9 +4106,9 @@ function runEnter(defs, at) {
   }
   return true;
 }
-// cg names a stage by id; a screen follows the id and never the words.
+// ayis names a stage by id; a screen follows the id and never the words.
 const idIs = (got, want) => got === want || (got || '').startsWith(want + '.');
-// A step cg announced: move to the step it belongs to, closing the ones before.
+// A step ayis announced: move to the step it belongs to, closing the ones before.
 function runStep(text, id) {
   if (!run) return;
   const now = Date.now();
@@ -4140,7 +4140,7 @@ function runStep(text, id) {
   }
   if (run.idx >= 0) run.steps[run.idx].lines.push(text);
 }
-// The box started a piece of the machine (cg names it). The last piece, finishing
+// The box started a piece of the machine (ayis names it). The last piece, finishing
 // up, is the games step of its own.
 function runPartDone(id) {
   if (!run || run.kind !== 'init' || !id) return;
@@ -4231,7 +4231,7 @@ function settleRunOnly() {
   if (!run || run.state !== 'done') return;
   if (run.kind === 'destroy') {
     lastBuild = null;
-    // cg said the machine is gone; the status read that confirms it is still
+    // ayis said the machine is gone; the status read that confirms it is still
     // on its way, and the plan should not wait for it.
     run = null;
     boxNow = null;
@@ -4286,7 +4286,7 @@ function paintBuildMode() {
   strip.hidden = !(own ? run && run.host === machineTab : awsRun);
 }
 
-// Cancel a build: stop cg, then delete whatever it rented. The delete runs
+// Cancel a build: stop ayis, then delete whatever it rented. The delete runs
 // even when no machine has been seen yet - the launch may have gone through
 // before the status caught up, and a delete with nothing to delete is quick
 // and free. --no-push: a half-built machine holds nothing worth saving.
@@ -4299,7 +4299,7 @@ async function cancelBuild() {
   if (!ok || !run || run.kind !== 'init' || run.state !== 'running') return;
   run.cancelling = true;
   paintRun();
-  for (const [id, j] of jobs) if (j.cmd[0] === 'init') window.cg.cancel(id);
+  for (const [id, j] of jobs) if (j.cmd[0] === 'init') window.ayis.cancel(id);
 }
 
 // A step's name as the run shows it: restoring games says how much, or is the
@@ -4370,7 +4370,7 @@ function paintRun() {
     $('b-run-step').textContent = `Step ${at + 1} of ${defs.length}.`
       + (r.kind === 'init' ? ' You can leave this screen; the build carries on.' : '');
   }
-  // A build's time and bill as two tiles: the time against the last build cg
+  // A build's time and bill as two tiles: the time against the last build ayis
   // measured, the bill from the moment the machine was rented.
   const lastMin = ((statusNow || {}).build || {}).last_min;
   const tiles = headed && r.kind === 'init';
@@ -4455,9 +4455,9 @@ function paintRun() {
       }
       body.append(chips);
     }
-    // Playing is not a wait: no progress sweep, and no echo of cg's last line.
+    // Playing is not a wait: no progress sweep, and no echo of ayis's last line.
     if (state === 'running' && !(def && def.stream)) {
-      // A wait cg is reporting says how long it has gone, and against what limit;
+      // A wait ayis is reporting says how long it has gone, and against what limit;
       // otherwise the step's last line.
       const w = r.wait;
       const last = w ? waitWords(w) : [...st.lines].reverse().find(Boolean);
@@ -4475,7 +4475,7 @@ function paintRun() {
       body.append(sweep);
     }
     if (state === 'failed') body.append(fail);
-    // A failed step shows cg's words once, in the failure above - not again here.
+    // A failed step shows ayis's words once, in the failure above - not again here.
     if (st && st.lines.length && state !== 'locked' && state !== 'failed') {
       // This step's own lines, folded - opened by itself when it failed.
       const det = document.createElement('details');
@@ -4533,7 +4533,7 @@ function paintRun() {
   }
 }
 
-// The durations and the bill move with cg's own lines - a build reports at
+// The durations and the bill move with ayis's own lines - a build reports at
 // least every ten seconds - so nothing here runs on a timer.
 
 // The live line and step heading for runs, now that the strip has no line of
@@ -4559,7 +4559,7 @@ function buildStep(text, id) {
   if ($('b-follow').checked) log.scrollTop = log.scrollHeight;
 }
 
-// cg times every step; the transcript keeps how long each took.
+// ayis times every step; the transcript keeps how long each took.
 function buildStepEnd(event) {
   if (!buildLogged()) return;
   const heads = $('b-log').querySelectorAll('.step');
@@ -4593,7 +4593,7 @@ async function deleteFailedBuild() {
   const r = run;
   r.deleting = true;
   paintRun();
-  const { rc } = await runCg(['destroy', '--no-push'], { wantRc: true, aside: true });
+  const { rc } = await runAyis(['destroy', '--no-push'], { wantRc: true, aside: true });
   r.deleting = false;
   r.deleted = rc === 0;
   await readFresh(['status', '--json'], 'status');
@@ -4601,25 +4601,25 @@ async function deleteFailedBuild() {
 }
 function paintElapsed() { paintRun(); }
 
-// Every line cg marked as a failure, plus whatever `error` event ended the run.
+// Every line ayis marked as a failure, plus whatever `error` event ended the run.
 // Kept out of the log on purpose: the log holds 200 lines and auto-scrolls, so by
 // the time a run ends the line that said why is usually gone.
 let buildFailures = [];
-// The `problem` event of this failure, if cg sent one: the words and the kind to pick
-// buttons by. Without one (an older cg, or a failure with no event yet) the panel
-// falls back to reading cg's lines, as it always did.
+// The `problem` event of this failure, if ayis sent one: the words and the kind to pick
+// buttons by. Without one (an older ayis, or a failure with no event yet) the panel
+// falls back to reading ayis's lines, as it always did.
 let buildProblem = null;
-// cg marks only the HEADLINE of a failure report as `fail`; the AWS message and
+// ayis marks only the HEADLINE of a failure report as `fail`; the AWS message and
 // the remedy underneath it are ordinary continuation lines. A relayed script
 // exits straight after printing one, so once a failure starts, everything until
 // the next step belongs to it - which is how the panel gets the whole report
 // rather than just its title.
 let buildFailing = false;
-// What to DO about a failure, keyed by the AWS error code cg prints. The code
+// What to DO about a failure, keyed by the AWS error code ayis prints. The code
 // is the stable part: the prose around it is written for a terminal, where the
 // answer is a command to type, and in here a command to type is a worse button.
 //
-// Nothing is invented: every action here is one cg already offers somewhere
+// Nothing is invented: every action here is one ayis already offers somewhere
 // else, reached from the moment it is relevant.
 const FAIL_ACTS = {
   // Spot ran out. Full price, another location and another machine were all
@@ -4633,7 +4633,7 @@ const FAIL_ACTS = {
   VcpuLimitExceeded: () => [['Ask AWS for a higher GPU limit', () => openQuota()]],
   InstanceLimitExceeded: () => [['Ask AWS for a higher GPU limit', () => openQuota()]],
   'InvalidKeyPair.NotFound': () => [
-    ['Fix it', () => runCg(['check', '--fix'])],
+    ['Fix it', () => runAyis(['check', '--fix'])],
   ],
   // The region is not switched on for this account: another location is the
   // answer, and it is picked where the machine is.
@@ -4641,7 +4641,7 @@ const FAIL_ACTS = {
   AuthFailure: () => [['Connect AWS again', () => openAwsKey()]],
   UnauthorizedOperation: () => [['Connect AWS again', () => openAwsKey()]],
 };
-// The same buttons by the problem's kind, which is what cg promises to keep
+// The same buttons by the problem's kind, which is what ayis promises to keep
 // stable (docs/commands.md). A kind with no entry has nothing to offer beyond
 // Try again, which is already beside the step.
 FAIL_ACTS.no_capacity = FAIL_ACTS.InsufficientInstanceCapacity;
@@ -4660,14 +4660,14 @@ function problemWhy(p) {
   return [charge, p.text].filter(Boolean).join('  ');
 }
 
-// cg's own words, read back: the marked line is the headline, and the two
+// ayis's own words, read back: the marked line is the headline, and the two
 // lines under it are the facts worth keeping above the fold.
 function failSummary(text) {
   const lines = text.split('\n');
   const head = (lines.find(l => l.trim() && !l.startsWith(' ')) || '').trim();
   const code = (/error code:\s*([A-Za-z0-9.]+)/.exec(text) || [])[1] || '';
   const said = (/AWS said:\s*(.+)/.exec(text) || [])[1] || '';
-  // cg's two sentences, apart: a refused launch charges nothing, unless what
+  // ayis's two sentences, apart: a refused launch charges nothing, unless what
   // refused it is another machine, still billing.
   const safe = /nothing was launched, and nothing is billing/.test(text);
   const other = /nothing was launched by this build - but the machine above is still billing/.test(text);
@@ -4700,13 +4700,13 @@ function buildFail(text) {
   if (buildFailures[buildFailures.length - 1] === line) return;
   buildFailures.push(line);
   // The title names the phase, not the failure: a fixed "launch failed" above
-  // cg's own "launch failed: InsufficientInstanceCapacity" read as the same
+  // ayis's own "launch failed: InsufficientInstanceCapacity" read as the same
   // thing said twice.
   // The strip's own heading carries the state, rather than a second heading
   // under it: "Provisioning" above "Provisioning stopped" was the same words
-  // twice, and cg's first line says what failed anyway.
+  // twice, and ayis's first line says what failed anyway.
   // Noted, not believed: a step is failed only when the run ends in failure.
-  // cg reads "cannot" in a line as a failure, and the box's own healthy
+  // ayis reads "cannot" in a line as a failure, and the box's own healthy
   // progress said "NvFBC cannot capture" - the driver step went red while the
   // build carried on installing Steam.
   paintFail();
@@ -4721,7 +4721,7 @@ function paintFail() {
   const whole = buildFailures.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   $('b-error').textContent = whole;
   // The headline above the fold, the detail behind a disclosure, and the two or
-  // three things worth doing as buttons - because "cg config set GAME_SPOT 0"
+  // three things worth doing as buttons - because "ayis config set GAME_SPOT 0"
   // is a command to type at someone who is looking at a window.
   const { head, code, said, safe, other } = failSummary(whole);
   if (buildProblem) {
@@ -4781,7 +4781,7 @@ function buildLine(event) {
   paintRun();
 }
 
-window.cg.onEvent(({ id, event }) => {
+window.ayis.onEvent(({ id, event }) => {
   const job = jobs.get(id);
   if (!job) return;
   logLine(event);
@@ -4810,16 +4810,16 @@ window.cg.onEvent(({ id, event }) => {
       // beats a bare status label the eye slides over.
       if (event.rc !== 0 && !buildFailures.length && !(run && run.cancelling)
           && !((job.cmd[0] === 'open' || ownSession) && event.rc === 130))
-        buildFail(`${CgName(job.cmd)} exited without an error message. See the log above.`);
+        buildFail(`${AyisName(job.cmd)} exited without an error message. See the log above.`);
     }
   }
   if (event.t === 'step' && job.onStep) job.onStep(event.text);
   if (event.t === 'ask') {
-    // The key dialog asked already: cg's two questions are answered from what
+    // The key dialog asked already: ayis's two questions are answered from what
     // is in it, rather than putting two more modals on top of the one the
     // person is looking at.
     const pre = awsKeyAnswer(event.id) ?? oneFieldAnswer(event.id) ?? typedAnswer(event.id);
-    if (pre !== null) window.cg.answer(id, pre);
+    if (pre !== null) window.ayis.answer(id, pre);
     else if (!serverPwAnswer(id, event.id) && !sudoAnswer(id, event.id)) ask(id, event);
   }
   // JSON comes back on stdout as the command's own data; reports arrive as events.
@@ -4868,7 +4868,7 @@ window.cg.onEvent(({ id, event }) => {
         if (!paint) throw new Error(`no painter for ${job.json}`);
         paint(data);
       } catch (err) {
-        failure = `Could not show ${cgName(job.cmd)}: ${err && err.message ? err.message : err}`;
+        failure = `Could not show ${ayisName(job.cmd)}: ${err && err.message ? err.message : err}`;
       }
     }
     if (job.age) $(job.age).textContent = new Date().toLocaleTimeString();
@@ -4883,12 +4883,12 @@ window.cg.onEvent(({ id, event }) => {
     if (job.json) {
       if (event.rc !== 0 || failure) {
         readFailures.set(job.json, failure ? failure
-          : job.err ? `${CgName(job.cmd)} could not run: ${job.err}`
+          : job.err ? `${AyisName(job.cmd)} could not run: ${job.err}`
           // A read that answered WITH its reason has already said it on the
           // screen it belongs to; repeating "exit 1" in the header adds a
           // number and takes away the reason.
           : painted && painted.error ? painted.error
-          : `${CgName(job.cmd)} did not finish.`);
+          : `${AyisName(job.cmd)} did not finish.`);
       } else {
         readFailures.delete(job.json);       // it worked this time
       }
@@ -4912,7 +4912,7 @@ window.cg.onEvent(({ id, event }) => {
     // A build, a destroy or a session changes what every free screen shows -
     // the box, the archive, the guards - so read them again once it is over.
     if (job.write) {
-      note(`${CgName(job.cmd)} ${event.rc === 0 ? 'finished' : 'stopped'}`,
+      note(`${AyisName(job.cmd)} ${event.rc === 0 ? 'finished' : 'stopped'}`,
            event.rc === 0 ? 'text-primary' : 'text-error');
       // Even one that stopped part-way may have rented or deleted something.
       const change = byCommand(BILL_CHANGE, job.cmd);
@@ -4929,11 +4929,11 @@ window.cg.onEvent(({ id, event }) => {
 // "Stop 2 runs" for a click that was one.
 // `aside`: a write that is not the run on the Machine page - its events stay
 // out of that card, which keeps showing the run it is about.
-function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart, onStep, group, aside } = {}) {
+function runAyis(args, { panel, age, json, env, collect, capture, wantRc, onStart, onStep, group, aside } = {}) {
   return new Promise(async resolve => {
-    const res = await window.cg.run(args, env);
+    const res = await window.ayis.run(args, env);
     if (!res.ok) {
-      const why = `Waiting for ${cgName(res.args)} to finish.`;
+      const why = `Waiting for ${ayisName(res.args)} to finish.`;
       if (collect) $(collect).textContent = why + '\n';
       if (panel) $(panel).textContent = why;
       // A step's read-back that never ran must not hold the step - and the
@@ -4944,17 +4944,17 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart,
       // moment the task in its way ends.
       if (json && !wantRc && jobs.size) {
         await new Promise(wake => jobEnded.push(wake));
-        return resolve(runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart, onStep, group, aside }));
+        return resolve(runAyis(args, { panel, age, json, env, collect, capture, wantRc, onStart, onStep, group, aside }));
       }
       if (json && !wantRc) { readFailures.set(json, why); updateHeader(); }   // never a silent "checking"
       return resolve(wantRc ? { rc: null, err: why } : undefined);
     }
     jobs.set(res.id, { cmd: args, view, panel, age, json, collect, capture, wantRc, onStep, group, aside,
-                      // cg's verdict, not a second guess at it.
+                      // ayis's verdict, not a second guess at it.
                       write: !!res.write,
                       out: [], collected: '', resolve });
     if (onStart) onStart(res.id);
-    if (res.write) note(`${cgName(args)} started`, 'text-primary');
+    if (res.write) note(`${ayisName(args)} started`, 'text-primary');
     updateHeader();
     if (panel) $(panel).textContent = 'Running…';
   });
@@ -4962,16 +4962,16 @@ function runCg(args, { panel, age, json, env, collect, capture, wantRc, onStart,
 
 // --- Machines ------------------------------------------------------------------
 // Home is the machines: the AWS one when this laptop plays on AWS, and each of
-// yours (`cg host`). Every fact on a card is cg's - `cg host list` for what is
-// saved, `cg host status <name>` for what each is ready for, over ssh and
-// Tailscale - and every button is a cg command. Setting a machine up is adding
+// yours (`ayis host`). Every fact on a card is ayis's - `ayis host list` for what is
+// saved, `ayis host status <name>` for what each is ready for, over ssh and
+// Tailscale - and every button is an ayis command. Setting a machine up is adding
 // it: the add dialog walks the steps it needs (prereqs), and a machine that
 // needs something afterwards says so on its own card.
 // What Home showed last time, kept in this window's storage: which machines
 // there are, what each is, and whether AWS is one - so Home opens in its final
 // layout while the reads that confirm it are on their way. Never a status: a
 // machine's state and its buttons appear only once a live check has answered.
-const HOME_KEY = 'cg.home';
+const HOME_KEY = 'ayis.home';
 const homeBoot = (() => {
   try { const v = JSON.parse(localStorage.getItem(HOME_KEY) || 'null'); return v && Array.isArray(v.hosts) ? v : null; }
   catch { return null; }
@@ -4986,15 +4986,15 @@ function homeRemember() {
 }
 // Machines whose card has shown its loading state, so the answer fades in.
 const hostWasLoading = new Set();
-let hostsNow = homeBoot ? homeBoot.hosts : null;   // `cg host list --json`, as last read
-const hostStatus = new Map();     // name -> `cg host status <name> --json`
+let hostsNow = homeBoot ? homeBoot.hosts : null;   // `ayis host list --json`, as last read
+const hostStatus = new Map();     // name -> `ayis host status <name> --json`
 const hostLogs = new Map();       // name -> its setup log <pre>, kept across paints
 let machineTab = 'aws';           // what the Machine page shows: 'aws', or one of yours by name
 let adding = null;                // 'aws' | 'host' while the add dialog is open
 let addedHost = null;             // the machine that dialog has just added
 
 // "An AWS machine" is a laptop set up to play on AWS: a region chosen, which is
-// the last step of adding it. cg aws forget takes it away again.
+// the last step of adding it. ayis aws forget takes it away again.
 const awsAdded = () => regionChosen();
 // AWS is asked something only when there is an AWS machine, or one is being added.
 const awsInPlay = () => awsAdded() || adding === 'aws';
@@ -5024,7 +5024,7 @@ function paintHosts(list) {
   for (const h of hostsNow)
     if (!hostStatus.has(h.name) && !readOut(`host:${h.name}`)) {
       const [args, json] = hostRead(h.name);
-      runCg(args, { json, group: 'refresh' });
+      runAyis(args, { json, group: 'refresh' });
     }
   for (const name of Object.keys(hostIdentity)) if (!hostsNow.some(h => h.name === name)) delete hostIdentity[name];
   homeRemember();
@@ -5039,7 +5039,7 @@ function paintHostStatus(name, d) {
   if (name === addedHost) paintOnboardSoon();
 }
 
-// What a machine is ready for, in one line and a tone, from what cg said.
+// What a machine is ready for, in one line and a tone, from what ayis said.
 function hostState(h) {
   const s = hostStatus.get(h.name);
   if (hostJob(h.name, 'setup')) return { title: 'Setting up', tone: 'run', sub: 'Installing missing components.' };
@@ -5137,7 +5137,7 @@ function hostCard(h, full) {
     // Ends it here; a setup stopped part-way carries on from there next time.
     btn(playing ? 'Stop session' : 'Stop setup', playing ? 'btn btn-primary btn-lg' : 'btn', () => {
       const j = [...jobs].find(([, x]) => hostRun(x) && x.cmd[2] === h.name);
-      if (j) window.cg.cancel(j[0]);
+      if (j) window.ayis.cancel(j[0]);
     }, 'stop');
   }
   // The gear: this machine's detail - checks, log, removing it.
@@ -5150,7 +5150,7 @@ function hostCard(h, full) {
 }
 
 // A machine of yours on the Machine page: what it is ready for and what to do
-// with it on the left, everything cg checked on the right, a row each with what
+// with it on the left, everything ayis checked on the right, a row each with what
 // it found - and the setup's own words under both.
 // One row of "What is working", on either kind of machine: a tick or a cross,
 // what was checked, and what was found.
@@ -5259,7 +5259,7 @@ function hostDetail(h, failed) {
     // Ends it here; a setup stopped part-way carries on from there next time.
     btn(playing ? 'Stop session' : 'Stop setup', playing ? 'btn btn-primary btn-lg w-full' : 'btn', () => {
       const j = [...jobs].find(([, x]) => hostRun(x) && x.cmd[2] === h.name);
-      if (j) window.cg.cancel(j[0]);
+      if (j) window.ayis.cancel(j[0]);
     }, 'stop', playing ? acts : more);
   }
   const q = btn('Stream quality', 'btn', () => goSetting(settingEl('GAME_RES')), 'quality', more);
@@ -5269,7 +5269,7 @@ function hostDetail(h, failed) {
   acts.append(more);
   left.append(acts);
 
-  // Right: every check cg made, each with what it found.
+  // Right: every check ayis made, each with what it found.
   const right = el('section', 'flex flex-col gap-space-sm');
   right.append(el('p', 'section-label mb-space-xs', 'What is working'));
   const checks = el('div', 'flex flex-col gap-space-sm');
@@ -5438,7 +5438,7 @@ async function playOn(name) {
 }
 
 // Removing a machine of yours: asked, run and reported in one dialog that
-// closes by itself once Home has caught up. cg says when the machine could not
+// closes by itself once Home has caught up. ayis says when the machine could not
 // be reached to revoke the key: that outlasts the dialog, as a toast.
 async function removeHost(name) {
   const unreachable = out => /could not reach it/.test(out);
@@ -5471,19 +5471,19 @@ async function removeHost(name) {
 // After anything changes a machine: the list, and that machine's status.
 async function refreshHosts(name) {
   if (name) hostStatus.delete(name);
-  await runCg(HOSTS_READ[0], { json: HOSTS_READ[1], group: 'refresh' });
+  await runAyis(HOSTS_READ[0], { json: HOSTS_READ[1], group: 'refresh' });
 }
 
-// Removing AWS: cg aws forget, which refuses while a machine or saved games are
+// Removing AWS: ayis aws forget, which refuses while a machine or saved games are
 // still there and says which. When AWS cannot be asked (exit 3), whether
 // anything still bills is not known - that is said, and it is your call.
-// What is in AWS, as cg aws inventory reads it live - for the confirmation.
+// What is in AWS, as ayis aws inventory reads it live - for the confirmation.
 async function awsInventory() {
-  const out = await runCg(['aws', 'inventory', '--json'], { capture: true });
+  const out = await runAyis(['aws', 'inventory', '--json'], { capture: true });
   try { return JSON.parse(out) || { error: 'Could not read what is in AWS.' }; }
   catch { return { error: 'Could not read what is in AWS.' }; }
 }
-// Disconnecting AWS deletes everything cg has there, so nothing is left billing
+// Disconnecting AWS deletes everything ayis has there, so nothing is left billing
 // - the machine, every region's saved games, leftovers, the watchdog, the
 // budget - in one dialog: what is there, read live; DELETE typed; the run; a
 // look that nothing is left; then Home, without AWS. What stays is free.
@@ -5557,9 +5557,9 @@ function openAdd(kind) {
 function closeAdd() {
   if (onbHandover) { clearTimeout(onbHandover); onbHandover = null; }
   adding = null;
-  // Closed while it waits for the password: an empty answer, and cg stops with
+  // Closed while it waits for the password: an empty answer, and ayis stops with
   // nothing changed on the server.
-  if (serverPwAsk) { window.cg.answer(serverPwAsk, ''); serverPwAsk = null; }
+  if (serverPwAsk) { window.ayis.answer(serverPwAsk, ''); serverPwAsk = null; }
   serverForm.querySelector('#add-pw').value = '';
   if ($('adddlg').open) closeDialog($('adddlg'));
   paintHome();
@@ -5611,7 +5611,7 @@ const serverForm = (() => {
 // way when there is one (a write re-reads by itself), else a new one.
 async function readFresh(args, json) {
   if (readOut(json)) { while (readOut(json)) await new Promise(r => jobEnded.push(r)); return; }
-  await runCg(args, { json, group: 'refresh' });
+  await runAyis(args, { json, group: 'refresh' });
 }
 let connecting = false;
 // Until a machine's status has answered once, or failed - asking for it if no
@@ -5621,17 +5621,17 @@ async function hostAnswered(name) {
   while (!hostStatus.has(name) && !readFailures.has(key)) {
     if (readOut(key)) { await new Promise(r => jobEnded.push(r)); continue; }
     const [args, json] = hostRead(name);
-    await runCg(args, { json, group: 'refresh' });
+    await runAyis(args, { json, group: 'refresh' });
     break;
   }
 }
 let serverPwAsk = null;   // the job whose password question the form is holding
-// cg's password question while connecting: answered from the form - at once
+// ayis's password question while connecting: answered from the form - at once
 // when it is filled in already, otherwise when you press Continue.
 function serverPwAnswer(job, askId) {
   if (askId !== ASK.hostSshPw || !connecting) return false;
   const pw = $('add-pw');
-  if (pw.value) { window.cg.answer(job, pw.value); pw.value = ''; return true; }
+  if (pw.value) { window.ayis.answer(job, pw.value); pw.value = ''; return true; }
   serverPwAsk = job;
   $('add-log').textContent = 'Password required.';
   paintOnboard();
@@ -5644,7 +5644,7 @@ async function connectServer() {
     if (!pw.value) { pw.focus(); return; }
     const job = serverPwAsk;
     serverPwAsk = null;
-    window.cg.answer(job, pw.value); pw.value = '';
+    window.ayis.answer(job, pw.value); pw.value = '';
     $('add-log').textContent = 'Installing key…';
     paintOnboard();
     return;
@@ -5660,7 +5660,7 @@ async function connectServer() {
   log.dataset.fresh = 'yes';
   paintOnboard();
   const before = new Set((hostsNow || []).map(h => h.name));
-  const { rc } = await runCg(['host', 'add', ...(name ? [name] : []), '--ssh', `${user}@${addr}`],
+  const { rc } = await runAyis(['host', 'add', ...(name ? [name] : []), '--ssh', `${user}@${addr}`],
                              { collect: 'add-log', wantRc: true });
   if (rc !== 0) { connecting = false; log.classList.add('text-error'); paintOnboard(); return; }
   await refreshHosts();
@@ -5719,9 +5719,9 @@ function askPassword({ title, sub, placeholder = '' }) {
     input.focus();
   });
 }
-// What cg asks while it sets a machine up - its sudo password, and the
+// What ayis asks while it sets a machine up - its sudo password, and the
 // Tailscale auth key when it is not on the tailnet yet: the popup, and an empty
-// answer if it is cancelled - cg then stops, with nothing changed.
+// answer if it is cancelled - ayis then stops, with nothing changed.
 const SETUP_ASKS = {
   [ASK.hostSudo]: name => ({ title: 'Sudo password', wait: 'Waiting for the sudo password…',
     sub: `${name ? name + ': ' : ''}used once for setup. Not stored.` }),
@@ -5737,7 +5737,7 @@ function sudoAnswer(job, askId) {
   const live = onbRunning === 'setup' ? $('onb-live-setup') : null;
   if (live) live.textContent = q.wait;
   askPassword(q).then(v => {
-    window.cg.answer(job, v || '');
+    window.ayis.answer(job, v || '');
     if (live && v) live.textContent = 'Continuing…';
   });
   return true;
@@ -5794,7 +5794,7 @@ async function refresh(each, need = readsFor(view)) {
   if (!need) return;               // logs need nothing
   if (view !== 'cost') loaded.add(view);
   await Promise.all(need.map(([args, json]) =>
-    runCg(args, view === 'cost' ? { json } : { json, group: 'refresh' }).then(() => each && each(json))));
+    runAyis(args, view === 'cost' ? { json } : { json, group: 'refresh' }).then(() => each && each(json))));
 }
 
 // Each read, in the words the page uses for what it shows.
@@ -5884,7 +5884,7 @@ $('refdlg').oncancel = e => e.preventDefault();
 $('refdlg').addEventListener('keydown', e => { if (e.key === 'Escape') e.preventDefault(); });
 
 // On open, every free read goes at once and each screen paints when its own
-// answer lands - they share nothing. cg cost is not among them: it is $0.01 a
+// answer lands - they share nothing. ayis cost is not among them: it is $0.01 a
 // call, so it waits for its button.
 // Asked FIRST, and alone, because they decide whether anything else is worth
 // asking. Six `command -v` checks, a file read, and two free calls - nothing
@@ -5906,7 +5906,7 @@ const ALL_READS = [
   [['status', '--json'], 'status'],
   [['watcher', '--json'], 'guards'],
   [['library', 'list', '--json'], 'library'],
-  // Its own read: finding cg's other buckets takes seconds, and the archive
+  // Its own read: finding ayis's other buckets takes seconds, and the archive
   // in use must not wait for it.
   [['library', 'elsewhere', '--json'], 'elsewhere'],
   [['machines', '--json'], 'machines'],
@@ -5928,15 +5928,15 @@ const ALL_READS = [
 // be dealt with before this one can be judged at all. A rung whose read failed
 // must never read as met.
 //
-// One sentence each. An old warning strip ran to three - cg's own sentence, then "Your
+// One sentence each. An old warning strip ran to three - ayis's own sentence, then "Your
 // games are in S3; nothing here can see them until this is fixed", then where
 // the button was - which is a paragraph to say "the key does not work".
-// What is wrong with the key, which is cg's answer and not a guess from an
+// What is wrong with the key, which is ayis's answer and not a guess from an
 // error string: a laptop with no network was told "AWS rejected this access
 // key", which is a lie about a call that never arrived, and sent people to
 // replace a key that was fine. See creds_json in lib/laptop.sh.
 //
-// An older cg sends no reason at all, and a rejection is what this said before
+// An older ayis sends no reason at all, and a rejection is what this said before
 // and what nearly all of them are, so that is where it falls back to.
 function keyProblem() {
   switch (credsNow && credsNow.reason) {
@@ -5964,7 +5964,7 @@ function whereDone() {
   return city && city.city ? `Runs in ${shortCity(city.city)}` : `Runs in ${machinesNow.region}`;
 }
 
-// Whether a region is written in .env - chosen - as against cg's default.
+// Whether a region is written in .env - chosen - as against ayis's default.
 const regionChosen = () => {
   const r = (config || []).find(x => x.key === 'GAME_REGION');
   return !!(r && r.is_set);
@@ -5975,7 +5975,7 @@ function prereqs(kind = kindNow()) {
   const email = (config || []).find(r => r.key === 'EMAIL_ALERTS');
   const all = [
     // Installed is not enough for the AWS CLI: it also has to run, which only
-    // cg creds can say. Both answers decide this one step - the pipeline used
+    // ayis creds can say. Both answers decide this one step - the pipeline used
     // to show the second as a row of its own, also called Tools, that came and
     // went as the two answers landed a second apart.
     { key: 'tools', reads: 'deps', name: 'Required tools installed',
@@ -5998,7 +5998,7 @@ function prereqs(kind = kindNow()) {
       ok: !credsNow ? null : credsNow.cli ? credsNow.valid === true : null,
       problem: { blocking: true, ...keyProblem() } },
     { key: 'tailnet', reads: 'tskey', name: 'Tailscale signed in',
-      // Only a clear yes. cg says null when it cannot tell - Tailscale is not
+      // Only a clear yes. ayis says null when it cannot tell - Tailscale is not
       // installed - and "not false" read that as signed in: an empty laptop
       // showed this step ticked before it had Tailscale at all.
       ok: tskeyNow ? tskeyNow.signed_in === true : null,
@@ -6028,14 +6028,14 @@ function prereqs(kind = kindNow()) {
       // looks completely set up and cannot build - which is exactly how an
       // enabled-but-empty Malaysia read as a broken app.
       //
-      // And not cg's default either: a region nobody chose is not a choice.
-      // On a fresh laptop .env names no region, cg falls back to ap-south-2,
+      // And not ayis's default either: a region nobody chose is not a choice.
+      // On a fresh laptop .env names no region, ayis falls back to ap-south-2,
       // that happens to rent the machine - and the stage ticked itself, so the
       // pipeline finished and handed over without ever showing the list. The
       // popup IS this stage; it is skipped only once a region has been
       // written to .env, by it or by Settings.
       //
-      // Still judged only once `cg machines` has answered, never before: it is
+      // Still judged only once `ayis machines` has answered, never before: it is
       // one of the reads behind the gate, and a stage that could shut the gate
       // on the reads it needs would wait for ever.
       ok: !machinesNow ? null
@@ -6065,7 +6065,7 @@ function prereqs(kind = kindNow()) {
 // Where it runs. A dialog, because changing it later is this same question
 // asked again - and because it is a choice, which is what a dialog is for.
 //
-// Every number in it is cg's: the latency it measured, the rupee rates it
+// Every number in it is ayis's: the latency it measured, the rupee rates it
 // converted, and whether AWS will actually let you launch there. The app adds
 // nothing but the radio buttons.
 let whereToPick = null;
@@ -6202,20 +6202,20 @@ $('whereto-use').onclick = async e => {
   const machine = row && whereToMachine(row);
   // The machine before the region, as the chooser does: the wrong type in the
   // right region is a refused launch, the reverse silently builds the wrong box.
-  // Only over a type cg reported: with none read, there is nothing to correct.
+  // Only over a type ayis reported: with none read, there is nothing to correct.
   // Checked, both ways: a type saved for a region that then was not is the
   // mismatch this exists to prevent, so it is put back.
   const was = cfgVal('GAME_INSTANCE_TYPE');
   const retype = !!(machine && was && machine.type !== was);
-  if (retype && (await runCg(['config', 'set', 'GAME_INSTANCE_TYPE', machine.type], { wantRc: true })).rc !== 0) {
+  if (retype && (await runAyis(['config', 'set', 'GAME_INSTANCE_TYPE', machine.type], { wantRc: true })).rc !== 0) {
     toast(`Could not save ${machine.type}. Nothing was changed.`, 'bad');
     return;
   }
-  // cg owns the setting and its rules - the app does not write .env.
+  // ayis owns the setting and its rules - the app does not write .env.
   const ok = await runInPipeline('where', ['config', 'set', 'GAME_REGION', code],
                                  `Saving ${placeName(code)}\u2026`);
-  if (!ok && retype) await runCg(['config', 'set', 'GAME_INSTANCE_TYPE', was]);
-  // `cg config set` is not a write by cg's contract, so nothing re-reads on its
+  if (!ok && retype) await runAyis(['config', 'set', 'GAME_INSTANCE_TYPE', was]);
+  // `ayis config set` is not a write by ayis's contract, so nothing re-reads on its
   // own, and the stage sat on "Pick where it runs" after you had picked. The
   // setting, so the stage sees a region was chosen - and then everything behind
   // the gate, because all of it is per region: the machines it rents, the box,
@@ -6223,13 +6223,13 @@ $('whereto-use').onclick = async e => {
   // Together, not one after the other: the setting lands first and ticks the
   // last step, and if the reads had not started by then the dashboard opened
   // on a box read for the old region, still loading.
-  if (ok) await Promise.all([runCg(['config', '--json'], { json: 'config' }), readBehindGate()]);
+  if (ok) await Promise.all([runAyis(['config', '--json'], { json: 'config' }), readBehindGate()]);
 };
 
 // ── The first-run pipeline ────────────────────────────────────────────────────
 //
 // The dashboard, on a laptop that is not ready. Six stages in the order they
-// have to be met, one of them active, the pane beside it carrying cg's own
+// have to be met, one of them active, the pane beside it carrying ayis's own
 // words. When the last one is met it collapses to a line and the dashboard
 // cards take over.
 //
@@ -6239,7 +6239,7 @@ $('whereto-use').onclick = async e => {
 // blocking. All three were ways of avoiding the fact that a new laptop has no
 // screen of its own.
 //
-// What is on each stage comes from prereqs(). What cg is doing comes from cg.
+// What is on each stage comes from prereqs(). What ayis is doing comes from ayis.
 
 // Which of three things the dashboard is doing:
 //   setup      something is unmet, or not yet known - the pipeline is the screen
@@ -6316,7 +6316,7 @@ function onbStatus() {
 //
 // One log per step rather than one pane for all of them: when step three fails
 // you want step three's output, not whatever ran last. Each is a small unit -
-// the line cg is on now, a progress sweep, the sign-in link when there is one,
+// the line ayis is on now, a progress sweep, the sign-in link when there is one,
 // and the full output folded behind "Details" - built once and kept in
 // #onb-logs between paints, because the steps are redrawn every time a read
 // lands and an install's half-written log must survive that.
@@ -6437,7 +6437,7 @@ async function runInPipeline(key, args, status, started) {
     onbQueued = false;
     $('onb-live-' + key).textContent = status || 'Starting…';
   }
-  const { rc, err } = await runCg(args, { collect: onbLogId(key), wantRc: true,
+  const { rc, err } = await runAyis(args, { collect: onbLogId(key), wantRc: true,
                                           onStart: id => { onbJob = id; if (started) started(); } });
   onbJob = null;
   onbRunning = null;
@@ -6455,7 +6455,7 @@ async function runInPipeline(key, args, status, started) {
       : rc === 130 ? 'Stopped.'
       : (ONB_FAIL[key] || 'Failed. See details below.');
     onbTone = 'bad';
-    // The reason is in cg's words, and nobody should have to find the toggle
+    // The reason is in ayis's words, and nobody should have to find the toggle
     // to read why the thing they just pressed did not work.
     if (rc !== 130) onbLogOpen(key, true);
   }
@@ -6499,7 +6499,7 @@ const missingTools = () => depsNow
   ? neededTools().filter(x => !x.present).map(x => x.label) : [];
 // Short and plain: what is needed and what it is for, in one or two sentences.
 // The Tools step has no sentence at all - it shows the tools themselves.
-// The AWS CLI is installed - cg deps found it - but does not run: cg creds
+// The AWS CLI is installed - ayis deps found it - but does not run: ayis creds
 // says there is no CLI. Shown on its own chip, not as a second Tools row.
 function cliBroken() {
   if (kindNow() !== 'aws' || !depsNow || !credsNow || credsNow.cli !== false) return false;
@@ -6551,7 +6551,7 @@ const ONB_COPY = {
   tailnet: { name: 'Tailscale', done: () => 'Tailscale signed in',
     body: () => 'Sign in to Tailscale. Machines are reachable only over your tailnet.' },
   // Done only with a working access token, said as what the key is: one in
-  // the settings, or one cg will make from the token when a machine needs it.
+  // the settings, or one ayis will make from the token when a machine needs it.
   authkey: { name: 'Access token',
     done: () => (tskeyNow && tskeyNow.auth_key_stored ? 'Auth key saved, checked before each build'
                                                       : 'Generated from your access token at build time'),
@@ -6578,7 +6578,7 @@ const ONB_ACTION = {
   // Only after a setup that failed or was stopped: it starts by itself.
   setup:   () => [{ label: 'Set up', go: onbSetupHost },
                   { label: 'Later', go: closeAdd, plain: true }],
-  // Installed but will not run is not something installing fixes - cg deps
+  // Installed but will not run is not something installing fixes - ayis deps
   // install skips a tool it can find - so that case offers a fresh look.
   tools:   () => [!missingTools().length && cliBroken()
                     ? { label: 'Check again', go: retryReads }
@@ -6639,7 +6639,7 @@ function paintOnboard() {
   $('adddlg-close').title = stepBusy ? 'Waits for this step to finish' : '';
 
   // No engine. Not a stage you can be talked through - every command fails
-  // identically without cg, and six broken reads is not what happened. One
+  // identically without ayis, and six broken reads is not what happened. One
   // thing did, and only the main process can see it.
   if (engineGone) {
     if (!$('adddlg').open) $('adddlg').showModal();
@@ -6647,11 +6647,11 @@ function paintOnboard() {
     $('onb-count').textContent = '';
     wrap.textContent = '';
     wrap.append(el('p', 'font-body-md text-body-md text-on-surface-variant mb-space-md',
-      'Cloud Gaming requires its scripts, which are not installed.'));
+      'Ayis requires its scripts, which are not installed.'));
     for (const [state, text, note] of [
-      ['failed', `Expected at ${engineGone.cg}`, ''],
+      ['failed', `Expected at ${engineGone.ayis}`, ''],
       ['locked', 'Install them with:',
-       'git clone https://github.com/jebin2/aws_cloud_gaming ~/cloud_gaming'],
+       'git clone https://github.com/jebin2/ayis ~/ayis'],
     ]) {
       const row = document.createElement('div');
       row.className = 'flex gap-space-sm items-start';
@@ -6880,12 +6880,12 @@ function paintOnboard() {
     } else if (state === 'running' && (onbQueued || ONB_NO_STOP.has(r.key))) {
       // Nothing to stop: the reads it waits on are the app's, and the write is instant.
     } else if (state === 'running') {
-      // Stopping has to reach cg: a sign-in is waiting on a browser that may
+      // Stopping has to reach ayis: a sign-in is waiting on a browser that may
       // never answer, and a package manager can be sitting on a lock.
       const stop = document.createElement('button');
       stop.className = 'btn';
       stop.textContent = onbWaiting ? 'Stop waiting' : 'Stop';
-      stop.onclick = () => { if (onbJob !== null) window.cg.cancel(onbJob); };
+      stop.onclick = () => { if (onbJob !== null) window.ayis.cancel(onbJob); };
       bar.append(stop);
     } else {
       for (const a of onbActions(r)) {
@@ -6910,14 +6910,14 @@ function paintOnboard() {
 }
 
 
-// What cg is doing, for the pipeline's log pane and for the refusal when
+// What ayis is doing, for the pipeline's log pane and for the refusal when
 // something else holds the lock. The nine reads each have a sentence; see
-// CG_WORDS.
+// AYIS_WORDS.
 //
 // There used to be a popup here - three modes of it - which said the same
 // things in front of the window instead of in it. The pipeline on the
 // dashboard says them in place, so the popup and the header's
-// "running: cg machines, cg refresh" are both gone.
+// "running: ayis machines, ayis refresh" are both gone.
 
 // True when there is something to talk to. A main process too old to answer -
 // or a test stub - says nothing, and is taken at its word: carry on, and let
@@ -6925,7 +6925,7 @@ function paintOnboard() {
 let engineGone = null;
 async function engineReady() {
   let e;
-  try { e = await window.cg.engine(); } catch { return true; }
+  try { e = await window.ayis.engine(); } catch { return true; }
   if (!e || e.found) { engineGone = null; return true; }
   engineGone = e;
   paintOnboard();
@@ -6938,7 +6938,7 @@ async function engineReady() {
 // where they were - in `jobs`, where a job in flight is what disables Build,
 // Play and Destroy.
 async function retryReads() {
-  for (const [id, job] of [...jobs]) if (!job.write && !hostRun(job)) await window.cg.cancel(id);
+  for (const [id, job] of [...jobs]) if (!job.write && !hostRun(job)) await window.ayis.cancel(id);
   if (!(await engineReady())) return;
   return refreshAll();
 }
@@ -6951,10 +6951,10 @@ async function retryReads() {
 //
 // When the gate stays shut, it has to open again by itself once the last
 // blocking stage is fixed - and not every fix is a write that comes back
-// through here. The billing address is a `cg config set`, which cg does not
+// through here. The billing address is a `ayis config set`, which ayis does not
 // list as running alone, so the window re-reads only the setting: the stage
 // ticked, and "where it runs" sat on "checking…" for ever, waiting on a
-// `cg machines` that nothing was ever going to ask for. So `gateShut` remembers
+// `ayis machines` that nothing was ever going to ask for. So `gateShut` remembers
 // that the reads behind the gate were skipped, and ANY gate read that lands
 // with nothing blocking left - from a dialog, from Settings, from anywhere -
 // asks them. Cleared at the start of this function, so the gate reads it
@@ -6964,7 +6964,7 @@ let gateShut = false;
 async function refreshAll(each) {
   gateShut = false;
   await Promise.all(GATE_READS.map(([args, json]) =>
-    runCg(args, { json, group: 'refresh' }).then(() => each && each(json))));
+    runAyis(args, { json, group: 'refresh' }).then(() => each && each(json))));
   paintOnboardSoon();
   // A prerequisite is missing. The reads that need AWS or a tailnet would
   // every one come back unknown, and the pipeline is already showing the one
@@ -6973,7 +6973,7 @@ async function refreshAll(each) {
   return readBehindGate(each);
 }
 // Only a stage judged on a gate read can keep the gate shut. "Where it runs"
-// is judged on `cg machines`, which is BEHIND the gate - letting it shut the
+// is judged on `ayis machines`, which is BEHIND the gate - letting it shut the
 // gate would stop the very read that answers it, and leave the region popup
 // with nothing to list.
 const GATE_JSON = new Set(GATE_READS.map(([, json]) => json));
@@ -6987,10 +6987,10 @@ async function readBehindGate(each) {
   for (const v of Object.keys(NEEDS)) loaded.add(v);
   readingBehindGate++;
   // In parallel, because they share nothing and each screen paints when its own
-  // answer lands. cg cost is not among them: it bills.
+  // answer lands. ayis cost is not among them: it bills.
   try {
     await Promise.all(forMode(ALL_READS).map(([args, json]) =>
-      runCg(args, { json, group: 'refresh' }).then(() => each && each(json))));
+      runAyis(args, { json, group: 'refresh' }).then(() => each && each(json))));
   } finally { readingBehindGate--; }
   paintOnboard();
   firstScan();             // not awaited: a first scan takes 90 seconds
@@ -7010,7 +7010,7 @@ async function firstScan() {
   // Locations are AWS's: with no AWS machine, there is nothing to measure.
   if (!awsInPlay()) return;
   if (sweepNow && (sweepNow.regions || []).length) return;
-  // Something is running: a scan can wait, and cg would refuse to start one
+  // Something is running: a scan can wait, and ayis would refuse to start one
   // underneath a build anyway.
   if (jobs.size) return;
   scanOffered = true;
@@ -7055,7 +7055,7 @@ function goSetting(el) {
   el.addEventListener('animationend', () => el.classList.remove('flash-attn'), { once: true });
   el.classList.add('flash-attn');
 }
-// A settings row, by the key cg calls it.
+// A settings row, by the key ayis calls it.
 const settingEl = key => document.querySelector(`.row[data-key="${key}"]`);
 
 function goView(v) {
@@ -7069,7 +7069,7 @@ $('goto').onclick = () => {
 $('cancel').onclick = async () => {
   const mine = jobsHere().filter(j => !headerSpares(j));
   if (!mine.length) return;
-  const names = mine.map(j => 'cg ' + j.cmd.join(' ')).join(', ');
+  const names = mine.map(j => 'ayis ' + j.cmd.join(' ')).join(', ');
   const ok = await askConfirm({
     title: `Stop ${names}?`,
     body: mine.map(j => STOP_WARNING[j.cmd[0]]).find(Boolean)
@@ -7078,7 +7078,7 @@ $('cancel').onclick = async () => {
     yes: 'Stop', danger: true,
   });
   if (!ok) return;
-  for (const [id, j] of jobs) if (j.view === view && !headerSpares(j)) window.cg.cancel(id);
+  for (const [id, j] of jobs) if (j.view === view && !headerSpares(j)) window.ayis.cancel(id);
 };
 mountMachineCard($('d-hero'), 'd');
 mountMachineCard($('b-machine'), 'b');
@@ -7093,7 +7093,7 @@ for (const b of document.querySelectorAll('[data-filter]')) {
   b.onclick = () => applyLogFilter(b.dataset.filter);
 }
 $('log-files').onclick = async () => {
-  try { const dir = await window.cg.openLogs(); $('log-count').textContent = dir; }
+  try { const dir = await window.ayis.openLogs(); $('log-count').textContent = dir; }
   catch { $('log-count').textContent = 'Could not open the log folder'; }
 };
 $('log-clear').onclick = () => {
@@ -7116,7 +7116,7 @@ $('log-cloud').onclick = async () => {
   btn.disabled = true;
   $('log-cloud-label').textContent = 'Loading…';
   $('log-cloud-out').textContent = 'Loading…';
-  const out = await runCg(['watchdog', 'logs'], { capture: true });
+  const out = await runAyis(['watchdog', 'logs'], { capture: true });
   btn.disabled = false;
   $('log-cloud-label').textContent = 'Load';
   // Refused - something runs alone - is not "nothing happened".
@@ -7130,7 +7130,7 @@ $('log-cloud').onclick = async () => {
 function watchdogDigest(text) {
   const rows = [];
   for (const line of text.split('\n')) {
-    const m = line.match(/^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)\S*\s+(?:cg-watchdog:\s*)?(.*)$/);
+    const m = line.match(/^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)\S*\s+(?:ayis-watchdog:\s*)?(.*)$/);
     if (m) rows.push({ at: new Date(m[1] + 'Z'), msg: m[2] });
     else if (line.trim()) rows.push({ at: null, msg: line.trim() });
   }
@@ -7151,10 +7151,10 @@ function watchdogDigest(text) {
   }
   return out.map(o => o.text.trim()).join('\n');
 }
-// Both of these delete things in S3 for good. The app asks once, then cg asks
+// Both of these delete things in S3 for good. The app asks once, then ayis asks
 // for the word typed out - CLEAN, FORGET - which the ask dialog renders.
 // Keep for: the one rule for every saved game, saved and applied in one go
-// (cg library keep-for), so the dates in the table are the ones AWS acts on.
+// (ayis library keep-for), so the dates in the table are the ones AWS acts on.
 async function keepFor(n) {
   await libraryRun(['library', 'keep-for', String(n)],
                    n ? `Retention set to ${n} days` : 'Retention set to forever');
@@ -7168,7 +7168,7 @@ $('lib-clean').onclick = async () => {
   });
   if (ok) await libraryRun(['library', 'clean'], 'Deleting leftover files', 'clean-orphans', 'CLEAN');
 };
-// Changing the machine is a `config set` - .env is where cg keeps it, and the
+// Changing the machine is a `config set` - .env is where ayis keeps it, and the
 // next build reads it from there. Re-read afterwards rather than assuming the
 // write landed: the note and the chip both describe the new choice.
 // Picking a price in the chooser sets THREE settings, because it is one
@@ -7211,19 +7211,19 @@ async function chooseMachine(row, spot) {
   // whatever the order, so the order is chosen to leave the least wrong state:
   // the wrong type in the right region is a refused launch with a clear reason,
   // while the right type in the wrong region silently builds the wrong box.
-  await runCg(['config', 'set', 'GAME_INSTANCE_TYPE', row.type]);
-  await runCg(['config', 'set', 'GAME_SPOT', spot ? '1' : '0']);
-  if (moving) await runCg(['config', 'set', 'GAME_REGION', row.region]);
+  await runAyis(['config', 'set', 'GAME_INSTANCE_TYPE', row.type]);
+  await runAyis(['config', 'set', 'GAME_SPOT', spot ? '1' : '0']);
+  if (moving) await runAyis(['config', 'set', 'GAME_REGION', row.region]);
   // machines is per-region, so a move makes the old answer wrong; and the
   // games that fit depend on the machine's disk, so the library is read again.
   // Both halves of it: the library is a bucket per region, so after a move the
   // bucket that was "somewhere else" is the machine's own, and a stale list of
   // other places drew the same game twice, with a second login, until Refresh.
-  await Promise.all([runCg(['config', '--json'], { json: 'config' }),
-                     runCg(['machines', '--json'], { json: 'machines' }),
-                     runCg(['status', '--json'], { json: 'status' }),
-                     runCg(['library', 'list', '--json'], { json: 'library' }),
-                     runCg(['library', 'elsewhere', '--json'], { json: 'elsewhere' })]);
+  await Promise.all([runAyis(['config', '--json'], { json: 'config' }),
+                     runAyis(['machines', '--json'], { json: 'machines' }),
+                     runAyis(['status', '--json'], { json: 'status' }),
+                     runAyis(['library', 'list', '--json'], { json: 'library' }),
+                     runAyis(['library', 'elsewhere', '--json'], { json: 'elsewhere' })]);
   saved = currentPick().type === row.type && currentPick().region === row.region;
   } finally {
     choosing = false;
@@ -7247,7 +7247,7 @@ async function scanRegions(btn) {
                 'Checking all regions')
     : null;
   try {
-    await runCg(['sweep', '--json'], { json: 'sweep' });
+    await runAyis(['sweep', '--json'], { json: 'sweep' });
   } finally {
     sweeping = false;
     if (btn) btn.textContent = was;
@@ -7263,12 +7263,12 @@ if (sweepBtn) sweepBtn.onclick = () => scanRegions(sweepBtn);
 // is made where the build is - it used to send you to the top of Settings.
 $('b-login-choice').onchange = async ev => {
   ev.target.disabled = true;
-  await runCg(['config', 'set', 'GAME_STEAM_LOGIN', ev.target.value]);
-  await runCg(['config', '--json'], { json: 'config' });
+  await runAyis(['config', 'set', 'GAME_STEAM_LOGIN', ev.target.value]);
+  await runAyis(['config', '--json'], { json: 'config' });
   ev.target.disabled = false;
 };
 
-// Add disk, on the running machine. cg says what it will do (second) and how
+// Add disk, on the running machine. ayis says what it will do (second) and how
 // much room there is to add (max_add_gb); this only asks how much, says the
 // price, and runs it.
 const DISK_SIZES_GB = [50, 100, 200, 500];
@@ -7301,7 +7301,7 @@ $('diskdlg-done').onclick = async () => {
   done.disabled = true;
   msg.textContent = 'Checking Steam…';
   let st = null;
-  try { st = JSON.parse(await runCg(['disk', '--json'], { capture: true })); } catch { /* said below */ }
+  try { st = JSON.parse(await runAyis(['disk', '--json'], { capture: true })); } catch { /* said below */ }
   if (st && st.extra_in_steam) return diskdlgFinish('Steam is using the new disk');
   msg.textContent = st ? 'Steam does not list the drive yet. Add it in Settings > Storage, then press Done again.'
     : 'Could not check Steam on your game PC. If you added the drive, you can close this.';
@@ -7321,7 +7321,7 @@ async function openAddDisk() {
   $('diskdlg-now').textContent = 'Looking at your game PC…';
   if (!dlg.open) dlg.showModal();
   let st = null;
-  try { st = JSON.parse(await runCg(['disk', '--json'], { capture: true })); } catch { /* said below */ }
+  try { st = JSON.parse(await runAyis(['disk', '--json'], { capture: true })); } catch { /* said below */ }
   if (!st || !st.running) {
     // Turned away because something else runs alone is not the same as not
     // being able to reach the game PC, and the person can wait for it.
@@ -7427,16 +7427,16 @@ function startRun(args, opts = {}) {
   runBegin(opts.host ? 'open' : args[0], opts);
   paintRun();
   // A machine of yours: its card turns to Streaming, with its Stop, once it runs.
-  return runCg(args, { ...(opts.env ? { env: opts.env } : {}), ...(opts.host ? { onStart: paintHostCards } : {}) });
+  return runAyis(args, { ...(opts.env ? { env: opts.env } : {}), ...(opts.host ? { onStart: paintHostCards } : {}) });
 }
 
 // A machine that runs but has not finished building. Closing the app in the
 // middle of a build ends this laptop's half of it - waiting for the box, then
 // pairing Moonlight - while the box carries on setting itself up; opened again,
 // "running" read as ready and the card offered Play on a box with no desktop.
-// cg status says whether the box is set up (ready) and whether this laptop's
+// ayis status says whether the box is set up (ready) and whether this laptop's
 // half finished (built). Either missing, it is shown as building, and the build
-// is picked up again once: `cg init` finds the same instance and launches
+// is picked up again once: `ayis init` finds the same instance and launches
 // nothing new, so it costs nothing beyond the machine already running.
 function unfinished(box) {
   return !!(box && box.state === 'running' && (box.ready === false || box.built === false));
@@ -7448,7 +7448,7 @@ function resumeBuild(s) {
   // left alone.
   if (!unfinished(box) || resumedFor === box.id || ['init', 'destroy', 'open'].some(jobsFor)) return;
   resumedFor = box.id;
-  // No GAME_APPS: the box was given its games when it launched, and cg keeps
+  // No GAME_APPS: the box was given its games when it launched, and ayis keeps
   // that choice in .env - passing "none" here overwrote it, and with it the
   // restore's "109 of 160 GB" progress line.
   startRun(['init'], { stay: true });
@@ -7495,7 +7495,7 @@ async function removeGameDisk() {
 // games, you tick the ones you want, and they are copied before the stream opens.
 // What does not fit the machine's own fast drive goes on an added disk, made for
 // the purpose and sized here (and changeable) before anything is spent.
-const PLAY_PICKS_KEY = 'cg-play-picks';
+const PLAY_PICKS_KEY = 'ayis-play-picks';
 const playPicks = {
   get() { try { return JSON.parse(localStorage.getItem(PLAY_PICKS_KEY) || 'null'); } catch { return null; } },
   set(ids) { try { localStorage.setItem(PLAY_PICKS_KEY, JSON.stringify(ids)); } catch { /* a convenience */ } },
@@ -7691,7 +7691,7 @@ function restoreEnd(rc) {
   ui.retry = failed.map(r => r.g);
 }
 function restoreCancel() {
-  for (const [id, j] of jobs) if (j.cmd[0] === 'open') window.cg.cancel(id);
+  for (const [id, j] of jobs) if (j.cmd[0] === 'open') window.ayis.cancel(id);
 }
 $('restoredlg-cancel').onclick = () => { restoreCancel(); if (restoreUi) restoreUi.finished = true; $('restoredlg').close(); restoreUi = null; };
 $('restoredlg-close').onclick = () => { $('restoredlg').close(); restoreUi = null; };
@@ -7700,7 +7700,7 @@ $('restoredlg-retry').onclick = () => {
   $('restoredlg').close(); restoreUi = null;
   playWith({ ...ui.pick, games: ui.retry });
 };
-// A step cg announces moves the dialog on; once the stream's own steps start the
+// A step ayis announces moves the dialog on; once the stream's own steps start the
 // games are all back and it closes.
 function restoreOnEvent(event) {
   if (!restoreUi) return;
@@ -7721,7 +7721,7 @@ function restoreOnEvent(event) {
 // Which games are on the disks a stop keeps - the root disk and the games disk -
 // as the machine said last time it was asked (Play, Stop machine). A stopped
 // machine cannot be asked, and these games are on it all the same.
-const BOX_GAMES_KEY = 'cg-box-games';
+const BOX_GAMES_KEY = 'ayis-box-games';
 const boxGames = {
   get(id) { try { const v = JSON.parse(localStorage.getItem(BOX_GAMES_KEY) || 'null'); return v && v.id === id ? v.games || [] : []; } catch { return []; } },
   set(id, games) {
@@ -7736,7 +7736,7 @@ async function readPlayContext(b) {
   const sel = libNow && libNow.selectable_gb;
   if (b.state === 'running') {
     try {
-      const pc = JSON.parse(await runCg(['games', '--json', '--box'], { capture: true }));
+      const pc = JSON.parse(await runAyis(['games', '--json', '--box'], { capture: true }));
       for (const g of pc.games || []) if (/^(installed|running)$/i.test(g.state) && !g.incomplete) {
         ctx.onBox.add(String(g.appid));
         if (g.disk) ctx.where.set(String(g.appid), g.disk);
@@ -7746,9 +7746,9 @@ async function readPlayContext(b) {
     } catch { /* unknown: nothing is locked, the copy skips what is whole */ }
   }
   if (ctx.driveFree == null && sel != null) ctx.driveFree = sel;   // a stopped machine's fast drive starts empty
-  try { ctx.extraHave = (JSON.parse(await runCg(['disk', '--json'], { capture: true })).extra_gb) || 0; } catch { /* none known */ }
+  try { ctx.extraHave = (JSON.parse(await runAyis(['disk', '--json'], { capture: true })).extra_gb) || 0; } catch { /* none known */ }
   // Stopped: what the root disk and the games disk had when it was last asked.
-  // The games disk's only while it still exists. cg checks again once the machine
+  // The games disk's only while it still exists. ayis checks again once the machine
   // is up, so a list that is out of date costs nothing worse than a copy.
   if (b.state !== 'running') for (const g of boxGames.get(b.id)) {
     if (g.disk === 'extra' && !(ctx.extraHave > 0)) continue;
@@ -7800,7 +7800,7 @@ const play = async () => {
   dlg.returnValue = '';
   dlg.showModal();
   try {
-    if (!libNow) await runCg(['library', 'list', '--json'], { json: 'library', group: 'refresh' }).catch(() => {});
+    if (!libNow) await runAyis(['library', 'list', '--json'], { json: 'library', group: 'refresh' }).catch(() => {});
     // Always the same popup, games or none: with nothing saved yet it says so, and
     // the disk can still be chosen - Play is one flow, whatever is in Saved games.
     if (!gaveUp) {
@@ -7831,7 +7831,7 @@ async function stopSession() {
     body: 'The session does not open. The machine keeps running and billing; Stop machine stops it.',
     yes: 'Stop starting', no: 'Keep going', danger: true,
   });
-  if (ok) for (const [id] of openJobs()) window.cg.cancel(id);
+  if (ok) for (const [id] of openJobs()) window.ayis.cancel(id);
 }
 // ── Stop machine and Delete machine: one window, start to finish ────────────
 //
@@ -7879,15 +7879,15 @@ async function askKeepGames(kind, untick = []) {
   if (!dlg.open) dlg.showModal();
   let games = null;
   try {
-    if (!libNow) await runCg(['library', 'list', '--json'], { json: 'library', group: 'refresh' }).catch(() => {});
-    const pc = JSON.parse(await runCg(['games', '--json', '--box'], { capture: true }));
+    if (!libNow) await runAyis(['library', 'list', '--json'], { json: 'library', group: 'refresh' }).catch(() => {});
+    const pc = JSON.parse(await runAyis(['games', '--json', '--box'], { capture: true }));
     games = (pc.games || []).filter(g => g.state !== 'in S3 only' && !g.tool);
     if (b) boxGames.set(b.id, pc.games);
   } catch { games = null; }
   // The games disk, if the machine has one: Stop can delete it too.
   let diskGb = 0;
   if (stop && games !== null) {
-    try { diskGb = (JSON.parse(await runCg(['disk', '--json'], { capture: true })).extra_gb) || 0; } catch { diskGb = 0; }
+    try { diskGb = (JSON.parse(await runAyis(['disk', '--json'], { capture: true })).extra_gb) || 0; } catch { diskGb = 0; }
   }
   if (!dlg.open) return null;
   const saved = new Set(((libNow && !libNow.error && libNow.games) || []).map(g => String(g.appid)));
@@ -8041,7 +8041,7 @@ async function askKeepGames(kind, untick = []) {
 }
 
 // The run, in the same window: every step listed up front, each matched to what
-// cg says as it goes. A step cg never says (Steam was not open) is ticked when a
+// ayis says as it goes. A step ayis never says (Steam was not open) is ticked when a
 // later one begins.
 function keepRun(title, steps) {
   keepMode('run');
@@ -8073,7 +8073,7 @@ function keepRun(title, steps) {
   return {
     go,
     key: k => go(rows.findIndex((r, i) => i > at && r.key === k)),
-    said(text) {   // cg's own step: the planned row it belongs to, if any
+    said(text) {   // ayis's own step: the planned row it belongs to, if any
       const i = rows.findIndex((r, j) => j > at && r.match && r.match.test(text));
       if (i >= 0) go(i);
     },
@@ -8109,7 +8109,7 @@ function saveOnEvent(e) {
 }
 // What is happening right now, under the step in progress: AWS's own state while
 // the stop waits for it ("stopping · 1 min 20 s"), and the latest thing the
-// machine or cg said. A step that takes minutes with nothing under it looks stuck.
+// machine or ayis said. A step that takes minutes with nothing under it looks stuck.
 function keepLive(e) {
   const host = keepUi.run && keepUi.run.current();
   if (!host) return;
@@ -8119,7 +8119,7 @@ function keepLive(e) {
     keepUi.aws = text;
   } else if (e.t === 'line' && e.text && e.kind !== 'fail') {
     const t = e.text.trim();
-    // Not cg's own echo of the state change - that is the AWS line already.
+    // Not ayis's own echo of the state change - that is the AWS line already.
     if (/^(running|stopping|stopped|pending|still \w+ \(\d+s\)|\w+ after \d+s)$/.test(t)) return;
     keepUi.said = t.replace(/^machine:\s*/, 'Machine: ');
   } else return;
@@ -8128,13 +8128,13 @@ function keepLive(e) {
   if (row.previousElementSibling !== host) host.after(row);
   row.textContent = [keepUi.aws, keepUi.said].filter(Boolean).join('\n');
 }
-// One cg command of the run: its steps feed the window; its failure is the reason.
+// One ayis command of the run: its steps feed the window; its failure is the reason.
 async function keepCmd(run, args, ask) {
   typedPending = ask || null;
-  const { rc, err } = await runCg(args, { wantRc: true, onStep: t => run.said(t), aside: args[0] !== 'library' });
+  const { rc, err } = await runAyis(args, { wantRc: true, onStep: t => run.said(t), aside: args[0] !== 'library' });
   typedPending = null;
   if (rc === 0) return null;
-  return (err || '').trim().split('\n').filter(Boolean).slice(-2).join(' ') || `cg ${args.join(' ')} stopped (exit ${rc})`;
+  return (err || '').trim().split('\n').filter(Boolean).slice(-2).join(' ') || `ayis ${args.join(' ')} stopped (exit ${rc})`;
 }
 // Stop machine and Delete machine, after the choice: the steps, then the run.
 async function keepGo(kind, choice) {
@@ -8164,7 +8164,7 @@ async function keepGo(kind, choice) {
   if (choice.skip.length) args.push('--skip', choice.skip.join(','));
   const why = await keepCmd(run, args);
   if (why) return why;
-  // Only once the machine has stopped and the save is done: cg disk remove itself
+  // Only once the machine has stopped and the save is done: ayis disk remove itself
   // refuses unless Saved games has a complete save from this run.
   if (stop && choice.deleteDisk) {
     run.key('disk');
@@ -8197,7 +8197,7 @@ async function keepFlow(kind, untick) {
   } else {
     keepUi.run.fail(why);
     $('keepdlg-title').textContent = `${stop ? 'Stopping' : 'Deleting'} the machine - not done`;
-    // The reason is cg's, above: most often Saved games has no complete save from
+    // The reason is ayis's, above: most often Saved games has no complete save from
     // this run (a game still downloading anywhere makes the save incomplete), and
     // then Remove games disk would refuse just the same until there is one.
     $('keepdlg-run-note').textContent = keepUi.failedAt === 'disk'
@@ -8220,7 +8220,7 @@ var flowBusy = false;   // var: read by painters that can run before this line i
 // needs the machine reachable, not the session job gone, and a session that will
 // not end must not leave the click doing nothing.
 async function endSessionJobs() {
-  for (const [id] of openJobs()) window.cg.cancel(id);
+  for (const [id] of openJobs()) window.ayis.cancel(id);
   for (let i = 0; i < 80 && openJobs().length; i++) await new Promise(r => setTimeout(r, 250));
 }
 async function stopMachine(untick = []) {
@@ -8458,13 +8458,13 @@ for (const ev of ['mousedown', 'mousemove', 'keydown']) {
   addEventListener(ev, e => { if (e.isTrusted) document.body.classList.remove('pad'); }, { passive: true });
 }
 
-// Settings' sections: the account cards are there before cg's settings are
+// Settings' sections: the account cards are there before ayis's settings are
 // read, and stay if that read fails.
 paintSettingsNav();
 // Drawn once before anything has been read, so the card has its rows and they
 // say "reading…", rather than being blank until two reads land.
 checkAsks();
-// Is there an engine? Then what does it say. In that order: without cg the
+// Is there an engine? Then what does it say. In that order: without ayis the
 // reads cannot even be started, and nine spawn errors describe one problem
 // badly.
 // The steps are drawn at once, all of them still being checked, so the window
@@ -8479,7 +8479,7 @@ if (homeBoot && homeBoot.aws) paintMachineCards();
   // not after the list comes back: their cards are already on screen.
   for (const h of hostsNow || []) {
     const [args, json] = hostRead(h.name);
-    runCg(args, { json, group: 'refresh' });
+    runAyis(args, { json, group: 'refresh' });
   }
   await refreshAll();
 })();

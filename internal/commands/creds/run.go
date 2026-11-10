@@ -9,16 +9,16 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/laptop"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/laptop"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
-// Run is `cg creds [status|--json]` and `cg creds tailscale [status|--json]`.
+// Run is `ayis creds [status|--json]` and `ayis creds tailscale [status|--json]`.
 // Setting a key is a separate port.
 func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out *output.Out) int {
 	sub := "status"
@@ -85,11 +85,11 @@ func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out
 
 func setter(env *config.Env, out *output.Out) Setter {
 	home, _ := os.UserHomeDir()
-	return Setter{Out: out, Ask: ask.New(out, os.Getenv("CG_YES") == "1"), Env: env, Verify: VerifyKey, Home: home, Getenv: os.Getenv,
+	return Setter{Out: out, Ask: ask.New(out, os.Getenv("AYIS_YES") == "1"), Env: env, Verify: VerifyKey, Home: home, Getenv: os.Getenv,
 		TS: func(token string) tskey.Client { return tskey.Client{Token: token} }}
 }
 
-// signin is `cg creds tailscale signin`.
+// signin is `ayis creds tailscale signin`.
 func signin(ctx context.Context, l laptop.Laptop, out *output.Out) int {
 	if l.Runner.Has("tailscale") && !l.TailscaleDown(ctx) {
 		out.LogAs("ok", "already signed in")

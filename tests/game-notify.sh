@@ -61,7 +61,7 @@ check "  once" "$(( $(sent) - before ))" "1"
 echo "5. the pieces are in place"
 check "the installer puts the timer on" "$(grep -c 'enable --now game-notify.timer' host/install-watchdog.sh)" "1"
 check "  and the build checks it"       "$(grep -c 'game-notify.timer' lib/bootstrap.d/15-watchdog.sh)" "1"
-check "  and the service loads the notify settings" "$(grep -c 'EnvironmentFile=-/etc/cg-notify.conf' host/game-notify.service)" "1"
+check "  and the service loads the notify settings" "$(grep -c 'EnvironmentFile=-/etc/ayis-notify.conf' host/game-notify.service)" "1"
 
 echo "game-notify: $pass passed, $fail failed"
 [[ $fail -eq 0 ]]

@@ -1,16 +1,16 @@
 {
-  "name": "cg-app",
+  "name": "ayis-app",
   "version": "0.1.0",
   "private": true,
-  "description": "Desktop viewer for cg - the scripts stay the engine",
+  "description": "Desktop viewer for ayis - the scripts stay the engine",
   "main": "main/index.js",
   "scripts": {
-    "start": "npm run build:cg && npm run build:css && electron .",
+    "start": "npm run build:ayis && npm run build:css && electron .",
     "test": "node --test test/*.test.mjs",
     "build:css": "tailwindcss -i renderer/src.css -o renderer/tailwind.css --minify",
-    "dist": "npm run build:cg && npm run build:css && electron-builder",
-    "pack": "npm run build:cg && npm run build:css && electron-builder --dir",
-    "build:cg": "node scripts/build-cg.js"
+    "dist": "npm run build:ayis && npm run build:css && electron-builder",
+    "pack": "npm run build:ayis && npm run build:css && electron-builder --dir",
+    "build:ayis": "node scripts/build-ayis.js"
   },
   "devDependencies": {
     "electron": "^39.2.4",
@@ -18,8 +18,8 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "dev.cg.desktop",
-    "productName": "cg",
+    "appId": "dev.ayis.desktop",
+    "productName": "Ayis",
     "asar": true,
     "files": [
       "main/**",
@@ -38,13 +38,13 @@
       ],
       "category": "Game",
       "icon": "build/icon.png",
-      "synopsis": "Desktop viewer for cg, the cloud gaming rig",
-      "description": "Runs cg, a single program, and renders what it says. It holds no AWS logic of its own.",
+      "synopsis": "Ayis: All Yours, Instantly Streamed",
+      "description": "Runs ayis, a single program, and renders what it says. It holds no AWS logic of its own.",
       "maintainer": "jebin2 <noreply@users.noreply.github.com>",
       "extraResources": [
         {
-          "from": "../cg",
-          "to": "cg/cg"
+          "from": "../ayis",
+          "to": "ayis/ayis"
         }
       ]
     },
@@ -54,12 +54,12 @@
       ],
       "category": "public.app-category.games",
       "icon": "build/icon.png",
-      "artifactName": "cg-${version}-mac-${arch}.${ext}",
+      "artifactName": "ayis-${version}-mac-${arch}.${ext}",
       "identity": null,
       "extraResources": [
         {
-          "from": "../cg",
-          "to": "cg/cg"
+          "from": "../ayis",
+          "to": "ayis/ayis"
         }
       ]
     },
@@ -68,19 +68,19 @@
         "portable"
       ],
       "icon": "build/icon.png",
-      "artifactName": "cg-${version}-win-portable.${ext}",
+      "artifactName": "ayis-${version}-win-portable.${ext}",
       "extraResources": [
         {
-          "from": "../cg.exe",
-          "to": "cg/cg.exe"
+          "from": "../ayis.exe",
+          "to": "ayis/ayis.exe"
         }
       ]
     },
-    "executableName": "cg",
+    "executableName": "ayis",
     "extraResources": [
       {
         "from": "../.env.example",
-        "to": "cg/.env.example"
+        "to": "ayis/.env.example"
       }
     ],
     "pacman": {
@@ -95,10 +95,10 @@
     }
   },
   "author": "jebin2",
-  "homepage": "https://github.com/jebin2/aws_cloud_gaming",
+  "homepage": "https://github.com/jebin2/ayis",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jebin2/aws_cloud_gaming.git"
+    "url": "https://github.com/jebin2/ayis.git"
   },
   "license": "MIT"
 }

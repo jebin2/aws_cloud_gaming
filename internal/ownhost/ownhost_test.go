@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/hosts"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
+	"github.com/jebin2/ayis/internal/hosts"
+	"github.com/jebin2/ayis/internal/local"
+	fx "github.com/jebin2/ayis/internal/testfixture"
 )
 
 func TestNames(t *testing.T) {
@@ -19,12 +19,12 @@ func TestNames(t *testing.T) {
 			t.Errorf("%q: %q want %q", in, got, want)
 		}
 	}
-	for name, bad := range map[string]bool{"pc": false, "my-pc-2": false, "PC": true, "-pc": true, "pc-": true, "gamevps": true, "gamevps-3": true, "gamevpsx": false, "": true} {
-		if got := NameOK(name, "gamevps"); (got != "") != bad {
+	for name, bad := range map[string]bool{"pc": false, "my-pc-2": false, "PC": true, "-pc": true, "pc-": true, "ayis": true, "ayis-3": true, "ayisx": false, "": true} {
+		if got := NameOK(name, "ayis"); (got != "") != bad {
 			t.Errorf("%q: %q", name, got)
 		}
 	}
-	if !strings.Contains(NameOK("gamevps-2", "gamevps"), "clean-up would delete it") {
+	if !strings.Contains(NameOK("ayis-2", "ayis"), "clean-up would delete it") {
 		t.Error("it says why")
 	}
 }
@@ -75,7 +75,7 @@ func TestFactsAreParsedFirstValueWins(t *testing.T) {
 
 func conn(t *testing.T) (Conn, *fx.Runner) {
 	r := &fx.Runner{Installed: map[string]bool{"ssh": true, "ssh-keygen": true}, Contains: map[string]string{}}
-	return Conn{R: r, Key: filepath.Join(t.TempDir(), "cg", "ssh", "id_ed25519")}, r
+	return Conn{R: r, Key: filepath.Join(t.TempDir(), "ayis", "ssh", "id_ed25519")}, r
 }
 
 func TestFactsAreReadWithOneReadOnlySSH(t *testing.T) {
@@ -110,7 +110,7 @@ func TestThePasswordIsInTheEnvironmentAndNowhereElse(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = os.WriteFile(c.Key, []byte("private"), 0o600)
-	_ = os.WriteFile(c.Key+".pub", []byte("ssh-ed25519 AAAAC3Nza cg@laptop\n"), 0o644)
+	_ = os.WriteFile(c.Key+".pub", []byte("ssh-ed25519 AAAAC3Nza ayis@laptop\n"), 0o644)
 	if rc := c.InstallKey(context.Background(), "me@pc", "hunter2-pw"); rc != 0 {
 		t.Fatalf("rc %d", rc)
 	}
@@ -119,10 +119,10 @@ func TestThePasswordIsInTheEnvironmentAndNowhereElse(t *testing.T) {
 		t.Errorf("the password is on a command line: %s", line)
 	}
 	env := strings.Join(r.Envs[line], " ")
-	if !strings.Contains(env, "CG_SSH_PASSWORD=hunter2-pw") || !strings.Contains(env, "SSH_ASKPASS_REQUIRE=force") {
+	if !strings.Contains(env, "AYIS_SSH_PASSWORD=hunter2-pw") || !strings.Contains(env, "SSH_ASKPASS_REQUIRE=force") {
 		t.Errorf("env %s", env)
 	}
-	for _, want := range []string{"PubkeyAuthentication=no", "NumberOfPasswordPrompts=1", "ssh-ed25519 AAAAC3Nza cg@laptop", "grep -qxF"} {
+	for _, want := range []string{"PubkeyAuthentication=no", "NumberOfPasswordPrompts=1", "ssh-ed25519 AAAAC3Nza ayis@laptop", "grep -qxF"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("lacks %q: %s", want, line)
 		}
@@ -147,13 +147,13 @@ func TestEnsureKeyMakesOneAndRepairsTheHalf(t *testing.T) {
 	if _, err := os.Stat("/usr/bin/ssh-keygen"); err != nil {
 		t.Skip("no ssh-keygen")
 	}
-	c := Conn{R: local.Exec{}, Key: filepath.Join(t.TempDir(), "cg", "ssh", "id_ed25519"), Hostname: func() string { return "testbox" }}
+	c := Conn{R: local.Exec{}, Key: filepath.Join(t.TempDir(), "ayis", "ssh", "id_ed25519"), Hostname: func() string { return "testbox" }}
 	ctx := context.Background()
 	if err := c.EnsureKey(ctx); err != nil || !c.keyOK() {
 		t.Fatalf("%v", err)
 	}
 	pub, _ := os.ReadFile(c.Key + ".pub")
-	if !strings.Contains(string(pub), "cg@testbox") {
+	if !strings.Contains(string(pub), "ayis@testbox") {
 		t.Errorf("%s", pub)
 	}
 	st, _ := os.Stat(c.Key)

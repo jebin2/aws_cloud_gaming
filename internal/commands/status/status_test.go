@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	"github.com/jebin2/aws_cloud_gaming/internal/session"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
+	"github.com/jebin2/ayis/internal/pricing"
+	"github.com/jebin2/ayis/internal/session"
+	fx "github.com/jebin2/ayis/internal/testfixture"
 )
 
-const host = "gamevps"
+const host = "ayis"
 
 var now = time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 
@@ -31,10 +31,10 @@ func account() *fx.Scenario {
 		Account: "123456789012", Plan: "PAID", Credits: 139.35, KeyPair: true, KeyName: host, SecGroup: true, SGID: "sg-test",
 		Ingress: [][3]string{{"udp", "41641", "0.0.0.0/0"}},
 		VCPUs:   4, MemMiB: 16384, GPU: "L4", GPUMem: 22888, QuotaOnDemand: 4, QuotaSpot: 4,
-		Budget: "57.0", Notifications: 2, Bucket: "cg-library-test",
+		Budget: "57.0", Notifications: 2, Bucket: "ayis-library-test",
 		Roles: map[string]bool{host + "-box": true, host + "-cloud-watchdog": true},
 		LogEvents: []fx.LogEvent{{At: now.Add(-10 * time.Minute),
-			Msg: "cg-watchdog: archive: kept - last used 2d ago; deleted in 12d unless a box is launched"}},
+			Msg: "ayis-watchdog: archive: kept - last used 2d ago; deleted in 12d unless a box is launched"}},
 	}
 	each := int64(172000000000 / 6218)
 	for i := 0; i < 6217; i++ {
@@ -63,8 +63,8 @@ func newEnv(t *testing.T) *env {
 	home := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(home, ".ssh"), 0o700)
 	_ = os.WriteFile(filepath.Join(home, ".ssh", host+".pem"), nil, 0o600)
-	e := &env{home: home, cache: filepath.Join(home, ".cache", "cg"),
-		ts: "100.64.0.9  gamevps  you@  linux  offline, last seen 2d ago\n"}
+	e := &env{home: home, cache: filepath.Join(home, ".cache", "ayis"),
+		ts: "100.64.0.9  ayis  you@  linux  offline, last seen 2d ago\n"}
 	return e
 }
 
@@ -82,7 +82,7 @@ func (e *env) gather(t *testing.T, s *fx.Scenario) View {
 		EC2: fx.EC2{S: s}, Quotas: fx.Quotas{S: s}, Budgets: fx.Budgets{S: s}, FreeTier: fx.FreeTier{S: s},
 		S3: fx.S3{S: s}, STS: fx.STS{S: s}, IAM: fx.IAM{S: s}, Logs: fx.Logs{S: s}, Runner: e.runner, Probe: probe{},
 		Host: host, Node: host, Region: "ap-south-2", Type: "g6.xlarge", Bucket: s.Bucket, Home: e.home, CacheDir: e.cache,
-		LockFile: filepath.Join(e.home, "cg-session.pid"), ExpiryDays: 14, Now: func() time.Time { return now },
+		LockFile: filepath.Join(e.home, "ayis-session.pid"), ExpiryDays: 14, Now: func() time.Time { return now },
 		AuthKey: true,
 	}
 	f := g.Gather(context.Background())
@@ -163,7 +163,7 @@ func TestNoBox(t *testing.T) {
 	eq(t, "budget limit", at(j, "budget.limit"), 57.0)
 	eq(t, "alerts", at(j, "budget.alerts"), 2.0)
 	eq(t, "spot quota", at(j, "quota.spot"), 4.0)
-	eq(t, "host", at(j, "host"), "gamevps")
+	eq(t, "host", at(j, "host"), "ayis")
 	eq(t, "vcpus", at(j, "spec.vcpus"), 4.0)
 	eq(t, "memory", at(j, "spec.memory_mib"), 16384.0)
 	eq(t, "gpu", at(j, "spec.gpu"), "L4")
@@ -202,7 +202,7 @@ func TestARunningBox(t *testing.T) {
 
 func TestReadyIsAskedOverTheTailnet(t *testing.T) {
 	e := newEnv(t)
-	e.ts = "100.64.0.9  gamevps  you@  linux  active; direct\n"
+	e.ts = "100.64.0.9  ayis  you@  linux  active; direct\n"
 	s := account()
 	running(s, "spot")
 	e.answers = map[string]string{"ssh": "yes 268435456000\n"}
@@ -242,9 +242,9 @@ func TestTheLocalSide(t *testing.T) {
 	eq(t, "moonlight", at(j, "local.moonlight"), true)
 	eq(t, "ssh key", at(j, "local.ssh_key"), true)
 	eq(t, "auth key", at(j, "local.auth_key"), true)
-	eq(t, "the node is named, not addressed", at(j, "tailnet.node"), "gamevps")
+	eq(t, "the node is named, not addressed", at(j, "tailnet.node"), "ayis")
 	eq(t, "offline is false, not a string", at(j, "tailnet.online"), false)
-	e.ts = "100.64.0.9  gamevps  you@  linux  active; direct\n"
+	e.ts = "100.64.0.9  ayis  you@  linux  active; direct\n"
 	eq(t, "online is true", at(jq(t, e.gather(t, account())), "tailnet.online"), true)
 
 	// Being on no tailnet is a NORMAL state and has to report as one.
@@ -257,7 +257,7 @@ func TestTheLocalSide(t *testing.T) {
 	eq(t, "no node", at(j, "tailnet.node"), nil)
 	eq(t, "offline", at(j, "tailnet.online"), false)
 	eq(t, "the fields around it are intact", at(j, "local.moonlight"), true)
-	has(t, v.Human(), "no 'gamevps' node on the tailnet")
+	has(t, v.Human(), "no 'ayis' node on the tailnet")
 }
 
 func TestNoCredentialsStillReportsEverythingLocal(t *testing.T) {
@@ -311,7 +311,7 @@ func TestStrandedSpotBox(t *testing.T) {
 	s.SpotRequest = "disabled"
 	text := newEnv(t).gather(t, s).Human()
 	has(t, text, "STRANDED       this stopped spot box can never start again (request: disabled)",
-		"its 50 GB root volume still bills $4.56/mo (INR 401)", "reclaim it: cg destroy")
+		"its 50 GB root volume still bills $4.56/mo (INR 401)", "reclaim it: ayis destroy")
 	s.SpotRequest = "active"
 	lacks(t, newEnv(t).gather(t, s).Human(), "STRANDED")
 	s.Instances[0].Lifecycle = ""
@@ -322,11 +322,11 @@ func TestStrandedSpotBox(t *testing.T) {
 func TestAStreamHeldFromThisLaptop(t *testing.T) {
 	e := newEnv(t)
 	s := account()
-	lock := filepath.Join(e.home, "cg-session.pid")
+	lock := filepath.Join(e.home, "ayis-session.pid")
 	_ = os.WriteFile(lock, []byte("42 "+"1\n"), 0o644)
 	v := e.gather(t, s)
 	v.Facts.Session = Known[session.Lock]{V: session.Lock{PID: 42, Started: now.Add(-125 * time.Second).Unix()}, OK: true}
-	has(t, v.Human(), "streaming       yes - cg open is running here (pid 42, 2m 05s)")
+	has(t, v.Human(), "streaming       yes - ayis open is running here (pid 42, 2m 05s)")
 	j := jq(t, v)
 	eq(t, "pid", at(j, "session.pid"), 42.0)
 	eq(t, "age", at(j, "session.age_s"), 125.0)
@@ -335,7 +335,7 @@ func TestAStreamHeldFromThisLaptop(t *testing.T) {
 func TestTheBudgetBeforeAndAfterAWSHasCalculatedIt(t *testing.T) {
 	s := account()
 	has(t, newEnv(t).gather(t, s).Human(), "budget          $57 limit, AWS reports $0.00 spent - not calculated yet",
-		"(Budgets lags up to 24h after creation; real spend: cg cost)")
+		"(Budgets lags up to 24h after creation; real spend: ayis cost)")
 	s.Spent = "12.5"
 	has(t, newEnv(t).gather(t, s).Human(), "budget          $57 limit, $12.50 spent so far")
 	s.Budget = ""
@@ -347,8 +347,8 @@ func TestLegacyVolumeAndEIPNote(t *testing.T) {
 	s.Volumes = []fx.Volume{{ID: "vol-games", State: "available", GB: 160, AZ: "ap-south-2a", Tags: map[string]string{"Name": host + "-games"}}}
 	s.Addresses = 1
 	text := newEnv(t).gather(t, s).Human()
-	has(t, text, "old EBS volume  vol-games  160 GB in ap-south-2a  (~$14.59/mo, LEGACY - cg games --volume --delete)",
-		"elastic ips     1   <- in this region, not made by cg; they bill while idle")
+	has(t, text, "old EBS volume  vol-games  160 GB in ap-south-2a  (~$14.59/mo, LEGACY - ayis games --volume --delete)",
+		"elastic ips     1   <- in this region, not made by ayis; they bill while idle")
 	lacks(t, text, "game library")
 }
 
@@ -362,10 +362,10 @@ func TestQuotaWarnings(t *testing.T) {
 func TestIAMRoles(t *testing.T) {
 	s := account()
 	text := newEnv(t).gather(t, s).Human()
-	has(t, text, "instance role   gamevps-box  (lets the box read/write its library bucket)",
-		"watchdog role   gamevps-cloud-watchdog  (the cloud watchdog: ends only the gamevps box)")
+	has(t, text, "instance role   ayis-box  (lets the box read/write its library bucket)",
+		"watchdog role   ayis-cloud-watchdog  (the cloud watchdog: ends only the ayis box)")
 	s.Roles = map[string]bool{}
-	has(t, newEnv(t).gather(t, s).Human(), "instance role   none - cg init creates it", "watchdog role   none - cg init creates it")
+	has(t, newEnv(t).gather(t, s).Human(), "instance role   none - ayis init creates it", "watchdog role   none - ayis init creates it")
 }
 
 func tailGatherer(t *testing.T, e *env, s *fx.Scenario, r *fx.Runner) *Gatherer {
@@ -379,17 +379,17 @@ func TestTheTailAsksTheBoxOverTheTailnet(t *testing.T) {
 	running(s, "spot")
 	r := &fx.Runner{
 		Installed: map[string]bool{"tailscale": true, "ssh": true},
-		Answers:   map[string]string{"tailscale ip -4 gamevps": "100.64.0.9\n"},
+		Answers:   map[string]string{"tailscale ip -4 ayis": "100.64.0.9\n"},
 		Contains: map[string]string{
-			"cg-library status": "  on the box: 6218 files\n  in S3: 6218 files\n",
-			"df -h":             "  Mounted on  Used  Size  Use%\n  /           8.0G  49G   17%\n",
-			"tailscale0":        "1073741824 2147483648 536870912 7200\n",
+			"ayis-library status": "  on the box: 6218 files\n  in S3: 6218 files\n",
+			"df -h":               "  Mounted on  Used  Size  Use%\n  /           8.0G  49G   17%\n",
+			"tailscale0":          "1073741824 2147483648 536870912 7200\n",
 		}}
 	egress := filepath.Join(e.home, "egress")
 	_ = os.WriteFile(egress, []byte(strconv.FormatInt(now.Add(-10*time.Minute).Unix(), 10)+" 9.4 100\n"), 0o644)
 	out := tailGatherer(t, e, s, r).Tail(context.Background(), "i-0abc123", egress)
 	has(t, out, "instance: running", "disk:", "  /           8.0G  49G   17%", "\ngame library\n  on the box: 6218 files",
-		"TRAFFIC (this boot only - see cg cost for the billed month)",
+		"TRAFFIC (this boot only - see ayis cost for the billed month)",
 		"stream out      1.00 GB   avg 1.2 Mbps over 2.0 h",
 		"total out       2.00 GB   <- what AWS bills", "total in        0.50 GB",
 		"monthly egress  9.4 GB used, ~91 GB of 100 GB free left  (as of 10 min ago)")
@@ -401,10 +401,10 @@ func TestTheTailSaysWhenTheBoxDoesNotAnswer(t *testing.T) {
 	s := account()
 	r := &fx.Runner{
 		Installed: map[string]bool{"tailscale": true, "ssh": true},
-		Answers:   map[string]string{"tailscale ip -4 gamevps": "100.64.0.9\n"},
+		Answers:   map[string]string{"tailscale ip -4 ayis": "100.64.0.9\n"},
 		Failing:   map[string]bool{"ssh": true}}
 	out := tailGatherer(t, e, s, r).Tail(context.Background(), "", filepath.Join(e.home, "none"))
-	has(t, out, "game library\n  box not reachable - the archive is listed by: cg library list")
+	has(t, out, "game library\n  box not reachable - the archive is listed by: ayis library list")
 	lacks(t, out, "TRAFFIC", "instance:", "disk:")
 	// A box in .env that cannot be reached.
 	running(s, "spot")
@@ -422,7 +422,7 @@ func TestNoTailnetNoTail(t *testing.T) {
 func TestEgressMonthIsStampedWithItsAge(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "egress")
-	if got := EgressMonth(p, now); got != "  monthly egress  unknown - run: cg cost\n" {
+	if got := EgressMonth(p, now); got != "  monthly egress  unknown - run: ayis cost\n" {
 		t.Errorf("never run: %q", got)
 	}
 	write := func(ago time.Duration) {
@@ -432,7 +432,7 @@ func TestEgressMonthIsStampedWithItsAge(t *testing.T) {
 	has(t, EgressMonth(p, now), "120.0 GB used, ~0 GB of 100 GB free left  (as of 3 h ago)")
 	lacks(t, EgressMonth(p, now), "stale")
 	write(30 * time.Hour)
-	has(t, EgressMonth(p, now), "(as of 30 h ago)", "stale - refresh with: cg cost")
+	has(t, EgressMonth(p, now), "(as of 30 h ago)", "stale - refresh with: ayis cost")
 	write(72 * time.Hour)
 	has(t, EgressMonth(p, now), "(as of 3 days ago)")
 }

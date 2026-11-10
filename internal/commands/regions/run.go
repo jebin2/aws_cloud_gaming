@@ -9,12 +9,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/account"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
 )
 
-// Run is `cg regions [optin|enable <region>]`.
+// Run is `ayis regions [optin|enable <region>]`.
 func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out *output.Out) int {
 	sub := ""
 	if len(args) > 0 {
@@ -47,7 +47,7 @@ func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out
 		return 0
 	case "enable":
 		if len(args) == 0 || args[0] == "" {
-			out.Die("usage: cg regions enable <region>")
+			out.Die("usage: ayis regions enable <region>")
 			return 1
 		}
 		return Enabler{Account: acct, Say: out.Say, LogAs: out.LogAs, Log: out.Log, Sleep: time.Sleep}.Enable(ctx, args[0])
@@ -61,7 +61,7 @@ func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out
 		out.Report("Regions", Show(l))
 		return 0
 	}
-	out.Die("usage: cg regions [optin|enable <region>]")
+	out.Die("usage: ayis regions [optin|enable <region>]")
 	return 1
 }
 

@@ -8,18 +8,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
-	wd "github.com/jebin2/aws_cloud_gaming/internal/watchdog"
+	"github.com/jebin2/ayis/internal/output"
+	fx "github.com/jebin2/ayis/internal/testfixture"
+	wd "github.com/jebin2/ayis/internal/watchdog"
 )
 
-const host = "gamevps"
+const host = "ayis"
 
 var now = time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 
 func scenario(state, lifecycle string) *fx.Scenario {
 	s := &fx.Scenario{Account: "123456789012", Budget: "57.0", Notifications: 2, ShutdownBehavior: "terminate",
-		LogEvents: []fx.LogEvent{{At: now.Add(-5 * time.Minute), Msg: "cg-watchdog: box i-1 idle 4m\n"}},
+		LogEvents: []fx.LogEvent{{At: now.Add(-5 * time.Minute), Msg: "ayis-watchdog: box i-1 idle 4m\n"}},
 		WD:        fx.WatchdogState{Installed: true, RuleState: "ENABLED"}}
 	if state != "" {
 		s.Instances = []fx.Instance{{ID: "i-1", State: state, Type: "g6.xlarge", Lifecycle: lifecycle, Name: host, RootVolume: "vol-r"}}
@@ -38,7 +38,7 @@ func build(s *fx.Scenario, r *fx.Runner, instance string) *Watcher {
 
 func reachable(active string) *fx.Runner {
 	return &fx.Runner{Installed: map[string]bool{"tailscale": true, "ssh": true},
-		Answers:  map[string]string{"tailscale ip -4 gamevps": "100.64.0.9\n"},
+		Answers:  map[string]string{"tailscale ip -4 ayis": "100.64.0.9\n"},
 		Contains: map[string]string{"is-active": active + "\n", "journalctl": "idle 4m of 30\nstill here\n", "true": ""}}
 }
 
@@ -89,7 +89,7 @@ func TestNoBox(t *testing.T) {
 	}
 	text := render(t, w, f)
 	for _, want := range []string{"==> guards", "instance          none", "on-host watchdog  (box not reachable)",
-		"cloud watchdog    ENABLED  (Lambda gamevps-cloud-watchdog, every 5 min)", "budget            57.0"} {
+		"cloud watchdog    ENABLED  (Lambda ayis-cloud-watchdog, every 5 min)", "budget            57.0"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("lacks %q:\n%s", want, text)
 		}
@@ -152,7 +152,7 @@ func TestAnInactiveOnHostWatchdogIsNotArmed(t *testing.T) {
 
 func TestRunningButUnreachable(t *testing.T) {
 	r := &fx.Runner{Installed: map[string]bool{"tailscale": true, "ssh": true},
-		Answers: map[string]string{"tailscale ip -4 gamevps": "100.64.0.9\n"}, Failing: map[string]bool{"ssh": true}}
+		Answers: map[string]string{"tailscale ip -4 ayis": "100.64.0.9\n"}, Failing: map[string]bool{"ssh": true}}
 	w := build(scenario("running", "spot"), r, "i-1")
 	f := w.Gather(context.Background())
 	g := guard(jq(t, w, f), 1)

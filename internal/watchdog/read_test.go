@@ -37,10 +37,10 @@ func ev(msg string, ago time.Duration) types.FilteredLogEvent {
 
 func TestDecisionIsTheLatestEventAndItsAge(t *testing.T) {
 	l := logs{events: []types.FilteredLogEvent{
-		ev("cg-watchdog: archive: kept - old", 50*time.Minute),
-		ev("cg-watchdog: archive: kept - last used 16h ago; deleted in 6d 7h unless a box is launched", 6*time.Minute),
+		ev("ayis-watchdog: archive: kept - old", 50*time.Minute),
+		ev("ayis-watchdog: archive: kept - last used 16h ago; deleted in 6d 7h unless a box is launched", 6*time.Minute),
 	}}
-	got := ArchiveDecision(context.Background(), l, "gamevps", 14, now)
+	got := ArchiveDecision(context.Background(), l, "ayis", 14, now)
 	want := "kept - last used 16h ago; deleted in 6d 7h unless a box is launched  (checked 6 min ago)"
 	if got != want {
 		t.Errorf("got %q want %q", got, want)
@@ -73,7 +73,7 @@ func TestOffNeverCheckedAndUnreadable(t *testing.T) {
 }
 
 func TestOtherLinesAreIgnored(t *testing.T) {
-	l := logs{events: []types.FilteredLogEvent{ev("cg-watchdog: archive-ish noise", time.Minute)}}
+	l := logs{events: []types.FilteredLogEvent{ev("ayis-watchdog: archive-ish noise", time.Minute)}}
 	if got := ArchiveDecision(context.Background(), l, "h", 14, now); !strings.Contains(got, "not checked yet") {
 		t.Errorf("got %q", got)
 	}

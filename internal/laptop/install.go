@@ -65,7 +65,7 @@ func (i *Installer) pkg(ctx context.Context, pm, pkg string) bool {
 	as, why := i.L.Root()
 	if as == "" {
 		i.Say("log", "cannot install from here: "+why)
-		i.Say("log", "  in a terminal:  cg deps install")
+		i.Say("log", "  in a terminal:  ayis deps install")
 		return false
 	}
 	run := func(args ...string) bool {
@@ -123,7 +123,7 @@ func (i *Installer) tailscaleScript(ctx context.Context) bool {
 		i.Say("fail", "could not download "+tailscaleScript+": "+err.Error())
 		return false
 	}
-	dir, err := os.MkdirTemp("", "cg-ts-")
+	dir, err := os.MkdirTemp("", "ayis-ts-")
 	if err != nil {
 		return false
 	}

@@ -5,7 +5,7 @@ GATE_NAME=startup-gate-build
 source "$(dirname "$0")/lib/startup-gate-harness.sh"
 
 echo "7. the Build page: a build is eight plain steps"
-# cg reports a dozen steps of its own and the box a dozen more ("installing
+# ayis reports a dozen steps of its own and the box a dozen more ("installing
 # nvidia driver", "configuring headless X"); the page shows eight, in plain
 # words, with the bill in the heading from the moment the machine is rented.
 BUILD="window.__after = async () => {
@@ -134,8 +134,8 @@ ENGINE="window.__after = async () => {
   const id = window.__lastId;
   window.__ran = [];
   // The delete's own id: the reads a write starts take later ones.
-  const run0 = window.cg.run;
-  window.cg.run = args => run0(args).then(r => { if (args[0] === 'destroy') window.__delId = r.id; return r; });
+  const run0 = window.ayis.run;
+  window.ayis.run = args => run0(args).then(r => { if (args[0] === 'destroy') window.__delId = r.id; return r; });
   for (const t of ['preflight', 'arming the budget', 'provisioning instance', 'waiting for the box to join the tailnet'])
     window.__emit(id, { t: 'step', text: t });
   window.__emit(id, { t: 'line', kind: 'fail', text: 'no new node joined after 30 min.' });
@@ -156,7 +156,7 @@ ENGINE="window.__after = async () => {
   await new Promise(r => setTimeout(r, 30));
   const id2 = window.__lastId;
   window.__ran = [];
-  for (const t of ['preflight', 'arming the budget', 'reusing the existing box, already on the tailnet as gamevps', 'building the box'])
+  for (const t of ['preflight', 'arming the budget', 'reusing the existing box, already on the tailnet as ayis', 'building the box'])
     window.__emit(id2, { t: 'step', text: t });
   window.__emit(id2, { t: 'exit', rc: 1 });
   await new Promise(r => setTimeout(r, 30));
@@ -210,13 +210,13 @@ B4="window.__after = async () => {
     + ' panel=' + panel();
   nav('dashboard'); nav('build');
   const done2 = card();
-  // Cancel: cg is interrupted, then whatever it rented is deleted, and the
+  // Cancel: ayis is interrupted, then whatever it rented is deleted, and the
   // plan comes straight back.
   window.__answers['status --json'].box = null;
   run = null; boxNow = null; paintRun();
   let del = null;
-  const orig = window.cg.run;
-  window.cg.run = async a => { const r = await orig(a); if (a[0] === 'destroy') del = r.id; return r; };
+  const orig = window.ayis.run;
+  window.ayis.run = async a => { const r = await orig(a); if (a[0] === 'destroy') del = r.id; return r; };
   document.getElementById('b-build').click();
   await wait();
   id = window.__lastId;
@@ -239,7 +239,7 @@ contains "  and still does after leaving"     "$(row AFTER)" "back=run:Building 
 # The panel is the machine, with Play and Delete; under it, how it was built.
 contains "a finished build is the machine"    "$(row AFTER)" "done=run:How it was built acts= folded=true panel=Ready to play b-open,b-destroy"
 contains "  and stays it after leaving"       "$(row AFTER)" "done2=run:How it was built |"
-contains "cancel interrupts cg"               "$(row AFTER)" "cancelled=true"
+contains "cancel interrupts ayis"               "$(row AFTER)" "cancelled=true"
 contains "  then deletes what it rented"      "$(row AFTER)" ";destroy --no-push;"
 contains "  shown as the delete"              "$(row AFTER)" "run:Deleting the machine"
 contains "  and the plan is back after it"    "$(row AFTER)" "after=plan"
@@ -334,7 +334,7 @@ ENGINE=""
 
 echo "7e4. playing a machine whose games disk was removed asks which games to bring back"
 B5P="window.__after = async () => {
-  localStorage.setItem('cg-disk-removed', JSON.stringify({'i-1': 1}));
+  localStorage.setItem('ayis-disk-removed', JSON.stringify({'i-1': 1}));
   // Until the machine and its disk have both been read, not for a moment.
   for (let i = 0; i < 120 && !(statusNow && stoppedDisk); i++) await new Promise(r => setTimeout(r, 20));
   document.querySelector('.nav-item[data-view=build]').click();
@@ -387,7 +387,7 @@ B5P="window.__after = async () => {
   for (let i = 0; i < 60 && window.__ran.filter(l => l.startsWith('open')).length < 2; i++) await new Promise(r => setTimeout(r, 30));
   const retried = 'retry=' + window.__ran.filter(l => l.startsWith('open')).slice(-1)[0];
   // Then a clean run: the stream's own step closes the window.
-  await new Promise(r => setTimeout(r, 60));   // the retried job is registered a moment after cg is asked
+  await new Promise(r => setTimeout(r, 60));   // the retried job is registered a moment after ayis is asked
   const openJob = [...jobs].filter(([, j]) => j.cmd[0] === 'open').pop()[0];   // reads also take ids; the session is the open job
   window.__emit(openJob, { t: 'restore', id: '222', state: 'done', got: 10 * 1073741824, of: 10 * 1073741824 });
   window.__emit(openJob, { t: 'step', id: 'open.sunshine', text: 'starting the game stream' });
@@ -395,7 +395,7 @@ B5P="window.__after = async () => {
   window.__emit(openJob, { t: 'step', id: 'open.play', text: 'playing' });
   const closed = 'closedByItself=' + !pd.open + ' openWhileStreamStarts=' + stillOpen;
   return opened + ' | ' + mid + ' | ' + failedUi + ' | ' + retried + ' | ' + closed + ' |||| ' + 'label=' + label + ' | open=' + dlg.open + ' | rows=' + rows.join(';') + ' | ticks=' + ticks + ' | diskHidden0=' + diskHidden0 + ' | price=' + price + ' | price2=' + price2 + ' | diskBox=' + diskBox
-    + ' | ran=' + window.__ran.filter(l => l.includes('--extra-gb')).join(',') + ' | again=' + (localStorage.getItem('cg-disk-removed') || '');
+    + ' | ran=' + window.__ran.filter(l => l.includes('--extra-gb')).join(',') + ' | again=' + (localStorage.getItem('ayis-disk-removed') || '');
 };"
 ENGINE="$B5P"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
@@ -450,7 +450,7 @@ contains "  and the machine is started"             "$(row AFTER)" "ran=open"
 ENGINE=""
 
 echo "7e4c. a stopped machine: games last seen on the root disk or the games disk are already on it, not copied again"
-B5R="try { localStorage.setItem('cg-box-games', JSON.stringify({id: 'i-1', games: [{appid: '111', disk: 'root'}, {appid: '222', disk: 'extra'}]})); } catch (e) {}
+B5R="try { localStorage.setItem('ayis-box-games', JSON.stringify({id: 'i-1', games: [{appid: '111', disk: 'root'}, {appid: '222', disk: 'extra'}]})); } catch (e) {}
 window.__after = async () => {
   for (let i = 0; i < 120 && !statusNow; i++) await new Promise(r => setTimeout(r, 20));
   await new Promise(r => setTimeout(r, 300));
@@ -517,7 +517,7 @@ window.__after = async () => {
   if (sj) {
     window.__emit(sj[0], { t: 'step', text: 'Stopping the machine at AWS (billing ends once it has stopped)' });
     window.__emit(sj[0], { t: 'wait', id: 'box.stopped', state: 'waiting', text: 'stopping', secs: 80, of: 600 });
-    window.__emit(sj[0], { t: 'line', kind: 'cont', text: '  machine: cg-library: pushing ZERO PARADES' });
+    window.__emit(sj[0], { t: 'line', kind: 'cont', text: '  machine: ayis-library: pushing ZERO PARADES' });
     const lr = document.getElementById('keepdlg-live');
     live = lr ? lr.textContent.replace(/\n/g, ' | ') + ' under=' + lr.previousElementSibling.dataset.step : 'none';
   }
@@ -550,7 +550,7 @@ contains "  every step listed from the start"   "$(row AFTER)" "Getting ready/�
 contains "  steps to come are shown as to come" "$(row AFTER)" "○Stopping the machine at AWS"
 contains "  the save's bar is there at once, under its step, moving" "$(row AFTER)" "bar0=Measuring what to save moving=true under=Saving your games and Steam login"
 contains "  then sized"                         "$(row AFTER)" "bar1=Saving your games · 2.0 GB of 8.0 GB width=25%"
-contains "  while AWS stops it: AWS's state and the machine's last line, under that step" "$(row AFTER)" "live=AWS says: stopping · 1 min 20 s | Machine: cg-library: pushing ZERO PARADES under=Stopping the machine at AWS"
+contains "  while AWS stops it: AWS's state and the machine's last line, under that step" "$(row AFTER)" "live=AWS says: stopping · 1 min 20 s | Machine: ayis-library: pushing ZERO PARADES under=Stopping the machine at AWS"
 contains "  the window closes once it is done"   "$(row AFTER)" "afterOpen=false"
 contains "  the saved one is deleted, then the stop leaves both out" "$(row AFTER)" "ran=library forget 111,stop --yes --skip 111,333"
 ENGINE=""
@@ -660,14 +660,14 @@ contains "  and that it is still billing"        "$(row AFTER)" "note=The machin
 ENGINE=""
 
 echo "7e6. a Stop machine that never finished is said on the card, with the way to finish it"
-B5U="try { localStorage.setItem('cg-flow-pending', JSON.stringify({kind: 'stop', id: 'i-1', skip: ['333'], at: 1})); } catch (e) {}
+B5U="try { localStorage.setItem('ayis-flow-pending', JSON.stringify({kind: 'stop', id: 'i-1', skip: ['333'], at: 1})); } catch (e) {}
 window.__after = async () => {
   for (let i = 0; i < 120 && !statusNow; i++) await new Promise(r => setTimeout(r, 20));
   await new Promise(r => setTimeout(r, 300));
   document.querySelector('.nav-item[data-view=build]').click();
   await new Promise(r => setTimeout(r, 60));
   const u = document.getElementById('b-unfinished');
-  return 'shown=' + !u.hidden + ' | text=' + u.innerText.replace(/\\s+/g, ' ').trim() + ' | kept=' + (localStorage.getItem('cg-flow-pending') !== null);
+  return 'shown=' + !u.hidden + ' | text=' + u.innerText.replace(/\\s+/g, ' ').trim() + ' | kept=' + (localStorage.getItem('ayis-flow-pending') !== null);
 };"
 ENGINE="$B5U"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP,
@@ -681,7 +681,7 @@ contains "  and forgotten"                        "$(row AFTER)" "kept=false"
 ENGINE=""
 
 echo "7f. play is a session, as steps; closing Moonlight just ends it"
-# cg open announces no steps, so the card used to say "Starting the stream" over
+# ayis open announces no steps, so the card used to say "Starting the stream" over
 # an empty list for the whole session.
 B6="window.__after = async () => {
   await new Promise(r => setTimeout(r, 1200));
@@ -736,7 +736,7 @@ B6H="window.__after = async () => {
   hostsNow = [{ name: 'homebox', ssh: 'me@10.0.0.5', os: 'Linux', family: 'ubuntu' }];
   hostStatus.set('homebox', { name: 'homebox', set_up: true, sunshine: true, reachable: true, online: true,
                               login_ok: true, paired: true, gpu: 'NVIDIA GeForce RTX 3060' });
-  // cg knows it too, for the reads after the session.
+  // ayis knows it too, for the reads after the session.
   window.__answers['host list --json'] = hostsNow;
   window.__answers['host status homebox --json'] = hostStatus.get('homebox');
   paintHostCards();
@@ -777,7 +777,7 @@ B6H="window.__after = async () => {
 };"
 ENGINE="$B6H"
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP}")
-contains "play runs cg host open"            "$(row AFTER)" "ran=host open homebox"
+contains "play runs ayis host open"            "$(row AFTER)" "ran=host open homebox"
 contains "  on that machine's page"          "$(row AFTER)" "view=build tab=homebox card=own:shown"
 contains "  as steps, the first running"     "$(row AFTER)" "steps=running,locked"
 contains "  named for the machine, with no bill" "$(row AFTER)" "kicker=Starting session · homebox · NVIDIA GeForce RTX 3060 · Your machine"
@@ -904,7 +904,7 @@ B10="window.__after = async () => {
   let asked = null;
   window.askConfirm = async o => { asked = o; return true; };
   const answered = [];
-  window.cg.answer = (id, v) => { answered.push(v); return Promise.resolve(true); };
+  window.ayis.answer = (id, v) => { answered.push(v); return Promise.resolve(true); };
   [...document.querySelectorAll('#lib-rows button')].find(b => b.textContent === 'Delete').click();
   await wait();
   const id = window.__lastId;
@@ -927,9 +927,9 @@ B10="window.__after = async () => {
     + ' why=' + document.getElementById('refdlg-list').innerText.replace(/\\s+/g, ' ')
     + ' close=' + !document.getElementById('refdlg-menu').hidden + ' view=' + view()
     + ' sub=' + document.getElementById('refdlg-sub').textContent;
-  // What a failure left, from cg's words: a move part-way, a setting half-applied.
+  // What a failure left, from ayis's words: a move part-way, a setting half-applied.
   const left = 'move=' + libraryLeft('the copy stopped - nothing was deleted from ap-south-2; run the move again to finish it')
-    + ' keep=' + libraryLeft('saved, but the cloud watchdog still counts the old days - run: cg watchdog install')
+    + ' keep=' + libraryLeft('saved, but the cloud watchdog still counts the old days - run: ayis watchdog install')
     + ' forget=' + libraryLeft('only part of Diablo IV was deleted from ap-south-2 - what is left still bills; run the delete again to finish it')
     + ' moved=' + libraryLeft('moved Diablo IV to ap-south-1, but part of it is still in ap-south-2 and still bills there - delete it there to finish')
     + ' clean=' + libraryLeft('could not delete 2 of them (2 in all) - they still bill; run the clean up again');
@@ -941,14 +941,14 @@ LIB='{"games": [{"appid": "2344520", "name": "Diablo IV", "bytes": 96636764160, 
 OUT=$(probe "{$READY, \"sweep --cached --json\": $FULL_SWEEP, \"library list --json\": $LIB,
   \"status --json\": $(st null '{"bytes": 96636764160}' '{"volumes_gb": 0}' '{"limit": 57}')}")
 contains "forget stays on Library"           "$(row AFTER)" "during=view=library word=DELETE"
-contains "  runs cg's forget"                "$(row AFTER)" "ran=library forget 2344520"
+contains "  runs ayis's forget"                "$(row AFTER)" "ran=library forget 2344520"
 contains "  with the popup saying so"        "$(row AFTER)" "popup=true:Deleting Diablo IV"
-contains "  and cg gets the word, no second dialog" "$(row AFTER)" "answered=FORGET askdlg=false"
+contains "  and ayis gets the word, no second dialog" "$(row AFTER)" "answered=FORGET askdlg=false"
 contains "done: the popup reads the page again" "$(row AFTER)" "reading=Refreshing Games"
 contains "  only the saved games, nothing else" "$(row AFTER)" "reads=library,elsewhere |"
 contains "  and closes, still on Library"    "$(row AFTER)" "after=view=library popup=false"
 contains "refused: the popup stays"          "$(row AFTER)" "refused=popup=true title=Deleting Diablo IV - not done"
-contains "  with cg's reason"                "$(row AFTER)" "aborted - nothing was deleted"
+contains "  with ayis's reason"                "$(row AFTER)" "aborted - nothing was deleted"
 contains "  a Close, and still on Library"   "$(row AFTER)" "close=true view=library"
 contains "  and nothing was changed"         "$(row AFTER)" "sub=Nothing was changed."
 contains "a move stopped part-way says so"   "$(row AFTER)" "move=The game is still where it was, untouched. Part of it may already be copied"
@@ -976,7 +976,7 @@ B11="window.__after = async () => {
   let asked = null;
   window.askConfirm = async o => { asked = o; return true; };
   const answered = [];
-  window.cg.answer = (id, v) => { answered.push(v); return Promise.resolve(true); };
+  window.ayis.answer = (id, v) => { answered.push(v); return Promise.resolve(true); };
   const btn = (row, label) => [...document.querySelectorAll('#lib-rows [data-game]')][row].querySelector('[data-f=acts]')
     .querySelectorAll('button').values().find(b => b.textContent === label);
   btn(1, 'Move to Mumbai').click();
@@ -1024,10 +1024,10 @@ LIB2="{\"games\": [{\"appid\": \"1174180\", \"name\": \"Red Dead 2\", \"installd
       \"region\": \"ap-south-1\", \"inr_per_usd\": 94.95, \"expiry_days\": 14, \"last_seen\": \"$SEEN\", \"marks_read\": true}"
 ELSE="{\"error\": null, \"region\": \"ap-south-1\", \"inr_per_usd\": 94.95, \"expiry_days\": 14,
   \"last_seen\": \"$SEEN\", \"marks_read\": true, \"bytes\": 174813455930, \"usd_month\": 4.07, \"places\": [
-  {\"bucket\": \"cg-library-old\", \"region\": \"ap-south-2\", \"error\": null, \"bytes\": 174813455930, \"games_bytes\": 174813206488, \"xregion_usd_gb\": 0.086,
+  {\"bucket\": \"ayis-library-old\", \"region\": \"ap-south-2\", \"error\": null, \"bytes\": 174813455930, \"games_bytes\": 174813206488, \"xregion_usd_gb\": 0.086,
    \"usd_month\": 4.07, \"login\": true, \"games\": [{\"appid\": \"2344520\", \"name\": \"Diablo IV\", \"installdir\": \"Diablo IV\",
    \"bytes\": 174813206488, \"usd_month\": 4.07, \"pushed\": \"2026-09-26T10:38:58Z\", \"kept\": \"$KEPT\"}]},
-  {\"bucket\": \"cg-library-empty\", \"region\": \"ap-south-2\", \"error\": null, \"bytes\": 0, \"games_bytes\": 0,
+  {\"bucket\": \"ayis-library-empty\", \"region\": \"ap-south-2\", \"error\": null, \"bytes\": 0, \"games_bytes\": 0,
    \"usd_month\": 0, \"games\": [], \"login\": false}]}"
 TWO_SWEEP='{"cached": true, "age_seconds": 90, "too_far": [], "unreachable": [],
   "regions": [{"region": "ap-south-2", "city": "Asia Pacific (Hyderabad)", "rtt_ms": 19, "enabled": true, "machines": []},
@@ -1040,18 +1040,18 @@ contains "  then the other place's, with Move" "$(row AFTER)" "Diablo IV / Hyder
 contains "  its Reset counts from the Reset" "$(row AFTER)" "Deleted on $D14 unless"
 contains "  one total"                       "$(row AFTER)" "foot=2 games · 282.8 GB · ₹671 a month"
 contains "  and how long, as set"            "$(row AFTER)" "keepfor=14 note=Deleted 14 days after last played."
-lacks    "  an empty place is not a row"     "$(row AFTER)" "cg-library-empty"
-c=$(row AFTER); lacks "  nor any bucket name on the page" "${c%% | move=*}" "cg-library"
+lacks    "  an empty place is not a row"     "$(row AFTER)" "ayis-library-empty"
+c=$(row AFTER); lacks "  nor any bucket name on the page" "${c%% | move=*}" "ayis-library"
 contains "Move asks first, with the price"   "$(row AFTER)" "title=Move Diablo IV to Mumbai? body=162.8 GB is copied from Hyderabad to Mumbai"
 contains "  about the one-time cost"         "$(row AFTER)" "One-time transfer: about ₹1,329"
-contains "  runs cg's move from that place"  "$(row AFTER)" "ran=library move 2344520 --from cg-library-old"
-contains "  in the popup, answered for cg"   "$(row AFTER)" "popup=Moving Diablo IV to Mumbai answered=MOVE"
+contains "  runs ayis's move from that place"  "$(row AFTER)" "ran=library move 2344520 --from ayis-library-old"
+contains "  in the popup, answered for ayis"   "$(row AFTER)" "popup=Moving Diablo IV to Mumbai answered=MOVE"
 contains "  and stays on Library"            "$(row AFTER)" "after=view=library popup=false"
-contains "Reset needs no confirm"            "$(row AFTER)" "reset=ran=library reset 2344520 --from cg-library-old popup=Resetting timer for Diablo IV"
+contains "Reset needs no confirm"            "$(row AFTER)" "reset=ran=library reset 2344520 --from ayis-library-old popup=Resetting timer for Diablo IV"
 contains "Keep for applies at once"          "$(row AFTER)" "keep=ran=library keep-for 30 popup=Retention set to 30 days"
 # The popup said "Keeping saved games for 14 days" twice - title and step.
-contains "  under the title, a placeholder until cg speaks" "$(row AFTER)" "steps=before:● Working…"
-contains "  then cg's own steps, each ticked as the next begins" "$(row AFTER)" "during:✓ Saving the setting, ● Updating auto-stop"
+contains "  under the title, a placeholder until ayis speaks" "$(row AFTER)" "steps=before:● Working…"
+contains "  then ayis's own steps, each ticked as the next begins" "$(row AFTER)" "during:✓ Saving the setting, ● Updating auto-stop"
 contains "  a place by its city, not its code" "$(row AFTER)" "● Deleting it from Hyderabad"
 lacks    "  never the title again"           "$(row AFTER)" "during:● Keeping"
 # And afterwards, only what Keep for can change - not the tools, the keys,
@@ -1061,7 +1061,7 @@ ENGINE=""
 
 echo "7c. a line that sounds like failure does not fail a healthy build"
 # What happened on a real build: the box's progress said "NvFBC cannot capture
-# with it on", cg reads "cannot" as a failure, and the driver step went red
+# with it on", ayis reads "cannot" as a failure, and the driver step went red
 # while the build carried on installing Steam.
 B3="window.__after = async () => {
   await new Promise(r => setTimeout(r, 1200));
@@ -1106,8 +1106,8 @@ contains "a long build scrolls in its card" "$(row AFTER)" "stripScrolls=true"
 contains "it finishes as how it was built" "$(row AFTER)" "end=How it was built done,done,done,done,done,done,done,done"
 ENGINE=""
 
-echo "7d. a wait cg reports: how long, against what, and only the first and last in the log"
-# cg sends a wait event every few seconds. The step shows the latest as its live
+echo "7d. a wait ayis reports: how long, against what, and only the first and last in the log"
+# ayis sends a wait event every few seconds. The step shows the latest as its live
 # line, a short limit as a real bar, and the Log keeps the start and the end -
 # not one row per poll.
 B7="window.__after = async () => {

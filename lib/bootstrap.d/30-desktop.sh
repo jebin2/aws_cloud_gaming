@@ -22,7 +22,7 @@ if aws_box || ! has_display_manager; then
         apt-get install -y xfce4 xfce4-goodies lightdm xserver-xorg x11-xserver-utils xclip
       fi
       DESKTOP_ADDED=1 ;;
-    *) echo ">>> FAILED: no desktop on this machine, and cg installs one only on Ubuntu or Debian - install one, then run setup again"
+    *) echo ">>> FAILED: no desktop on this machine, and ayis installs one only on Ubuntu or Debian - install one, then run setup again"
        exit 1 ;;
   esac
 fi

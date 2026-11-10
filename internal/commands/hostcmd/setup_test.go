@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/creds"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/session"
-	"github.com/jebin2/aws_cloud_gaming/internal/stream"
-	"github.com/jebin2/aws_cloud_gaming/internal/sunshine"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	"github.com/jebin2/ayis/internal/commands/creds"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/session"
+	"github.com/jebin2/ayis/internal/stream"
+	"github.com/jebin2/ayis/internal/sunshine"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
 // ready wires a rig for setup and open: the machine builds itself in one look at its
@@ -29,7 +29,7 @@ func ready(t *testing.T, input string, facts string) *rig {
 			return true, "/tmp/build.AbC\n", nil
 		case strings.Contains(line, "tail -n +"):
 			return true, ">>> installing\n>>> ok: installing\n", nil
-		case strings.Contains(line, "cloud-gaming-ready"), strings.Contains(line, ".steam-prewarmed"):
+		case strings.Contains(line, "ayis-ready"), strings.Contains(line, ".steam-prewarmed"):
 			return true, "", nil
 		case strings.Contains(line, `printf "%s|%s`):
 			return true, "working|\n", nil
@@ -65,7 +65,7 @@ func ready(t *testing.T, input string, facts string) *rig {
 	r.d.Now = func() time.Time { return time.Unix(1700000000, 0) }
 	r.d.CacheDir = t.TempDir()
 	r.d.Pair = sunshine.Pairer{C: r.d.Sun, R: r.r, Sleep: r.d.Sleep, Log: r.out.Log}
-	r.d.SessionFile = dir + "/cg-session.pid"
+	r.d.SessionFile = dir + "/ayis-session.pid"
 	r.d.Probe = session.Proc{}
 	r.d.Player = stream.Player{R: r.r, Get: r.d.Env.Get, CacheDir: r.d.CacheDir, Root: t.TempDir(), Echo: r.out.Echo, Log: r.out.Log, Warn: r.out.Log}
 	_ = r.d.Store.Set("desk-pc", "ssh", "me@pc", "os", "Linux", "sunshine_user", "admin", "sunshine_pass", "saved-pw")
@@ -86,7 +86,7 @@ func TestSetupBuildsAndLeavesTheMachineReady(t *testing.T) {
 	got := r.o.String()
 	for _, want := range []string{"==> asking desk-pc what it is", "Ubuntu 24.04 LTS, signed in as me", "==> starting the build on desk-pc", "==> building desk-pc - live progress below (it takes a while)",
 		"installing", "  ok  installing", "build complete after 0m", "==> Sunshine account", "already configured, and the saved login works", "==> moonlight pairing", "already paired",
-		"==> waiting for Steam to finish installing", "on the tailnet at 100.64.0.9", "no TAILSCALE_API_KEY in .env - key expiry left on", "ready: cg host open desk-pc"} {
+		"==> waiting for Steam to finish installing", "on the tailnet at 100.64.0.9", "no TAILSCALE_API_KEY in .env - key expiry left on", "ready: ayis host open desk-pc"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}
@@ -159,7 +159,7 @@ func TestSetupAsksTheSudoPasswordOnceAndChecksItFirst(t *testing.T) {
 func TestSetupRefusesWhatItCannotBuild(t *testing.T) {
 	for name, c := range map[string]struct{ facts, want string }{
 		"windows":           {"os=Windows\n", "setting a Windows machine up is not built yet"},
-		"gentoo":            {strings.Replace(linuxFacts, "id=ubuntu\nid_like=debian\n", "id=gentoo\n", 1), "cg sets up Ubuntu, Debian, Arch and Fedora; Ubuntu 24.04 LTS is not one."},
+		"gentoo":            {strings.Replace(linuxFacts, "id=ubuntu\nid_like=debian\n", "id=gentoo\n", 1), "ayis sets up Ubuntu, Debian, Arch and Fedora; Ubuntu 24.04 LTS is not one."},
 		"arm":               {strings.Replace(linuxFacts, "arch=x86_64", "arch=aarch64", 1), "x86_64 only - Steam and Proton need it (aarch64 here)"},
 		"no ubuntu release": {strings.Replace(linuxFacts, "ubuntu_version=24.04\n", "", 1), "which Ubuntu release it is could not be read"},
 	} {
@@ -174,7 +174,7 @@ func TestSetupRefusesWhatItCannotBuild(t *testing.T) {
 		}
 	}
 	r := ready(t, "", onTailnet)
-	if rc := r.d.Setup(context.Background(), []string{"nope"}, r.out); rc != 1 || !strings.Contains(r.e.String(), "no machine called 'nope' - add it: cg host add nope --ssh <user@address>") {
+	if rc := r.d.Setup(context.Background(), []string{"nope"}, r.out); rc != 1 || !strings.Contains(r.e.String(), "no machine called 'nope' - add it: ayis host add nope --ssh <user@address>") {
 		t.Error(r.e.String())
 	}
 }
@@ -182,7 +182,7 @@ func TestSetupRefusesWhatItCannotBuild(t *testing.T) {
 func TestAMachineNotOnTheTailnetJoinsWithAKeyOrIsNotTouched(t *testing.T) {
 	r := ready(t, "", linuxFacts) // no ts_ip
 	r.d.Ask.TTY = false
-	if rc := r.d.Setup(context.Background(), []string{"desk-pc"}, r.out); rc != 1 || !strings.Contains(r.e.String(), "desk-pc is not on your tailnet, and there is no Tailscale auth key to join it with - cg creds tailscale authkey saves one") {
+	if rc := r.d.Setup(context.Background(), []string{"desk-pc"}, r.out); rc != 1 || !strings.Contains(r.e.String(), "desk-pc is not on your tailnet, and there is no Tailscale auth key to join it with - ayis creds tailscale authkey saves one") {
 		t.Fatalf("%s", r.e)
 	}
 	for _, l := range r.r.Ran {
@@ -244,14 +244,14 @@ func TestABuildThatStopsIsNotReady(t *testing.T) {
 		switch {
 		case strings.Contains(line, "tail -n +"):
 			return true, ">>> FAILED: installing the driver\n", nil
-		case strings.Contains(line, "test -f /var/lib/cloud-gaming-ready"):
+		case strings.Contains(line, "test -f /var/lib/ayis-ready"):
 			return true, "", &exit{1}
-		case strings.Contains(line, "cloud-gaming-bootstrap.rc"):
+		case strings.Contains(line, "ayis-bootstrap.rc"):
 			return true, "exited|no\n", nil
 		}
 		return prev(line)
 	}
-	if rc := r.d.Setup(context.Background(), []string{"desk-pc"}, r.out); rc != 1 || !strings.Contains(r.e.String(), "the build on desk-pc did not finish - its log is /var/log/cloud-gaming-bootstrap.log there") {
+	if rc := r.d.Setup(context.Background(), []string{"desk-pc"}, r.out); rc != 1 || !strings.Contains(r.e.String(), "the build on desk-pc did not finish - its log is /var/log/ayis-bootstrap.log there") {
 		t.Fatalf("%s%s", r.o, r.e)
 	}
 	if r.d.Store.Get("desk-pc").Field("ready") == "yes" || !strings.Contains(r.o.String(), "the build STOPPED here: installing the driver") {
@@ -284,9 +284,9 @@ func TestOpenStreamsUnderTheLockAndReleasesIt(t *testing.T) {
 		args  []string
 		want  string
 	}{
-		"not set up":   {func(r *rig) { _ = r.d.Store.Set("desk-pc", "ts_ip", "") }, []string{"desk-pc"}, "'desk-pc' is not set up yet: cg host setup desk-pc"},
-		"no moonlight": {func(r *rig) { r.d.Moonlight = false }, []string{"desk-pc"}, "Moonlight is not installed - cg check --fix installs it"},
-		"no name":      {func(r *rig) {}, nil, "usage: cg host open <name>"},
+		"not set up":   {func(r *rig) { _ = r.d.Store.Set("desk-pc", "ts_ip", "") }, []string{"desk-pc"}, "'desk-pc' is not set up yet: ayis host setup desk-pc"},
+		"no moonlight": {func(r *rig) { r.d.Moonlight = false }, []string{"desk-pc"}, "Moonlight is not installed - ayis check --fix installs it"},
+		"no name":      {func(r *rig) {}, nil, "usage: ayis host open <name>"},
 		"silent": {func(r *rig) {
 			r.d.Sun = sunshine.Client{URL: func(ip, path string) string { return "https://127.0.0.1:1" + path }}
 		}, []string{"desk-pc"}, "Sunshine is not answering on desk-pc (100.64.0.9) - is it on, and a desktop signed in?"},
@@ -304,14 +304,14 @@ func TestOpenStreamsUnderTheLockAndReleasesIt(t *testing.T) {
 	_ = r.d.Store.Set("desk-pc", "ts_ip", "100.64.0.9")
 	r.d.Moonlight = true
 	session.Claim(r.d.SessionFile, time.Now())
-	r.d.Probe = alwaysCg{}
+	r.d.Probe = alwaysAyis{}
 	if rc := r.d.Open(context.Background(), []string{"desk-pc"}, r.out); rc != 1 || !strings.Contains(r.e.String(), "a stream from this laptop is already running (pid ") {
 		t.Errorf("rc %d\n%s", rc, r.e)
 	}
 }
 
-// alwaysCg is a probe that sees a live cg at any pid: the test binary is not called cg.
-type alwaysCg struct{}
+// alwaysAyis is a probe that sees a live ayis at any pid: the test binary is not called ayis.
+type alwaysAyis struct{}
 
-func (alwaysCg) Alive(int) bool          { return true }
-func (alwaysCg) Args(int) (string, bool) { return "cg host open", true }
+func (alwaysAyis) Alive(int) bool          { return true }
+func (alwaysAyis) Args(int) (string, bool) { return "ayis host open", true }

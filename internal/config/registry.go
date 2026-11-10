@@ -9,7 +9,7 @@ import (
 )
 
 // Setting is one row of the registry: what a setting is, what it may be, and
-// where it belongs on screen. One registry, read by `cg config` and by the app,
+// where it belongs on screen. One registry, read by `ayis config` and by the app,
 // so the rules - a disk that cannot be shrunk, an expiry of 0 meaning "keep
 // forever", a token that must look like a token - live here and not in a
 // renderer.
@@ -23,7 +23,7 @@ type Setting struct {
 	Group   string // which card it belongs on; empty means it has a card of its own
 }
 
-// Registry is every setting cg reads from .env.
+// Registry is every setting ayis reads from .env.
 var Registry = []Setting{
 	{"GAME_DISK_GB", "number", "50", "30", "Root disk in GB. Cannot be shrunk later; applies to the next build.", "root disk (GB)", "The box"},
 	{"GAME_DISK_RESERVE_GB", "number", "20", "0", "Space kept free on the game disk for Steam's downloads, updates and shader caches.", "game disk kept free (GB)", "The box"},
@@ -90,7 +90,7 @@ func NtfyURL(v string) string {
 
 // Validate says why a value is refused, or "" if it is fine. It is a pure
 // function: whether a region exists or rents a GPU is AWS's answer, and comes
-// from `cg sweep`.
+// from `ayis sweep`.
 func Validate(key, value string) string {
 	s, ok := Find(key)
 	if !ok {

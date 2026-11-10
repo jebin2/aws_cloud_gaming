@@ -15,11 +15,11 @@ invocation cannot corrupt a counter, and a dry run changes nothing.
 
 It never pulls the plug first. Terminating (spot) or stopping (on demand)
 through the API is a GRACEFUL OS shutdown, which is where the box mirrors its
-games to S3 (cg-library-shutdown.service, up to 30 minutes). Only an instance
+games to S3 (ayis-library-shutdown.service, up to 30 minutes). Only an instance
 still stuck going down an hour later is forced, whichever guard started it.
 
-Every decision is printed with the numbers behind it, prefixed "cg-watchdog:",
-which is what `cg watchdog logs` filters on.
+Every decision is printed with the numbers behind it, prefixed "ayis-watchdog:",
+which is what `ayis watchdog logs` filters on.
 
 It also deletes an ON-DEMAND BOX LEFT STOPPED for EXPIRY_DAYS - the days games
 are kept for. Stopped, it bills for its disk with no end, and kept the archive
@@ -42,46 +42,46 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-TS_HOST = os.environ.get("CG_TS_HOST", "gamevps")
-IDLE_MINUTES = int(os.environ.get("CG_IDLE_MINUTES", "30"))
-BOOT_GRACE_MINUTES = int(os.environ.get("CG_BOOT_GRACE_MINUTES", "20"))
-STUCK_MINUTES = int(os.environ.get("CG_STUCK_MINUTES", "60"))
+TS_HOST = os.environ.get("AYIS_TS_HOST", "ayis")
+IDLE_MINUTES = int(os.environ.get("AYIS_IDLE_MINUTES", "30"))
+BOOT_GRACE_MINUTES = int(os.environ.get("AYIS_BOOT_GRACE_MINUTES", "20"))
+STUCK_MINUTES = int(os.environ.get("AYIS_STUCK_MINUTES", "60"))
 # Bytes in + out per 5-minute period that count as use. Streaming at 20 Mbps
 # moves ~750 MB a period, so 10 MB is comfortably idle.
-THRESHOLD = int(os.environ.get("CG_THRESHOLD_BYTES", "10485760"))
+THRESHOLD = int(os.environ.get("AYIS_THRESHOLD_BYTES", "10485760"))
 PERIOD = 300
 # Written on an instance going down with no timestamp in its state reason (an
 # in-guest `shutdown -h`), so the next run can tell how long it has been stuck.
-SINCE_TAG = "cg-going-down-since"
+SINCE_TAG = "ayis-going-down-since"
 # Notifications about one shutdown, recorded on the instance so each is sent once.
 # Their value starts with when that shutdown began, so an earlier one never counts.
 SLOW_MINUTES = 30
-SLOW_TAG = "cg-slow-noted"
-FORCED_TAG = "cg-forced"
+SLOW_TAG = "ayis-slow-noted"
+FORCED_TAG = "ayis-forced"
 # When a stopped box was first seen stopped, where AWS did not timestamp the stop,
 # and the stop a warning of its deletion was sent for - so it is sent once.
-STOPPED_SINCE_TAG = "cg-stopped-since"
-STOPPED_WARNED_TAG = "cg-stopped-warned"
+STOPPED_SINCE_TAG = "ayis-stopped-since"
+STOPPED_WARNED_TAG = "ayis-stopped-warned"
 
 STATE_EVENT = "EC2 Instance State-change Notification"
 SPOT_EVENT = "EC2 Spot Instance Interruption Warning"
 
 # Archive expiry, in days with no box. 0 turns it off.
-BUCKET = os.environ.get("CG_BUCKET", "")
-# Where cg-library keeps the archive inside the bucket: its "everything is saved"
+BUCKET = os.environ.get("AYIS_BUCKET", "")
+# Where ayis-library keeps the archive inside the bucket: its "everything is saved"
 # marker is <PREFIX>/pushed.json.
-PREFIX = os.environ.get("CG_PREFIX", "steam")
-# The games disk cg adds beside the machine's own drive.
+PREFIX = os.environ.get("AYIS_PREFIX", "steam")
+# The games disk ayis adds beside the machine's own drive.
 GAMES_DISK_DEVICE = "/dev/sdg"
 # The account, so this host's OTHER buckets can be recognised by name: a region
 # move leaves games in a bucket nothing points at, billing until someone looks.
 # Unset, only BUCKET is ever touched - which is how it worked before.
-ACCOUNT = os.environ.get("CG_ACCOUNT", "")
-EXPIRY_DAYS = int(os.environ.get("CG_ARCHIVE_EXPIRY_DAYS", "0") or 0)
+ACCOUNT = os.environ.get("AYIS_ACCOUNT", "")
+EXPIRY_DAYS = int(os.environ.get("AYIS_ARCHIVE_EXPIRY_DAYS", "0") or 0)
 # The expiry check's marks are SSM Parameter Store standard parameters - which cost
-# nothing - under /cloud-gaming/<host>/, not bucket tags, which are billed S3
+# nothing - under /ayis/<host>/, not bucket tags, which are billed S3
 # requests. Whether an archive exists comes from S3's free daily size metric.
-# AWS's S3 price and the rupee rate (GST included), as cg had them when it
+# AWS's S3 price and the rupee rate (GST included), as ayis had them when it
 # deployed this - never a number written here. Either missing, the archive is
 # described by its size alone.
 def _rate(k):
@@ -89,18 +89,18 @@ def _rate(k):
         return float(os.environ[k])
     except (KeyError, ValueError):
         return None
-S3_USD_PER_GB = _rate("CG_S3_USD_GB_MONTH")
-INR_PER_USD = _rate("CG_INR_PER_USD")
+S3_USD_PER_GB = _rate("AYIS_S3_USD_GB_MONTH")
+INR_PER_USD = _rate("AYIS_INR_PER_USD")
 
-# ntfy push notifications. Off unless cg passed a URL.
-NTFY_URL = os.environ.get("CG_NTFY_URL", "")
+# ntfy push notifications. Off unless ayis passed a URL.
+NTFY_URL = os.environ.get("AYIS_NTFY_URL", "")
 # A launch history longer than this is treated as unreadable, not as empty.
 TRAIL_PAGES = 40
 DELETE_ROUNDS = 1000
 
 
 def say(msg):
-    print("cg-watchdog: " + msg, flush=True)
+    print("ayis-watchdog: " + msg, flush=True)
 
 
 def send(url, title, message, priority, tags):
@@ -153,7 +153,7 @@ def handler(event, context):
 def state_changed(ec2, event, cw=None, now=None, ssm=None, s3=None, sleep=None):
     """An instance finished stopping or terminating. The box cannot report its own
     end - by then it is gone - so this is the notification that says it really is,
-    however it ended: a watchdog, cg destroy, a spot interruption, the console.
+    however it ended: a watchdog, ayis destroy, a spot interruption, the console.
     EventBridge sends every instance in the region, so only this host's counts."""
     detail = event.get("detail") or {}
     iid = detail.get("instance-id", "")
@@ -204,7 +204,7 @@ def drop_games_disk(ec2, s3, inst, sleep=None):
         Stop machine, whose own choice about the disk stands;
       - the machine has a games disk;
       - Saved games holds a complete save made after this machine last started -
-        the marker cg-library writes only when it saved everything. No marker, or
+        the marker ayis-library writes only when it saved everything. No marker, or
         an older one, and the disk is kept: something on it may not be saved.
     """
     sleep = sleep or time.sleep
@@ -270,7 +270,7 @@ def run_all(ec2, cw, s3, ssm, trail, now, dry=False, s3_for=None):
         # At most hourly: a watchdog that is failing fails every 5 minutes.
         if not dry and now.minute < 5:
             notify("The cost-protection check is not working",
-                   "The check that switches off idle game PCs failed. Open the cg app to see why.",
+                   "The check that switches off idle game PCs failed. Open the ayis app to see why.",
                    "urgent", "rotating_light")
         raise failure
     return result
@@ -291,7 +291,7 @@ def minutes(delta):
 def run(ec2, cw, now, dry=False):
     # "Could not ask" must never read as "nothing there": a blind watchdog that
     # reports all clear is worse than none. Raise, so the invocation counts as
-    # an error and `cg watchdog` shows it.
+    # an error and `ayis watchdog` shows it.
     try:
         resp = ec2.describe_instances(Filters=[
             {"Name": "tag:Name", "Values": [TS_HOST]},
@@ -312,7 +312,7 @@ def run(ec2, cw, now, dry=False):
         try:
             d = decide(ec2, cw, inst, now, dry)
             # A dry run proves the permission on EVERY running box, not only on
-            # one it would end. Otherwise `cg watchdog check` during a session -
+            # one it would end. Otherwise `ayis watchdog check` during a session -
             # a busy box, the one time anyone runs it - proves nothing about
             # whether this role can actually terminate the instance.
             if dry and d["action"] == "none" and inst["State"]["Name"] == "running":
@@ -448,7 +448,7 @@ def going_down(ec2, inst, now, dry):
             ec2.create_tags(Resources=[iid], Tags=[{"Key": FORCED_TAG, "Value": "%s/%s" % (mark, iso(now))}])
     elif len(forced) > 1 and now.minute < 5 and forced[1] <= iso(now - timedelta(hours=1)):
         notify("Game PC will not switch off - it may still be charging",
-               "Open the cg app and delete it, or check your AWS account.", "urgent", "rotating_light")
+               "Open the ayis app and delete it, or check your AWS account.", "urgent", "rotating_light")
     return {"instance": iid, "action": "force-" + verb, "reason": why}
 
 
@@ -620,7 +620,7 @@ def boxes(ec2):
 
 
 def mark_name(name):
-    return "/cloud-gaming/%s/%s" % (TS_HOST, name)
+    return "/ayis/%s/%s" % (TS_HOST, name)
 
 
 def mark_get(ssm, name):
@@ -696,7 +696,7 @@ def archive_note(look, now):
         note += " Deleted after %d days with no box, around %s." % (
             EXPIRY_DAYS, (now + timedelta(days=EXPIRY_DAYS)).strftime("%Y-%m-%d"))
     else:
-        note += " Kept until you delete it: cg destroy --all."
+        note += " Kept until you delete it: ayis destroy --all."
     return note
 
 
@@ -746,7 +746,7 @@ def warn_once(ssm, seen, idle, left):
         return
     if notify("Saved games will be deleted in %s" % words(left),
               "There has been no game PC for %s. Start one to keep your games, or turn the deletion "
-              "off in the cg app's settings." % words(idle), "high", "warning"):
+              "off in the ayis app's settings." % words(idle), "high", "warning"):
         mark_put(ssm, "archive-warned", due)
 
 
@@ -804,7 +804,7 @@ def empty_and_delete(s3, bucket=None):
 # --- one game at a time, wherever it is saved --------------------------------
 # The rule is the same for every game - N days after a machine was last seen -
 # but each game can be kept longer from the app ("Reset"), which writes
-# /cloud-gaming/<host>/kept/<bucket>/<appid>. A game goes when the later of the
+# /ayis/<host>/kept/<bucket>/<appid>. A game goes when the later of the
 # two is N days old. Nothing here decides whether the games are in use; that is
 # expire_archive's job, and it only calls this once both records say unused.
 
@@ -812,22 +812,22 @@ KEPT_PATH = "kept"
 
 
 def bucket_name(*parts):
-    """lib/s3-region.sh's cg_bucket_name, and the name it used before the region
+    """lib/s3-region.sh's ayis_bucket_name, and the name it used before the region
     went into the hash. Both are this host's; nothing else is."""
-    return "cg-library-" + hashlib.sha256("-".join(parts).encode()).hexdigest()[:12]
+    return "ayis-library-" + hashlib.sha256("-".join(parts).encode()).hexdigest()[:12]
 
 
 def own_buckets(s3):
     """[(name, region)] for every bucket this host owns. A bucket is ours when its
-    name is the one cg derives for this account, host and ITS region - or the old
-    form without a region - never merely because it starts with cg-library-."""
+    name is the one ayis derives for this account, host and ITS region - or the old
+    form without a region - never merely because it starts with ayis-library-."""
     if not ACCOUNT:
         return [(BUCKET, None)] if BUCKET else []
     legacy = bucket_name(ACCOUNT, TS_HOST)
     out = []
     for b in s3.list_buckets().get("Buckets", []):
         name = b.get("Name", "")
-        if not name.startswith("cg-library-"):
+        if not name.startswith("ayis-library-"):
             continue
         loc = s3.get_bucket_location(Bucket=name).get("LocationConstraint") or "us-east-1"
         if name in (BUCKET, legacy, bucket_name(ACCOUNT, TS_HOST, loc)):
@@ -960,7 +960,7 @@ def expire_archive(ec2, s3, ssm, cw, trail, now, dry=False, s3_for=None):
     if EXPIRY_DAYS <= 0 or not BUCKET:
         return None
     # Hourly: one invocation in twelve lands in the first 5 minutes of an hour.
-    # A dry run always looks, so `cg watchdog check` can show the countdown.
+    # A dry run always looks, so `ayis watchdog check` can show the countdown.
     if not dry and now.minute >= 5:
         return None
     window = timedelta(days=EXPIRY_DAYS)
@@ -1014,7 +1014,7 @@ def expire_archive(ec2, s3, ssm, cw, trail, now, dry=False, s3_for=None):
         return "in-use"
     if not ACCOUNT:
         # The one bucket, whole: how this worked before games could be kept one by
-        # one, and still how it works when cg did not say whose account this is.
+        # one, and still how it works when ayis did not say whose account this is.
         if dry:
             say("archive: unused for %s - WOULD DELETE s3://%s (dry run)" % (span(now - seen), BUCKET))
             return "would-delete"

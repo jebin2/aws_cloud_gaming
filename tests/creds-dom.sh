@@ -2,7 +2,7 @@
 # The credentials card, actually rendered.
 #
 # A warning strip above every page used to say "AWS rejected
-# these credentials - ... Settings - or cg check --fix - takes a new key" on a
+# these credentials - ... Settings - or ayis check --fix - takes a new key" on a
 # laptop that had no AWS CLI to reject anything, pointing at a Settings screen
 # with no field for a key. Three claims, none true.
 #
@@ -32,7 +32,7 @@ cp app/renderer/index.html app/renderer/app.js "$T/r/"
 cp app/renderer/*.css "$T/r/"
 cp -r app/renderer/fonts "$T/r/" 2>/dev/null || true
 
-# Every cg call is recorded instead of run, so the test can assert which command
+# Every ayis call is recorded instead of run, so the test can assert which command
 # a button would have run.
 cat > "$T/r/stub.js" <<'STUB'
 window.__errs = [];
@@ -41,7 +41,7 @@ addEventListener('error', e => window.__errs.push(e.message));
 addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
 window.__answers = [];
 window.__opened = [];
-window.cg = {
+window.ayis = {
   run: (args) => { window.__ran.push(args.join(' '));
                    window.__lastId = (window.__lastId || 0) + 1;
                    return Promise.resolve({ ok: true, id: window.__lastId }); },
@@ -67,7 +67,7 @@ cat > "$T/r/probe.js" <<'PROBE'
   };
   // A status payload with only what paintStatus needs to reach the banner.
   const status = cause => ({
-    host: 'gamevps', region: 'ap-south-1', instance_type: 'g4dn.xlarge',
+    host: 'ayis', region: 'ap-south-1', instance_type: 'g4dn.xlarge',
     box: null, session: null, archive: {}, config: {}, local: {}, quota: {}, spec: {},
     account: { id: 'NO CREDENTIALS', plan: '?', credits: '?' }, budget: {}, res: {},
     tailnet: {}, old_volume: {}, login: null,
@@ -77,7 +77,7 @@ cat > "$T/r/probe.js" <<'PROBE'
   });
   try {
     paintCreds({ cli: false, source: null, key_id: null, account: null, arn: null,
-                 valid: null, error: 'The AWS CLI is not installed - cg check --fix installs it' });
+                 valid: null, error: 'The AWS CLI is not installed - ayis check --fix installs it' });
     read('NOCLI');
     window.__ran = [];
     document.getElementById('creds-set').click();
@@ -130,7 +130,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push('SUBMIT BTN | ' + document.getElementById('awskey-go').textContent.trim()
              + ' disabled=' + document.getElementById('awskey-go').disabled
              + ' cancel=' + (document.getElementById('awskey-cancel').disabled ? 'off' : 'on'));
-    // cg asks its two questions; the form answers them.
+    // ayis asks its two questions; the form answers them.
     window.__emit(window.__lastId, { t: 'ask', id: 'aws-access-key-id', prompt: 'id: ', default: '' });
     window.__emit(window.__lastId, { t: 'ask', id: 'aws-secret-access-key', prompt: 'secret: ', default: '', secret: 1 });
     out.push('SUBMIT ANSWERS | ' + window.__answers.join(' ;; '));
@@ -254,7 +254,7 @@ cat > "$T/r/probe.js" <<'PROBE'
              + ' retry=' + document.getElementById('rundlg-retry').hidden);
     out.push('SIGNIN RAN | ' + window.__ran.join(' ;; '));
     out.push('SIGNIN LINK EARLY | ' + document.getElementById('rundlg-link').hidden);
-    // cg relays what `tailscale up` printed while it is still waiting.
+    // ayis relays what `tailscale up` printed while it is still waiting.
     window.__emit(window.__lastId, { t: 'line', kind: 'info', text: 'finishing the sign-in needs a browser - the link appears below' });
     window.__emit(window.__lastId, { t: 'line', kind: 'info', text: 'sign in here: https://login.tailscale.com/a/abc123def456' });
     out.push('SIGNIN LINKNOW | ' + document.getElementById('rundlg-link').hidden);
@@ -278,12 +278,12 @@ cat > "$T/r/probe.js" <<'PROBE'
     await new Promise(r => setTimeout(r, 400));     // its closing motion
     out.push('SIGNIN CLOSED | ' + tsup.open);
 
-    // Cancelling has to reach cg: tailscale up is waiting on a browser that is
+    // Cancelling has to reach ayis: tailscale up is waiting on a browser that is
     // never going to answer.
     paintTskey({ present: false, valid: null, state: 'absent', detail: null,
                  signed_in: false, node: null });
     window.__cancelled = [];
-    window.cg.cancel = id => { window.__cancelled.push(id); return Promise.resolve(true); };
+    window.ayis.cancel = id => { window.__cancelled.push(id); return Promise.resolve(true); };
     document.getElementById('tskey-signin-go').click();
     await sleep();
     document.getElementById('rundlg-cancel').click();
@@ -298,7 +298,7 @@ cat > "$T/r/probe.js" <<'PROBE'
                  signed_in: false, node: null });
     document.getElementById('tskey-signin-go').click();
     await sleep();
-    // pkexec with no polkit agent says this on plain stderr - no cg event.
+    // pkexec with no polkit agent says this on plain stderr - no ayis event.
     window.__emit(window.__lastId, { t: 'raw', stream: 'stderr',
       text: 'Error executing command as another user: No authentication agent found.' });
     window.__emit(window.__lastId, { t: 'exit', rc: 127 });
@@ -311,13 +311,13 @@ cat > "$T/r/probe.js" <<'PROBE'
     document.getElementById('rundlg-done').click();
 
     // And a run that was refused because something else holds the lock.
-    const realRun = window.cg.run;
-    window.cg.run = () => Promise.resolve({ ok: false, reason: 'busy', args: ['init'] });
+    const realRun = window.ayis.run;
+    window.ayis.run = () => Promise.resolve({ ok: false, reason: 'busy', args: ['init'] });
     document.getElementById('tskey-signin-go').click();
     await sleep(); await sleep();
     out.push('SIGNIN BUSY | ' + document.getElementById('rundlg-log').textContent.replace(/\s+/g, ' ').trim());
     out.push('SIGNIN BUSYBTN | ' + document.getElementById('tskey-signin-go').disabled);
-    window.cg.run = realRun;
+    window.ayis.run = realRun;
 
     paintDeps({ tools: [], package_manager: 'pacman', root: 'pkexec', root_blocked: null,
                 tailscale_signed_in: true });
@@ -406,7 +406,7 @@ contains "the key is named, masked"    "$(row 'BAD STATE')"   "****1234"
 contains "  and called rejected"       "$(row 'BAD STATE')"   "rejected"
 contains "  with AWS's reason"         "$(row 'BAD DETAIL')"  "InvalidClientTokenId"
 contains "the button asks for a key"   "$(row 'BAD BTN')"     "Update access key"
-# The button opens the form; cg runs when the form is submitted.
+# The button opens the form; ayis runs when the form is submitted.
 check    "  and runs nothing yet"      "$(row 'BAD RAN')"     "BAD RAN | "
 
 echo "3. a key that works"
@@ -434,14 +434,14 @@ contains "  with both halves"          "$(row 'FORM FIELDS')"  "id=text secret=p
 contains "an empty form says so"       "$(row 'EMPTY ERR')"    "are both required"
 check    "  and runs nothing"          "$(row 'EMPTY RAN')"    "EMPTY RAN | "
 check    "  staying open"              "$(row 'EMPTY OPEN')"   "EMPTY OPEN | true"
-check    "submitting runs cg creds set" "$(row 'SUBMIT RAN')"  "SUBMIT RAN | creds set"
+check    "submitting runs ayis creds set" "$(row 'SUBMIT RAN')"  "SUBMIT RAN | creds set"
 contains "  the button shows it is working" "$(row 'SUBMIT BTN')" "Checking with AWS"
 contains "  and cannot be pressed twice"    "$(row 'SUBMIT BTN')" "disabled=true"
-# Closing would not stop cg: the key saved behind a Cancel, or asked for again.
-contains "  nor cancelled while cg saves it" "$(row 'SUBMIT BTN')" "cancel=off"
-# cg still asks its two questions; the form answers them, so no second modal
+# Closing would not stop ayis: the key saved behind a Cancel, or asked for again.
+contains "  nor cancelled while ayis saves it" "$(row 'SUBMIT BTN')" "cancel=off"
+# ayis still asks its two questions; the form answers them, so no second modal
 # appears on top of the one being looked at.
-check    "the form answers cg's questions" "$(row 'SUBMIT ANSWERS')" "SUBMIT ANSWERS | AKIABADBADBADBAD9999 ;; bad-secret"
+check    "the form answers ayis's questions" "$(row 'SUBMIT ANSWERS')" "SUBMIT ANSWERS | AKIABADBADBADBAD9999 ;; bad-secret"
 check    "  with no extra prompt"      "$(row 'SUBMIT MODALS')" "SUBMIT MODALS | false"
 check    "a rejected key keeps the form open" "$(row 'FAIL OPEN')" "FAIL OPEN | true"
 contains "  showing AWS's reason there" "$(row 'FAIL ERR')"    "InvalidClientTokenId"
@@ -481,7 +481,7 @@ contains "it opens, as a password field"  "$(row 'TSFORM OPEN')" "true type=pass
 contains "an empty one says so"           "$(row 'TSEMPTY')"     "Required."
 contains "  running nothing"              "$(row 'TSEMPTY')"     "ran="
 check    "submitting runs the set"        "$(row 'TSSUBMIT RAN')" "TSSUBMIT RAN | creds set tailscale"
-check    "  answering cg's question"      "$(row 'TSSUBMIT ANSWERS')" "TSSUBMIT ANSWERS | tskey-api-nope"
+check    "  answering ayis's question"      "$(row 'TSSUBMIT ANSWERS')" "TSSUBMIT ANSWERS | tskey-api-nope"
 contains "a refusal stays in the form"    "$(row 'TSFAIL')"      "open=true"
 contains "  with Tailscale's reason"      "$(row 'TSFAIL')"      "rejected that token (401)"
 lacks    "  without the how-to line"      "$(row 'TSFAIL')"      "NOT an auth key"
@@ -499,12 +499,12 @@ check    "it runs the sign-in"          "$(row 'SIGNIN RAN')"       "SIGNIN RAN 
 # before it is printed and must appear the moment it is.
 check    "no link before one is printed" "$(row 'SIGNIN LINK EARLY')" "SIGNIN LINK EARLY | true"
 check    "  and one as soon as it is"    "$(row 'SIGNIN LINKNOW')"   "SIGNIN LINKNOW | false"
-contains "what cg said is shown"         "$(row 'SIGNIN LOG')"       "the link appears below"
+contains "what ayis said is shown"         "$(row 'SIGNIN LOG')"       "the link appears below"
 check    "the link opens that URL"       "$(row 'SIGNIN OPENED')"    "SIGNIN OPENED | https://login.tailscale.com/a/abc123def456"
 
 echo "4f. a sign-in that goes nowhere says so"
 # "starting…" and then silence is what a dead run looked like: pkexec's own
-# complaint is plain stderr, not a cg event, so the panel never showed it.
+# complaint is plain stderr, not an ayis event, so the panel never showed it.
 contains "stderr reaches the panel"    "$(row 'SIGNIN DEAD')"    "No authentication agent found"
 lacks    "  with no stale starting line" "$(row 'SIGNIN DEAD')"  "starting -"
 contains "  the status says it failed" "$(row 'SIGNIN DEADSTATUS')" "Sign-in failed"
@@ -512,11 +512,11 @@ contains "  offering another go"        "$(row 'SIGNIN DEADBUTTONS')" "retry=fal
 contains "  and a way out"              "$(row 'SIGNIN DEADBUTTONS')" "done=Close"
 # A write is refused outright while anything else runs - it is not queued - and
 # the only sign of that used to be a line in the header.
-# Named, not spelled: "cg init" is the command, "the build" is the thing that
-# is keeping you waiting - see CG_WORDS.
+# Named, not spelled: "ayis init" is the command, "the build" is the thing that
+# is keeping you waiting - see AYIS_WORDS.
 contains "a refusal says what holds it" "$(row 'SIGNIN BUSY')"   "Waiting for the build to finish"
 contains "  and the dialog says so too" "$(row 'SIGNIN BUSY')" "Waiting for the build to finish"
-lacks    "  without spelling the command" "$(row 'SIGNIN BUSY')" "cg init is still"
+lacks    "  without spelling the command" "$(row 'SIGNIN BUSY')" "ayis init is still"
 
 echo "4g. the sign-in dialog, start to end"
 # `tailscale up` prints a link and then waits for a browser. That is a thing
@@ -531,9 +531,9 @@ contains "  Cancel goes away"          "$(row 'SIGNIN OKBUTTONS')" "cancel=true"
 contains "  Done appears"              "$(row 'SIGNIN OKBUTTONS')" "done=false label=Done"
 contains "  and the dead link goes"    "$(row 'SIGNIN OKBUTTONS')" "link=true"
 check    "Done closes it"              "$(row 'SIGNIN CLOSED')"  "SIGNIN CLOSED | false"
-# Closing the dialog does not tell cg anything: the command is still waiting on
+# Closing the dialog does not tell ayis anything: the command is still waiting on
 # a browser that is never going to answer.
-contains "Cancel reaches cg"           "$(row 'SIGNIN CANCEL')"  "cancelled="
+contains "Cancel reaches ayis"           "$(row 'SIGNIN CANCEL')"  "cancelled="
 contains "  and closes the dialog"     "$(row 'SIGNIN CANCEL')"  "open=false"
 
 echo "5. nothing threw"

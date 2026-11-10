@@ -19,12 +19,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	"github.com/jebin2/aws_cloud_gaming/internal/session"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/pricing"
+	"github.com/jebin2/ayis/internal/session"
 )
 
 // Options are what the command line said.
@@ -43,22 +43,22 @@ func ParseArgs(args []string) (Options, error) {
 		case "--watch":
 		case "--on":
 			if i+1 >= len(args) {
-				return o, fmt.Errorf("--on needs the name of a machine (see: cg host list)")
+				return o, fmt.Errorf("--on needs the name of a machine (see: ayis host list)")
 			}
 			i++
 			o.On = args[i]
 		default:
-			return o, fmt.Errorf("unknown option '%s' (see: cg help)", args[i])
+			return o, fmt.Errorf("unknown option '%s' (see: ayis help)", args[i])
 		}
 	}
 	return o, nil
 }
 
-// Run is `cg status`. It returns the exit code. Nothing in it stops at the
+// Run is `ayis status`. It returns the exit code. Nothing in it stops at the
 // first failed read: a probe that fails is a fact.
 func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, out *output.Out) int {
 	if opts.On != "" {
-		out.Die("status --on <machine> is not ported to Go yet (see: cg host status)")
+		out.Die("status --on <machine> is not ported to Go yet (see: ayis host status)")
 		return 1
 	}
 	region := env.Region()
@@ -97,7 +97,7 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, 
 	v.Flags.Notifications = env.Get("GAME_NTFY_URL") != ""
 	v.Flags.TailscaleAPIKey = env.Get("TAILSCALE_API_KEY") != ""
 	v.Flags.AlertEmail = env.Get("EMAIL_ALERTS") != "" || env.Get("GAME_ALERT_EMAIL") != ""
-	// How long a build takes is measured by cg init, never promised.
+	// How long a build takes is measured by ayis init, never promised.
 	if b, err := os.ReadFile(filepath.Join(cacheDir, "last-build-min")); err == nil {
 		if n, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
 			v.LastBuildMin = ok(n)
@@ -120,7 +120,7 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, opts Options, 
 // cache is the one thing a user already knows how to do.
 func cacheDir(get config.Lookup, home string) string {
 	if base, ok := get("XDG_CACHE_HOME"); ok && base != "" {
-		return filepath.Join(base, "cg")
+		return filepath.Join(base, "ayis")
 	}
-	return filepath.Join(home, ".cache", "cg")
+	return filepath.Join(home, ".cache", "ayis")
 }

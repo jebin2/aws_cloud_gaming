@@ -15,7 +15,7 @@ RemainAfterExit=yes
 # credentials come from the metadata service, which any local user can read.
 User=ubuntu
 Group=ubuntu
-ExecStart=/usr/local/bin/cg-library pull
+ExecStart=/usr/local/bin/ayis-library pull
 # ~140 GB at the measured 235 MB/s is about 10 minutes; allow for a slow day.
 TimeoutStartSec=3600
 # A hard backstop under the tuned s5cmd flags. A restore that grows its memory

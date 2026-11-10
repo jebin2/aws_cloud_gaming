@@ -1,5 +1,5 @@
-// Package session is the local stream lock: `cg open` holds it for as long as
-// Moonlight is on screen, `cg status` reports it, and `cg destroy` closes it
+// Package session is the local stream lock: `ayis open` holds it for as long as
+// Moonlight is on screen, `ayis status` reports it, and `ayis destroy` closes it
 // before taking the box away. It is how an app knows a stream is already up,
 // even if whatever started it has gone.
 package session
@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	"github.com/jebin2/ayis/internal/local"
 )
 
 // Lock is a held session.
@@ -56,11 +56,11 @@ func File(get func(string) (string, bool), uid int) string {
 			dir = os.TempDir()
 		}
 	}
-	return filepath.Join(dir, fmt.Sprintf("cg-session-%d.pid", uid))
+	return filepath.Join(dir, fmt.Sprintf("ayis-session-%d.pid", uid))
 }
 
 // Running returns the lock if a live session holds it. A file whose process
-// is gone, or whose pid was reused by something that is not cg, holds nothing.
+// is gone, or whose pid was reused by something that is not ayis, holds nothing.
 func Running(path string, p Probe) (Lock, bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -75,7 +75,7 @@ func Running(path string, p Probe) (Lock, bool) {
 		return Lock{}, false
 	}
 	args, ok := p.Args(pid)
-	if !ok || !(strings.Contains(args, "cg") || strings.Contains(args, "game")) {
+	if !ok || !(strings.Contains(args, "ayis") || strings.Contains(args, "game")) {
 		return Lock{}, false // the pid was reused
 	}
 	l := Lock{PID: pid}
@@ -86,7 +86,7 @@ func Running(path string, p Probe) (Lock, bool) {
 }
 
 // Claim takes the lock for this process. It is a pid file, not flock: the app and
-// `cg status` want to SAY what is running, and a pid answers that. A lock that
+// `ayis status` want to SAY what is running, and a pid answers that. A lock that
 // cannot be written is no lock, and no reason to refuse a stream.
 func Claim(path string, now time.Time) {
 	_ = os.WriteFile(path, []byte(fmt.Sprintf("%d %d\n", os.Getpid(), now.Unix())), 0o644)
@@ -94,7 +94,7 @@ func Claim(path string, now time.Time) {
 
 // Release drops the lock now, and only if it is this process's. Not End: that
 // ends whoever holds the lock, and when that is this process it would send TERM to
-// itself - every `cg host open` ended killed, exit 143, and the app called a
+// itself - every `ayis host open` ended killed, exit 143, and the app called a
 // normal session a failed one.
 func Release(path string) {
 	b, err := os.ReadFile(path)
@@ -116,9 +116,9 @@ type Ender struct {
 	Sleep    func(time.Duration)
 }
 
-// End ends the stream this laptop holds, Moonlight first. `cg open` waits on
+// End ends the stream this laptop holds, Moonlight first. `ayis open` waits on
 // Moonlight, so killing Moonlight lets it finish the way it normally does. TERM to
-// the children, then to `cg open` itself; SIGKILL only if ten seconds of asking
+// the children, then to `ayis open` itself; SIGKILL only if ten seconds of asking
 // politely got nowhere. It reports whether no stream is left.
 func (e Ender) End() bool {
 	l, held := Running(e.Path, e.Probe)

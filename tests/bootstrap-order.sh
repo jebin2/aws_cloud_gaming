@@ -69,7 +69,7 @@ for f in host/install-library.sh; do
 done
 
 echo "5. needrestart is told never to restart the library units"
-# apt's needrestart restarted cg-library-restore mid-download during the NVIDIA
+# apt's needrestart restarted ayis-library-restore mid-download during the NVIDIA
 # install, killing a 160 GB restore and blocking the build for ~9 minutes. The
 # rule is checked by EVALUATING it the way needrestart does, not by grepping for
 # its text: a typo'd regex or a mangled \$ would still grep fine.
@@ -85,7 +85,7 @@ else
       for my $re (keys %{$nrconf{override_rc}}) {
         return 1 if $u =~ /$re/ && !$nrconf{override_rc}{$re} } 0 }
     print join " ", map { skipped($_) ? "skip" : "restart" }
-      qw(cg-library-restore.service cg-library-shutdown.service ssh.service sunshine.service);
+      qw(ayis-library-restore.service ayis-library-shutdown.service ssh.service sunshine.service);
   ' 2>&1)
   check "restore, shutdown skipped; ssh, sunshine still restarted" "$verdict" "skip skip restart restart"
 fi

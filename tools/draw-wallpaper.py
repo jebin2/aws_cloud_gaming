@@ -1,7 +1,7 @@
 # The game PC's desktop help picture: black, pale green, flat colours only.
-# Draws lib/assets/gamepc-help.png (needs Pillow and the DejaVu fonts, on a
+# Draws lib/assets/ayis-help.png (needs Pillow and the DejaVu fonts, on a
 # developer's machine only - the box is sent the finished picture):
-#     python3 -I tools/draw-wallpaper.py lib/assets/gamepc-help.png
+#     python3 -I tools/draw-wallpaper.py lib/assets/ayis-help.png
 # Flat fills and no gradient on purpose: a stream at a low bitrate bands a gradient
 # and smears fine detail, while flat black with sharp, large text stays clean.
 from PIL import Image, ImageDraw, ImageFont
@@ -56,7 +56,7 @@ line("this PC; press Z to use your own. on a Mac: Command + Option.", DIM, 21, 2
 y += 12
 
 head("added a games disk?")
-line("Steam > Settings > Storage > Add Drive > the drive at /scratch2 (cgextra)")
+line("Steam > Settings > Storage > Add Drive > the drive at /scratch2 (ayisextra)")
 y += 10
 
 head("before you delete this machine")

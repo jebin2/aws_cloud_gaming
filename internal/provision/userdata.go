@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/render"
+	"github.com/jebin2/ayis/internal/render"
 )
 
 // UserDataLimit is what EC2 allows user-data to be, in bytes.
@@ -77,7 +77,7 @@ func hostBundle(fsys fs.FS, ntfyURL string, extra map[string][]byte) ([]byte, er
 		}
 		b = stripComments(b)
 		mode := int64(0o644)
-		if strings.HasSuffix(n, ".sh") || n == "cg-library" || n == "cg-notify" {
+		if strings.HasSuffix(n, ".sh") || n == "ayis-library" || n == "ayis-notify" {
 			mode = 0o755
 		}
 		if err := put(n, mode, b); err != nil {
@@ -87,8 +87,8 @@ func hostBundle(fsys fs.FS, ntfyURL string, extra map[string][]byte) ([]byte, er
 	// The desktop help picture rides in the bundle as it is: a picture is not a
 	// script, and stripping its "comment" lines would break it. It is not in host/
 	// for the same reason (everything there is stripped).
-	if pic, err := fs.ReadFile(fsys, "lib/assets/gamepc-help.png"); err == nil {
-		withPic := map[string][]byte{"gamepc-help.png": pic}
+	if pic, err := fs.ReadFile(fsys, "lib/assets/ayis-help.png"); err == nil {
+		withPic := map[string][]byte{"ayis-help.png": pic}
 		for k, v := range extra {
 			withPic[k] = v
 		}
@@ -168,7 +168,7 @@ func CrossRegion(bucketRegion, region string, archiveBytes int64, price, inr *fl
 	switch {
 	case archiveBytes < 0:
 		out = append(out, "   the box can read it, but every GB crossing regions is billed at",
-			"   "+txt+". The size could not be read - cg library list shows it.")
+			"   "+txt+". The size could not be read - ayis library list shows it.")
 	case archiveBytes < 1<<30:
 		out = append(out, "   nothing is archived there yet, so nothing is being billed to cross",
 			"   regions. Once games are pushed, every GB back is "+txt+".")
@@ -182,5 +182,5 @@ func CrossRegion(bucketRegion, region string, archiveBytes int64, price, inr *fl
 		}
 	}
 	return append(out, "   To keep everything in "+region+" instead, clear GAME_S3_BUCKET from .env",
-		"   and let cg init make one there - the games in "+bucketRegion+" stay put.")
+		"   and let ayis init make one there - the games in "+bucketRegion+" stay put.")
 }

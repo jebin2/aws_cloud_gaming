@@ -1,5 +1,5 @@
-// The runner is the whole contract between the app and cg, so it is tested
-// against a fake cg: events on stderr, data on stdout, answers on stdin.
+// The runner is the whole contract between the app and ayis, so it is tested
+// against a fake ayis: events on stderr, data on stdout, answers on stdin.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, chmodSync, readFileSync, unlinkSync } from 'node:fs';
@@ -15,9 +15,9 @@ function alive(pid) {
 }
 
 function fakeRepo(script) {
-  const dir = mkdtempSync(join(tmpdir(), 'cg-app-'));
-  writeFileSync(join(dir, 'cg'), '#!/usr/bin/env bash\n' + script, { mode: 0o755 });
-  chmodSync(join(dir, 'cg'), 0o755);
+  const dir = mkdtempSync(join(tmpdir(), 'ayis-app-'));
+  writeFileSync(join(dir, 'ayis'), '#!/usr/bin/env bash\n' + script, { mode: 0o755 });
+  chmodSync(join(dir, 'ayis'), 0o755);
   return dir;
 }
 
@@ -83,24 +83,24 @@ test('a failing command reports its exit code', async () => {
   assert.equal(events.at(-1).rc, 1);
 });
 
-test('cg is always run with CG_JSON=1', async () => {
-  const repo = fakeRepo(`echo "{\\"t\\":\\"line\\",\\"kind\\":\\"info\\",\\"text\\":\\"json=$CG_JSON\\"}" >&2; exit 0`);
+test('ayis is always run with AYIS_JSON=1', async () => {
+  const repo = fakeRepo(`echo "{\\"t\\":\\"line\\",\\"kind\\":\\"info\\",\\"text\\":\\"json=$AYIS_JSON\\"}" >&2; exit 0`);
   const { events } = await collect(repo, ['status']);
   assert.equal(events.find(e => e.t === 'line').text, 'json=1');
 });
 
-test('cg runs natively everywhere: ./cg, or cg.exe on Windows', () => {
-  const { file, argv, opts } = spawnArgs('/home/me/cloud_gaming', ['library', 'list']);
+test('ayis runs natively everywhere: ./ayis, or ayis.exe on Windows', () => {
+  const { file, argv, opts } = spawnArgs('/home/me/ayis', ['library', 'list']);
   assert.deepEqual(argv, ['library', 'list']);
-  assert.equal(opts.cwd, '/home/me/cloud_gaming');
-  if (process.platform === 'win32') assert.match(file, /cg\.exe$/);
-  else assert.equal(file, './cg');
+  assert.equal(opts.cwd, '/home/me/ayis');
+  if (process.platform === 'win32') assert.match(file, /ayis\.exe$/);
+  else assert.equal(file, './ayis');
 });
 
-test('Stop signals everything cg started, not just cg', async () => {
+test('Stop signals everything ayis started, not just ayis', async () => {
   // A build spawns aws, ssh, provision.sh. Signalling the child alone left
-  // those running, which is why cg runs in its own process group.
-  const marker = join(tmpdir(), `cg-app-grandchild-${process.pid}`);
+  // those running, which is why ayis runs in its own process group.
+  const marker = join(tmpdir(), `ayis-app-grandchild-${process.pid}`);
   const repo = fakeRepo(`
     trap 'exit 130' INT
     # trap - INT: a background job in a script inherits SIGINT ignored, while

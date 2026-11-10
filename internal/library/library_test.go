@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/bucket"
+	"github.com/jebin2/ayis/internal/bucket"
 )
 
 type obj struct {
@@ -75,7 +75,7 @@ func (p params) Path(context.Context, string) (map[string]string, error) { retur
 
 func fl(v float64) *float64 { return &v }
 
-const account, host = "123456789012", "gamevps"
+const account, host = "123456789012", "ayis"
 
 var here = bucket.Name(account, host, "ap-south-1")
 
@@ -165,7 +165,7 @@ func TestTheListing(t *testing.T) {
 	f.objects[here]["steam/account/steam-account.tgz"] = obj{head: Head{Size: 22458, Modified: time.Date(2026, 10, 10, 16, 30, 3, 0, time.UTC), ETag: `"abc"`}, data: []byte("not a tarball")}
 	l := lib(f)
 	gb := 250
-	res := l.List(context.Background(), params{"/cloud-gaming/gamevps/archive-last-seen": "2026-10-24T20:44:20Z", "/cloud-gaming/gamevps/kept/" + here + "/440": "2026-10-20"},
+	res := l.List(context.Background(), params{"/ayis/ayis/archive-last-seen": "2026-10-24T20:44:20Z", "/ayis/ayis/kept/" + here + "/440": "2026-10-20"},
 		Disk{Type: "g6.xlarge", GB: &gb, Measured: true, ReserveGB: ptr(20)}, 14)
 	g := *res.Games
 	if len(g) != 2 || g[0].Name != "Diablo IV" || *g[0].USDMonth != 4 || g[1].Kept == nil || *g[1].Kept != "2026-10-20" {
@@ -196,14 +196,14 @@ func TestTheHumanList(t *testing.T) {
 	}
 	for _, want := range []string{"APPID      GAME", "2344520    Diablo IV", "440        Team Fortress 2", "160.0 GB  2026-10-10 12:00",
 		"total                             180.0 GB   $4.50/month (INR 450)", "250 GB fits on a g6.xlarge at once (230 GB selectable, 20 GB kept free; AWS figure, not yet measured)",
-		"plus 6.0 GB of ORPHANED objects from an unfinished push", "remove them: cg library clean"} {
+		"plus 6.0 GB of ORPHANED objects from an unfinished push", "remove them: ayis library clean"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("lacks %q:\n%s", want, text)
 		}
 	}
 	small := 100
 	text, _ = l.Human(context.Background(), nil, Disk{Type: "g4dn.xlarge", GB: &small, ReserveGB: ptr(20)})
-	if !strings.Contains(text, "the archive is larger than that - cg init asks which to restore") {
+	if !strings.Contains(text, "the archive is larger than that - ayis init asks which to restore") {
 		t.Errorf("%s", text)
 	}
 	text, _ = l.Human(context.Background(), nil, Disk{Type: "g6.xlarge"})
@@ -304,15 +304,15 @@ func TestTheArchivedLoginAndItsAccounts(t *testing.T) {
 
 func TestOnlyMyBucketsAreMine(t *testing.T) {
 	if !Ours(bucket.Name(account, host, "ap-south-2"), "ap-south-2", account, host) || !Ours(bucket.NameNoRegion(account, host), "ap-south-1", account, host) {
-		t.Error("derived and legacy names are cg's")
+		t.Error("derived and legacy names are ayis's")
 	}
-	if Ours("cg-library-000000000000", "ap-south-1", account, host) || Ours(bucket.Name(account, host, "ap-south-2"), "ap-south-1", account, host) {
+	if Ours("ayis-library-000000000000", "ap-south-1", account, host) || Ours(bucket.Name(account, host, "ap-south-2"), "ap-south-1", account, host) {
 		t.Error("a name merely like ours, or ours in another region, is not ours")
 	}
 }
 
 func prices(_ context.Context, region, key string) *float64 {
-	if key == "CG_XREGION_USD_GB" {
+	if key == "AYIS_XREGION_USD_GB" {
 		return fl(0.086)
 	}
 	if region == "ap-south-2" {
@@ -321,13 +321,13 @@ func prices(_ context.Context, region, key string) *float64 {
 	return fl(0.023)
 }
 
-// A region move left games in a bucket cg no longer looks at.
+// A region move left games in a bucket ayis no longer looks at.
 func TestGamesSavedSomewhereElse(t *testing.T) {
 	old := bucket.Name(account, host, "ap-south-2")
 	f := world()
 	f.buckets[old] = "ap-south-2"
 	f.buckets["some-other-project"] = "us-east-1"
-	f.buckets["cg-library-deadbeef0000"] = "us-east-1" // named like ours, not ours
+	f.buckets["ayis-library-deadbeef0000"] = "us-east-1" // named like ours, not ours
 	f.objects[old] = map[string]obj{"steam/index.json": {data: indexJSON(App{AppID: "2344520", Name: "Diablo IV", InstallDir: "Diablo IV", Bytes: 160 << 30})},
 		"steam/account/steam-account.tgz": {head: Head{Size: 22458, ETag: `"e"`}, data: tgz(t, vdf)}}
 	f.lists[old] = []Object{{Key: "steam/steamapps/common/Diablo IV/a.bin", Size: 160 << 30}, {Key: "steam/account/steam-account.tgz", Size: 22458}}
@@ -346,7 +346,7 @@ func TestGamesSavedSomewhereElse(t *testing.T) {
 		t.Errorf("%+v", e)
 	}
 	text, ok := ShowElsewhere(e, fl(100))
-	for _, want := range []string{"ap-south-2", "160.0 GB   INR 400 a month   s3://" + old, "2344520    Diablo IV", "(and a Steam login)", "cg library move <appid> --from <bucket>"} {
+	for _, want := range []string{"ap-south-2", "160.0 GB   INR 400 a month   s3://" + old, "2344520    Diablo IV", "(and a Steam login)", "ayis library move <appid> --from <bucket>"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("lacks %q:\n%s", want, text)
 		}
@@ -389,8 +389,8 @@ func TestElsewhereFailuresAreSaidNotHidden(t *testing.T) {
 }
 
 func TestMarks(t *testing.T) {
-	m := ReadMarks(context.Background(), params{"/cloud-gaming/gamevps/archive-last-seen": "2026-10-24T20:44:20Z",
-		"/cloud-gaming/gamevps/kept/b/440": "2026-10-20", "/cloud-gaming/gamevps/other": "x"}, host)
+	m := ReadMarks(context.Background(), params{"/ayis/ayis/archive-last-seen": "2026-10-24T20:44:20Z",
+		"/ayis/ayis/kept/b/440": "2026-10-20", "/ayis/ayis/other": "x"}, host)
 	if *m.LastSeen != "2026-10-24T20:44:20Z" || m.Kept["b/440"] != "2026-10-20" || len(m.Kept) != 1 {
 		t.Errorf("%+v", m)
 	}

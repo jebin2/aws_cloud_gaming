@@ -15,7 +15,7 @@ import (
 func TestSpotAllowanceNamesWhatHoldsIt(t *testing.T) {
 	f := LaunchFailure{Code: "MaxSpotInstanceCountExceeded", Type: "g6.xlarge", Region: "ap-south-1", Holders: []Holder{{"i-1", "running", "g6.xlarge", "2026-10-25T01:00:00+00:00"}}, HoldersKnown: true}
 	got := strings.Join(f.Report(), "\n")
-	for _, want := range []string{"!! a spot machine in ap-south-1 is still there and holds your spot allowance: i-1 (running)", "nothing was launched by this build - but the machine above is still billing", "    i-1  running  g6.xlarge  launched 2026-10-25T01:00:00+00:00", "GAME_SPOT=0 cg init (L-3819A6DF)"} {
+	for _, want := range []string{"!! a spot machine in ap-south-1 is still there and holds your spot allowance: i-1 (running)", "nothing was launched by this build - but the machine above is still billing", "    i-1  running  g6.xlarge  launched 2026-10-25T01:00:00+00:00", "GAME_SPOT=0 ayis init (L-3819A6DF)"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}

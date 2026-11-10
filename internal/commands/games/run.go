@@ -10,16 +10,16 @@ import (
 	awspricing "github.com/aws/aws-sdk-go-v2/service/pricing"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/remote"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/commands/remote"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/pricing"
 )
 
-// Run is `cg games` and `cg games --volume`.
+// Run is `ayis games` and `ayis games --volume`.
 func Run(ctx context.Context, env *config.Env, args []string, out *output.Out) int {
 	if len(args) > 0 && (args[0] == "--volume" || args[0] == "volume") {
 		return runVolume(ctx, env, args[1:], out)
@@ -34,8 +34,8 @@ func Run(ctx context.Context, env *config.Env, args []string, out *output.Out) i
 			// app can ask every few seconds without a request to AWS each time.
 			boxOnly = true
 		default:
-			// `cg games --delete` has never existed: the volume's is --volume --delete.
-			out.Die("usage: cg games [--json] [--box] [--volume [--delete]]")
+			// `ayis games --delete` has never existed: the volume's is --volume --delete.
+			out.Die("usage: ayis games [--json] [--box] [--volume [--delete]]")
 			return 1
 		}
 	}
@@ -88,7 +88,7 @@ func runVolume(ctx context.Context, env *config.Env, args []string, out *output.
 	case "show", "":
 	case "--delete", "delete":
 	default:
-		out.Die("usage: cg games [--volume [--delete]]")
+		out.Die("usage: ayis games [--volume [--delete]]")
 		return 1
 	}
 	cfg, err := awscfg.New(ctx, env.Region())
@@ -102,7 +102,7 @@ func runVolume(ctx context.Context, env *config.Env, args []string, out *output.
 		return 1
 	}
 	if sub == "--delete" || sub == "delete" {
-		return DeleteVolume(ctx, ec2.NewFromConfig(cfg), v, ask.New(out, os.Getenv("CG_YES") == "1"), out)
+		return DeleteVolume(ctx, ec2.NewFromConfig(cfg), v, ask.New(out, os.Getenv("AYIS_YES") == "1"), out)
 	}
 	us, _ := awscfg.New(ctx, "us-east-1")
 	rates := pricing.Load(ctx, pricing.Options{Getenv: env.Get,

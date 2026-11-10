@@ -7,11 +7,11 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/provision"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/provision"
 )
 
 // Chooser asks which archived games to restore, before anything launches: the
@@ -67,12 +67,12 @@ func (c Chooser) Choose(ctx context.Context) string {
 func (c Chooser) pick(ctx context.Context, current string) (string, bool) {
 	bucket, known := c.Lib.Bucket, c.Lib.Bucket != ""
 	if !known {
-		// No bucket in .env: a new laptop before its first cg init writes one, or the
+		// No bucket in .env: a new laptop before its first ayis init writes one, or the
 		// state a region move leaves behind. This used to answer "all" without asking,
 		// so a new laptop's first build restored every archived game.
 		b, ok := c.Lib.BucketName()
 		if !ok {
-			c.say("  could not tell which game archive to read - restoring none; cg library pull fetches games later\n")
+			c.say("  could not tell which game archive to read - restoring none; ayis library pull fetches games later\n")
 			return "none", true
 		}
 		bucket = b
@@ -84,7 +84,7 @@ func (c Chooser) pick(ctx context.Context, current string) (string, bool) {
 	apps, missing, err := c.Lib.IndexAt(ctx, bucket, region)
 	if missing {
 		if !known {
-			c.say("  no archive found at the derived name - restoring none; cg library pull fetches games later\n")
+			c.say("  no archive found at the derived name - restoring none; ayis library pull fetches games later\n")
 			return "none", true
 		}
 		return "all", true
@@ -97,13 +97,13 @@ func (c Chooser) pick(ctx context.Context, current string) (string, bool) {
 		// restore every game in the real archive - 163 GB onto a 229 GB disk, which is
 		// the exact overflow this chooser exists to prevent.
 		if strings.Contains(err.Error(), "does not exist") && !known {
-			c.say("  no archive found at the derived name - restoring none; cg library pull fetches games later\n")
+			c.say("  no archive found at the derived name - restoring none; ayis library pull fetches games later\n")
 			return "none", true
 		}
 		if strings.Contains(err.Error(), "does not exist") {
 			return "all", true
 		}
-		c.say("  could not read the game archive's index - restoring none; cg library pull fetches games later\n")
+		c.say("  could not read the game archive's index - restoring none; ayis library pull fetches games later\n")
 		return "none", true
 	}
 	// Nothing archived yet: no question worth asking.
@@ -236,7 +236,7 @@ func resolve(apps []library.App, text string) ([]library.App, error) {
 // a prompt, and here that would start a 158 GB transfer - minutes of build time and
 // an S3 bill - for a box they might have wanted empty. Restoring a game is cheap to
 // ask for and annoying to undo. Nothing is lost by defaulting low: the archive is
-// untouched, and `cg library pull --apps <id>` fetches it later.
+// untouched, and `ayis library pull --apps <id>` fetches it later.
 func (c Chooser) interactive(apps []library.App) (string, bool) {
 	const def = "none"
 	c.table(apps)

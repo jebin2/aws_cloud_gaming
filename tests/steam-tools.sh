@@ -7,7 +7,7 @@
 # game archiving never removes an absent app, so they would have stayed forever.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-SRC=host/cg-library
+SRC=host/ayis-library
 T=$(mktemp -d); pass=0; fail=0
 trap 'rm -rf "$T"' EXIT
 contains() { if [[ $2 == *"$3"* ]]; then echo "  ok   $1"; pass=$((pass+1));
@@ -44,9 +44,9 @@ app 9999991 "HunterGame" "Proton Hunter"
 
 : > "$T/s5.log"
 out=$(S5LOG="$T/s5.log" PATH="$T/bin:$PATH" HOME="$T/home" \
-  CG_EXTRA_LIBS="${CG_EXTRA_LIBS-}" CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam \
-  CG_STATE_DIR="$T/state" CG_S5CMD="$T/bin/s5cmd" CG_BOOT_ID_FILE="$T/bootid" \
-  CG_STEAM_BASE="$T/home" timeout 60 bash "$SRC" push 2>&1)
+  AYIS_EXTRA_LIBS="${AYIS_EXTRA_LIBS-}" AYIS_LIB_DIR="$T/scratch/steam" AYIS_S3_BUCKET=b AYIS_S3_PREFIX=steam \
+  AYIS_STATE_DIR="$T/state" AYIS_S5CMD="$T/bin/s5cmd" AYIS_BOOT_ID_FILE="$T/bootid" \
+  AYIS_STEAM_BASE="$T/home" timeout 60 bash "$SRC" push 2>&1)
 log=$(cat "$T/s5.log")
 
 echo "1. the game is archived"

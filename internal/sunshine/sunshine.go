@@ -1,4 +1,4 @@
-// Package sunshine is the stream server on a box or machine, as far as cg talks
+// Package sunshine is the stream server on a box or machine, as far as ayis talks
 // to it over HTTPS: whether it answers, and whether a login is the one it takes.
 //
 // The Sunshine login: this laptop and the machine must never hold different ones.

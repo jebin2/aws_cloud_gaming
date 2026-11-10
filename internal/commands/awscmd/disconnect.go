@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/inventory"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/storage"
-	"github.com/jebin2/aws_cloud_gaming/internal/teardown"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/inventory"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/storage"
+	"github.com/jebin2/ayis/internal/teardown"
 )
 
-// Disconnector is `cg aws disconnect`: this laptop stops playing on AWS, and leaves
+// Disconnector is `ayis aws disconnect`: this laptop stops playing on AWS, and leaves
 // nothing there that bills: the machine, every region's saved games, leftover disks
-// and images, the watchdog, the budget - cg destroy --all, every other region's
+// and images, the watchdog, the budget - ayis destroy --all, every other region's
 // archive, then a look to make sure. What stays is free and yours: the account, the
 // access key it signs in with, region opt-ins and GPU quota.
 type Disconnector struct {
@@ -24,7 +24,7 @@ type Disconnector struct {
 	Env *config.Env
 	// Inventory reads what is there, live.
 	Inventory func(ctx context.Context) inventory.Result
-	// DestroyHere is `cg destroy --all --force` for the region in use.
+	// DestroyHere is `ayis destroy --all --force` for the region in use.
 	DestroyHere func(ctx context.Context) int
 	// RemoveWatchdog removes the cloud watchdog in a region; the last of them,
 	// finding none left that uses the shared role, takes it too.
@@ -62,7 +62,7 @@ func (d Disconnector) Run(ctx context.Context) int {
 		d.Out.Die("AWS could not be asked what is there - nothing was deleted")
 		return 3
 	}
-	d.Out.Say("this deletes everything cg has in AWS")
+	d.Out.Say("this deletes everything ayis has in AWS")
 	for _, it := range inv.Items {
 		d.Out.Echo(fmt.Sprintf("  %-22s %s", it.Label, it.Detail))
 	}
@@ -107,10 +107,10 @@ func (d Disconnector) Run(ctx context.Context) int {
 		}
 	}
 
-	// cg's disks, images and snapshots in every region - this one's went with destroy
+	// ayis's disks, images and snapshots in every region - this one's went with destroy
 	// above; a region move left others behind.
 	if !d.Teardown.CleanEverywhere(ctx, d.Scan(ctx)) {
-		d.Out.LogAs("fail", "some of cg's disks, images or snapshots could not be deleted")
+		d.Out.LogAs("fail", "some of ayis's disks, images or snapshots could not be deleted")
 	}
 
 	// Every other region's saved games.
@@ -134,7 +134,7 @@ func (d Disconnector) Run(ctx context.Context) int {
 		d.Teardown.DeleteSettings(ctx, by)
 	}
 
-	// A look, not a hope: anything of cg's still there - billing or not - is said, and
+	// A look, not a hope: anything of ayis's still there - billing or not - is said, and
 	// AWS stays set up here so it can still be seen and deleted.
 	d.Out.Say("checking nothing is left")
 	left := d.Inventory(ctx)
@@ -161,7 +161,7 @@ func (d Disconnector) Run(ctx context.Context) int {
 		d.Out.Die("could not write .env")
 		return 1
 	}
-	d.Out.LogAs("ok", "AWS disconnected - nothing of cg is left billing, nor anything else of cg's")
+	d.Out.LogAs("ok", "AWS disconnected - nothing of ayis is left billing, nor anything else of ayis's")
 	d.Out.Log("the account, its access key, region opt-ins and GPU quota were kept; they cost nothing")
 	return 0
 }

@@ -10,9 +10,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/format"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	"github.com/jebin2/aws_cloud_gaming/internal/watchdog"
+	"github.com/jebin2/ayis/internal/format"
+	"github.com/jebin2/ayis/internal/pricing"
+	"github.com/jebin2/ayis/internal/watchdog"
 )
 
 // LoginLine is the archived Steam login, on its own line because it is its own
@@ -29,7 +29,7 @@ func LoginLine(present Known[bool], bytes int64, pushed string) string {
 		if bytes > 0 {
 			size = ", " + format.IEC(bytes)
 		}
-		s := fmt.Sprintf("  steam login     archived%s - a new box comes up signed in  (cg library account)\n", size)
+		s := fmt.Sprintf("  steam login     archived%s - a new box comes up signed in  (ayis library account)\n", size)
 		if pushed != "" {
 			s += fmt.Sprintf("                  pushed %s\n", pushed)
 		}
@@ -38,8 +38,8 @@ func LoginLine(present Known[bool], bytes int64, pushed string) string {
 	return "  steam login     none archived - a new box will ask you to sign in\n"
 }
 
-// RoleLines are the IAM roles cg made. Status used to show no IAM at all, and
-// that is how a live access key survived `cg destroy --all` unnoticed: anything
+// RoleLines are the IAM roles ayis made. Status used to show no IAM at all, and
+// that is how a live access key survived `ayis destroy --all` unnoticed: anything
 // that can act on the account, or cost money, belongs in a status view.
 func RoleLines(box, wd Known[bool], host string) string {
 	role := func(k Known[bool], label, name, what string) string {
@@ -49,7 +49,7 @@ func RoleLines(box, wd Known[bool], host string) string {
 		case k.V:
 			return fmt.Sprintf("  %s %s  (%s)\n", label, name, what)
 		}
-		return fmt.Sprintf("  %s none - cg init creates it\n", label)
+		return fmt.Sprintf("  %s none - ayis init creates it\n", label)
 	}
 	return role(box, "instance role  ", host+"-box", "lets the box read/write its library bucket") +
 		role(wd, "watchdog role  ", watchdog.Name(host), "the cloud watchdog: ends only the "+host+" box")
@@ -71,11 +71,11 @@ func StrandedLines(s *Stranded, r pricing.Rates) string {
 	default:
 		fmt.Fprintf(&b, "                 its %d GB root volume still bills $%.2f/mo (INR %.0f)\n", s.GB, g**r.EBSGBMonth, g**r.EBSGBMonth**r.INRPerUSD)
 	}
-	b.WriteString("                 reclaim it: cg destroy\n")
+	b.WriteString("                 reclaim it: ayis destroy\n")
 	return b.String()
 }
 
-// Extras are the facts `cg cost` borrows from the status report: what sits
+// Extras are the facts `ayis cost` borrows from the status report: what sits
 // beside the archive.
 type Extras struct {
 	Login    Known[bool]

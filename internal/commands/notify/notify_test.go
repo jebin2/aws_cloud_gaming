@@ -10,15 +10,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 func env(t *testing.T, line string) *config.Env {
 	f := filepath.Join(t.TempDir(), ".env")
 	_ = os.WriteFile(f, []byte(line+"\n"), 0o600)
 	return config.Load(func(k string) (string, bool) {
-		if k == "CG_ENV_FILE" {
+		if k == "AYIS_ENV_FILE" {
 			return f, true
 		}
 		return "", false

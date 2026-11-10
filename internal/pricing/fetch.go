@@ -94,7 +94,7 @@ func firstTier(raw []string) (usageType string, usd *float64) {
 // endpoint for the rupee.
 type AWSSource struct {
 	API    Products
-	FXURL  string // CG_FX_URL, or the default
+	FXURL  string // AYIS_FX_URL, or the default
 	Client *http.Client
 }
 
@@ -118,15 +118,15 @@ func (a AWSSource) Prices(ctx context.Context, region string) (map[string]float6
 	}
 	prefix := strings.SplitN(ut, "EBS:", 2)[0]
 	asks := map[string][2]string{
-		"CG_SNAPSHOT_USD_GB_MONTH": {"AmazonEC2", prefix + "EBS:SnapshotUsage"},
-		"CG_S3_USD_GB_MONTH":       {"AmazonS3", prefix + "TimedStorage-ByteHrs"},
-		"CG_IPV4_USD_HOUR":         {"AmazonVPC", prefix + "PublicIPv4:InUseAddress"},
-		"CG_EGRESS_USD_GB":         {"AWSDataTransfer", prefix + "DataTransfer-Out-Bytes"},
-		"CG_XREGION_USD_GB":        {"AWSDataTransfer", prefix + "AWS-Out-Bytes"},
+		"AYIS_SNAPSHOT_USD_GB_MONTH": {"AmazonEC2", prefix + "EBS:SnapshotUsage"},
+		"AYIS_S3_USD_GB_MONTH":       {"AmazonS3", prefix + "TimedStorage-ByteHrs"},
+		"AYIS_IPV4_USD_HOUR":         {"AmazonVPC", prefix + "PublicIPv4:InUseAddress"},
+		"AYIS_EGRESS_USD_GB":         {"AWSDataTransfer", prefix + "DataTransfer-Out-Bytes"},
+		"AYIS_XREGION_USD_GB":        {"AWSDataTransfer", prefix + "AWS-Out-Bytes"},
 		// Cost Explorer is billed in us-east-1 whatever the region.
-		"CG_CE_CALL_USD": {"AWSCostExplorer", "USE1-APIRequest"},
+		"AYIS_CE_CALL_USD": {"AWSCostExplorer", "USE1-APIRequest"},
 	}
-	got := map[string]float64{"CG_EBS_USD_GB_MONTH": *ebs}
+	got := map[string]float64{"AYIS_EBS_USD_GB_MONTH": *ebs}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	var firstErr error
@@ -170,7 +170,7 @@ const DefaultFXURL = "https://jeapis.netlify.app/.netlify/functions/currency?fro
 func (a AWSSource) FX(ctx context.Context) (float64, error) {
 	url := a.FXURL
 	if url == "" {
-		url = os.Getenv("CG_FX_URL")
+		url = os.Getenv("AYIS_FX_URL")
 	}
 	if url == "" {
 		url = DefaultFXURL

@@ -215,10 +215,10 @@ func (f LaunchFailure) Report() []string {
 		switch {
 		case len(live) > 0:
 			out = append(out, "  Each one counts against the spot allowance while it exists, stopped or not,",
-				"  and a running one is billing. If it is the machine cg built, delete it -",
-				"  Delete on the app's Machine page, or: cg destroy - then build again.",
+				"  and a running one is billing. If it is the machine ayis built, delete it -",
+				"  Delete on the app's Machine page, or: ayis destroy - then build again.",
 				"  Anything else is in the EC2 console.",
-				"  If the allowance is simply too small for two: GAME_SPOT=0 cg init (L-3819A6DF)")
+				"  If the allowance is simply too small for two: GAME_SPOT=0 ayis init (L-3819A6DF)")
 		case len(f.Holders) > 0:
 			out = append(out, "  It is on its way out; AWS frees its share of the allowance once it is gone.",
 				"  Nothing is wrong - try again in a minute or two.")
@@ -227,7 +227,7 @@ func (f LaunchFailure) Report() []string {
 				"  minute or two AFTER an instance terminates, so an immediate rebuild",
 				"  hits it. Nothing is wrong - wait ~2 minutes and run it again.",
 				fmt.Sprintf("  If it persists, the quota (L-3819A6DF) is smaller than %s needs:", t),
-				"    GAME_SPOT=0 cg init",
+				"    GAME_SPOT=0 ayis init",
 				"  What holds it: aws ec2 describe-spot-instance-requests --region "+r)
 		}
 	case "InsufficientInstanceCapacity", "SpotMaxPriceTooLow":
@@ -241,11 +241,11 @@ func (f LaunchFailure) Report() []string {
 				"  does not.",
 				"",
 				"  Pay full price, and build now:",
-				"      cg config set GAME_SPOT 0       (Settings > purchase model, in the app)",
+				"      ayis config set GAME_SPOT 0       (Settings > purchase model, in the app)",
 				"  Try a different GPU - each shape is its own pool:",
-				"      cg machines",
+				"      ayis machines",
 				"  Or see which region has capacity, free and about 90 seconds:",
-				"      cg sweep                        (Scan all regions, in the app)",
+				"      ayis sweep                        (Scan all regions, in the app)",
 				"",
 				"  Or come back later. Spot capacity returns on its own, often within hours,",
 				"  and nothing here needs fixing in the meantime.")
@@ -254,9 +254,9 @@ func (f LaunchFailure) Report() []string {
 				"  fall back to - the region is simply out of this machine.",
 				"",
 				"  Try a different GPU - each shape is its own pool:",
-				"      cg machines",
+				"      ayis machines",
 				"  Or see which region has capacity, free and about 90 seconds:",
-				"      cg sweep                        (Scan all regions, in the app)",
+				"      ayis sweep                        (Scan all regions, in the app)",
 				fmt.Sprintf("      note: your game archive lives in %s and does not", here),
 				"      follow you - a box elsewhere re-downloads what it needs.",
 				"",
@@ -264,14 +264,14 @@ func (f LaunchFailure) Report() []string {
 		}
 	case "VcpuLimitExceeded", "InstanceLimitExceeded":
 		out = append(out, fmt.Sprintf("  The on-demand vCPU quota in %s is smaller than", orStr(region, "the region")),
-			fmt.Sprintf("  %s needs. What you have: cg status", orStr(f.Type, "this instance")))
+			fmt.Sprintf("  %s needs. What you have: ayis status", orStr(f.Type, "this instance")))
 	case "AccessDenied", "AccessDeniedException", "UnauthorizedOperation":
 		out = append(out, "  Launching with an instance profile needs iam:PassRole for",
 			fmt.Sprintf("  %s. Without it the box cannot reach", orStr(f.Profile, "the instance profile")),
 			"  S3, and the game library will not survive a stop.")
 	case "InvalidKeyPair.NotFound":
 		out = append(out, fmt.Sprintf("  The key pair %s no longer exists in %s.", f.KeyName, orStr(region, "the region")),
-			fmt.Sprintf("  cg check --fix recreates it and the matching %s.", orStr(f.KeyFile, ".pem")))
+			fmt.Sprintf("  ayis check --fix recreates it and the matching %s.", orStr(f.KeyFile, ".pem")))
 	case "OptInRequired", "SubscriptionRequiredException", "AuthFailure", "UnauthorizedAccount", "Blocked":
 		out = append(out, "  AWS refused the ACCOUNT, not the request - a suspension, a verification",
 			"  hold, or a payment problem. Read the console banner before changing",
@@ -279,7 +279,7 @@ func (f LaunchFailure) Report() []string {
 	default:
 		out = append(out, "  Not an error this script has been taught. The usual causes:",
 			"    MaxSpotInstanceCountExceeded   your old allocation, wait ~2 minutes",
-			fmt.Sprintf("    InsufficientInstanceCapacity   region short of %s, GAME_SPOT=0 cg init", orStr(f.Type, "the instance")),
+			fmt.Sprintf("    InsufficientInstanceCapacity   region short of %s, GAME_SPOT=0 ayis init", orStr(f.Type, "the instance")),
 			fmt.Sprintf("    VcpuLimitExceeded              quota smaller than %s needs", orStr(f.Type, "the instance")),
 			fmt.Sprintf("    AccessDenied on iam:PassRole   cannot pass %s", orStr(f.Profile, "the profile")),
 			"  Spot requests: aws ec2 describe-spot-instance-requests --region "+r)

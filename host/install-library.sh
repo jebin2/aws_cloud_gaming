@@ -5,16 +5,16 @@ set -euo pipefail
 
 BUCKET="${1:?usage: install-library.sh <s3-bucket> [prefix] [apps-csv]}"
 PREFIX="${2:-steam}"
-CG_APPS="${3:-${CG_APPS:-all}}"
+AYIS_APPS="${3:-${AYIS_APPS:-all}}"
 # "use" or "fresh" - whether this box restores the archived Steam login. Decided
-# on the laptop, for the same reason CG_APPS is.
-CG_LOGIN="${4:-${CG_LOGIN:-use}}"
+# on the laptop, for the same reason AYIS_APPS is.
+AYIS_LOGIN="${4:-${AYIS_LOGIN:-use}}"
 # Space kept free on the game disk: the laptop's GAME_DISK_RESERVE_GB, so the
 # box and the laptop's picker refuse the same games.
-CG_RESERVE_GB="${5:-${CG_RESERVE_GB:-}}"
+AYIS_RESERVE_GB="${5:-${AYIS_RESERVE_GB:-}}"
 # The games (appids, comma separated) the restore puts on the added disk at
 # /scratch2 instead of the machine's own drive; empty puts them all on the drive.
-CG_EXTRA_APPS="${6:-${CG_EXTRA_APPS:-}}"
+AYIS_EXTRA_APPS="${6:-${AYIS_EXTRA_APPS:-}}"
 S5_VERSION="${S5_VERSION:-2.2.2}"
 
 # The AWS CLI can do this, but at roughly 80 MB/s single-threaded; s5cmd
@@ -43,24 +43,24 @@ if ! /usr/local/bin/s5cmd version >/dev/null 2>&1; then
   install -m 755 "$tmp/s5cmd" /usr/local/bin/s5cmd
 fi
 
-install -m 755 cg-library /usr/local/bin/cg-library
+install -m 755 ayis-library /usr/local/bin/ayis-library
 
 # One config file rather than five copies of the bucket name in unit files.
-# CG_APPS is decided on the LAPTOP, before launch. The restore runs here at boot
+# AYIS_APPS is decided on the LAPTOP, before launch. The restore runs here at boot
 # with no terminal to ask at, and it has to start early to overlap the build, so
 # the choice cannot be made on the box. "all" is the default; "none" boots a
 # clean box for other work.
-cat > /etc/cg-library.conf <<EOF
-CG_S3_BUCKET=$BUCKET
-CG_S3_PREFIX=$PREFIX
-CG_LIB_DIR=${CG_LIB_DIR:-/scratch/steam}
-CG_APPS=${CG_APPS:-all}
-CG_LOGIN=${CG_LOGIN:-use}
-CG_RESERVE_GB=${CG_RESERVE_GB}
-CG_EXTRA_APPS=${CG_EXTRA_APPS}
-CG_EXTRA_LIB=/scratch2/steam
+cat > /etc/ayis-library.conf <<EOF
+AYIS_S3_BUCKET=$BUCKET
+AYIS_S3_PREFIX=$PREFIX
+AYIS_LIB_DIR=${AYIS_LIB_DIR:-/scratch/steam}
+AYIS_APPS=${AYIS_APPS:-all}
+AYIS_LOGIN=${AYIS_LOGIN:-use}
+AYIS_RESERVE_GB=${AYIS_RESERVE_GB}
+AYIS_EXTRA_APPS=${AYIS_EXTRA_APPS}
+AYIS_EXTRA_LIB=/scratch2/steam
 EOF
-chmod 644 /etc/cg-library.conf
+chmod 644 /etc/ayis-library.conf
 
 # The state directory records WHICH boot restored the library - the guard that
 # stops an empty /scratch being pushed over the archive. It must be writable by
@@ -69,8 +69,8 @@ chmod 644 /etc/cg-library.conf
 # Nothing is deleted here. The marker names its boot, so a stale one from a
 # previous boot is already disregarded; deleting it instead meant that
 # re-running this installer on a live box revoked a valid restore and left
-# `cg stop` and `cg destroy` unable to save the games.
-install -d -o ubuntu -g ubuntu -m 755 /var/lib/cg-library
+# `ayis stop` and `ayis destroy` unable to save the games.
+install -d -o ubuntu -g ubuntu -m 755 /var/lib/ayis-library
 
 # Two units: restore at boot, and a mirror on the way down. There is
 # deliberately NO periodic push timer - nothing uploads while you are playing.
@@ -78,24 +78,24 @@ install -d -o ubuntu -g ubuntu -m 755 /var/lib/cg-library
 # The shutdown unit is not optional cover. The box stops itself two ways (the
 # on-host idle watchdog and the cloud watchdog) and both end in a graceful
 # OS shutdown, so without this unit either would wipe the instance store and lose every game installed since the
-# last explicit `cg stop`.
-install -m 644 cg-library-restore.service /etc/systemd/system/
-install -m 644 cg-library-shutdown.service /etc/systemd/system/
-install -m 755 cg-shutdown-push.sh /usr/local/bin/cg-shutdown-push
+# last explicit `ayis stop`.
+install -m 644 ayis-library-restore.service /etc/systemd/system/
+install -m 644 ayis-library-shutdown.service /etc/systemd/system/
+install -m 755 ayis-shutdown-push.sh /usr/local/bin/ayis-shutdown-push
 # Tells Steam about the added disk once Steam has been closed, and again if Steam
 # drops it. Inert on a machine without /scratch2 (the unit waits for the mount).
 install -m 755 steam-add-extra-library /usr/local/bin/steam-add-extra-library
-install -m 644 cg-extra-library.service /etc/systemd/system/
+install -m 644 ayis-extra-library.service /etc/systemd/system/
 # Remove the periodic timer if an earlier build installed one.
-systemctl disable --now cg-library-push.timer >/dev/null 2>&1 || true
-rm -f /etc/systemd/system/cg-library-push.service \
-      /etc/systemd/system/cg-library-push.timer
+systemctl disable --now ayis-library-push.timer >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/ayis-library-push.service \
+      /etc/systemd/system/ayis-library-push.timer
 systemctl daemon-reload
-systemctl enable cg-library-restore.service cg-library-shutdown.service cg-extra-library.service >/dev/null
+systemctl enable ayis-library-restore.service ayis-library-shutdown.service ayis-extra-library.service >/dev/null
 
 echo "library mirror installed: s3://$BUCKET/$PREFIX"
 
-# See the note at the end of cg: bash reads a script incrementally and returns
+# See the note at the end of ayis: bash reads a script incrementally and returns
 # for more input after the last command, so a file edited while this runs can
 # resume at a stale offset. An explicit exit ends the read.
 exit 0

@@ -1,7 +1,7 @@
 # Every push to main and every pull request runs the whole suite, so a break is
-# found by a red check and not by the person who next tries to use cg.
+# found by a red check and not by the person who next tries to use ayis.
 #
-# It is the same command a person runs: `bash tests/run-all.sh` builds cg, runs
+# It is the same command a person runs: `bash tests/run-all.sh` builds ayis, runs
 # `go test ./...`, then the shell and DOM suites. Nothing here touches AWS - the
 # suites use fakes and stubs - so it costs nothing but runner minutes, which are
 # free on a public repository.
@@ -77,12 +77,12 @@ jobs:
           go vet ./...
         shell: bash
 
-      # cg runs on a Mac and a Windows PC as well: it must at least build there,
+      # ayis runs on a Mac and a Windows PC as well: it must at least build there,
       # or a Unix-only call slips in unseen (it did, once: syscall.Kill).
       - name: Build For macOS And Windows
         run: |
           for target in darwin/amd64 darwin/arm64 windows/amd64; do
-            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/cg
+            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/ayis
             GOOS=${target%/*} GOARCH=${target#*/} go vet ./...
             echo "ok  $target"
           done

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Machines in the app, actually rendered: a new laptop with no AWS at all,
-# against a stub cg, from the first open to a server of its own being set up.
+# against a stub ayis, from the first open to a server of its own being set up.
 #
 # What only a render can show:
 #   * there is no setup screen: Home opens, and with no machines it asks the one
@@ -36,7 +36,7 @@ cp app/renderer/index.html app/renderer/app.js app/renderer/*.css "$T/r/"
 cp -r app/renderer/fonts "$T/r/" 2>/dev/null || true
 
 # A laptop with no AWS: the AWS CLI missing, no key, no region - signed in to
-# Tailscale, with a machine key. cg's answers by command. `host add` asks for
+# Tailscale, with a machine key. ayis's answers by command. `host add` asks for
 # the server's password and finishes once it is answered; `config set` and
 # `host add` change what later reads say, as they would.
 cat > "$T/r/stub.js" <<'STUB'
@@ -69,7 +69,7 @@ function reply(a) {
     lines: ['reaching me@10.0.0.5 over ssh'],
     ask: { t: 'ask', id: 'host-ssh-password', prompt: '  password for me@10.0.0.5: ', default: '', secret: 1 },
     afterAnswer: () => { S.hosts = [{ name: 'homebox', ssh: 'me@10.0.0.5', os: 'Linux', family: 'ubuntu', user: 'me' }];
-                         return ["added 'homebox'. Next: cg host setup homebox"]; } };
+                         return ["added 'homebox'. Next: ayis host setup homebox"]; } };
   // Slow, as an ssh round trip and a Sunshine check are.
   // What is in AWS, read slowly enough for the loading to be seen; then the
   // disconnect, which asks for DELETE and leaves no AWS behind.
@@ -80,16 +80,16 @@ function reply(a) {
       { kind: 'watchdog', label: 'Cloud watchdog', detail: 'function, schedule, role, logs', usd_month: 0, bills: false }] } };
   if (a === 'aws disconnect') return {
     ask: { t: 'ask', id: 'aws-disconnect', prompt: '  type DELETE to confirm: ', default: '' },
-    // cg says where old devices can be removed by hand: a page, not a sign-in.
+    // ayis says where old devices can be removed by hand: a page, not a sign-in.
     // Held there, so the dialog can be looked at while it runs.
     afterAnswer: Object.assign(() => { S.region = false; return ['  Or prune them by hand: https://login.tailscale.com/admin/machines',
-                                                    'AWS disconnected - nothing of cg is left billing']; }, { hold: true }) };
+                                                    'AWS disconnected - nothing of ayis is left billing']; }, { hold: true }) };
   if (a === 'host status homebox --json') return { out: STATUS, delay: 300 };
-  // Removing it: cg says whether the key came off, and forgets it either way.
+  // Removing it: ayis says whether the key came off, and forgets it either way.
   if (a === 'host remove homebox') { S.hosts = [];
     return { lines: S.removeDown
-      ? ["could not reach it to take cg's key off - that one line stays in its ~/.ssh/authorized_keys", "forgot 'homebox'"]
-      : ["took cg's key off it", "forgot 'homebox' - nothing else on the machine was changed"] }; }
+      ? ["could not reach it to take ayis's key off - that one line stays in its ~/.ssh/authorized_keys", "forgot 'homebox'"]
+      : ["took ayis's key off it", "forgot 'homebox' - nothing else on the machine was changed"] }; }
   // Setup asks for sudo, then keeps going until the probe lets it finish.
   // ...and, not on the tailnet yet, a key to join it with.
   if (a === 'host setup homebox') return { ask: { t: 'ask', id: 'host-sudo', prompt: '  sudo password for me@10.0.0.5: ', default: '', secret: 1 },
@@ -100,14 +100,14 @@ function reply(a) {
 let handler = null, next = 0;
 const waiting = new Map(), asksAfter = new Map();
 const emit = (id, event) => handler && handler({ id, event });
-window.cg = {
+window.ayis = {
   run: args => {
     const a = args.join(' '); window.__ran.push(a);
     const id = ++next, r = reply(a);
     setTimeout(() => {
       for (const text of r.lines || []) emit(id, { t: 'line', text });
       if (r.out !== undefined) emit(id, { t: 'raw', stream: 'stdout', text: JSON.stringify(r.out) });
-      // Listening before asking, as cg reads its stdin: an answer the window
+      // Listening before asking, as ayis reads its stdin: an answer the window
       // has ready is handed over the moment the question arrives.
       if (r.then) asksAfter.set(id, r.then);
       if (r.afterAnswer) waiting.set(id, r.afterAnswer);
@@ -353,7 +353,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     const removeBtn = () => button(document.querySelector('#b-hosts [data-host="homebox"]'), 'Remove');
     goHost('homebox');
     await wait(200);
-    // An AWS build running: cg would refuse this machine's setup and stream,
+    // An AWS build running: ayis would refuse this machine's setup and stream,
     // so they are greyed, saying why, and back once it ends.
     const own = f => document.querySelector('#b-hosts [data-host="homebox"] button[data-f=' + f + ']');
     const lockState = () => ['play', 'setup'].map(f => f + '=' + (own(f) ? own(f).disabled + ':' + own(f).title : 'none')).join(' ');
@@ -492,7 +492,7 @@ d = open(sys.argv[1]).read()
 m = re.search(r"<pre id=\"probe-out\">(.*?)</pre>", d, re.S)
 print(html.unescape(m.group(1)) if m else "PROBE DID NOT RUN")' "$T/dom.html")
 
-[[ -n ${CG_DOM_DUMP:-} ]] && { printf '%s\n' "$OUT"; exit 0; }
+[[ -n ${AYIS_DOM_DUMP:-} ]] && { printf '%s\n' "$OUT"; exit 0; }
 if [[ $OUT == "PROBE DID NOT RUN" || -z $OUT ]]; then
   echo "  FAIL the page did not render at all"; echo; echo "hosts-dom: $pass passed, 1 failed"; exit 1
 fi
@@ -512,7 +512,7 @@ check    "Install installs what a server needs, no AWS CLI" "$(row 'INSTALL RAN'
 for gone in cli key authkey email where; do
   lacks  "  no AWS step: $gone"                  "$(row 'ADD STAGES')" " $gone:"
 done
-check    "connecting is cg host add"             "$(row 'PW RAN')" "PW RAN | host add --ssh me@10.0.0.5"
+check    "connecting is ayis host add"             "$(row 'PW RAN')" "PW RAN | host add --ssh me@10.0.0.5"
 check    "four fields, the password among them" "$(row 'PW FIELDS')" "PW FIELDS | add-addr,add-user,add-pw,add-name"
 check    "  shown from the start"                "$(row 'PW UPFRONT')" "PW UPFRONT | true"
 check    "its password is asked in the form, no popup" "$(row 'PW OPEN')" "PW OPEN | false"
@@ -521,7 +521,7 @@ contains "  saying it is used once, not stored"   "$(row 'PW PROMPT')" "Used onc
 check    "  hidden as it is typed"               "$(row 'PW INPUT')" "PW INPUT | password"
 check    "  Connect becomes Continue"            "$(row 'PW BUTTONS')" "PW BUTTONS | Continue"
 check    "  an empty one is not sent"            "$(row 'PW EMPTY')" "PW EMPTY | 0"
-check    "  and handed to cg"                    "$(row 'PW ANSWER')" "PW ANSWER | letmein"
+check    "  and handed to ayis"                    "$(row 'PW ANSWER')" "PW ANSWER | letmein"
 check    "  and not left in the field"           "$(row 'PW CLEARED')" "PW CLEARED | "
 contains "added, it waits for what the machine is" "$(row 'SERVER MID')" "server:active setup:locked"
 contains "  still connecting"                    "$(row 'SERVER MID')" "Connecting…"
@@ -532,19 +532,19 @@ lacks    "  no Set up button to click"           "$(row 'SERVER BUTTONS')" "Set 
 
 echo "3. setting it up happens on its card"
 check    "setup runs in the dialog, which stays open" "$(row 'SETUP DIALOG')" "SETUP DIALOG | true"
-check    "  as cg host setup"                    "$(row 'SETUP RAN')" "SETUP RAN | host setup homebox"
+check    "  as ayis host setup"                    "$(row 'SETUP RAN')" "SETUP RAN | host setup homebox"
 check    "  in its step, the log open"           "$(row 'SETUP STATE')" "SETUP STATE | running log=true"
 check    "sudo is asked in the compact popup"    "$(row 'SUDO POPUP')" "SUDO POPUP | true generic=false / Sudo password / homebox: used once for setup. Not stored."
 check    "  one hidden field, focused; Continue waits for it" "$(row 'SUDO FIELD')" "SUDO FIELD | pwdlg-input password continue-off=true"
 check    "  the step says what it waits for"     "$(row 'SUDO LIVE')" "SUDO LIVE | Waiting for the sudo password…"
 check    "  over the add dialog, still open"     "$(row 'SUDO BEHIND')" "SUDO BEHIND | true"
 check    "Esc does not close the add dialog"     "$(row 'ESC')" "ESC | stopped=true"
-check    "  handed to cg, not left in the field" "$(row 'SUDO ANSWER')" "SUDO ANSWER | true cleared=true"
+check    "  handed to ayis, not left in the field" "$(row 'SUDO ANSWER')" "SUDO ANSWER | true cleared=true"
 contains "not on the tailnet: the auth key, in the same popup" "$(row 'KEY POPUP')" "KEY POPUP | true / Tailscale auth key / homebox is not on your tailnet yet."
 contains "  with where to make one"            "$(row 'KEY POPUP')" "Reusable on, Ephemeral off"
 contains "  and what one looks like"           "$(row 'KEY POPUP')" "/ tskey-auth-…"
 check    "  the step says what it waits for"    "$(row 'KEY LIVE')" "KEY LIVE | Waiting for a Tailscale auth key…"
-check    "  handed to cg"                       "$(row 'KEY ANSWER')" "KEY ANSWER | true closed=true"
+check    "  handed to ayis"                       "$(row 'KEY ANSWER')" "KEY ANSWER | true closed=true"
 check    "its progress shows in the step"        "$(row 'SETUP LIVE')" "SETUP LIVE | >>> installing sunshine open=true"
 check    "done: the step ticks"                  "$(row 'SETUP DONE')" "SETUP DONE | done open=true"
 check    "  and then the dialog closes"          "$(row 'SETUP CLOSED')" "SETUP CLOSED | false"
@@ -562,7 +562,7 @@ check    "Try again does not cancel the setup"   "$(row 'RETRY KEPT')" "RETRY KE
 echo "4. its detail"
 check    "the Machine page, for it"              "$(row 'DETAIL VIEW')" "DETAIL VIEW | build aws=hidden own=shown title=Machine"
 check    "  one machine: nothing to pick, no way back to make" "$(row 'DETAIL PICK')" "DETAIL PICK | hidden back=none"
-contains "every check cg made, with what it found" "$(row 'DETAIL CARD')" "Moonlightpaired"
+contains "every check ayis made, with what it found" "$(row 'DETAIL CARD')" "Moonlightpaired"
 contains "  where it is"                         "$(row 'DETAIL CARD')" "me@10.0.0.5"
 contains "  and removing it"                     "$(row 'DETAIL BUTTONS')" "Remove(off)"
 check    "not one read asked AWS"                "$(row 'NO AWS')" "NO AWS | "
@@ -618,7 +618,7 @@ check    "  exactly"                             "$(row 'DISC WRONG')" "DISC WRO
 check    "  then Disconnect can be pressed"      "$(row 'DISC RIGHT')" "DISC RIGHT | go-off=false"
 check    "an admin page in the log is no sign-in button" "$(row 'DISC LINK')" "DISC LINK | signin=false status=Deleting…"
 check    "done: it stays, ticked, with Done - Home already behind it" "$(row 'DISC RESULT')" "DISC RESULT | open=true ✓AWS disconnected. Nothing left billing. buttons=Done behind=dashboard"
-check    "it runs, cg's own DELETE answered, and Done closes onto Home without AWS" "$(row 'DISC DONE')" "DISC DONE | false answered=DELETE ran=1 view=dashboard aws-card=hidden add-aws=shown"
+check    "it runs, ayis's own DELETE answered, and Done closes onto Home without AWS" "$(row 'DISC DONE')" "DISC DONE | false answered=DELETE ran=1 view=dashboard aws-card=hidden add-aws=shown"
 check    "which reopens its steps"               "$(row 'FINISH')" "FINISH | true Finish setting up AWS"
 
 check "no errors on the page" "$(row 'ERRS')" "ERRS | "

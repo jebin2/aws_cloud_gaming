@@ -20,7 +20,7 @@ func Home(get func(string) (string, bool)) string {
 	return ""
 }
 
-// ConfigBase is where cg keeps its own files: $XDG_CONFIG_HOME, else ~/.config.
+// ConfigBase is where ayis keeps its own files: $XDG_CONFIG_HOME, else ~/.config.
 func ConfigBase(get func(string) (string, bool)) string {
 	if b, ok := get("XDG_CONFIG_HOME"); ok && b != "" {
 		return b

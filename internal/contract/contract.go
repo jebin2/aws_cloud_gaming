@@ -1,5 +1,5 @@
 // Package contract is the command registry and the event contract the app
-// drives cg by. Help, --contract and dispatch are all generated from it, so
+// drives ayis by. Help, --contract and dispatch are all generated from it, so
 // none of them can say something the others do not.
 package contract
 
@@ -17,11 +17,11 @@ import "encoding/json"
 // pick buttons by. Only a launch refused by AWS sends it so far.
 //
 // Version 5 adds the restore event ({"t":"restore","id","state","got","of"}): how
-// far one game is on its way from Saved games onto the machine, while cg open
+// far one game is on its way from Saved games onto the machine, while ayis open
 // waits for it.
 //
 // Version 6 adds the save event ({"t":"save","id","text","got","of"}): how far one
-// game set is on its way into Saved games, while cg stop or cg destroy copies it.
+// game set is on its way into Saved games, while ayis stop or ayis destroy copies it.
 const EventsVersion = 6
 
 // Command is one entry in the registry: a path such as ["library", "push"]
@@ -35,12 +35,12 @@ type Command struct {
 	RunsAlone bool // may not run beside any other command
 }
 
-// Registry is every command cg-go implements. A command that is not in it is
+// Registry is every command ayis-go implements. A command that is not in it is
 // not reachable. The pilot has only cost; the rest is added as it is ported.
 var Registry = []Command{
 	{Path: []string{"notify"}, Summary: "send a test notification to GAME_NTFY_URL"},
 	{Path: []string{"games"}, Summary: "what Steam has on the box: installed, downloading, running, archived", JSON: true},
-	{Path: []string{"aws", "inventory"}, Summary: "everything of cg's in this AWS account, and what it bills", JSON: true},
+	{Path: []string{"aws", "inventory"}, Summary: "everything of ayis's in this AWS account, and what it bills", JSON: true},
 	{Path: []string{"snapshot"}, Summary: "saved images: --list, create, delete", JSON: true},
 	{Path: []string{"host"}, Summary: "your own machines: list, add, status, setup, open, remove", JSON: true},
 	{Path: []string{"library"}, Aliases: [][]string{{"lib"}}, Summary: "the game archive: list, push, pull, elsewhere, account, forget, clean, reset, keep-for, move", JSON: true},
@@ -55,7 +55,7 @@ var Registry = []Command{
 	{Path: []string{"disk"}, Summary: "the games' disk: how full it is; add <GB> gives the games more room on a running box; remove deletes it from a stopped machine once every game is in Saved games", JSON: true},
 	{Path: []string{"clip"}, Summary: "copy and paste between this computer and the box: send puts this clipboard there, get brings the box's here"},
 	{Path: []string{"pair"}, Summary: "pair Moonlight with the box again, without rebuilding it"},
-	{Path: []string{"destroy"}, Summary: "delete the box and what it left, after saving its games; --force deletes even if that save failed (the games may be lost), --no-push leaves the archive as it is, --all also removes everything of cg's from the AWS account", RunsAlone: true},
+	{Path: []string{"destroy"}, Summary: "delete the box and what it left, after saving its games; --force deletes even if that save failed (the games may be lost), --no-push leaves the archive as it is, --all also removes everything of ayis's from the AWS account", RunsAlone: true},
 	{Path: []string{"check"}, Summary: "the preflight: tools, AWS, region, quota, keys, settings. --fix installs and asks. Creates nothing, but can save settings and mint a Tailscale key"},
 	{Path: []string{"deps"}, Aliases: [][]string{{"dependencies"}}, Summary: "the tools this computer needs, and what is missing", JSON: true},
 	{Path: []string{"creds"}, Aliases: [][]string{{"credentials"}}, Summary: "the AWS access key and the Tailscale token, and whether each works", JSON: true},
@@ -70,7 +70,7 @@ var Registry = []Command{
 }
 
 // RunsAlone lists commands that cannot run beside anything else. These are
-// named by path prefix, as `cg --contract` has always published them, and
+// named by path prefix, as `ayis --contract` has always published them, and
 // include commands not yet ported: the app schedules from this list.
 var RunsAlone = [][]string{
 	{"init"}, {"destroy"}, {"open"},
@@ -85,7 +85,7 @@ var RunsAlone = [][]string{
 	{"aws", "disconnect"},
 }
 
-// Asks is every question cg can put to the app, by id.
+// Asks is every question ayis can put to the app, by id.
 var Asks = []string{
 	"aws-access-key-id", "aws-secret-access-key",
 	"tailscale-api-token", "tailscale-auth-key",
@@ -95,7 +95,7 @@ var Asks = []string{
 }
 
 // Env is the settings a screen may hand a command, by name. Everything else
-// stays in .env, where cg owns it; the app used to keep this list itself.
+// stays in .env, where ayis owns it; the app used to keep this list itself.
 var Env = []string{"GAME_APPS", "GAME_EXTRA_DISK_GB"}
 
 type document struct {
@@ -105,7 +105,7 @@ type document struct {
 	Env       []string   `json:"env"`
 }
 
-// JSON is what `cg --contract` prints.
+// JSON is what `ayis --contract` prints.
 func JSON() ([]byte, error) {
 	return json.MarshalIndent(document{EventsVersion, RunsAlone, Asks, Env}, "", "  ")
 }

@@ -1,5 +1,5 @@
-// Command cg is the cloud-gaming CLI. This is the Go port: it is built beside
-// the Bash cg, one command at a time, and the Bash one is the oracle until the
+// Command ayis is the ayis CLI. This is the Go port: it is built beside
+// the Bash ayis, one command at a time, and the Bash one is the oracle until the
 // port is complete (docs/migration/go-plan.md).
 package main
 
@@ -14,30 +14,30 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/awscmd"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/boxcmd"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/check"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/configcmd"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/cost"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/creds"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/deps"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/games"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/hostcmd"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/initcmd"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/librarycmd"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/machines"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/notify"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/quota"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/regions"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/remote"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/snapshot"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/sweep"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/watchdog"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/watcher"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/contract"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/commands/awscmd"
+	"github.com/jebin2/ayis/internal/commands/boxcmd"
+	"github.com/jebin2/ayis/internal/commands/check"
+	"github.com/jebin2/ayis/internal/commands/configcmd"
+	"github.com/jebin2/ayis/internal/commands/cost"
+	"github.com/jebin2/ayis/internal/commands/creds"
+	"github.com/jebin2/ayis/internal/commands/deps"
+	"github.com/jebin2/ayis/internal/commands/games"
+	"github.com/jebin2/ayis/internal/commands/hostcmd"
+	"github.com/jebin2/ayis/internal/commands/initcmd"
+	"github.com/jebin2/ayis/internal/commands/librarycmd"
+	"github.com/jebin2/ayis/internal/commands/machines"
+	"github.com/jebin2/ayis/internal/commands/notify"
+	"github.com/jebin2/ayis/internal/commands/quota"
+	"github.com/jebin2/ayis/internal/commands/regions"
+	"github.com/jebin2/ayis/internal/commands/remote"
+	"github.com/jebin2/ayis/internal/commands/snapshot"
+	"github.com/jebin2/ayis/internal/commands/status"
+	"github.com/jebin2/ayis/internal/commands/sweep"
+	"github.com/jebin2/ayis/internal/commands/watchdog"
+	"github.com/jebin2/ayis/internal/commands/watcher"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/contract"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 // version is set at release time with -ldflags "-X main.version=...".
@@ -72,9 +72,9 @@ func main() {
 	os.Exit(run(ctx, os.Args[1:], os.LookupEnv, os.Stdout, os.Stderr))
 }
 
-// repoDir is where cg's files live: CG_REPO, else beside the binary.
+// repoDir is where ayis's files live: AYIS_REPO, else beside the binary.
 func repoDir(get config.Lookup) string {
-	if v, ok := get("CG_REPO"); ok && v != "" {
+	if v, ok := get("AYIS_REPO"); ok && v != "" {
 		return v
 	}
 	if exe, err := os.Executable(); err == nil {
@@ -84,8 +84,8 @@ func repoDir(get config.Lookup) string {
 }
 
 func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stderr io.Writer) (rc int) {
-	cgJSON, _ := lookup("CG_JSON")
-	out := &output.Out{Stdout: stdout, Stderr: stderr, JSON: cgJSON == "1"}
+	ayisJSON, _ := lookup("AYIS_JSON")
+	out := &output.Out{Stdout: stdout, Stderr: stderr, JSON: ayisJSON == "1"}
 	// Every step ends - on success, on failure and on interrupt.
 	defer func() {
 		if ctx.Err() != nil {
@@ -102,7 +102,7 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 		return lookup(k)
 	}
 
-	// Global flags come before the command, as in the Bash cg.
+	// Global flags come before the command, as in the Bash ayis.
 	for len(args) > 0 && len(args[0]) > 0 && args[0][0] == '-' {
 		switch args[0] {
 		case "--json":
@@ -111,14 +111,14 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			watchFlag, args = true, args[1:]
 		case "--region", "--host":
 			if len(args) < 2 {
-				out.Die(fmt.Sprintf("%s needs a value (see: cg help)", args[0]))
+				out.Die(fmt.Sprintf("%s needs a value (see: ayis help)", args[0]))
 				return 1
 			}
 			key := map[string]string{"--region": "GAME_REGION", "--host": "GAME_TS_HOST"}[args[0]]
 			overrides[key] = args[1]
 			args = args[2:]
 		case "--version":
-			fmt.Fprintf(stdout, "cg %s\nevents %d\n", buildVersion(), contract.EventsVersion)
+			fmt.Fprintf(stdout, "ayis %s\nevents %d\n", buildVersion(), contract.EventsVersion)
 			return 0
 		case "--contract":
 			b, err := contract.JSON()
@@ -131,7 +131,7 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 		case "-h", "--help":
 			args = []string{"help"}
 		default:
-			out.Die(fmt.Sprintf("unknown flag '%s' (see: cg help)", args[0]))
+			out.Die(fmt.Sprintf("unknown flag '%s' (see: ayis help)", args[0]))
 			return 1
 		}
 	}
@@ -151,10 +151,10 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 	}
 	switch cmd {
 	case "help":
-		fmt.Fprintln(stdout, "cg - cloud gaming")
+		fmt.Fprintln(stdout, "ayis - All Yours, Instantly Streamed")
 		fmt.Fprintln(stdout)
 		for _, c := range contract.Registry {
-			fmt.Fprintf(stdout, "  cg %-10s %s\n", c.Path[0], c.Summary)
+			fmt.Fprintf(stdout, "  ayis %-10s %s\n", c.Path[0], c.Summary)
 		}
 		return 0
 	case "notify":
@@ -196,7 +196,7 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 			}
 			return d.SnapshotDelete(ctx, id, c)
 		}
-		out.Die("usage: cg snapshot [create|--list|--delete <id>]")
+		out.Die("usage: ayis snapshot [create|--list|--delete <id>]")
 		return 1
 	case "init":
 		env := config.Load(get, repoDir(get))
@@ -306,7 +306,7 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 		case len(args) > 0 && args[0] == "get":
 			return d.ClipGet(ctx)
 		}
-		out.Die("usage: cg clip send | get")
+		out.Die("usage: ayis clip send | get")
 		return 1
 	case "pair":
 		d, _, err := boxcmd.New(ctx, get, config.Load(get, repoDir(get)), out)
@@ -342,7 +342,7 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 	case "sweep", "regions-sweep":
 		return sweep.Run(ctx, config.Load(get, repoDir(get)), get, args, jsonFlag, out)
 	case "machines", "types":
-		// `cg machines [region] --sweep` is the sweep, whatever region was named.
+		// `ayis machines [region] --sweep` is the sweep, whatever region was named.
 		for i, a := range args {
 			if a == "--sweep" || a == "sweep" {
 				rest := append(append([]string{}, args[:i]...), args[i+1:]...)
@@ -395,7 +395,7 @@ func run(ctx context.Context, args []string, lookup config.Lookup, stdout, stder
 		}
 		return cost.Run(ctx, config.Load(get, repoDir(get)), get, opts, out)
 	}
-	out.Die(fmt.Sprintf("unknown command '%s' (see: cg help)", cmd))
+	out.Die(fmt.Sprintf("unknown command '%s' (see: ayis help)", cmd))
 	return 1
 }
 
@@ -406,7 +406,7 @@ func firstArg(args []string, def string) string {
 	return def
 }
 
-// onBoxLibrary: the forms of `cg library` that ask the box.
+// onBoxLibrary: the forms of `ayis library` that ask the box.
 func onBoxLibrary(sub string, args []string) bool {
 	switch sub {
 	case "status", "push", "sync", "pull", "restore", "check":

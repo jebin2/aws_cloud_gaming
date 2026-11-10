@@ -12,13 +12,13 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/inventory"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/storage"
-	"github.com/jebin2/aws_cloud_gaming/internal/teardown"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/inventory"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/storage"
+	"github.com/jebin2/ayis/internal/teardown"
 )
 
 type rig struct {
@@ -72,10 +72,10 @@ func TestForgetRefusesWhileAnythingStillBills(t *testing.T) {
 		rc   int
 		want string
 	}{
-		"a running machine": {func(r *rig) Forgetter { return forgetter(r, "running", 0, nil, 0, nil) }, 1, "a machine is still on AWS (running) - delete it first: cg destroy"},
+		"a running machine": {func(r *rig) Forgetter { return forgetter(r, "running", 0, nil, 0, nil) }, 1, "a machine is still on AWS (running) - delete it first: ayis destroy"},
 		"a stopped machine": {func(r *rig) Forgetter { return forgetter(r, "stopped", 0, nil, 0, nil) }, 1, "a machine is still on AWS (stopped)"},
-		"one saved game":    {func(r *rig) Forgetter { return forgetter(r, "none", 1, nil, 0, nil) }, 1, "1 game still saved in AWS - delete them first, or keep using AWS: cg library list"},
-		"games elsewhere":   {func(r *rig) Forgetter { return forgetter(r, "terminated", 0, nil, 3, nil) }, 1, "3 games still saved in another AWS region - see cg library elsewhere"},
+		"one saved game":    {func(r *rig) Forgetter { return forgetter(r, "none", 1, nil, 0, nil) }, 1, "1 game still saved in AWS - delete them first, or keep using AWS: ayis library list"},
+		"games elsewhere":   {func(r *rig) Forgetter { return forgetter(r, "terminated", 0, nil, 3, nil) }, 1, "3 games still saved in another AWS region - see ayis library elsewhere"},
 	} {
 		r := newRig(t, "", "GAME_REGION=ap-south-1\n")
 		if rc := c.f(r).Run(context.Background(), nil); rc != c.rc || !strings.Contains(r.e.String(), c.want) || !strings.Contains(r.region(), "GAME_REGION") {
@@ -201,8 +201,8 @@ func full() inventory.Result {
 	return inventory.Result{Region: "ap-south-1", Items: []inventory.Item{
 		item("machine", "Machine", "g6.xlarge, running", "ap-south-1", "i-here", ""),
 		item("machine", "Machine", "g4dn.xlarge, stopped in us-east-1", "us-east-1", "i-away", ""),
-		item("games", "Saved games", "2 games, 160.0 GB", "ap-south-1", "", "cg-here"),
-		item("games", "Saved games elsewhere", "1 game, 20.0 GB in us-east-1", "us-east-1", "", "cg-away"),
+		item("games", "Saved games", "2 games, 160.0 GB", "ap-south-1", "", "ayis-here"),
+		item("games", "Saved games elsewhere", "1 game, 20.0 GB in us-east-1", "us-east-1", "", "ayis-away"),
 		{Kind: "watchdog", Label: "Cloud watchdog", Regions: []string{"ap-south-1", "us-east-1"}, Detail: "function"},
 	}}
 }
@@ -212,7 +212,7 @@ func TestDisconnectAsksForDELETEAndNeedsIt(t *testing.T) {
 	if rc := x.d.Run(context.Background()); rc != 1 || len(x.calls) != 0 || !strings.Contains(x.o.String(), "not confirmed - nothing was deleted") {
 		t.Fatalf("rc %d %v\n%s", rc, x.calls, x.o)
 	}
-	for _, want := range []string{"==> this deletes everything cg has in AWS", "Machine                g6.xlarge, running", "Saved games elsewhere  1 game, 20.0 GB in us-east-1", "your saved games cannot be brought back; the account, its access key, region opt-ins and GPU quota stay"} {
+	for _, want := range []string{"==> this deletes everything ayis has in AWS", "Machine                g6.xlarge, running", "Saved games elsewhere  1 game, 20.0 GB in us-east-1", "your saved games cannot be brought back; the account, its access key, region opt-ins and GPU quota stay"} {
 		if !strings.Contains(x.o.String(), want) {
 			t.Errorf("lacks %q in:\n%s", want, x.o)
 		}
@@ -227,28 +227,28 @@ func TestDisconnectDeletesEveryRegionThenLooksAndOnlyThenForgets(t *testing.T) {
 	if rc := x.d.Run(context.Background()); rc != 0 {
 		t.Fatalf("rc %d\n%s%s", rc, x.o, x.e)
 	}
-	want := "destroy --all --force,watchdog@us-east-1,role,end i-away@us-east-1,bucket cg-away@us-east-1"
+	want := "destroy --all --force,watchdog@us-east-1,role,end i-away@us-east-1,bucket ayis-away@us-east-1"
 	if strings.Join(x.calls, ",") != want {
 		t.Errorf("here first, then the other regions; this region's bucket went with destroy:\n got %s\nwant %s", strings.Join(x.calls, ","), want)
 	}
 	if strings.Contains(x.region(), "GAME_REGION") {
 		t.Error("only after the final look is clean does the laptop forget the region")
 	}
-	if !strings.Contains(x.o.String(), "AWS disconnected - nothing of cg is left billing, nor anything else of cg's") || !strings.Contains(x.o.String(), "==> checking nothing is left") {
+	if !strings.Contains(x.o.String(), "AWS disconnected - nothing of ayis is left billing, nor anything else of ayis's") || !strings.Contains(x.o.String(), "==> checking nothing is left") {
 		t.Error(x.o.String())
 	}
 }
 
 func TestDisconnectKeepsAWSConfiguredWhenAnythingIsLeft(t *testing.T) {
-	left := inventory.Result{Region: "ap-south-1", Items: []inventory.Item{item("games", "Saved games elsewhere", "1 game, 20.0 GB in us-east-1", "us-east-1", "", "cg-away")}}
+	left := inventory.Result{Region: "ap-south-1", Items: []inventory.Item{item("games", "Saved games elsewhere", "1 game, 20.0 GB in us-east-1", "us-east-1", "", "ayis-away")}}
 	x := newDisc(t, "DELETE\n", full(), left)
-	x.failBkt = "cg-away"
+	x.failBkt = "ayis-away"
 	x.destroy = 1
 	if rc := x.d.Run(context.Background()); rc != 1 {
 		t.Fatalf("rc %d", rc)
 	}
 	got := x.o.String()
-	for _, want := range []string{"not everything here could be deleted - carrying on; the check at the end says what is left", "could not delete s3://cg-away",
+	for _, want := range []string{"not everything here could be deleted - carrying on; the check at the end says what is left", "could not delete s3://ayis-away",
 		"still there: Saved games elsewhere - 1 game, 20.0 GB in us-east-1"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
@@ -280,7 +280,7 @@ func TestAFailedRegionAndAMachineThatWontEndKeepsItListed(t *testing.T) {
 		t.Fatalf("rc %d", rc)
 	}
 	got := x.o.String()
-	for _, want := range []string{"could not end i-away in us-east-1", "AWS would not say what is in: eu-west-1", "some of cg's disks, images or snapshots could not be deleted", "still there: Machine - g4dn.xlarge, stopped in us-east-1"} {
+	for _, want := range []string{"could not end i-away in us-east-1", "AWS would not say what is in: eu-west-1", "some of ayis's disks, images or snapshots could not be deleted", "still there: Machine - g4dn.xlarge, stopped in us-east-1"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}

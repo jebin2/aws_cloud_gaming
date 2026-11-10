@@ -9,8 +9,8 @@ rm -rf "$out"; mkdir -p "$out"
 for f in testdata/cost/in/*.json; do
   n=$(basename "$f" .json)
   for rate in known unknown; do
-    env=(CG_EGRESS_FREE_GB=100 CG_TAX_PCT=0)
-    [[ $rate == known ]] && env+=(CG_INR_PER_USD=88)
+    env=(AYIS_EGRESS_FREE_GB=100 AYIS_TAX_PCT=0)
+    [[ $rate == known ]] && env+=(AYIS_INR_PER_USD=88)
     for mode in table json aggregate; do
       flag=(); [[ $mode == json ]] && flag=(--json); [[ $mode == aggregate ]] && flag=(--aggregate)
       env -i PATH="$PATH" "${env[@]}" python3 lib/cost-daily.py "${flag[@]}" < "$f" \

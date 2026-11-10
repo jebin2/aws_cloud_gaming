@@ -255,7 +255,7 @@ func TestShow(t *testing.T) {
 	tb := reader(t, f, fakeQuotas{od: 4, sp: 4}).Build(context.Background(), "g4dn.xlarge", "1", fl(100))
 	text := Show(tb, false)
 	for _, want := range []string{"region ap-south-1 - quota 4 vCPU on demand, 4 spot", "*g4dn.xlarge   4     T4        16 GB    16 GB   125 GB   INR 30.00 / INR 60.00",
-		"1 larger shapes exist here that no quota covers: cg machines --all", "* is the one in use."} {
+		"1 larger shapes exist here that no quota covers: ayis machines --all", "* is the one in use."} {
 		if !strings.Contains(text, want) {
 			t.Errorf("lacks %q:\n%s", want, text)
 		}

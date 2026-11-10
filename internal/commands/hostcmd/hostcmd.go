@@ -1,4 +1,4 @@
-// Package hostcmd is `cg host`: your own machines. List, add, status and remove
+// Package hostcmd is `ayis host`: your own machines. List, add, status and remove
 // are ported; setting up and streaming from one come with the build and stream
 // code they share with the AWS box.
 package hostcmd
@@ -12,22 +12,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/creds"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/hosts"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/ownhost"
-	"github.com/jebin2/aws_cloud_gaming/internal/session"
-	"github.com/jebin2/aws_cloud_gaming/internal/stream"
-	"github.com/jebin2/aws_cloud_gaming/internal/sunshine"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/commands/creds"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/hosts"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/ownhost"
+	"github.com/jebin2/ayis/internal/session"
+	"github.com/jebin2/ayis/internal/stream"
+	"github.com/jebin2/ayis/internal/sunshine"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
-const usage = "usage: cg host [list|add [name] --ssh <user@address>|setup <name>|status <name>|open <name>|remove <name>]"
+const usage = "usage: ayis host [list|add [name] --ssh <user@address>|setup <name>|status <name>|open <name>|remove <name>]"
 
-// List is `cg host list`: the machines as data (without any password), or as a
+// List is `ayis host list`: the machines as data (without any password), or as a
 // table for a person.
 func List(s hosts.Store, jsonOut bool) string {
 	names := s.Names()
@@ -40,7 +40,7 @@ func List(s hosts.Store, jsonOut bool) string {
 		return string(b) + "\n"
 	}
 	if len(names) == 0 {
-		return "  no machines of your own yet - add one: cg host add <name> --ssh <user@address>\n"
+		return "  no machines of your own yet - add one: ayis host add <name> --ssh <user@address>\n"
 	}
 	var b strings.Builder
 	for _, n := range names {
@@ -57,7 +57,7 @@ type Deps struct {
 	Ask       *ask.Asker
 	Sun       sunshine.Client
 	Runner    local.Runner
-	AWSHost   string // the name cg gives its AWS boxes, which a machine of yours may not take
+	AWSHost   string // the name ayis gives its AWS boxes, which a machine of yours may not take
 	Moonlight bool
 
 	// What setup and open need beyond that.
@@ -83,7 +83,7 @@ func New(get config.Lookup, env *config.Env, out *output.Out) Deps {
 			}
 			return "laptop"
 		}},
-		Ask: ask.New(out, os.Getenv("CG_YES") == "1"), Sun: sunshine.Client{}, Runner: r,
+		Ask: ask.New(out, os.Getenv("AYIS_YES") == "1"), Sun: sunshine.Client{}, Runner: r,
 		AWSHost: env.Host(), Moonlight: r.Has("moonlight")}
 	return d.withRuntime(get, env, out)
 }
@@ -91,9 +91,9 @@ func New(get config.Lookup, env *config.Env, out *output.Out) Deps {
 // withRuntime fills in what setup and open use, for the real computer.
 func (d Deps) withRuntime(get config.Lookup, env *config.Env, out *output.Out) Deps {
 	home, _ := os.UserHomeDir()
-	cache := filepath.Join(home, ".cache", "cg")
+	cache := filepath.Join(home, ".cache", "ayis")
 	if base, ok := get("XDG_CACHE_HOME"); ok && base != "" {
-		cache = filepath.Join(base, "cg")
+		cache = filepath.Join(base, "ayis")
 	}
 	d.Env, d.CacheDir, d.Sleep, d.Now = env, cache, time.Sleep, time.Now
 	d.TS = func(t string) tskey.Client { return tskey.Client{Token: t} }
@@ -105,7 +105,7 @@ func (d Deps) withRuntime(get config.Lookup, env *config.Env, out *output.Out) D
 	return d
 }
 
-// Run is `cg host`.
+// Run is `ayis host`.
 func Run(ctx context.Context, d Deps, args []string, jsonFlag bool, out *output.Out) int {
 	sub := "list"
 	if len(args) > 0 {

@@ -7,18 +7,18 @@
 # goes out when that game's flags no longer say so and say fully installed (4),
 # not paused (512) and not waiting for an update (2).
 # A game that is simply there - restored from the archive, or installed before
-# this ran - has no marker and says nothing. Off without CG_NTFY_URL, like every
-# other notification from the box (cg-notify decides).
+# this ran - has no marker and says nothing. Off without AYIS_NTFY_URL, like every
+# other notification from the box (ayis-notify decides).
 set -uo pipefail
 
-STATE="${GAME_NOTIFY_STATE:-/var/lib/cg-game-notify}"
+STATE="${GAME_NOTIFY_STATE:-/var/lib/ayis-game-notify}"
 VDFS="${GAME_NOTIFY_VDFS:-/home/*/.local/share/Steam/config/libraryfolders.vdf}"
-NOTIFY="${GAME_NOTIFY_CMD:-/usr/local/bin/cg-notify}"
+NOTIFY="${GAME_NOTIFY_CMD:-/usr/local/bin/ayis-notify}"
 mkdir -p "$STATE"
 
 # Every library on the box: the archive's, the added disk's, and each folder Steam
 # lists itself - Steam's Add Drive makes its own (/scratch2/SteamLibrary), not the
-# one cg named, and a game installed there must be seen.
+# one ayis named, and a game installed there must be seen.
 libs() {
   if [[ -n ${GAME_NOTIFY_LIBS+x} ]]; then echo "$GAME_NOTIFY_LIBS"; return; fi
   {

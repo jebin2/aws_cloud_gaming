@@ -16,10 +16,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	wd "github.com/jebin2/aws_cloud_gaming/internal/watchdog"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
+	wd "github.com/jebin2/ayis/internal/watchdog"
 )
 
 // NewInstaller wires the installer to AWS for the settings in force.
@@ -80,7 +80,7 @@ func adoptNtfy(ctx context.Context, env *config.Env, r *wd.Reader, out *output.O
 	if err != nil || o.Environment == nil {
 		return
 	}
-	v := o.Environment.Variables["CG_NTFY_URL"]
+	v := o.Environment.Variables["AYIS_NTFY_URL"]
 	if v == "" || v == "None" {
 		return
 	}
@@ -90,7 +90,7 @@ func adoptNtfy(ctx context.Context, env *config.Env, r *wd.Reader, out *output.O
 	out.LogAs("ok", "notifications: copied the ntfy address from the cloud watchdog into .env")
 }
 
-// AdoptNtfy is adoptNtfy for a caller that has no reader of its own: `cg check`,
+// AdoptNtfy is adoptNtfy for a caller that has no reader of its own: `ayis check`,
 // which does it before it asks for the address. Any trouble reading the
 // watchdog is the same as there being nothing to adopt.
 func AdoptNtfy(ctx context.Context, env *config.Env, out *output.Out) {
@@ -137,7 +137,7 @@ func mutate(ctx context.Context, env *config.Env, r *wd.Reader, sub string, out 
 }
 
 // Reinstall redeploys the cloud watchdog with the settings now in force, as
-// `cg watchdog install` does. It is what a setting that the watchdog carries -
+// `ayis watchdog install` does. It is what a setting that the watchdog carries -
 // how long saved games are kept - needs to take effect.
 func Reinstall(ctx context.Context, env *config.Env, out *output.Out) int {
 	r, err := NewReader(ctx, env)
@@ -149,7 +149,7 @@ func Reinstall(ctx context.Context, env *config.Env, out *output.Out) int {
 	return mutate(ctx, env, r, "install", out)
 }
 
-// Ensure is what `cg init` does before anything launches: the cloud watchdog
+// Ensure is what `ayis init` does before anything launches: the cloud watchdog
 // watches by TAG, so it does not need the instance to exist - and the point of an
 // independent guard is that it is already watching when the box appears. When
 // nothing changed this is one round of read-only calls: no redeploy, and no new
@@ -166,12 +166,12 @@ func Ensure(ctx context.Context, env *config.Env, out *output.Out) {
 	if len(st.Drift) == 0 {
 		now := r.Now()
 		if st.LastMS == 0 {
-			out.Log("cloud watchdog: up to date, but it has logged nothing in the last hour - check: cg watchdog status")
+			out.Log("cloud watchdog: up to date, but it has logged nothing in the last hour - check: ayis watchdog status")
 			return
 		}
-		out.Log(fmt.Sprintf("cloud watchdog: up to date - last check %s ago: %s", wd.Age(st.LastMS, now), strings.TrimPrefix(st.LastMsg, "cg-watchdog: ")))
+		out.Log(fmt.Sprintf("cloud watchdog: up to date - last check %s ago: %s", wd.Age(st.LastMS, now), strings.TrimPrefix(st.LastMsg, "ayis-watchdog: ")))
 		if now.Unix()-st.LastMS/1000 > 900 {
-			out.Log(fmt.Sprintf("  ^ nothing for %d min but it runs every 5 - it is not running. Check: cg watchdog status", (now.Unix()-st.LastMS/1000)/60))
+			out.Log(fmt.Sprintf("  ^ nothing for %d min but it runs every 5 - it is not running. Check: ayis watchdog status", (now.Unix()-st.LastMS/1000)/60))
 		}
 		if m := st.LastMsg; strings.Contains(m, "CANNOT QUERY AWS") || strings.Contains(m, "DENIED") || strings.Contains(m, "FAILED") {
 			out.Log("  ^ it cannot act on your account - fix this or layer 3 is decoration")

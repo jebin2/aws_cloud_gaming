@@ -124,7 +124,7 @@ if aws_box || { [[ -n $(nvidia_card) ]] && ! nvidia_driver_installed; }; then
       progress "installing nvidia driver"
       pkg nvidia-open-dkms nvidia-utils
       verify "nvidia driver installed" pacman -Q nvidia-utils ;;
-    *) echo ">>> FAILED: this NVIDIA card has no driver, and cg installs one only on Ubuntu, Debian or Arch"
+    *) echo ">>> FAILED: this NVIDIA card has no driver, and ayis installs one only on Ubuntu, Debian or Arch"
        exit 1 ;;
   esac
   NVIDIA_ADDED=1
@@ -142,7 +142,7 @@ if aws_box; then
 # which reads as a network fault and is nothing of the sort. This box has no
 # physical display and needs nothing KMS provides, so turn it off. The build
 # reboots at the end anyway, which is when this takes effect.
-# Worded with no failure word in it: cg reads "cannot", "failed" or "error"
+# Worded with no failure word in it: ayis reads "cannot", "failed" or "error"
 # in a progress line as a failure, and this one is a normal step.
 progress "disabling nvidia DRM KMS (NvFBC needs it off to capture)"
 printf 'options nvidia_drm modeset=0 fbdev=0\n' > /etc/modprobe.d/zz-nvfbc-no-kms.conf

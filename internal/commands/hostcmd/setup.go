@@ -7,17 +7,17 @@ import (
 	"os"
 	"strings"
 
-	cg "github.com/jebin2/aws_cloud_gaming"
-	"github.com/jebin2/aws_cloud_gaming/internal/build"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/check"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/ownhost"
-	"github.com/jebin2/aws_cloud_gaming/internal/render"
-	"github.com/jebin2/aws_cloud_gaming/internal/sunshine"
+	ayis "github.com/jebin2/ayis"
+	"github.com/jebin2/ayis/internal/build"
+	"github.com/jebin2/ayis/internal/commands/check"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/ownhost"
+	"github.com/jebin2/ayis/internal/render"
+	"github.com/jebin2/ayis/internal/sunshine"
 )
 
-// remote reaches the machine as cg does: under sh, with cg's key.
+// remote reaches the machine as ayis does: under sh, with ayis's key.
 type remote struct {
 	c ownhost.Conn
 	t string
@@ -32,7 +32,7 @@ type died string
 
 func (d died) Error() string { return string(d) }
 
-const startBuild = `rm -f /var/lib/cloud-gaming-ready /var/lib/cloud-gaming-bootstrap.rc /var/log/cloud-gaming-bootstrap.log; setsid nohup bash "$1" >/dev/null 2>&1 </dev/null &`
+const startBuild = `rm -f /var/lib/ayis-ready /var/lib/ayis-bootstrap.rc /var/log/ayis-bootstrap.log; setsid nohup bash "$1" >/dev/null 2>&1 </dev/null &`
 
 // tailnetName is the name this laptop's tailscale gives the node at an address.
 func (d Deps) tailnetNode(ctx context.Context, ip string) (name string, ok bool) {
@@ -60,7 +60,7 @@ func (d Deps) takes() string {
 	return "it takes a while"
 }
 
-// Setup is `cg host setup <name>`: the build every machine gets, run on yours.
+// Setup is `ayis host setup <name>`: the build every machine gets, run on yours.
 // The same modules the AWS box boots with, here as a machine of yours: each step
 // adds only what is missing, and the AWS box's own are left out. Then the same
 // second half as the AWS box: its log followed, the Sunshine login, Moonlight
@@ -88,11 +88,11 @@ func (d Deps) setup(ctx context.Context, args []string, out *output.Out) error {
 		}
 	}
 	if name == "" {
-		return died("usage: cg host setup <name>")
+		return died("usage: ayis host setup <name>")
 	}
 	t := d.Store.Get(name).Field("ssh")
 	if t == "" {
-		return died(fmt.Sprintf("no machine called '%s' - add it: cg host add %s --ssh <user@address>", name, name))
+		return died(fmt.Sprintf("no machine called '%s' - add it: ayis host add %s --ssh <user@address>", name, name))
 	}
 	// In, before anything: a machine whose key was taken off asks once for its
 	// password here, rather than failing every step after.
@@ -104,7 +104,7 @@ func (d Deps) setup(ctx context.Context, args []string, out *output.Out) error {
 	if facts == nil {
 		return died(t + " did not answer over ssh")
 	}
-	// A machine added before cg knew who machines are: learned now, so adding it
+	// A machine added before ayis knew who machines are: learned now, so adding it
 	// again by another address is caught.
 	if mk := ownhost.MachineKey(facts); mk != "" && d.Store.Get(name).Field("machine") == "" {
 		_ = d.Store.Set(name, "machine", mk)
@@ -114,7 +114,7 @@ func (d Deps) setup(ctx context.Context, args []string, out *output.Out) error {
 	}
 	fam := ownhost.Family(facts)
 	if fam == "unsupported" {
-		return died(fmt.Sprintf("cg sets up Ubuntu, Debian, Arch and Fedora; %s is not one.", facts.Get("pretty")))
+		return died(fmt.Sprintf("ayis sets up Ubuntu, Debian, Arch and Fedora; %s is not one.", facts.Get("pretty")))
 	}
 	if facts.Get("arch") != "x86_64" {
 		return died(fmt.Sprintf("x86_64 only - Steam and Proton need it (%s here)", facts.Get("arch")))
@@ -154,7 +154,7 @@ func (d Deps) setup(ctx context.Context, args []string, out *output.Out) error {
 		key, _ = check.EnsureAuthKey(ctx, d.Env, out, d.TS, stored, name)
 		if key == "" {
 			if !d.Ask.CanAsk() {
-				return died(name + " is not on your tailnet, and there is no Tailscale auth key to join it with - cg creds tailscale authkey saves one")
+				return died(name + " is not on your tailnet, and there is no Tailscale auth key to join it with - ayis creds tailscale authkey saves one")
 			}
 			out.Log(name + " is not on your tailnet yet: it joins with a Tailscale auth key")
 			if d.Creds.SetAuthKey(ctx) != 0 {
@@ -167,8 +167,8 @@ func (d Deps) setup(ctx context.Context, args []string, out *output.Out) error {
 	out.Say("starting the build on " + name)
 	// Copied as a file readable by root alone - it may carry the auth key - and
 	// deleted by the build as it starts.
-	script, err := render.Bootstrap(cg.Files, map[string]string{"TS_AUTHKEY": key, "TS_HOST": name, "HOST_TGZ_URL": "", "S3_BUCKET": "", "CG_APPS": "",
-		"CG_LOGIN": "", "CG_RESERVE_GB": "", "CG_DATA_GB": "0", "CG_EXTRA_APPS": "", "CG_STEAM_CLIENT_URL": "", "CG_TARGET": "host", "CG_USER": facts.Get("user"), "CG_FAMILY": fam})
+	script, err := render.Bootstrap(ayis.Files, map[string]string{"TS_AUTHKEY": key, "TS_HOST": name, "HOST_TGZ_URL": "", "S3_BUCKET": "", "AYIS_APPS": "",
+		"AYIS_LOGIN": "", "AYIS_RESERVE_GB": "", "AYIS_DATA_GB": "0", "AYIS_EXTRA_APPS": "", "AYIS_STEAM_CLIENT_URL": "", "AYIS_TARGET": "host", "AYIS_USER": facts.Get("user"), "AYIS_FAMILY": fam})
 	if err != nil {
 		return died("could not assemble the build: " + err.Error())
 	}
@@ -190,7 +190,7 @@ func (d Deps) setup(ctx context.Context, args []string, out *output.Out) error {
 	}
 
 	// The second half, as every build. Reached as host_ssh reaches it - your ssh,
-	// with cg's key; its tailnet address is read once it has joined.
+	// with ayis's key; its tailnet address is read once it has joined.
 	rec := d.Store.Get(name)
 	login := &sunshine.Login{User: rec.Field("sunshine_user"), Pass: rec.Field("sunshine_pass")}
 	save := func(k, v string) {
@@ -242,7 +242,7 @@ func (d Deps) setup(ctx context.Context, args []string, out *output.Out) error {
 		if after != nil {
 			return after
 		}
-		return died(fmt.Sprintf("the build on %s did not finish - its log is /var/log/cloud-gaming-bootstrap.log there", name))
+		return died(fmt.Sprintf("the build on %s did not finish - its log is /var/log/ayis-bootstrap.log there", name))
 	}
 	// The login it ended with, kept on the machine for every other device.
 	rec = d.Store.Get(name)
@@ -250,7 +250,7 @@ func (d Deps) setup(ctx context.Context, args []string, out *output.Out) error {
 		out.Log("note: could not keep the Sunshine login on " + name + " - other devices may need to run setup")
 	}
 
-	// What cg does not change, said rather than fixed.
+	// What ayis does not change, said rather than fixed.
 	if facts.Get("session") == "" {
 		out.Log("note: no desktop is signed in on " + name + " right now - Sunshine streams a signed-in desktop")
 	}
@@ -258,6 +258,6 @@ func (d Deps) setup(ctx context.Context, args []string, out *output.Out) error {
 		out.Log("note: no GPU video encoder found on " + name + " - the stream would fall back to the CPU")
 	}
 	_ = d.Store.Set(name, "ready", "yes")
-	out.Log("ready: cg host open " + name)
+	out.Log("ready: ayis host open " + name)
 	return nil
 }

@@ -3,12 +3,12 @@ package deps
 import (
 	"context"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/laptop"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/laptop"
+	"github.com/jebin2/ayis/internal/output"
 )
 
-// Fix is what `cg check --fix` does about the laptop: install what is missing
+// Fix is what `ayis check --fix` does about the laptop: install what is missing
 // and sign Tailscale in, after asking. It reports true when nothing is left.
 func Fix(ctx context.Context, l laptop.Laptop, in *laptop.Installer, a *ask.Asker, out *output.Out) bool {
 	missing := l.Missing()
@@ -28,8 +28,8 @@ func Fix(ctx context.Context, l laptop.Laptop, in *laptop.Installer, a *ask.Aske
 	}
 	if !l.TTY() {
 		out.Log("--fix installs with sudo, which needs a terminal to ask for your password")
-		out.Log("  run this in a terminal:  cg check --fix")
-		out.Log("  the access key does not need sudo: cg creds set, or Settings > AWS credentials")
+		out.Log("  run this in a terminal:  ayis check --fix")
+		out.Log("  the access key does not need sudo: ayis creds set, or Settings > AWS credentials")
 		return false
 	}
 	out.Log("--fix will:")

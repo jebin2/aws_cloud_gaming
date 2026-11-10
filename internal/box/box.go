@@ -15,7 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	"github.com/jebin2/ayis/internal/local"
 )
 
 // EC2 is what the box's lifecycle uses.
@@ -31,7 +31,7 @@ type EC2 interface {
 	DescribeVolumes(context.Context, *ec2.DescribeVolumesInput, ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
 }
 
-// Box is one machine of cg's.
+// Box is one machine of ayis's.
 type Box struct {
 	EC2 EC2
 	ID  string // the instance id; "" when there is none
@@ -170,9 +170,9 @@ func (b Box) RootVolumeGB(ctx context.Context) string {
 func (b Box) CreateImage(ctx context.Context, name string) (string, error) {
 	tag := b.TagKey
 	if tag == "" {
-		tag = "cg:host"
+		tag = "ayis:host"
 	}
-	o, err := b.EC2.CreateImage(ctx, &ec2.CreateImageInput{InstanceId: aws.String(b.ID), Name: aws.String(name), Description: aws.String("cloud_gaming saved desktop"),
+	o, err := b.EC2.CreateImage(ctx, &ec2.CreateImageInput{InstanceId: aws.String(b.ID), Name: aws.String(name), Description: aws.String("ayis saved desktop"),
 		TagSpecifications: []ec2types.TagSpecification{
 			{ResourceType: ec2types.ResourceTypeImage, Tags: []ec2types.Tag{{Key: aws.String("Name"), Value: aws.String(b.Host + "-image")}, {Key: aws.String(tag), Value: aws.String(b.Host)}}},
 			{ResourceType: ec2types.ResourceTypeSnapshot, Tags: []ec2types.Tag{{Key: aws.String(tag), Value: aws.String(b.Host)}}},
@@ -234,7 +234,7 @@ func (b Box) sshArgs(ip string, timeout string, command string) []string {
 }
 
 // SSH runs a command on the box and returns what it printed. Standard input only
-// when given: otherwise ssh reads cg's own, where the app's answers arrive.
+// when given: otherwise ssh reads ayis's own, where the app's answers arrive.
 func (b Box) SSH(ctx context.Context, command string, stdin io.Reader) ([]byte, error) {
 	ip, ok := b.IP(ctx)
 	if !ok {
@@ -256,7 +256,7 @@ func (b Box) Stream(ctx context.Context, w io.Writer, command string) error {
 
 // streamCommand is ssh with its standard error folded into the stream. A shell does
 // the folding where there is one; Windows has none, so ssh runs on its own and its
-// error text goes to cg's own standard error - where the app reads it anyway.
+// error text goes to ayis's own standard error - where the app reads it anyway.
 func streamCommand(goos string, ssh []string) (string, []string) {
 	if goos == "windows" {
 		return "ssh", ssh

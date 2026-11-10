@@ -1,4 +1,4 @@
-// Package costreport renders `cg cost`'s "billed so far" section from the
+// Package costreport renders `ayis cost`'s "billed so far" section from the
 // month's usage types: the table, the spot-against-on-demand comparison and the
 // egress allowance. It is the Go form of lib/cost-report.py.
 //
@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/costdaily"
+	"github.com/jebin2/ayis/internal/costdaily"
 )
 
 // Settings are the prices and the stream bitrate. A nil is unknown and prints
@@ -32,7 +32,7 @@ type Settings struct {
 const defaultKBPS = 20000
 
 // Cache is told how much data went out this month, because Cost Explorer is the
-// only source for it and each call costs $0.01: `cg status` shows the cached
+// only source for it and each call costs $0.01: `ayis status` shows the cached
 // figure instead of asking for itself.
 type Cache func(outGB float64, freeGB *float64)
 

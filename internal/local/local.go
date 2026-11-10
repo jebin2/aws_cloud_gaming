@@ -54,7 +54,7 @@ func (p *execProc) Kill() {
 }
 
 // Cmd is a program to run. Env is added to this process's environment; Stdin
-// nil is the null device, so a program cannot swallow cg's own input.
+// nil is the null device, so a program cannot swallow ayis's own input.
 type Cmd struct {
 	Name  string
 	Args  []string

@@ -1,6 +1,6 @@
 # Getting started
 
-Everything you need before the first `cg init`, and what that first build does. The short version
+Everything you need before the first `ayis init`, and what that first build does. The short version
 is in the [README](../README.md).
 
 ## What you need first
@@ -17,7 +17,7 @@ console pages, what to request, example justifications and how to verify each on
   request submitted through the CLI carries no justification and is usually refused. Spot needs
   a *separate* quota (`L-3819A6DF`), which is **0 by default**; approval of one says nothing
   about the other, and spot is refused more often. Mine was denied first time and granted the
-  next day on a re-file, so a denial is worth appealing. `cg init` prefers spot and falls back
+  next day on a re-file, so a denial is worth appealing. `ayis init` prefers spot and falls back
   to on-demand when the quota cannot cover the instance.
 
   Note that "Resolved" on a support case means the case was **closed**, not that you got the
@@ -31,18 +31,18 @@ And locally:
 - **Tailscale**, installed and up (`sudo tailscale up`), plus a
   [pre-auth key](https://login.tailscale.com/admin/settings/keys)
 - optionally a **Tailscale API access token** (a different credential, from the same page) as
-  `TAILSCALE_API_KEY`. With it, `cg init` prunes offline nodes before each launch (and
-  `cg destroy --all` deletes them), so rebuilds keep the clean hostname instead of climbing
-  `gamevps-1`, `-2`, `-3` - and turns off key expiry on the new box, which would otherwise drop
+  `TAILSCALE_API_KEY`. With it, `ayis init` prunes offline nodes before each launch (and
+  `ayis destroy --all` deletes them), so rebuilds keep the clean hostname instead of climbing
+  `ayis-1`, `-2`, `-3` - and turns off key expiry on the new box, which would otherwise drop
   off the tailnet after ~180 days. Only nodes named exactly `<GAME_TS_HOST>` or
   `<GAME_TS_HOST>-<number>` are ever touched, and only a connected one gets its expiry turned off.
-  These tokens expire after 90 days; when one does, `cg init` says so plainly, and key expiry
+  These tokens expire after 90 days; when one does, `ayis init` says so plainly, and key expiry
   shows as a manual step again
-- **Moonlight** (`moonlight-qt`) - `cg check` stops without it, since `cg init` pairs it and
-  `cg open` streams with it
+- **Moonlight** (`moonlight-qt`) - `ayis check` stops without it, since `ayis init` pairs it and
+  `ayis open` streams with it
 - `aws` CLI v2 configured, `python3`, `curl`, and OpenSSH (`ssh`/`scp`)
 
-`./cg check --fix` installs every local tool in that list - on Linux, through pacman, apt, dnf or
+`./ayis check --fix` installs every local tool in that list - on Linux, through pacman, apt, dnf or
 zypper - starts the Tailscale sign-in, and asks for an AWS access key if none works. See
 [The first build](#the-first-build).
 
@@ -50,7 +50,7 @@ zypper - starts the Tailscale sign-in, and asks for an AWS access key if none wo
 
 If `aws configure` has already been run, nothing to do. Otherwise paste an access key:
 
-    cg creds set
+    ayis creds set
 
 It asks for the key id and its secret, checks them against AWS, and only then writes them to
 `~/.aws/credentials`. A key AWS will not take is not saved, so a typo cannot replace a key that
@@ -58,11 +58,11 @@ works. In the app the same thing is a card: **Settings > AWS credentials**, whic
 which account the key is for - a key that works for the *wrong* account looks healthy
 everywhere else.
 
-`cg creds` on its own reports where the key comes from, whether AWS takes it, and the state of
+`ayis creds` on its own reports where the key comes from, whether AWS takes it, and the state of
 the Tailscale API token beside it.
 
 **The console hands you the key as a `.csv` download. Delete it once you have pasted the key.**
-It is a plaintext secret, and anyone who reads it has your account. cg used to offer to import
+It is a plaintext secret, and anyone who reads it has your account. ayis used to offer to import
 one it found in your home directory; it no longer does, because that made leaving the file
 lying around a supported way of keeping a credential. `*.csv` is gitignored here so a stray
 copy in the repo cannot be committed, but that does not help it sitting in `~/Downloads`.
@@ -70,18 +70,18 @@ copy in the repo cannot be committed, but that does not help it sitting in `~/Do
 ## Configuration
 
 Everything lives in `.env` - see [.env.example](../.env.example), which documents every variable.
-`cg init` prompts for the Tailscale key and alert email if they are absent and saves them to `.env`,
-so each is asked once; `cg check --fix` also asks for the optional settings. The minimum is a
+`ayis init` prompts for the Tailscale key and alert email if they are absent and saves them to `.env`,
+so each is asked once; `ayis check --fix` also asks for the optional settings. The minimum is a
 working AWS profile and a Tailscale account.
 
 ## The first build
 
-`cg init` checks every prerequisite before it spends a cent and tells you exactly what is
+`ayis init` checks every prerequisite before it spends a cent and tells you exactly what is
 missing. It provisions the instance, arms the cost guards, installs the watchdog, and hands you
-a pairing URL. After that, `cg open` is the whole workflow.
+a pairing URL. After that, `ayis open` is the whole workflow.
 
-Use `cg check` to run every check and stop before anything is created. It lists everything the
-laptop is missing at once, and `cg check --fix` installs it: the AWS CLI v2, Tailscale, Moonlight,
+Use `ayis check` to run every check and stop before anything is created. It lists everything the
+laptop is missing at once, and `ayis check --fix` installs it: the AWS CLI v2, Tailscale, Moonlight,
 OpenSSH, `curl` and `python3`, through pacman, apt, dnf or zypper. It shows what it will run and
 asks once before using sudo, then starts the Tailscale sign-in and asks for an AWS access key if
 there is none. Any `.env` setting that is missing - the Tailscale auth key and alert email, and
@@ -90,10 +90,10 @@ with the default shown, and saved to `.env`. It creates
 nothing in AWS and costs nothing.
 
 **On a second laptop,** copy `.env` across: it holds your keys and is not in git. The ssh key
-sorts itself out. `cg check` compares `~/.ssh/<host>.pem` with the key pair in AWS, and when the
-file is missing or is a different key and no box exists, `cg init` replaces the pair. That is
+sorts itself out. `ayis check` compares `~/.ssh/<host>.pem` with the key pair in AWS, and when the
+file is missing or is a different key and no box exists, `ayis init` replaces the pair. That is
 free, and any old file is kept as `<host>-replaced-<time>.pem`, but the `.pem` on the other laptop
-stops working. While a box exists, copy the `.pem` from the laptop that built it instead - `cg
+stops working. While a box exists, copy the `.pem` from the laptop that built it instead - `ayis
 check` stops and says so.
 
 The build takes about 10-20 minutes - most of it the NVIDIA driver, with the game restore
@@ -120,16 +120,16 @@ that must never cost you the box - tailscale and the game library report a failu
 because an unreachable GPU instance is worse than a missing library.
 
 Anything that looks like an error is surfaced with a `!` prefix; the thousands of shell-trace
-lines behind it are not. The full log lives at `/var/log/cloud-gaming-bootstrap.log` on the box.
+lines behind it are not. The full log lives at `/var/log/ayis-bootstrap.log` on the box.
 
 ## Pairing and the web UI
 
-Pairing is automatic and needs no browser: `cg init` creates the Sunshine account and pairs
+Pairing is automatic and needs no browser: `ayis init` creates the Sunshine account and pairs
 Moonlight itself, then saves the credentials to `.env`. Pairing is certificate-based, so it
-survives stop/start and re-running `cg init`.
+survives stop/start and re-running `ayis init`.
 
 The web UI at `https://<tailscale-ip>:47990` is there if you want it. Its self-signed
 certificate warning is expected - the traffic is already encrypted by WireGuard before TLS
 applies.
 
-Run `cg open` from a real terminal: the prompt at the end of a session needs one.
+Run `ayis open` from a real terminal: the prompt at the end of a session needs one.

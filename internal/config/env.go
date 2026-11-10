@@ -1,21 +1,21 @@
-// Package config is where cg's settings live and the one loader that reads
+// Package config is where ayis's settings live and the one loader that reads
 // them. It replaces the old Bash env-file loader and, with it, the
 // settings registry.
 package config
 
 import (
 	"bufio"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	"github.com/jebin2/ayis/internal/local"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 )
 
-// TagKey is the tag every AWS resource cg creates carries, valued with the
-// box's name: cg:host=<host>. What cg deletes is chosen by it, never by a Name
+// TagKey is the tag every AWS resource ayis creates carries, valued with the
+// box's name: ayis:host=<host>. What ayis deletes is chosen by it, never by a Name
 // alone - a Name is a label anyone can give anything. AWS reserves only "aws:".
-const TagKey = "cg:host"
+const TagKey = "ayis:host"
 
 // Env is the process environment plus the settings file, with the rule that
 // anything already exported wins.
@@ -26,11 +26,11 @@ type Env struct {
 }
 
 // Defaults are the registry's defaults for the settings the ported commands
-// read. The full registry arrives with `cg config`.
+// read. The full registry arrives with `ayis config`.
 var Defaults = map[string]string{
 	"GAME_REGION":        "ap-south-2",
 	"GAME_INSTANCE_TYPE": "g6.xlarge",
-	"GAME_TS_HOST":       "gamevps",
+	"GAME_TS_HOST":       "ayis",
 }
 
 // Lookup is a way to read the process environment, for tests.
@@ -38,20 +38,20 @@ type Lookup func(string) (string, bool)
 
 // Resolve finds the settings file, first hit wins:
 //
-//	$CG_ENV_FILE              said outright - tests use this
-//	$CG_HOME/.env             a chosen state directory
+//	$AYIS_ENV_FILE              said outright - tests use this
+//	$AYIS_HOME/.env             a chosen state directory
 //	<repo>/.env               an existing checkout that already has one
-//	<repo>/.env               a checkout cg can write to - the normal case
-//	$XDG_CONFIG_HOME/cg/.env  otherwise: an installed, read-only copy
+//	<repo>/.env               a checkout ayis can write to - the normal case
+//	$XDG_CONFIG_HOME/ayis/.env  otherwise: an installed, read-only copy
 //
 // The checkout comes before XDG deliberately: a fresh `git clone` plus
-// `cg check --fix` keeps putting settings beside .env.example. XDG is for the
+// `ayis check --fix` keeps putting settings beside .env.example. XDG is for the
 // case the repo cannot serve.
 func Resolve(get Lookup, repo string) string {
-	if v, ok := get("CG_ENV_FILE"); ok && v != "" {
+	if v, ok := get("AYIS_ENV_FILE"); ok && v != "" {
 		return v
 	}
-	if v, ok := get("CG_HOME"); ok && v != "" {
+	if v, ok := get("AYIS_HOME"); ok && v != "" {
 		return filepath.Join(v, ".env")
 	}
 	if repo != "" {
@@ -63,7 +63,7 @@ func Resolve(get Lookup, repo string) string {
 		}
 	}
 	base := local.ConfigBase(get)
-	return filepath.Join(base, "cg", ".env")
+	return filepath.Join(base, "ayis", ".env")
 }
 
 func writable(dir string) bool {
@@ -71,7 +71,7 @@ func writable(dir string) bool {
 	if err != nil || !st.IsDir() {
 		return false
 	}
-	f, err := os.CreateTemp(dir, ".cg-w-*")
+	f, err := os.CreateTemp(dir, ".ayis-w-*")
 	if err != nil {
 		return false
 	}
@@ -129,7 +129,7 @@ func (e *Env) Setting(key string) string {
 // Region is the AWS region everything lives in.
 func (e *Env) Region() string { return e.Setting("GAME_REGION") }
 
-// Host is the box's name; it is also the value of cg's ownership tag.
+// Host is the box's name; it is also the value of ayis's ownership tag.
 func (e *Env) Host() string { return e.Setting("GAME_TS_HOST") }
 
 // OSLookup reads the real environment.

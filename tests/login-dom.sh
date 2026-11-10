@@ -34,13 +34,13 @@ cp app/renderer/index.html app/renderer/app.js "$T/r/" 2>/dev/null
 cp -r app/renderer/fonts "$T/r/" 2>/dev/null || true
 cp app/renderer/*.css "$T/r/" 2>/dev/null || true
 
-# The smallest cg that lets the page finish loading. No data is served: the
+# The smallest ayis that lets the page finish loading. No data is served: the
 # probe calls the painter directly, so nothing here needs to pretend to be AWS.
 cat > "$T/r/stub.js" <<'STUB'
 window.__errs = [];
 addEventListener('error', e => window.__errs.push(e.message));
 addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
-window.cg = {
+window.ayis = {
   run: () => Promise.resolve({ ok: true, id: 1 }),
   answer: () => Promise.resolve(true), cancel: () => Promise.resolve(true),
   busy: () => Promise.resolve([]),
@@ -78,9 +78,9 @@ cat > "$T/r/probe.js" <<'PROBE'
                 accounts: [{ steamid: '1', account: 'alice', most_recent: false, last_used: 1 },
                            { steamid: '2', account: 'bob', most_recent: true, last_used: 2 }] });
   call('ABSENT', { present: false, accounts: [] });
-  // The choice, on Build: picking "ask me" saves it through cg.
+  // The choice, on Build: picking "ask me" saves it through ayis.
   const ran = [];
-  window.cg.run = args => { ran.push(args.join(' ')); return Promise.resolve({ ok: true, id: 99 }); };
+  window.ayis.run = args => { ran.push(args.join(' ')); return Promise.resolve({ ok: true, id: 99 }); };
   paintLogin({ present: true, bytes: 22458, modified: null, usd_month: 0.000001,
                accounts: [{ steamid: '1', account: 'alice', most_recent: true }] });
   const sel = document.getElementById('b-login-choice');
@@ -94,17 +94,17 @@ cat > "$T/r/probe.js" <<'PROBE'
   call('NONAMES', { present: true, bytes: 22458, modified: null, usd_month: 0.000001,
                     accounts: null });
   // A copy a region move left beside games elsewhere: its own row, used by nothing.
-  elsewhereNow = { region: 'ap-south-1', places: [{ bucket: 'cg-library-old', region: 'ap-south-2', error: null,
+  elsewhereNow = { region: 'ap-south-1', places: [{ bucket: 'ayis-library-old', region: 'ap-south-2', error: null,
     bytes: 1, login: true, games: [], login_detail: { present: true, bytes: 22290, modified: '2026-09-26T12:20:10+00:00',
       accounts: [{ steamid: '1', account: 'alice', most_recent: true }] } }] };
   call('ELSE', { present: true, bytes: 22458, modified: '2026-10-10T16:30:03+00:00', usd_month: 0.000001,
                  accounts: [{ steamid: '1', account: 'alice', persona: 'Alice', most_recent: true, last_used: 1 }] });
   elsewhereNow = null;
 
-  // The build-time prompt, as the app actually shows it. cg sends the answers
+  // The build-time prompt, as the app actually shows it. ayis sends the answers
   // it accepts in the event; the dialog used to ignore them and render a text
   // box, so a build stopped on a modal reading "choice [1]:" with no sign of
-  // what the choices were - the options cg printed were in the log pane behind
+  // what the choices were - the options ayis printed were in the log pane behind
   // the modal.
   const askRead = label => {
     const box = document.getElementById('ask-choices');
@@ -119,7 +119,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     out.push(label + ' ROWS | ' + rows.join(' || '));
   };
   let answered = null;
-  window.cg.answer = (id, v) => { answered = id + '=' + v; return Promise.resolve(true); };
+  window.ayis.answer = (id, v) => { answered = id + '=' + v; return Promise.resolve(true); };
   const dlg = () => document.getElementById('ask');
   // The dialog's own `close` event is dispatched as a queued task, and under
   // --virtual-time-budget a setTimeout can run BEFORE it - a race this probe
@@ -128,7 +128,7 @@ cat > "$T/r/probe.js" <<'PROBE'
   // browser choosing to fire it is the browser's business.
   const closeNow = () => { const d = dlg(); const h = d.onclose; d.close(); if (h) h(); };
   try {
-    // A question the app has no words of its own for: cg's prompt, its choices.
+    // A question the app has no words of its own for: ayis's prompt, its choices.
     ask(7, { t: 'ask', id: 'fix-go-ahead', prompt: '  Fix it now? ', default: 'y', choices: 'y,n' });
     askRead('CHOICE');
     // Dismissing without touching anything must answer the DEFAULT, not empty.
@@ -178,7 +178,7 @@ d = sys.stdin.read()
 m = re.search(r"<pre id=\"probe-out\">(.*?)</pre>", d, re.S)
 print(html.unescape(m.group(1)) if m else "PROBE DID NOT RUN")')
 
-[[ -n ${CG_DOM_DUMP:-} ]] && { printf '%s\n' "$OUT"; exit 0; }
+[[ -n ${AYIS_DOM_DUMP:-} ]] && { printf '%s\n' "$OUT"; exit 0; }
 if [[ $OUT == "PROBE DID NOT RUN" || -z $OUT ]]; then
   echo "  FAIL the page did not render at all"
   echo ""; echo "login-dom: $pass passed, 1 failed"; exit 1
@@ -221,7 +221,7 @@ lacks    "  not as zero accounts"      "$(row 'NONAMES ROWS')" "0 accounts"
 echo "5c. Steam sign-in is chosen on Build"
 contains "the saved login is the default"  "$(row 'PRESENT BUILD')" "Signs in as alice / *Sign in as alice, Ask me to sign in"
 contains "with nothing saved there is no choice" "$(row 'ABSENT BUILD')" "/ no choice"
-contains "picking 'ask me' saves it through cg" "$(row 'PICK RAN')" "config set GAME_STEAM_LOGIN fresh"
+contains "picking 'ask me' saves it through ayis" "$(row 'PICK RAN')" "config set GAME_STEAM_LOGIN fresh"
 contains "  and Build then says so"        "$(row 'FRESH BUILD')" "You sign in on the machine / Sign in as alice, *Ask me to sign in"
 
 echo "5b. a copy left in another place"
@@ -231,11 +231,11 @@ contains "  after the one that signs in" "$(row 'ELSE ROWS')" "/ In use / Remove
 check    "  its Forget is not red"     "$(row 'ELSE BTN')" "ELSE BTN | btn btn-danger,btn"
 
 echo "6. a numbered prompt is a choice, not a text box"
-contains "the question is cg's, trimmed" "$(row 'CHOICE PROMPT')" "CHOICE PROMPT | Fix it now?"
+contains "the question is ayis's, trimmed" "$(row 'CHOICE PROMPT')" "CHOICE PROMPT | Fix it now?"
 check    "the radios are shown"        "$(row 'CHOICE BOX')"   "CHOICE BOX | shown"
 check    "  and the text field is not" "$(row 'CHOICE INPUT')" "CHOICE INPUT | hidden"
 contains "the default is preselected"  "$(row 'CHOICE ROWS')" "CHECKED y"
-# Dismissing must answer the default, never an empty string: cg reads the reply
+# Dismissing must answer the default, never an empty string: ayis reads the reply
 # and an empty one would fall through to its own default anyway, but a build
 # that answers "" to a choice prompt is a thing nobody can debug.
 check "closing answers the default"    "$(row 'CHOICE ANSWER')" "CHOICE ANSWER | 7=y"

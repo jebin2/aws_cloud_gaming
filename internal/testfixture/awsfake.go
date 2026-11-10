@@ -1,6 +1,6 @@
 // Package testfixture holds fakes for the AWS clients, driven by a Scenario:
 // one description of an account, so a test says what exists and every fake
-// answers from it. Filters are honoured, so a test that forgets cg's tag finds
+// answers from it. Filters are honoured, so a test that forgets ayis's tag finds
 // another project's disk and fails - which is the point.
 package testfixture
 

@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
-	wd "github.com/jebin2/aws_cloud_gaming/internal/watchdog"
+	fx "github.com/jebin2/ayis/internal/testfixture"
+	wd "github.com/jebin2/ayis/internal/watchdog"
 )
 
 const (
-	host    = "gamevps"
+	host    = "ayis"
 	region  = "ap-south-2"
 	account = "123456789012"
 )
@@ -21,7 +21,7 @@ const (
 var now = time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 
 func settings(string) wd.Settings {
-	return wd.Settings{Host: host, Account: account, Bucket: "cg-library-test", IdleMinutes: 30, StuckMinutes: 60, ExpiryDays: 14,
+	return wd.Settings{Host: host, Account: account, Bucket: "ayis-library-test", IdleMinutes: 30, StuckMinutes: 60, ExpiryDays: 14,
 		S3GBMonth: "0.025", INRPerUSD: "112.041"}
 }
 
@@ -38,12 +38,12 @@ func current(t *testing.T) (*fx.Scenario, *wd.Reader) {
 	pol, _ := json.Marshal(settings("").Policy(region))
 	s := &fx.Scenario{
 		LogEvents: []fx.LogEvent{
-			{At: now.Add(-20 * time.Minute), Msg: "cg-watchdog: box i-1 idle 4m"},
-			{At: now.Add(-6 * time.Minute), Msg: "cg-watchdog: archive: kept - last used 16h ago; deleted in 6d 7h unless a box is launched"},
-			{At: now.Add(-5 * time.Minute), Msg: "cg-watchdog: no box"},
+			{At: now.Add(-20 * time.Minute), Msg: "ayis-watchdog: box i-1 idle 4m"},
+			{At: now.Add(-6 * time.Minute), Msg: "ayis-watchdog: archive: kept - last used 16h ago; deleted in 6d 7h unless a box is launched"},
+			{At: now.Add(-5 * time.Minute), Msg: "ayis-watchdog: no box"},
 		},
 		WD: fx.WatchdogState{Installed: true, CodeSHA: sha, State: "Active", Update: "Successful", Runtime: "python3.13", Role: role,
-			Description: "cloud_gaming layer 3 idle watchdog cfg=" + settings("").Fingerprint(role),
+			Description: "ayis layer 3 idle watchdog cfg=" + settings("").Fingerprint(role),
 			RuleState:   "ENABLED", Schedule: "rate(5 minutes)", Target: fn, StateRuleState: "ENABLED", StateTarget: fn,
 			Permission: `{"Statement":[{"Condition":{"ArnLike":{"AWS:SourceArn":"arn:aws:events:` + region + `:` + account + `:rule/` + wd.Name(host) + `"}}},` +
 				`{"Condition":{"ArnLike":{"AWS:SourceArn":"arn:aws:events:` + region + `:` + account + `:rule/` + wd.StateRule(host) + `"}}}]}`,
@@ -107,7 +107,7 @@ func TestNotInstalled(t *testing.T) {
 		t.Errorf("%+v", st)
 	}
 	out := Status(context.Background(), r, 14)
-	for _, want := range []string{"function  not installed - cg init creates it", "schedule  none"} {
+	for _, want := range []string{"function  not installed - ayis init creates it", "schedule  none"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("lacks %q:\n%s", want, out)
 		}
@@ -131,9 +131,9 @@ func TestStatusText(t *testing.T) {
 	_, r := current(t)
 	out := Status(context.Background(), r, 14)
 	for _, want := range []string{
-		"  function  gamevps-cloud-watchdog  Active python3.13\n",
+		"  function  ayis-cloud-watchdog  Active python3.13\n",
 		"  schedule  every 5 minutes, ENABLED\n",
-		"  can end   only the instance tagged gamevps\n",
+		"  can end   only the instance tagged ayis\n",
 		"  archive   kept - last used 16h ago; deleted in 6d 7h unless a box is launched  (checked 6 min ago)\n",
 		"  recent decisions:\n",
 		" no box\n",
@@ -153,7 +153,7 @@ func TestStatusText(t *testing.T) {
 func TestWatcherRows(t *testing.T) {
 	s, r := current(t)
 	rows := WatcherLines(context.Background(), r)
-	if rows[0] != [2]string{"ok", "cloud watchdog    ENABLED  (Lambda gamevps-cloud-watchdog, every 5 min)"} {
+	if rows[0] != [2]string{"ok", "cloud watchdog    ENABLED  (Lambda ayis-cloud-watchdog, every 5 min)"} {
 		t.Errorf("%v", rows[0])
 	}
 	if rows[1][1] != "  last            5 min ago: no box" {
@@ -164,7 +164,7 @@ func TestWatcherRows(t *testing.T) {
 	if rows[1] != [2]string{"warn", "  ^ nothing logged in the last hour, but it runs every 5 min"} {
 		t.Errorf("%v", rows)
 	}
-	s.LogEvents = []fx.LogEvent{{At: now.Add(-time.Minute), Msg: "cg-watchdog: CANNOT QUERY AWS"}}
+	s.LogEvents = []fx.LogEvent{{At: now.Add(-time.Minute), Msg: "ayis-watchdog: CANNOT QUERY AWS"}}
 	rows = WatcherLines(context.Background(), r)
 	if len(rows) != 3 || rows[2][0] != "fail" {
 		t.Errorf("%v", rows)
@@ -178,7 +178,7 @@ func TestWatcherRows(t *testing.T) {
 // CloudWatch Logs hands the message back with its newline.
 func TestLogLinesCarryNoNewline(t *testing.T) {
 	s, r := current(t)
-	s.LogEvents = []fx.LogEvent{{At: now.Add(-6 * time.Minute), Msg: "cg-watchdog: archive: kept - fine\n"}, {At: now.Add(-5 * time.Minute), Msg: "cg-watchdog: no box\n"}}
+	s.LogEvents = []fx.LogEvent{{At: now.Add(-6 * time.Minute), Msg: "ayis-watchdog: archive: kept - fine\n"}, {At: now.Add(-5 * time.Minute), Msg: "ayis-watchdog: no box\n"}}
 	out := Status(context.Background(), r, 14)
 	if strings.Contains(out, "\n\n") || !strings.Contains(out, "kept - fine  (checked 6 min ago)\n") {
 		t.Errorf("%q", out)

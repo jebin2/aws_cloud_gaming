@@ -59,7 +59,7 @@ func ParseFacts(out string) BoxFacts {
 	return f
 }
 
-// SummaryIn is what the end of cg init reports.
+// SummaryIn is what the end of ayis init reports.
 type SummaryIn struct {
 	InstanceID, Type, Region string
 	Spot                     bool
@@ -86,7 +86,7 @@ func orDefault(s, d string) string {
 	return s
 }
 
-// Summary is the end of cg init: what you now have, and only then what is left to
+// Summary is the end of ayis init: what you now have, and only then what is left to
 // do. It used to be a list of numbered steps, most of which said "[DONE
 // automatically]". Once pairing and key expiry both happen on their own, a list of
 // finished chores is noise; what is worth seeing is what the box ended up with, and
@@ -117,7 +117,7 @@ func Summary(in SummaryIn) (title, text string) {
 		model = "spot"
 	}
 	b.WriteString(row("Box", fmt.Sprintf("%s · %s %s · %s", orDefault(in.InstanceID, "unknown"), in.Type, model, in.Region)))
-	b.WriteString(more("billing by the hour - end it with: cg destroy"))
+	b.WriteString(more("billing by the hour - end it with: ayis destroy"))
 	expiry := "ON - see below"
 	if in.ExpiryOff {
 		expiry = "off"
@@ -135,7 +135,7 @@ func Summary(in SummaryIn) (title, text string) {
 	var steam string
 	switch {
 	case strings.HasPrefix(in.SteamMsg, "still installing"):
-		steam = "still installing - check: cg log steam"
+		steam = "still installing - check: ayis log steam"
 	case in.Facts.Login == "yes":
 		steam = "signed in"
 	case in.Facts.Login == "no":
@@ -167,7 +167,7 @@ func Summary(in SummaryIn) (title, text string) {
 		}
 	}
 
-	watchdog := "cloud watchdog NOT armed - run: cg watchdog install"
+	watchdog := "cloud watchdog NOT armed - run: ayis watchdog install"
 	if in.WatchdogArmed {
 		watchdog = fmt.Sprintf("cloud watchdog %d min", in.WatchdogIdleMin)
 	}
@@ -189,8 +189,8 @@ func Summary(in SummaryIn) (title, text string) {
 		fmt.Fprintf(&b, "  STEP - pair Moonlight   [ACTION NEEDED]\n  ------------------------------------------------------------------\n  a) Run this. It prints a 4-digit PIN and waits:\n\n       moonlight pair %s\n\n  b) Open this, log in with SUNSHINE_USER / SUNSHINE_PASS from .env,\n     go to 'PIN', and enter that PIN. Accept the certificate warning.\n\n       https://%s:47990\n\n  c) Confirm - this should list Desktop:\n\n       moonlight list %s\n\n", in.IP, in.IP, in.IP)
 	}
 	if !in.ExpiryOff {
-		fmt.Fprintf(&b, "  STEP - stop the Tailscale key expiring   [ACTION NEEDED]\n  ------------------------------------------------------------------\n  Tailscale keys expire after ~180 days by default. When this one does,\n  the node drops off the tailnet and cg open hangs waiting for it.\n  cg init does this itself when TAILSCALE_API_KEY is set and valid; why it\n  could not this time is under \"turning off Tailscale key expiry\" above.\n\n       https://login.tailscale.com/admin/machines\n\n  Find \"%s\" -> the \"...\" menu -> Disable key expiry.\n\n", in.Node)
+		fmt.Fprintf(&b, "  STEP - stop the Tailscale key expiring   [ACTION NEEDED]\n  ------------------------------------------------------------------\n  Tailscale keys expire after ~180 days by default. When this one does,\n  the node drops off the tailnet and ayis open hangs waiting for it.\n  ayis init does this itself when TAILSCALE_API_KEY is set and valid; why it\n  could not this time is under \"turning off Tailscale key expiry\" above.\n\n       https://login.tailscale.com/admin/machines\n\n  Find \"%s\" -> the \"...\" menu -> Disable key expiry.\n\n", in.Node)
 	}
-	b.WriteString("  cg open to play · cg status · cg destroy when done\n\n")
+	b.WriteString("  ayis open to play · ayis status · ayis destroy when done\n\n")
 	return title, b.String()
 }

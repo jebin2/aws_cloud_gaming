@@ -38,7 +38,7 @@ cat > "$T/r/stub.js" <<'STUB'
 window.__errs = [];
 addEventListener('error', e => window.__errs.push(e.message));
 addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
-window.cg = {
+window.ayis = {
   run: () => Promise.resolve({ ok: true, id: 1 }),
   answer: () => Promise.resolve(true), cancel: () => Promise.resolve(true),
   busy: () => Promise.resolve([]),
@@ -46,7 +46,7 @@ window.cg = {
 };
 STUB
 
-# The registry as cg reports it. EMAIL_ALERTS carries the shape that broke the
+# The registry as ayis reports it. EMAIL_ALERTS carries the shape that broke the
 # layout - two addresses, which its own note invites - and lives on Guards now;
 # the bitrate's value on Settings says what an hour of streaming costs, which
 # makes it the longest value on that page.
@@ -134,7 +134,7 @@ row() { grep -m1 "^$1 " <<<"$GEO" || true; }
 field() { sed -n "s/.*| $2=\([^|]*\).*/\1/p" <<<"$(row "$1")" | tr -d ' '; }
 
 for W in 1000 1280; do
-  GEO=$(geo "$W"); [[ -n ${CG_GEO_DUMP:-} ]] && printf "%s\n" "$GEO"
+  GEO=$(geo "$W"); [[ -n ${AYIS_GEO_DUMP:-} ]] && printf "%s\n" "$GEO"
   echo "at ${W}px wide"
   [[ $GEO == *"NO PROBE OUTPUT"* ]] && { echo "  FAIL the page did not render"; fail=$((fail+1)); continue; }
 

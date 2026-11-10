@@ -1,28 +1,33 @@
 'use strict';
 // The Electron main process: the only place allowed to start a process.
 //
-// One job at a time, because cg takes its own locks and a destroy must never
+// One job at a time, because ayis takes its own locks and a destroy must never
 // race a build. The renderer gets events and sends answers; it has no node, no
 // filesystem and no AWS.
 const path = require('node:path');
 const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require('electron');
 const { run, answer, interrupt } = require('./runner');
-const { findRepo, CG } = require('./repo');
+const { findRepo, AYIS } = require('./repo');
 const { intelOnly } = require('./gpu');
+
+// Electron names its data folder after productName, "Ayis", but the program keeps
+// its settings in .../ayis (~/.config/ayis on Linux). Case matters on Linux, so
+// without this there would be two folders. One, as it was when both were "cg".
+app.setPath('userData', path.join(app.getPath('appData'), 'ayis'));
 
 // Off the NVIDIA GPU of a laptop that has an Intel one too - see main/gpu.js.
 // Here, before anything starts: Chromium's GPU process is launched later, with
-// the environment as it is then, and so is every cg the app runs.
+// the environment as it is then, and so is every ayis the app runs.
 {
   const intel = intelOnly();
   if (intel) {
     Object.assign(process.env, intel);
-    console.error('cg: drawing on the Intel GPU (NVIDIA left alone)');
+    console.error('ayis: drawing on the Intel GPU (NVIDIA left alone)');
   }
 }
 
 // Where the scripts are - see main/repo.js, which owns the order and the one
-// rule that matters: `cg` has to be a file, not a directory with that name.
+// rule that matters: `ayis` has to be a file, not a directory with that name.
 const REPO = findRepo();
 let win = null;
 let nextId = 1;
@@ -32,35 +37,35 @@ function send(channel, payload) {
 }
 
 // `env` carries the few settings a screen may choose - GAME_APPS for a build.
-// Anything else stays in .env, where cg owns it. cg's contract names them; this
-// is only what to assume when cg cannot be asked.
+// Anything else stays in .env, where ayis owns it. ayis's contract names them; this
+// is only what to assume when ayis cannot be asked.
 const envAllowed = () => new Set(Array.isArray(CONTRACT.env) ? CONTRACT.env : ['GAME_APPS']);
 
 // Reading AWS is independent work: status, the watcher and the archive index do
 // not touch each other, so they run together. Anything that CHANGES something
-// Which commands must run alone is cg's to say, not this file's. It was
+// Which commands must run alone is ayis's to say, not this file's. It was
 // written down here AND in the renderer, and the two disagreed three times -
 // each time silently, because a command that is never started looks exactly
 // like one that returned nothing.
 //
-// Read once at startup. If cg cannot be asked, nothing is assumed to be safe:
+// Read once at startup. If ayis cannot be asked, nothing is assumed to be safe:
 // everything runs alone, which is slow and correct rather than fast and wrong.
 const DEFAULT_CONTRACT = { runs_alone: null, asks: [] };
 let CONTRACT = DEFAULT_CONTRACT;
 function loadContract() {
   try {
     const out = require('node:child_process')
-      .execFileSync(path.join(REPO, CG), ['--contract'], { cwd: REPO, timeout: 10000, encoding: 'utf8', windowsHide: true });
+      .execFileSync(path.join(REPO, AYIS), ['--contract'], { cwd: REPO, timeout: 10000, encoding: 'utf8', windowsHide: true });
     const c = JSON.parse(out);
     if (!Array.isArray(c.runs_alone)) throw new Error('no runs_alone');
     CONTRACT = c;
   } catch (err) {
-    console.error('cg --contract could not be read: ' + (err && err.message)
+    console.error('ayis --contract could not be read: ' + (err && err.message)
                   + ' - every command will run alone');
   }
 }
 
-// cg takes its flags BEFORE the command - `cg --region X quota --json` - so
+// ayis takes its flags BEFORE the command - `ayis --region X quota --json` - so
 // they are skipped before anything is matched. --region and --host take a
 // value with them.
 const FLAG_TAKES_VALUE = new Set(['--region', '--host']);
@@ -72,7 +77,7 @@ const verb = args => {
   }
   return rest;
 };
-// A command runs alone when cg lists a prefix of it.
+// A command runs alone when ayis lists a prefix of it.
 const runsAlone = raw => {
   const cmd = verb(raw);
   if (!CONTRACT.runs_alone) return true;          // could not ask: assume the worst
@@ -93,7 +98,7 @@ const beside = raw => {
 };
 
 // Every run that changes something keeps its own log file, with the time of each
-// line: ~/.config/cg/logs/<time>-<command>.log (the app's data folder). The page
+// line: ~/.config/ayis/logs/<time>-<command>.log (the app's data folder). The page
 // shows a run's log only until the next one starts, so when a step is slow or a
 // run is cancelled this is what says what happened and when. The last 40 stay.
 function runLog(args) {
@@ -105,7 +110,7 @@ function runLog(args) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const name = `${stamp}-${verb(args).slice(0, 2).join('-') || 'run'}.log`;
     fd = fs.openSync(path.join(dir, name), 'a', 0o600);
-    fs.writeSync(fd, `cg ${args.join(' ')}\n`);
+    fs.writeSync(fd, `ayis ${args.join(' ')}\n`);
     const old = fs.readdirSync(dir).filter(f => f.endsWith('.log')).sort();
     for (const f of old.slice(0, Math.max(0, old.length - 40))) { try { fs.unlinkSync(path.join(dir, f)); } catch { /* in use */ } }
   } catch { return null; }
@@ -122,7 +127,7 @@ function runLog(args) {
 }
 
 // The reads - status, the bill, the games on the machine - share one log per time
-// the app is opened: ~/.config/cg/logs/<time>-reads.log, each line marked with its
+// the app is opened: ~/.config/ayis/logs/<time>-reads.log, each line marked with its
 // read. A screen that keeps loading is a read that has not answered, and this
 // says which one and since when.
 let readsFd;
@@ -145,7 +150,7 @@ function readLog(id, args) {
       fs.writeSync(readsFd, `${t}  ${name}  ${text}\n`);
     } catch { /* a log is never worth failing a read */ }
   };
-  line(`start: cg ${args.join(' ')}`);
+  line(`start: ayis ${args.join(' ')}`);
   return event => {
     if (event.t === 'exit') line(`exit rc=${event.rc}`);
     else if (event.t === 'error' || (event.t === 'line' && event.kind === 'fail')) line(`${event.t}: ${event.text || ''}`);
@@ -171,7 +176,7 @@ function startJob(args, env = {}) {
     args, env: safe,
     onEvent: event => {
       if (log) log(event);
-      send('cg:event', { id, event });
+      send('ayis:event', { id, event });
       if (event.t === 'exit') jobs.delete(id);
     },
   });
@@ -182,47 +187,47 @@ function startJob(args, env = {}) {
   return { ok: true, id, write: !readOnly };
 }
 
-ipcMain.handle('cg:run', (_e, { args, env }) => startJob(args, env || {}));
-ipcMain.handle('cg:answer', (_e, { id, text }) => {
+ipcMain.handle('ayis:run', (_e, { args, env }) => startJob(args, env || {}));
+ipcMain.handle('ayis:answer', (_e, { id, text }) => {
   const job = jobs.get(id);
   return job ? answer(job.child, text) : false;
 });
-ipcMain.handle('cg:cancel', (_e, id) => {
+ipcMain.handle('ayis:cancel', (_e, id) => {
   const job = jobs.get(id);
   return job ? interrupt(job.child) : false;
 });
 // The run logs' folder: opened in the file manager, and named back, so "where are
 // the logs" is a button and not a path to remember.
-ipcMain.handle('cg:open-logs', async () => {
+ipcMain.handle('ayis:open-logs', async () => {
   const dir = path.join(app.getPath('userData'), 'logs');
   try { require('node:fs').mkdirSync(dir, { recursive: true }); } catch { /* opened anyway */ }
   await shell.openPath(dir);
   return dir;
 });
-ipcMain.handle('cg:busy', () => [...jobs.values()].map(j => ({ id: j.id, args: j.args })));
-// The ids cg may ask under, as cg itself lists them. The window pre-answers a
+ipcMain.handle('ayis:busy', () => [...jobs.values()].map(j => ({ id: j.id, args: j.args })));
+// The ids ayis may ask under, as ayis itself lists them. The window pre-answers a
 // couple of them from a dialog it has already shown - and when an id is renamed
-// in cg, that pre-answer silently stops matching and a modal appears in the
+// in ayis, that pre-answer silently stops matching and a modal appears in the
 // middle of a build. So the list is handed over and checked against.
-ipcMain.handle('cg:asks', () => CONTRACT.asks || []);
+ipcMain.handle('ayis:asks', () => CONTRACT.asks || []);
 
-// Whether there is a cg here at all, and where this looked.
+// Whether there is an ayis here at all, and where this looked.
 //
 // Without it every command fails identically - a spawn error per read - and the
 // window had no way to say the one true thing: that the engine is missing, not
 // that six separate reads went wrong. main is the only place that knows, since
 // the renderer has no filesystem.
 //
-// Re-reads the contract when there is a cg but no contract, so that a window
-// started before cg was installed can be told to try again. Local, and free.
+// Re-reads the contract when there is an ayis but no contract, so that a window
+// started before ayis was installed can be told to try again. Local, and free.
 function engineFacts() {
-  const cg = path.join(REPO, CG);
+  const ayis = path.join(REPO, AYIS);
   let found = false;
-  try { found = require('node:fs').statSync(cg).isFile(); } catch { /* not there */ }
+  try { found = require('node:fs').statSync(ayis).isFile(); } catch { /* not there */ }
   if (found && !CONTRACT.runs_alone) loadContract();
-  return { repo: REPO, cg, found, contract: !!CONTRACT.runs_alone };
+  return { repo: REPO, ayis, found, contract: !!CONTRACT.runs_alone };
 }
-ipcMain.handle('cg:engine', () => engineFacts());
+ipcMain.handle('ayis:engine', () => engineFacts());
 
 // The window denies every navigation and every new window on purpose - it is a
 // viewer of local files. Tailscale's sign-in is the one exception: it finishes
@@ -232,7 +237,7 @@ ipcMain.handle('cg:engine', () => engineFacts());
 // quota appeal is a reply on an AWS support case. Both are checked HERE rather
 // than trusting whatever asked.
 const OPENABLE = new Set(['login.tailscale.com', 'console.aws.amazon.com']);
-ipcMain.handle('cg:open-signin', (_e, url) => {
+ipcMain.handle('ayis:open-signin', (_e, url) => {
   let u;
   try { u = new URL(String(url)); } catch { return false; }
   if (u.protocol !== 'https:' || !OPENABLE.has(u.hostname)) return false;
@@ -243,7 +248,7 @@ ipcMain.handle('cg:open-signin', (_e, url) => {
 function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 860, backgroundColor: '#10141a', show: false,
-    title: 'cg', autoHideMenuBar: true,
+    title: 'Ayis', autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -262,11 +267,11 @@ function createWindow() {
   // anyway and say why.
   setTimeout(() => {
     if (win && !win.isDestroyed() && !win.isVisible()) {
-      console.error('cg: the page has not painted after 5 s; showing the window anyway');
+      console.error('ayis: the page has not painted after 5 s; showing the window anyway');
       win.show();
     }
   }, 5000);
-  win.webContents.on('render-process-gone', (_e, d) => console.error('cg: the page stopped:', d.reason, d.exitCode));
+  win.webContents.on('render-process-gone', (_e, d) => console.error('ayis: the page stopped:', d.reason, d.exitCode));
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   // A viewer of local files: nothing here should ever navigate to the web.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -281,21 +286,21 @@ function createWindow() {
 // GPU, and the GPU is what kept the window from appearing: a VM's emulated card
 // (QEMU's, no 3D - "Exiting GPU process due to errors during initialization",
 // then a page that never painted) and, on a real laptop, an NVIDIA driver that
-// had hung. CG_GPU=1 puts the GPU back, for trying it.
-if (process.env.CG_GPU !== '1') app.disableHardwareAcceleration();
+// had hung. AYIS_GPU=1 puts the GPU back, for trying it.
+if (process.env.AYIS_GPU !== '1') app.disableHardwareAcceleration();
 
-// No File / Edit / View menu: this window runs cg and shows what it says.
+// No File / Edit / View menu: this window runs ayis and shows what it says.
 // Electron's default menu offers nothing here except ways to confuse.
 Menu.setApplicationMenu(null);
 
-app.on('child-process-gone', (_e, d) => console.error('cg:', d.type, 'process stopped:', d.reason, d.exitCode));
+app.on('child-process-gone', (_e, d) => console.error('ayis:', d.type, 'process stopped:', d.reason, d.exitCode));
 app.whenReady().then(() => { loadContract(); createWindow(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 
-// Killing cg mid-run can cost games: a destroy is pushing to S3 as it goes.
+// Killing ayis mid-run can cost games: a destroy is pushing to S3 as it goes.
 app.on('before-quit', e => {
-  // A stop is saving the games before the machine goes: cg does not make it run
+  // A stop is saving the games before the machine goes: ayis does not make it run
   // alone, but quitting under it is as risky as quitting under a delete.
   const risky = [...jobs.values()].filter(j => !j.readOnly || verb(j.args)[0] === 'stop');
   // Reading AWS can be abandoned safely - but stopped, not left behind: a read
@@ -307,7 +312,7 @@ app.on('before-quit', e => {
     type: 'warning',
     buttons: ['Wait', 'Stop it and quit'],
     defaultId: 0,
-    message: `"cg ${risky[0].args.join(' ')}" is still running.`,
+    message: `"ayis ${risky[0].args.join(' ')}" is still running.`,
     detail: 'Stopping a run that is uploading your games can lose whatever it had not sent yet.',
   });
   if (choice === 1) { risky.forEach(j => interrupt(j.child)); jobs.clear(); app.quit(); }

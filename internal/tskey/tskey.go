@@ -104,7 +104,7 @@ type Minted struct {
 // follows wants an hour of margin, so a key that lived one hour was "expired"
 // the moment it was made.
 //
-//	reusable:false   - the key is single use; cg checks the one it keeps
+//	reusable:false   - the key is single use; ayis checks the one it keeps
 //	ephemeral:false  - an ephemeral node is purged when it goes offline, and this
 //	                   box goes offline every time the watchdog stops it
 //	preauthorized    - nobody is at the box to approve it
@@ -112,7 +112,7 @@ func (c Client) Mint(ctx context.Context, host string) Minted {
 	if c.Token == "" {
 		return Minted{Err: "no API token"}
 	}
-	body := fmt.Sprintf(`{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":false,"preauthorized":true,"tags":[]}}},"expirySeconds":%d,"description":"cg %s"}`, int(mintLife/time.Second), host)
+	body := fmt.Sprintf(`{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":false,"preauthorized":true,"tags":[]}}},"expirySeconds":%d,"description":"ayis %s"}`, int(mintLife/time.Second), host)
 	code, b, err := c.do(ctx, http.MethodPost, "/tailnet/-/keys", strings.NewReader(body))
 	if err != nil {
 		return Minted{}

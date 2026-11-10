@@ -62,7 +62,7 @@ func pick(devs []device, node string) *device {
 
 // DisableExpiry turns Tailscale key expiry off for the node that just joined. A
 // node's key expires after ~180 days by default, and then the box drops off the
-// tailnet and `cg open` hangs waiting for it. The API token that already prunes
+// tailnet and `ayis open` hangs waiting for it. The API token that already prunes
 // stale nodes can stop that instead of a manual step in the admin console.
 func (c Client) DisableExpiry(ctx context.Context, node string) Expiry {
 	if c.Token == "" {
@@ -98,12 +98,12 @@ func (c Client) DisableExpiry(ctx context.Context, node string) Expiry {
 
 // PruneStale deletes OFFLINE tailnet nodes named after this host, before a build.
 //
-// Pruning used to happen only in `cg destroy`. That was fine when destroy was how
+// Pruning used to happen only in `ayis destroy`. That was fine when destroy was how
 // a session ended - but the box now terminates itself when it goes idle, and
 // nothing on the box can delete its own tailnet entry (that needs an API token,
 // which deliberately never leaves the laptop). So every auto-terminated box leaked
-// a node, the next build found its name taken, and the tailnet crept to gamevps-1,
-// gamevps-2, ... That is not cosmetic: a suffixed name means `.env` and Moonlight
+// a node, the next build found its name taken, and the tailnet crept to ayis-1,
+// ayis-2, ... That is not cosmetic: a suffixed name means `.env` and Moonlight
 // disagree about what the box is called, and a stale entry answers DNS for a
 // machine that no longer exists.
 //

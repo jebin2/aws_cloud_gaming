@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/laptop"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
+	"github.com/jebin2/ayis/internal/laptop"
+	fx "github.com/jebin2/ayis/internal/testfixture"
 )
 
 func installer(l laptop.Laptop, _ any) *laptop.Installer {

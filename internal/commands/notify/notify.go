@@ -1,4 +1,4 @@
-// Package notify is `cg notify`: a test message, to check the phone end before
+// Package notify is `ayis notify`: a test message, to check the phone end before
 // relying on it. The topic is never printed: on ntfy.sh, anyone who knows it can
 // read and post to it.
 package notify
@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 // Send posts the test message. client may be nil.

@@ -6,7 +6,7 @@
 # Empty when it cannot be told. Expects /etc/os-release already read.
 #
 # The one copy: the build picks Sunshine's package with it (95-sunshine.sh), and
-# cg reads it over ssh with the rest of a machine's facts (lib/host.sh includes
+# ayis reads it over ssh with the rest of a machine's facts (lib/host.sh includes
 # this file's text). Two copies drifted into facts saying "supported" while the
 # package lookup asked for a name that does not exist. POSIX sh: the facts run
 # under sh, whatever the login shell is.

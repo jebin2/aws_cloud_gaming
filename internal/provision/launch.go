@@ -15,7 +15,7 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/sshkey"
+	"github.com/jebin2/ayis/internal/sshkey"
 )
 
 // EC2 is what making and launching the box uses.
@@ -137,7 +137,7 @@ func (p Provisioner) tag(a Params) string {
 	if a.TagKey != "" {
 		return a.TagKey
 	}
-	return "cg:host"
+	return "ayis:host"
 }
 
 // Existing is the instance already there for this host, if one is: running,
@@ -181,16 +181,16 @@ func (p Provisioner) Run(ctx context.Context, a Params) (Result, error) {
 	// The old EBS game volume is deliberately NOT attached any more: nothing mounts
 	// it, and attaching it would re-pin the AZ for no benefit. It is not deleted
 	// either - deleting storage that might hold the only copy of something is not a
-	// thing to do silently. `cg games --volume` shows what it still costs.
+	// thing to do silently. `ayis games --volume` shows what it still costs.
 	if o, err := p.EC2.DescribeVolumes(ctx, &ec2.DescribeVolumesInput{Filters: []ec2types.Filter{{Name: aws.String("tag:Name"), Values: []string{a.Host + "-games"}}}}); err == nil && len(o.Volumes) > 0 {
 		v := aws.ToString(o.Volumes[0].VolumeId)
 		out(fmt.Sprintf("==> note: the old EBS game volume %s still exists and still bills", v))
-		out("    it is no longer used or attached - reclaim it with: cg games --volume --delete")
+		out("    it is no longer used or attached - reclaim it with: ayis games --volume --delete")
 	}
 	return res, nil
 }
 
-// image is a saved image from `cg destroy`, which already has driver, desktop,
+// image is a saved image from `ayis destroy`, which already has driver, desktop,
 // Sunshine and Tailscale on it, so restoring skips bootstrap entirely - minutes,
 // not ~20. The newest one.
 func (p Provisioner) image(ctx context.Context, host string) string {
@@ -224,7 +224,7 @@ func (p Provisioner) securityGroup(ctx context.Context, a Params) (string, error
 		// unauthenticated peers get nowhere. No SSH, no Sunshine ports.
 		p.Out("==> creating security group (tailscale UDP only)")
 		o, err := p.EC2.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{GroupName: aws.String(name),
-			Description:       aws.String("cloud gaming host; reachable over Tailscale only"),
+			Description:       aws.String("Ayis host; reachable over Tailscale only"),
 			TagSpecifications: []ec2types.TagSpecification{{ResourceType: ec2types.ResourceTypeSecurityGroup, Tags: []ec2types.Tag{{Key: aws.String(p.tag(a)), Value: aws.String(a.Host)}}}}})
 		if err != nil {
 			return "", fmt.Errorf("could not create the security group: %s", firstLine(err))
@@ -241,7 +241,7 @@ func (p Provisioner) securityGroup(ctx context.Context, a Params) (string, error
 			return "", fmt.Errorf("could not open the tailscale port: %s", firstLine(err))
 		}
 	}
-	// cg's tag on it, made before the tag existed or not - never fatal.
+	// ayis's tag on it, made before the tag existed or not - never fatal.
 	_, _ = p.EC2.CreateTags(ctx, &ec2.CreateTagsInput{Resources: []string{sg}, Tags: []ec2types.Tag{{Key: aws.String(p.tag(a)), Value: aws.String(a.Host)}}})
 	p.Out("    " + sg)
 	return sg, nil
@@ -452,15 +452,15 @@ func (p Provisioner) userData(ctx context.Context, a Params) (UserData, error) {
 // awsVars are the values the AWS box's build is filled in with: in its user-data,
 // and, in the environment file the user-data writes, for every stage and the prelude.
 func awsVars(a Params, url, apps, login, reserve string) map[string]string {
-	return map[string]string{"CG_DATA_GB": strconv.Itoa(a.DataGB), "CG_EXTRA_APPS": a.ExtraApps, "TS_AUTHKEY": a.AuthKey, "TS_HOST": a.Host, "HOST_TGZ_URL": url, "S3_BUCKET": a.Bucket,
-		"CG_APPS": apps, "CG_LOGIN": login, "CG_RESERVE_GB": reserve, "CG_TARGET": "aws", "CG_USER": "ubuntu", "CG_FAMILY": "ubuntu",
-		"CG_STEAM_CLIENT_URL": SteamClientURL}
+	return map[string]string{"AYIS_DATA_GB": strconv.Itoa(a.DataGB), "AYIS_EXTRA_APPS": a.ExtraApps, "TS_AUTHKEY": a.AuthKey, "TS_HOST": a.Host, "HOST_TGZ_URL": url, "S3_BUCKET": a.Bucket,
+		"AYIS_APPS": apps, "AYIS_LOGIN": login, "AYIS_RESERVE_GB": reserve, "AYIS_TARGET": "aws", "AYIS_USER": "ubuntu", "AYIS_FAMILY": "ubuntu",
+		"AYIS_STEAM_CLIENT_URL": SteamClientURL}
 }
 
 // SteamClientURL is where the Steam client archive is published (the Steam client
 // archive workflow, .github/workflows/steam-client.yml): the assets of one release
 // of this repository.
-const SteamClientURL = "https://github.com/jebin2/aws_cloud_gaming/releases/download/steam-client"
+const SteamClientURL = "https://github.com/jebin2/ayis/releases/download/steam-client"
 
 // repairProfile attaches the instance role to a reused instance that has none. A
 // box launched before the library moved to S3 has no instance profile, and without

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/laptop"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
+	"github.com/jebin2/ayis/internal/laptop"
+	"github.com/jebin2/ayis/internal/output"
+	fx "github.com/jebin2/ayis/internal/testfixture"
 )
 
 func lap(tty bool, has ...string) (laptop.Laptop, *fx.Runner) {
@@ -47,7 +47,7 @@ func TestJSONShape(t *testing.T) {
 	_ = json.Unmarshal(b, &m)
 	tools := m["tools"].([]any)
 	if len(tools) != 3 {
-		t.Fatalf("the Go cg needs ssh, tailscale and moonlight - not python3, curl or the AWS CLI: %v", tools)
+		t.Fatalf("the Go ayis needs ssh, tailscale and moonlight - not python3, curl or the AWS CLI: %v", tools)
 	}
 	mo := tools[2].(map[string]any)
 	if mo["tool"] != "moonlight" || mo["present"] != false || mo["plan"] != "sudo pacman -S moonlight-qt" || mo["for"] != "all" {
@@ -96,7 +96,7 @@ func TestInstalledButNotSignedInIsItsOwnState(t *testing.T) {
 		t.Error("not ready")
 	}
 	for _, want := range []string{"installed: OpenSSH (ssh, scp), Tailscale, Moonlight", "Tailscale is installed but not signed in, or not running",
-		"cg check --fix installs and signs in what is missing, after asking"} {
+		"ayis check --fix installs and signs in what is missing, after asking"} {
 		if !strings.Contains(o.String(), want) {
 			t.Errorf("lacks %q:\n%s", want, o.String())
 		}
@@ -119,7 +119,7 @@ func TestReportAfterFixSendsYouToDoItByHand(t *testing.T) {
 			t.Errorf("lacks %q:\n%s", want, o.String())
 		}
 	}
-	if strings.Contains(o.String(), "cg check --fix installs") {
+	if strings.Contains(o.String(), "ayis check --fix installs") {
 		t.Error("suggesting --fix again would only send you round in a loop")
 	}
 }

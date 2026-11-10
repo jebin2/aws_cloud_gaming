@@ -165,7 +165,7 @@ about it; a spot launch without it fails with `MaxSpotInstanceCountExceeded`. Sp
 quarter of the on-demand price (measured here: INR 19.8/hour against INR 85/hour), which is why
 this project defaults to it - see [cost.md](cost.md).
 
-Spot is optional. Without it `cg init` falls back to on-demand by itself and says so:
+Spot is optional. Without it `ayis init` falls back to on-demand by itself and says so:
 
     spot quota 0 vCPU cannot cover g6.xlarge (4) - using on-demand
       spot is ~4x cheaper; request quota L-3819A6DF to enable it
@@ -213,13 +213,13 @@ To see your requests and their status:
 Track the conversation on a case in the console's **Support Center**. `aws support` commands need a
 paid Support plan and fail with `SubscriptionRequiredException` without one.
 
-## Step 7 - Let `cg check` confirm everything
+## Step 7 - Let `ayis check` confirm everything
 
 With `.env` filled in (see [getting-started.md](getting-started.md)), run the preflight. It checks
 the plan, the region, the instance type and the right quota for the purchase model, and creates
 nothing:
 
-    ./cg check
+    ./ayis check
 
 **Passes when** it ends like this:
 
@@ -229,16 +229,16 @@ nothing:
     │  ✓ AWS credentials work (~/.aws/credentials, profile default)
     │  · account plan: PAID
     │  · spot quota 4 vCPU covers g6.xlarge (4)
-    │  ✓ ssh key ~/.ssh/gamevps.pem matches the key pair
+    │  ✓ ssh key ~/.ssh/ayis.pem matches the key pair
 
     🎉 preflight passed - nothing was created.
 
-`./cg check --fix` installs anything the laptop is missing first, and asks for any `.env` setting
+`./ayis check --fix` installs anything the laptop is missing first, and asks for any `.env` setting
 that is absent.
 
 **What its failures mean:**
 
-| `cg check` says | Go back to |
+| `ayis check` says | Go back to |
 |---|---|
 | `this AWS account is on the Free Plan, which can only launch free-tier-eligible instance types` | step 2 |
 | `'<region>' is not a region you can use` | step 1, or `GAME_REGION` in `.env` |
@@ -246,7 +246,7 @@ that is absent.
 | `spot GPU quota in <region> is 0 vCPU; <type> needs 4` | step 5, or unset `GAME_SPOT` to use on-demand |
 | `on-demand GPU quota in <region> is 0 vCPU; <type> needs 4` | step 4 |
 
-Once it passes, `./cg init` builds the box.
+Once it passes, `./ayis init` builds the box.
 
 ## The appeals we actually sent
 
@@ -259,7 +259,7 @@ AWS staff who replied are not named.
 > root volume, the budget was $70 with a Budget Action, and the CloudWatch alarm stopped the box.
 > Today a spot box is one-time and terminates, the games live in S3, and the budget is $57. Both
 > letters list four safeguards, but the CloudWatch alarm among them is gone. What runs now is three
-> guards - `cg open`, the on-host idle watchdog and a Lambda cloud watchdog - plus a budget that
+> guards - `ayis open`, the on-host idle watchdog and a Lambda cloud watchdog - plus a budget that
 > emails you. See [cost-guards.md](cost-guards.md), and write yours about what you actually run.
 
 ### On-demand: `Running On-Demand G and VT instances` - granted in two regions
@@ -373,7 +373,7 @@ available within the next hour."
 ## For AI assistants following this
 
 - **Safe to run yourself:** every `aws ... describe-*`, `get-*` and `list-*` command above, and
-  `./cg check`. They are read-only and free.
+  `./ayis check`. They are read-only and free.
 - **Leave to the person:** step 2's plan upgrade (irreversible, root user - do not run
   `aws freetier upgrade-account-plan`), and **sending** the appeals in steps 4 and 5. An appeal is a
   statement about the person's own workload and account, made to AWS in their name.

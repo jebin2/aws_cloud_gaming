@@ -58,7 +58,7 @@ PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print
 WEB=$!
 for _ in $(seq 1 50); do curl -fs "http://127.0.0.1:$PORT/steam-client.json" >/dev/null 2>&1 && break; sleep 0.1; done
 URL=http://127.0.0.1:$PORT
-fetch() { CG_FETCH_HOME=$1 bash host/steam-client-fetch "$URL" "$(id -un)" 2>&1; echo "rc=$?"; }
+fetch() { AYIS_FETCH_HOME=$1 bash host/steam-client-fetch "$URL" "$(id -un)" 2>&1; echo "rc=$?"; }
 out=$(fetch "$T/box1")
 contains "it succeeds"                "$out" "rc=0"
 contains "  and says where"           "$out" "the Steam client is in place"
@@ -109,6 +109,6 @@ contains "it says there is none"      "$out" "no Steam client archive to use"
 contains "  with a code of its own"    "$out" "rc=2"
 
 echo "8. the stage runs the fetcher with bash - the bundle does not keep the executable bit"
-check "  no bare call of a host file" "$(grep -c '^/opt/cloud-gaming-host/steam-client-fetch' lib/bootstrap.d/71-steam-client.sh)" "0"
+check "  no bare call of a host file" "$(grep -c '^/opt/ayis-host/steam-client-fetch' lib/bootstrap.d/71-steam-client.sh)" "0"
 
 echo; echo "steam-client: $pass passed, $fail failed"; [[ $fail -eq 0 ]]

@@ -1,4 +1,4 @@
-// Package quota is `cg quota`: the G-instance quota, what you have, what a build
+// Package quota is `ayis quota`: the G-instance quota, what you have, what a build
 // needs, and how to ask.
 //
 // A new AWS account gets 0 vCPU of GPU instances. The request is free and the
@@ -6,7 +6,7 @@
 // are put in place to help you gradually ramp up activity" - and what gets it
 // approved is the APPEAL on that same case, with a specific use case in it.
 // That is a human conversation, and the Support API needs a Business plan, so
-// cg cannot have it for you. What it can do is ask, track the answer, and write
+// ayis cannot have it for you. What it can do is ask, track the answer, and write
 // the appeal out of facts this rig already knows.
 //
 // Two quotas, not one. They are separate limits and a build needs whichever
@@ -97,7 +97,7 @@ type Kind struct {
 	Request *Request `json:"request"`
 }
 
-// Status is `cg quota --json`.
+// Status is `ayis quota --json`.
 type Status struct {
 	Region       string `json:"region"`
 	InstanceType string `json:"instance_type"`
@@ -221,19 +221,19 @@ func Rows(s Status) (rows []Row, after []string) {
 	}
 	if len(short) > 0 {
 		after = append(after,
-			fmt.Sprintf("  ask for %s:  cg quota request %s", strings.Join(short, " and "), short[0]),
-			fmt.Sprintf("  the first answer is usually no; the appeal is what works: cg quota appeal %s", short[0]))
+			fmt.Sprintf("  ask for %s:  ayis quota request %s", strings.Join(short, " and "), short[0]),
+			fmt.Sprintf("  the first answer is usually no; the appeal is what works: ayis quota appeal %s", short[0]))
 	}
 	return
 }
 
-// Ask is `cg quota request`: ask AWS for exactly what one box needs.
+// Ask is `ayis quota request`: ask AWS for exactly what one box needs.
 type Asker struct {
 	Quota
 	Say    func(string)
 	LogAs  func(kind, text string)
 	Log    func(string)
-	Appeal string // "cg quota appeal <kind>" hint
+	Appeal string // "ayis quota appeal <kind>" hint
 }
 
 // Request asks for the quota, unless it is already enough or a request is open.
@@ -280,7 +280,7 @@ func (a Asker) Request(ctx context.Context, kind string) int {
 	}
 	a.Log("  The first answer is usually an automatic refusal - that is normal, and")
 	a.Log("  the appeal on the same case is what gets approved.")
-	a.Log("  Write it with:  cg quota appeal " + kind)
+	a.Log("  Write it with:  ayis quota appeal " + kind)
 	return 0
 }
 

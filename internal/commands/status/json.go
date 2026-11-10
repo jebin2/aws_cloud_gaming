@@ -29,7 +29,7 @@ func nf(p *float64) any {
 	return *p
 }
 
-// JSON is `cg status --json`: the same facts as the report, as data. An
+// JSON is `ayis status --json`: the same facts as the report, as data. An
 // unreadable fact is null - never 0 or false: "I could not look" is not "there
 // is none". Keys sort.
 func (v View) JSON() ([]byte, error) {

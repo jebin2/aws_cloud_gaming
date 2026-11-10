@@ -1,4 +1,4 @@
-// Package librarycmd is `cg library`, the reads that need no box: what is in the
+// Package librarycmd is `ayis library`, the reads that need no box: what is in the
 // archive, what is saved somewhere else, and which Steam login a new box would
 // use. The archive outlives every box, so these have to be answerable when there
 // is none.
@@ -21,14 +21,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/pricing"
 )
 
-const usage = "usage: cg library [list|status|push|pull [--apps <csv>]|account [status|push|pull|forget]|check|forget <appid> [--from <bucket>]|reset <appid> [--from <bucket>]|keep-for <days>|move <appid> --from <bucket>|elsewhere|clean|--bucket]"
+const usage = "usage: ayis library [list|status|push|pull [--apps <csv>]|account [status|push|pull|forget]|check|forget <appid> [--from <bucket>]|reset <appid> [--from <bucket>]|keep-for <days>|move <appid> --from <bucket>|elsewhere|clean|--bucket]"
 
 // Reader is a library with everything it needs wired to AWS.
 type Reader struct {
@@ -61,9 +61,9 @@ func New(ctx context.Context, env *config.Env, get config.Lookup) (*Reader, erro
 		acct = aws.ToString(id.Account)
 	}
 	home, _ := os.UserHomeDir()
-	cache := filepath.Join(home, ".cache", "cg")
+	cache := filepath.Join(home, ".cache", "ayis")
 	if base, ok := get("XDG_CACHE_HOME"); ok && base != "" {
-		cache = filepath.Join(base, "cg")
+		cache = filepath.Join(base, "ayis")
 	}
 	r := &Reader{
 		Lib: library.Library{S3: &library.AWSStore{Home: region}, Host: env.Host(), Region: region, Account: acct,
@@ -79,7 +79,7 @@ func New(ctx context.Context, env *config.Env, get config.Lookup) (*Reader, erro
 }
 
 // diskFor is what the game disk of a machine type holds, in GiB: measured on a
-// real one once one has run (cg status writes it, cached per type), else AWS's
+// real one once one has run (ayis status writes it, cached per type), else AWS's
 // own figure for the type, which is in GB (10^9) and a little more than a
 // formatted disk holds. Free, and cached too.
 func diskFor(ctx context.Context, c *ec2.Client, t, cache string, reserve int) library.Disk {
@@ -131,7 +131,7 @@ func (c fileCache) Put(tag string, rows []library.SteamAccount) {
 	}
 }
 
-// Run is `cg library ...`.
+// Run is `ayis library ...`.
 func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string, jsonFlag bool, out *output.Out) int {
 	sub := "status"
 	if len(args) > 0 {
@@ -226,7 +226,7 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string,
 			out.Die("library account " + a + " is not ported to Go yet")
 			return 1
 		default:
-			out.Die("usage: cg library account [status|push|pull|forget]")
+			out.Die("usage: ayis library account [status|push|pull|forget]")
 			return 1
 		}
 		b := r.Bucket
@@ -253,13 +253,13 @@ func emit(v any, out *output.Out) int {
 	return 0
 }
 
-// ShowAccount is `cg library account` for a person.
+// ShowAccount is `ayis library account` for a person.
 func ShowAccount(d library.Login) string {
 	var b strings.Builder
 	if !d.Present {
 		b.WriteString("no archived Steam login - a new box would ask you to sign in\n")
 		b.WriteString("  one is pushed automatically when a box shuts down, or now with:\n")
-		b.WriteString("      cg library account push")
+		b.WriteString("      ayis library account push")
 		return b.String()
 	}
 	fmt.Fprintf(&b, "archived login   %s  (%.1f KB)\n", d.Key, float64(*d.Bytes)/1024)
@@ -298,7 +298,7 @@ func ShowAccount(d library.Login) string {
 	if len(*d.Accounts) > 1 {
 		b.WriteString("\n  More than one account is archived. The tarball is restored whole, so\n")
 		b.WriteString("  a new box gets all of them and signs in as the most recent. To keep\n")
-		b.WriteString("  only one: sign in as it on the box, then cg library account push.")
+		b.WriteString("  only one: sign in as it on the box, then ayis library account push.")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

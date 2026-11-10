@@ -3,7 +3,7 @@
 # every stop. This is what makes that survivable: the library is mirrored to an
 # S3 bucket and restored at boot.
 #
-# The push runs in `cg stop`, in `cg destroy`, and from a unit that fires as the
+# The push runs in `ayis stop`, in `ayis destroy`, and from a unit that fires as the
 # machine shuts down - which is what covers the two ways this box stops itself
 # without being asked (idle watchdog, cloud watchdog); both
 # end in a graceful shutdown. There is no periodic timer, so nothing
@@ -32,7 +32,7 @@
 # The S3 game library is the AWS box's: a machine of yours keeps its games.
 if aws_box; then
 progress "installing the S3 game library mirror"
-( cd /opt/cloud-gaming-host && bash ./install-library.sh '__S3_BUCKET__' steam '__CG_APPS__' '__CG_LOGIN__' '__CG_RESERVE_GB__' '__CG_EXTRA_APPS__' ) \
+( cd /opt/ayis-host && bash ./install-library.sh '__S3_BUCKET__' steam '__AYIS_APPS__' '__AYIS_LOGIN__' '__AYIS_RESERVE_GB__' '__AYIS_EXTRA_APPS__' ) \
   || echo ">>> FAILED: library mirror install - games will not persist a stop"
 
 # The restore needs credentials from the instance profile. IMDSv2 needs a token,
@@ -49,13 +49,13 @@ else
 fi
 
 # --no-block: start the download and carry on with the build.
-systemctl start --no-block cg-library-restore.service || true
+systemctl start --no-block ayis-library-restore.service || true
 
 # `|| true` on every one: a failure here must be REPORTED, not fatal. The games
 # not persisting a stop is a bad day; a box that never joins the tailnet is an
 # unreachable GPU instance you can only kill through the AWS console.
-verify "library mirror installed" test -x /usr/local/bin/cg-library || true
-verify "library restore started" bash -c 'systemctl show -p ActiveState --value cg-library-restore.service | grep -qE "^(active|activating)$"' || true
-verify "mirror on shutdown armed" systemctl is-enabled cg-library-shutdown.service || true
-verify "no background push timer exists" bash -c '! systemctl list-unit-files cg-library-push.timer 2>/dev/null | grep -q enabled' || true
+verify "library mirror installed" test -x /usr/local/bin/ayis-library || true
+verify "library restore started" bash -c 'systemctl show -p ActiveState --value ayis-library-restore.service | grep -qE "^(active|activating)$"' || true
+verify "mirror on shutdown armed" systemctl is-enabled ayis-library-shutdown.service || true
+verify "no background push timer exists" bash -c '! systemctl list-unit-files ayis-library-push.timer 2>/dev/null | grep -q enabled' || true
 fi

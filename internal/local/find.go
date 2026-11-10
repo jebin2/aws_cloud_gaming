@@ -9,7 +9,7 @@ import (
 
 // installed is where a desktop installer puts a program it does not put on PATH:
 // Moonlight and Tailscale come as applications on macOS and Windows, and their
-// installers leave the command line out. cg runs them by name, so it looks here
+// installers leave the command line out. ayis runs them by name, so it looks here
 // when PATH has nothing.
 func installed(goos, name string, getenv func(string) string) []string {
 	switch goos + ":" + name {

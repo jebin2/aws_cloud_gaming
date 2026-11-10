@@ -1,5 +1,5 @@
-// Package sweep is `cg sweep`: which REGION will rent you a GPU - the question
-// `cg machines` cannot answer. machines asks "what can this region rent me",
+// Package sweep is `ayis sweep`: which REGION will rent you a GPU - the question
+// `ayis machines` cannot answer. machines asks "what can this region rent me",
 // which is the right question only once the region is settled. It is not: a week
 // was spent retrying g6.xlarge in ap-south-2 on the assumption that spot
 // capacity comes back, while AWS had an API all along that says it will not.
@@ -27,7 +27,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/machines"
+	"github.com/jebin2/ayis/internal/commands/machines"
 )
 
 // Region is a region and whether this account may use it.
@@ -69,15 +69,15 @@ type Backend interface {
 	OnDemand(ctx context.Context, region, instanceType string) *float64
 }
 
-// Options are the knobs; the environment sets them (CG_SWEEP_*).
+// Options are the knobs; the environment sets them (AYIS_SWEEP_*).
 type Options struct {
 	Configured string   // the region in use
-	From       string   // CG_SWEEP_FROM: where the cross-region calls are made from
-	Types      []string // CG_SWEEP_TYPES: replaces the shortlist
-	Fallbacks  []string // CG_SWEEP_FALLBACKS
-	MaxMS      float64  // CG_SWEEP_MAX_MS: NVIDIA's own requirement for GeForce NOW
-	Samples    int      // CG_SWEEP_SAMPLES
-	Parallel   int      // CG_SWEEP_PAR
+	From       string   // AYIS_SWEEP_FROM: where the cross-region calls are made from
+	Types      []string // AYIS_SWEEP_TYPES: replaces the shortlist
+	Fallbacks  []string // AYIS_SWEEP_FALLBACKS
+	MaxMS      float64  // AYIS_SWEEP_MAX_MS: NVIDIA's own requirement for GeForce NOW
+	Samples    int      // AYIS_SWEEP_SAMPLES
+	Parallel   int      // AYIS_SWEEP_PAR
 	INRPerUSD  *float64
 }
 

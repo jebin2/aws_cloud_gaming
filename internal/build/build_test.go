@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/sunshine"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
+	"github.com/jebin2/ayis/internal/sunshine"
+	fx "github.com/jebin2/ayis/internal/testfixture"
 )
 
 // remote is a machine whose log grows as it is read.
@@ -52,7 +52,7 @@ func (r *remote) SSH(_ context.Context, cmd string) ([]byte, error) {
 			return nil, nil
 		}
 		return []byte(strings.Join(r.log[n-1:], "\n") + "\n"), nil
-	case cmd == "test -f /var/lib/cloud-gaming-ready":
+	case cmd == "test -f /var/lib/ayis-ready":
 		if r.ready {
 			return nil, nil
 		}
@@ -153,7 +153,7 @@ func TestAMachineThatSaysItExitedStopsTheWaitAtOnce(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	got := strings.Join(*logs, "\n")
-	for _, want := range []string{"the build STOPPED before it finished - the end of its log:", "    last line two", "nothing after that step ran.", "ssh -i /k me@pc", "sudo tail -50 /var/log/cloud-gaming-bootstrap.log"} {
+	for _, want := range []string{"the build STOPPED before it finished - the end of its log:", "    last line two", "nothing after that step ran.", "ssh -i /k me@pc", "sudo tail -50 /var/log/ayis-bootstrap.log"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}

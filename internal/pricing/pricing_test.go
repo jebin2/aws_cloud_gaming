@@ -103,8 +103,8 @@ func TestPricesComeFromTheirFirstPaidTier(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]float64{
-		"CG_EBS_USD_GB_MONTH": 0.0912, "CG_SNAPSHOT_USD_GB_MONTH": 0.05, "CG_S3_USD_GB_MONTH": 0.025,
-		"CG_IPV4_USD_HOUR": 0.005, "CG_EGRESS_USD_GB": 0.1093, "CG_XREGION_USD_GB": 0.086, "CG_CE_CALL_USD": 0.01,
+		"AYIS_EBS_USD_GB_MONTH": 0.0912, "AYIS_SNAPSHOT_USD_GB_MONTH": 0.05, "AYIS_S3_USD_GB_MONTH": 0.025,
+		"AYIS_IPV4_USD_HOUR": 0.005, "AYIS_EGRESS_USD_GB": 0.1093, "AYIS_XREGION_USD_GB": 0.086, "AYIS_CE_CALL_USD": 0.01,
 	}
 	for k, v := range want {
 		if m[k] != v {
@@ -130,14 +130,14 @@ func TestUSEast1MixesPrefixes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m["CG_CE_CALL_USD"] != 0.01 {
-		t.Errorf("CE price %v", m["CG_CE_CALL_USD"])
+	if m["AYIS_CE_CALL_USD"] != 0.01 {
+		t.Errorf("CE price %v", m["AYIS_CE_CALL_USD"])
 	}
 }
 
 func TestFromAWSKeptADay(t *testing.T) {
 	p := &fakeProducts{prefix: "APS2-"}
-	o := opts(t, fakeSource(p, 100, nil), map[string]string{"CG_TAX_PCT": "0"})
+	o := opts(t, fakeSource(p, 100, nil), map[string]string{"AYIS_TAX_PCT": "0"})
 	r := Load(context.Background(), o, "ap-south-2")
 	eq(t, "snapshot", r.SnapshotGBMonth, 0.05)
 	eq(t, "s3", r.S3GBMonth, 0.025)
@@ -159,7 +159,7 @@ func TestFromAWSKeptADay(t *testing.T) {
 }
 
 func TestNeverReadAndAWSDownIsUnknown(t *testing.T) {
-	o := opts(t, fakeSource(&fakeProducts{fail: true}, 100, errors.New("x")), map[string]string{"CG_TAX_PCT": "0"})
+	o := opts(t, fakeSource(&fakeProducts{fail: true}, 100, errors.New("x")), map[string]string{"AYIS_TAX_PCT": "0"})
 	r := Load(context.Background(), o, "ap-south-2")
 	if r.S3GBMonth != nil || r.SnapshotGBMonth != nil || r.INRPerUSD != nil {
 		t.Errorf("a price was invented: %+v", r)
@@ -167,7 +167,7 @@ func TestNeverReadAndAWSDownIsUnknown(t *testing.T) {
 }
 
 func TestAPriceSetByHandWins(t *testing.T) {
-	o := opts(t, fakeSource(&fakeProducts{prefix: "APS2-"}, 100, nil), map[string]string{"CG_TAX_PCT": "0", "CG_S3_USD_GB_MONTH": "0.5"})
+	o := opts(t, fakeSource(&fakeProducts{prefix: "APS2-"}, 100, nil), map[string]string{"AYIS_TAX_PCT": "0", "AYIS_S3_USD_GB_MONTH": "0.5"})
 	r := Load(context.Background(), o, "ap-south-2")
 	eq(t, "snapshot", r.SnapshotGBMonth, 0.05)
 	eq(t, "s3 by hand", r.S3GBMonth, 0.5)
@@ -175,8 +175,8 @@ func TestAPriceSetByHandWins(t *testing.T) {
 
 func TestAPricesFileAnswersOffline(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "p.env")
-	_ = os.WriteFile(f, []byte("CG_S3_USD_GB_MONTH=0.025\nCG_TAX_PCT=0\nCG_EGRESS_FREE_GB=100\n"), 0o644)
-	o := opts(t, nil, map[string]string{"CG_PRICES_FILE": f, "CG_INR_PER_USD": "88"})
+	_ = os.WriteFile(f, []byte("AYIS_S3_USD_GB_MONTH=0.025\nAYIS_TAX_PCT=0\nAYIS_EGRESS_FREE_GB=100\n"), 0o644)
+	o := opts(t, nil, map[string]string{"AYIS_PRICES_FILE": f, "AYIS_INR_PER_USD": "88"})
 	r := Load(context.Background(), o, "ap-south-2")
 	eq(t, "s3", r.S3GBMonth, 0.025)
 	eq(t, "tax from the file", &r.TaxPct, 0)
@@ -184,7 +184,7 @@ func TestAPricesFileAnswersOffline(t *testing.T) {
 	if r.SnapshotGBMonth != nil {
 		t.Error("a price not in the file was invented")
 	}
-	eq(t, "another region, same file", For(context.Background(), o, "ap-south-1", "CG_S3_USD_GB_MONTH"), 0.025)
+	eq(t, "another region, same file", For(context.Background(), o, "ap-south-1", "AYIS_S3_USD_GB_MONTH"), 0.025)
 }
 
 func TestGST(t *testing.T) {
@@ -192,7 +192,7 @@ func TestGST(t *testing.T) {
 		inr, tax string
 		fx, want float64
 	}{{"100", "18", 100, 118}, {"94.95", "0", 94.95, 94.95}} {
-		o := opts(t, nil, map[string]string{"CG_INR_PER_USD": c.inr, "CG_TAX_PCT": c.tax, "CG_PRICES_FILE": "/nonexistent"})
+		o := opts(t, nil, map[string]string{"AYIS_INR_PER_USD": c.inr, "AYIS_TAX_PCT": c.tax, "AYIS_PRICES_FILE": "/nonexistent"})
 		r := Load(context.Background(), o, "x")
 		eq(t, "exchange rate", r.FXINRPerUSD, c.fx)
 		if r.INRPerUSD == nil || fmt.Sprintf("%.2f", *r.INRPerUSD) != fmt.Sprintf("%.2f", c.want) {
@@ -212,7 +212,7 @@ func fxServer(t *testing.T, body string, code int) AWSSource {
 
 func fxLoad(t *testing.T, src Source, dir string, now time.Time) *float64 {
 	o := Options{Getenv: func(k string) string {
-		return map[string]string{"CG_TAX_PCT": "0", "CG_PRICES_FILE": "/nonexistent"}[k]
+		return map[string]string{"AYIS_TAX_PCT": "0", "AYIS_PRICES_FILE": "/nonexistent"}[k]
 	},
 		CacheDir: dir, Source: src, Now: func() time.Time { return now }}
 	return Load(context.Background(), o, "x").INRPerUSD

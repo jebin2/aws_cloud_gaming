@@ -1,5 +1,7 @@
 # AWS Cost Calculation, Usage Identification & Cost Leakage Audit Report
 
+> History: written before the project was renamed to Ayis (2026-11-10). It uses the old names - `cg`, `cloud_gaming`, `gamevps` - as they were then.
+
 **Target Codebase:** `cloud_gaming` CLI (`cg`), helper libraries (`lib/`), on-host daemons (`host/`), cloud watchdog Lambda (`lambda/`), and desktop app (`app/`).  
 **Audit Focus:** Cost calculation accuracy, AWS usage metric identification, and cost leakage risks.
 

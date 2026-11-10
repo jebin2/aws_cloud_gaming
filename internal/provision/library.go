@@ -18,7 +18,7 @@ import (
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/bucket"
+	"github.com/jebin2/ayis/internal/bucket"
 )
 
 // S3Admin is what making the bucket uses.
@@ -81,7 +81,7 @@ func (l Library) sleep(d time.Duration) {
 func (l Library) Role() string { return l.Host + "-box" }
 
 // Bucket is the bucket in use. Bucket names are globally unique, so it cannot just
-// be "cg-library": it is derived from the account, host AND REGION so it is the
+// be "ayis-library": it is derived from the account, host AND REGION so it is the
 // SAME name every time this runs in the same place - and hashed rather than
 // embedding the account number, which does not belong in a name that is
 // effectively public. The region is in there because a bucket IS regional and the
@@ -116,8 +116,8 @@ func (l Library) Ensure(ctx context.Context) (string, error) {
 		if l.Region != "us-east-1" {
 			in.CreateBucketConfiguration = &s3types.CreateBucketConfiguration{LocationConstraint: s3types.BucketLocationConstraint(l.Region)}
 		}
-		// The name is derived from the account, so `cg destroy --all` followed by
-		// `cg init` recreates the SAME name - and S3 refuses that for a short while
+		// The name is derived from the account, so `ayis destroy --all` followed by
+		// `ayis init` recreates the SAME name - and S3 refuses that for a short while
 		// after a delete with OperationAborted. It is a propagation delay, not a
 		// failure, so it is waited out here rather than surfaced as an init that
 		// works on the second try and looks flaky on the first.
@@ -136,7 +136,7 @@ func (l Library) Ensure(ctx context.Context) (string, error) {
 			case strings.Contains(msg, "OperationAborted"):
 				// The one error that IS the delay described above.
 				if attempt == 8 {
-					return "", fmt.Errorf("could not create bucket %s after %d attempts.\nIf you just ran 'cg destroy --all', S3 can hold the name for a few\nminutes. Wait and run cg init again; nothing else is wrong. (%s)", b, attempt, firstLine(err))
+					return "", fmt.Errorf("could not create bucket %s after %d attempts.\nIf you just ran 'ayis destroy --all', S3 can hold the name for a few\nminutes. Wait and run ayis init again; nothing else is wrong. (%s)", b, attempt, firstLine(err))
 				}
 				l.Note(fmt.Sprintf("S3 has not released the name yet (attempt %d) - waiting 15s", attempt))
 				if l.Beat != nil {
@@ -176,7 +176,7 @@ func (l Library) Ensure(ctx context.Context) (string, error) {
 	role := l.Role()
 	if _, err := l.IAM.GetRole(ctx, &iam.GetRoleInput{RoleName: aws.String(role)}); err != nil {
 		l.Note("creating role " + role)
-		if _, err := l.IAM.CreateRole(ctx, &iam.CreateRoleInput{RoleName: aws.String(role), Description: aws.String("cloud_gaming box: read/write its own game library bucket"),
+		if _, err := l.IAM.CreateRole(ctx, &iam.CreateRoleInput{RoleName: aws.String(role), Description: aws.String("ayis box: read/write its own game library bucket"),
 			AssumeRolePolicyDocument: aws.String(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}`)}); err != nil {
 			return "", fmt.Errorf("could not create the role %s: %s", role, firstLine(err))
 		}
@@ -189,12 +189,12 @@ func (l Library) Ensure(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("could not set the role's policy: %s", firstLine(err))
 	}
 
-	// cg's tag, on the role and the bucket - every run, so ones made before the tag
+	// ayis's tag, on the role and the bucket - every run, so ones made before the tag
 	// existed get it too. Tagged apart from creating them, and never fatal: a key
 	// without the tagging permissions still builds.
 	tag := l.TagKey
 	if tag == "" {
-		tag = "cg:host"
+		tag = "ayis:host"
 	}
 	_, _ = l.IAM.TagRole(ctx, &iam.TagRoleInput{RoleName: aws.String(role), Tags: []iamtypes.Tag{{Key: aws.String(tag), Value: aws.String(l.Host)}}})
 	_, _ = l.S3.PutBucketTagging(ctx, &s3.PutBucketTaggingInput{Bucket: aws.String(b), Tagging: &s3types.Tagging{TagSet: []s3types.Tag{{Key: aws.String(tag), Value: aws.String(l.Host)}}}})

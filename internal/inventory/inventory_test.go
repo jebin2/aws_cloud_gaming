@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/bucket"
-	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	"github.com/jebin2/aws_cloud_gaming/internal/storage"
+	"github.com/jebin2/ayis/internal/bucket"
+	"github.com/jebin2/ayis/internal/costfacts"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/pricing"
+	"github.com/jebin2/ayis/internal/storage"
 )
 
 type cloud struct {
@@ -92,7 +92,7 @@ func (s s3) Buckets(context.Context) ([]string, error) {
 
 func fl(v float64) *float64 { return &v }
 
-const account, host = "123456789012", "gamevps"
+const account, host = "123456789012", "ayis"
 
 var here = bucket.Name(account, host, "ap-south-1")
 
@@ -116,7 +116,7 @@ func TestNothingIsLeft(t *testing.T) {
 	if r.Error != nil || len(r.Items) != 0 || r.USDMonth == nil || *r.USDMonth != 0 || r.Hourly {
 		t.Errorf("%+v", r)
 	}
-	if Show(r) != "  nothing of cg is left in AWS\n" {
+	if Show(r) != "  nothing of ayis is left in AWS\n" {
 		t.Errorf("%q", Show(r))
 	}
 }
@@ -126,7 +126,7 @@ func TestEverythingThatBills(t *testing.T) {
 	c.machines = map[string][]Machine{"ap-south-1": {{"i-1", "running", "g6.xlarge"}}, "us-east-1": {{"i-2", "stopped", "g4dn.xlarge"}}}
 	c.watchdogs = map[string]bool{"ap-south-1": true}
 	c.role, c.budget = true, true
-	c.settings = map[string][]string{"ap-south-1": {"/cloud-gaming/gamevps/archive-last-seen"}}
+	c.settings = map[string][]string{"ap-south-1": {"/ayis/ayis/archive-last-seen"}}
 	old := bucket.Name(account, host, "us-east-1")
 	st := s3{buckets: map[string]string{here: "ap-south-1", old: "us-east-1"},
 		lists: map[string][]library.Object{

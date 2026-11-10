@@ -3,9 +3,9 @@
 # Run by the autostart entry beside it. Only once: a wallpaper the person picked
 # afterwards is theirs, and is not put back at the next login.
 set -uo pipefail
-IMG="${CG_WALLPAPER:-/usr/share/backgrounds/gamepc-help.png}"
-MARK="${CG_WALLPAPER_MARK:-$HOME/.config/cg-wallpaper-set}"
-WAIT="${CG_WALLPAPER_WAIT:-20}"
+IMG="${AYIS_WALLPAPER:-/usr/share/backgrounds/ayis-help.png}"
+MARK="${AYIS_WALLPAPER_MARK:-$HOME/.config/ayis-wallpaper-set}"
+WAIT="${AYIS_WALLPAPER_WAIT:-20}"
 [[ -f $IMG ]] || exit 0
 [[ -e $MARK ]] && exit 0
 

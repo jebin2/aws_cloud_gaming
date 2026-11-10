@@ -160,7 +160,7 @@ func TestEnableThatNeverFinishesIsNormal(t *testing.T) {
 	if rc := l.enabler(a).Enable(context.Background(), "af-south-1"); rc != 0 || len(a.enabled) != 0 {
 		t.Errorf("already enabling: not asked again: %v", a.enabled)
 	}
-	for _, want := range []string{"warn af-south-1 is already being enabled - that takes a few minutes", "warn af-south-1 is still enabling - this is normal", "check again with:  cg regions optin"} {
+	for _, want := range []string{"warn af-south-1 is already being enabled - that takes a few minutes", "warn af-south-1 is still enabling - this is normal", "check again with:  ayis regions optin"} {
 		if !strings.Contains(l.all(), want) {
 			t.Errorf("lacks %q:\n%s", want, l.all())
 		}

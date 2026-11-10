@@ -5,9 +5,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/watchdog"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/commands/status"
+	"github.com/jebin2/ayis/internal/commands/watchdog"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 var numeric = regexp.MustCompile(`^[0-9.]+$`)

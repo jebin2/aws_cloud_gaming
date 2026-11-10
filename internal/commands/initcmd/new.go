@@ -19,20 +19,20 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	cg "github.com/jebin2/aws_cloud_gaming"
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/check"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/notify"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/watchdog"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	"github.com/jebin2/aws_cloud_gaming/internal/provision"
-	"github.com/jebin2/aws_cloud_gaming/internal/sunshine"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	ayis "github.com/jebin2/ayis"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/commands/check"
+	"github.com/jebin2/ayis/internal/commands/notify"
+	"github.com/jebin2/ayis/internal/commands/watchdog"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/pricing"
+	"github.com/jebin2/ayis/internal/provision"
+	"github.com/jebin2/ayis/internal/sunshine"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
 // uploader puts the host bundle in S3 and signs a URL for it.
@@ -65,9 +65,9 @@ func New(ctx context.Context, get config.Lookup, env *config.Env, out *output.Ou
 		return nil, err
 	}
 	home, _ := os.UserHomeDir()
-	cache := filepath.Join(home, ".cache", "cg")
+	cache := filepath.Join(home, ".cache", "ayis")
 	if base, ok := get("XDG_CACHE_HOME"); ok && base != "" {
-		cache = filepath.Join(base, "cg")
+		cache = filepath.Join(base, "ayis")
 	}
 	account := ""
 	if id, err := sts.NewFromConfig(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err == nil {
@@ -93,7 +93,7 @@ func New(ctx context.Context, get config.Lookup, env *config.Env, out *output.Ou
 		ChooseGames: func(ctx context.Context) {
 			avail, reserve := availableGB(ctx, ec, env, cache)
 			Chooser{Lib: gameLib(), Env: env, Out: out,
-				Ask: ask.New(out, os.Getenv("CG_YES") == "1"), AvailGB: avail, ReserveGB: reserve,
+				Ask: ask.New(out, os.Getenv("AYIS_YES") == "1"), AvailGB: avail, ReserveGB: reserve,
 				INRPerGBHour: diskINRPerGBHour(ctx, popts, region)}.Choose(ctx)
 		},
 		ExtraDisk: func(ctx context.Context, apps string) GameDisk {
@@ -132,9 +132,9 @@ func New(ctx context.Context, get config.Lookup, env *config.Env, out *output.Ou
 		BucketRegion: func(ctx context.Context, b string) (string, error) { return store.Location(ctx, b) },
 		Prices: func(ctx context.Context, r string) (*float64, *float64) {
 			rates := pricing.Load(ctx, popts, region)
-			return pricing.For(ctx, popts, r, "CG_XREGION_USD_GB"), rates.INRPerUSD
+			return pricing.For(ctx, popts, r, "AYIS_XREGION_USD_GB"), rates.INRPerUSD
 		},
-		Provisioner: provision.Provisioner{EC2: ec, SSM: ssm.NewFromConfig(cfg), Up: uploader{store}, Src: cg.Files,
+		Provisioner: provision.Provisioner{EC2: ec, SSM: ssm.NewFromConfig(cfg), Up: uploader{store}, Src: ayis.Files,
 			WaitRunning: func(ctx context.Context, id string) error {
 				return ec2.NewInstanceRunningWaiter(ec).Wait(ctx, &ec2.DescribeInstancesInput{InstanceIds: []string{id}}, 10*time.Minute)
 			}},
@@ -181,7 +181,7 @@ func availableGB(ctx context.Context, c *ec2.Client, env *config.Env, cache stri
 // holds 0.
 func storeGB(ctx context.Context, c *ec2.Client, env *config.Env, cache string) (gb float64, known bool) {
 	t := env.Setting("GAME_INSTANCE_TYPE")
-	// Measured on a real one once one has run (cg status writes it, cached per type).
+	// Measured on a real one once one has run (ayis status writes it, cached per type).
 	if b, err := os.ReadFile(filepath.Join(cache, "scratch-"+t)); err == nil {
 		if n, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && n > 0 {
 			return float64(n), true

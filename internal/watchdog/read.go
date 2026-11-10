@@ -1,6 +1,6 @@
 // Package watchdog is the cloud watchdog: the Lambda that ends an idle box and,
 // with no box, deletes the game archive after a while. This is the read side -
-// what it last decided - which `cg status`, `cg cost` and `cg watcher` print.
+// what it last decided - which `ayis status`, `ayis cost` and `ayis watcher` print.
 package watchdog
 
 import (
@@ -47,7 +47,7 @@ func ArchiveDecision(ctx context.Context, logs LogsAPI, host string, expiryDays 
 	in := &cloudwatchlogs.FilterLogEventsInput{
 		LogGroupName:  aws.String(LogGroup(host)),
 		StartTime:     aws.Int64(now.Add(-2 * time.Hour).UnixMilli()),
-		FilterPattern: aws.String(`"cg-watchdog: archive"`),
+		FilterPattern: aws.String(`"ayis-watchdog: archive"`),
 	}
 	for {
 		out, err := logs.FilterLogEvents(ctx, in)
@@ -59,8 +59,8 @@ func ArchiveDecision(ctx context.Context, logs LogsAPI, host string, expiryDays 
 			return fmt.Sprintf("deleted after %d days with no box - the watchdog's log could not be read", expiryDays)
 		}
 		for _, e := range out.Events {
-			if m := aws.ToString(e.Message); strings.HasPrefix(m, "cg-watchdog: archive:") {
-				lastMS, lastMsg = aws.ToInt64(e.Timestamp), strings.TrimSpace(strings.TrimPrefix(m, "cg-watchdog: archive: "))
+			if m := aws.ToString(e.Message); strings.HasPrefix(m, "ayis-watchdog: archive:") {
+				lastMS, lastMsg = aws.ToInt64(e.Timestamp), strings.TrimSpace(strings.TrimPrefix(m, "ayis-watchdog: archive: "))
 			}
 		}
 		if out.NextToken == nil || *out.NextToken == "" {

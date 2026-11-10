@@ -1,4 +1,4 @@
-// Package cost is `cg cost`: what has been billed, what has not been billed
+// Package cost is `ayis cost`: what has been billed, what has not been billed
 // yet, and what still bills with no machine at all. Every figure is built from
 // facts that say whether they could be read; an unknown price or an unreadable
 // fact is "?" or null, never zero.
@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/costfacts"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
+	"github.com/jebin2/ayis/internal/costfacts"
+	"github.com/jebin2/ayis/internal/pricing"
 )
 
 // Estimate is the part of the month Cost Explorer has not caught up with (it
-// lags about a day): this instance's runtime, the disks it and cg leave
+// lags about a day): this instance's runtime, the disks it and ayis leave
 // behind, and the snapshots. Egress is counted by the bill, not here.
 type Estimate struct {
 	Hours      costfacts.Known[int]

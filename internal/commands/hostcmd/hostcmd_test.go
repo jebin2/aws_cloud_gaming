@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/hosts"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/hosts"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 func store(t *testing.T, body string) hosts.Store {
-	p := filepath.Join(t.TempDir(), "cg", "hosts.json")
+	p := filepath.Join(t.TempDir(), "ayis", "hosts.json")
 	if body != "" {
 		_ = os.MkdirAll(filepath.Dir(p), 0o755)
 		_ = os.WriteFile(p, []byte(body), 0o600)
@@ -44,7 +44,7 @@ func TestListForAPerson(t *testing.T) {
 	if text != "  desk             me@desk                      linux\n  homeserver       user@192.168.1.10            linux\n" {
 		t.Errorf("%q", text)
 	}
-	if got := List(store(t, ""), false); !strings.Contains(got, "no machines of your own yet - add one: cg host add <name> --ssh <user@address>") {
+	if got := List(store(t, ""), false); !strings.Contains(got, "no machines of your own yet - add one: ayis host add <name> --ssh <user@address>") {
 		t.Errorf("%q", got)
 	}
 	// A file that is not JSON is no machines, not a crash.
@@ -68,7 +68,7 @@ func TestRun(t *testing.T) {
 		t.Errorf("%q", e.String())
 	}
 	e.Reset()
-	if rc := Run(context.Background(), Deps{Store: s}, []string{"bogus"}, false, out); rc != 1 || !strings.Contains(e.String(), "usage: cg host [list|add") {
+	if rc := Run(context.Background(), Deps{Store: s}, []string{"bogus"}, false, out); rc != 1 || !strings.Contains(e.String(), "usage: ayis host [list|add") {
 		t.Errorf("%q", e.String())
 	}
 }

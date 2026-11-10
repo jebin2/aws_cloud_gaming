@@ -1,4 +1,4 @@
-// Package awscmd is `cg aws`: stop playing on AWS from this computer. Only the
+// Package awscmd is `ayis aws`: stop playing on AWS from this computer. Only the
 // read - what is there - is ported so far; forget and disconnect come with the
 // destroy phases.
 package awscmd
@@ -13,18 +13,18 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/inventory"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	"github.com/jebin2/aws_cloud_gaming/internal/storage"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/inventory"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/pricing"
+	"github.com/jebin2/ayis/internal/storage"
 )
 
-const usage = "usage: cg aws forget [--anyway] | cg aws disconnect | cg aws inventory [--json]"
+const usage = "usage: ayis aws forget [--anyway] | ayis aws disconnect | ayis aws inventory [--json]"
 
-// Run is `cg aws ...`.
+// Run is `ayis aws ...`.
 func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out *output.Out) int {
 	if len(args) == 0 {
 		out.Die(usage)

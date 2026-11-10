@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # A failed build, as something to act on.
 #
-# cg writes for a terminal, where the answer to a problem is a command to type.
-# In a window a command to type is a worse button, so the panel keeps cg's own
+# ayis writes for a terminal, where the answer to a problem is a command to type.
+# In a window a command to type is a worse button, so the panel keeps ayis's own
 # words - they say more than any button can - and puts the two or three things
 # worth doing on top of them.
 #
@@ -36,7 +36,7 @@ cat > "$T/r/stub.js" <<'STUB'
 window.__errs = [];
 addEventListener('error', e => window.__errs.push(e.message));
 window.__ran = [];
-window.cg = {
+window.ayis = {
   run: (args) => { window.__ran.push(args.join(' '));
                    window.__lastId = (window.__lastId || 0) + 1;
                    return Promise.resolve({ ok: true, id: window.__lastId }); },
@@ -67,7 +67,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     '  Spot rents the machines nobody else is paying full price for, and there',
     '  are none of those here at the moment.',
     '  Pay full price, and build now:',
-    '      cg config set GAME_SPOT 0       (Settings > purchase model, in the app)',
+    '      ayis config set GAME_SPOT 0       (Settings > purchase model, in the app)',
   ];
   try {
     paintConfig([{ key: 'GAME_SPOT', kind: 'choice', secret: false, is_set: true,
@@ -105,7 +105,7 @@ cat > "$T/r/probe.js" <<'PROBE'
                      '    error code: MaxSpotInstanceCountExceeded']) buildFail(l);
     read('HELD');
 
-    // cg's `problem` event: the words come from it, the buttons from its kind, and
+    // ayis's `problem` event: the words come from it, the buttons from its kind, and
     // the raw AWS report stays behind in the details.
     buildFailClear();
     buildProblem = { t: 'problem', kind: 'no_capacity', title: 'AWS has no cheap game PCs free here right now',
@@ -163,7 +163,7 @@ echo "1. nothing is shown until something fails"
 contains "the panel starts hidden"     "$(row BEFORE)" "hidden"
 
 echo "2. spot capacity, the one that keeps happening"
-contains "cg's headline is the headline" "$(row 'SPOT HEAD')" "no spare g6.xlarge at the spot price"
+contains "ayis's headline is the headline" "$(row 'SPOT HEAD')" "no spare g6.xlarge at the spot price"
 # First, because it is the only fact that matters before reading anything else.
 contains "it leads with the reassurance" "$(row 'SPOT WHY')"  "Nothing was launched. No charges."
 contains "  then AWS's own words"        "$(row 'SPOT WHY')"  "Insufficient capacity"
@@ -175,8 +175,8 @@ contains "another machine is offered"    "$(row 'SPOT ACTS')" "Pick another mach
 lacks    "  not full price"              "$(row 'SPOT ACTS')" "Pay full price"
 lacks    "  nor another location"        "$(row 'SPOT ACTS')" "Try another location"
 lacks    "and choosing changes no setting by itself" "$(row 'SPOT RAN')" "config set"
-# cg said more than three buttons can, and it is kept.
-contains "cg's full text is kept"        "$(row 'SPOT KEPT')" "true"
+# ayis said more than three buttons can, and it is kept.
+contains "ayis's full text is kept"        "$(row 'SPOT KEPT')" "true"
 
 echo "3. a different code, a different answer"
 contains "a quota failure says so"       "$(row 'QUOTA HEAD')" "quota is too small"
@@ -184,7 +184,7 @@ contains "  and offers the ask"          "$(row 'QUOTA ACTS')" "Ask AWS for a hi
 lacks    "  not on demand, which will not help" "$(row 'QUOTA ACTS')" "Build on demand"
 
 echo "4. a code nothing is known about"
-# No buttons is the honest answer; the headline and cg's text still carry it.
+# No buttons is the honest answer; the headline and ayis's text still carry it.
 contains "the headline still shows"      "$(row 'UNKNOWN HEAD')" "could not be launched"
 contains "  with AWS's words"            "$(row 'UNKNOWN WHY')"  "Something nobody has seen"
 check    "  and no invented buttons"     "$(row 'UNKNOWN ACTS')" "UNKNOWN ACTS | "
@@ -192,7 +192,7 @@ contains "spot allowance held: names the machine" "$(row 'HELD HEAD')" "holds yo
 contains "  and says it is billing"      "$(row 'HELD WHY')"  "Nothing was launched by this build, but that machine is still billing."
 lacks    "  never 'no charges'"          "$(row 'HELD WHY')"  "No charges"
 
-echo "4b. cg's own words for a launch problem (the problem event)"
+echo "4b. ayis's own words for a launch problem (the problem event)"
 contains "the title is the headline"      "$(row 'PLAIN HEAD')" "AWS has no cheap game PCs free here right now"
 contains "  money first"                   "$(row 'PLAIN WHY')"  "Nothing was started. No charge."
 contains "  then what to do"               "$(row 'PLAIN WHY')"  "Try again in a few minutes."

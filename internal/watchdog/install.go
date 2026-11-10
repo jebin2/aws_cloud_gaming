@@ -22,7 +22,7 @@ import (
 )
 
 // Everything the installer changes, as far as it uses it; the SDK clients
-// satisfy them. Nothing here is fatal to `cg init`: a missing guard must not stop
+// satisfy them. Nothing here is fatal to `ayis init`: a missing guard must not stop
 // a build; it says so, and the other layers still apply.
 type (
 	LambdaWriter interface {
@@ -126,19 +126,19 @@ func (i *Installer) Install(ctx context.Context) error {
 	roleARN := "arn:aws:iam::" + i.Account + ":role/" + name
 	tag := i.TagKey
 	if tag == "" {
-		tag = "cg:host"
+		tag = "ayis:host"
 	}
 
 	if _, err := i.IAM.GetRole(ctx, &iam.GetRoleInput{RoleName: aws.String(name)}); err != nil {
 		i.log("creating the role " + name)
 		if _, err := i.IAM.CreateRole(ctx, &iam.CreateRoleInput{RoleName: aws.String(name),
-			Description:              aws.String("cloud_gaming layer 3: end the idle " + i.Host + " instance"),
+			Description:              aws.String("ayis layer 3: end the idle " + i.Host + " instance"),
 			AssumeRolePolicyDocument: aws.String(assumeLambda)}); err != nil {
 			i.log("could not create the role " + name + " (needs iam:CreateRole)")
 			return ErrNotInstalled
 		}
 	}
-	// cg's tag, apart from creating it and never fatal.
+	// ayis's tag, apart from creating it and never fatal.
 	_, _ = i.IAM.TagRole(ctx, &iam.TagRoleInput{RoleName: aws.String(name), Tags: []iamtypes.Tag{{Key: aws.String(tag), Value: aws.String(i.Host)}}})
 	// put-role-policy overwrites, so this also repairs a policy edited by hand.
 	doc, _ := json.Marshal(i.Settings.Policy(i.Region))
@@ -156,7 +156,7 @@ func (i *Installer) Install(ctx context.Context) error {
 
 	zip, sha := Zip(i.Source)
 	fp := i.Settings.Fingerprint(roleARN)
-	desc := "cloud_gaming layer 3 idle watchdog cfg=" + fp
+	desc := "ayis layer 3 idle watchdog cfg=" + fp
 	env := &lambdatypes.Environment{Variables: i.Settings.EnvMap()}
 	cur, err := i.Lambda.GetFunctionConfiguration(ctx, &lambda.GetFunctionConfigurationInput{FunctionName: aws.String(name)})
 	if err == nil {
@@ -205,7 +205,7 @@ func (i *Installer) Install(ctx context.Context) error {
 	}
 
 	fnARN := "arn:aws:lambda:" + i.Region + ":" + i.Account + ":function:" + name
-	// cg's tag on the function and its logs - never fatal, as above.
+	// ayis's tag on the function and its logs - never fatal, as above.
 	_, _ = i.Lambda.TagResource(ctx, &lambda.TagResourceInput{Resource: aws.String(fnARN), Tags: map[string]string{tag: i.Host}})
 	_, _ = i.Logs.TagResource(ctx, &cloudwatchlogs.TagResourceInput{ResourceArn: aws.String("arn:aws:logs:" + i.Region + ":" + i.Account + ":log-group:" + logs), Tags: map[string]string{tag: i.Host}})
 
@@ -214,9 +214,9 @@ func (i *Installer) Install(ctx context.Context) error {
 	for _, r := range []struct {
 		name, desc, schedule, pattern, statement, failRule, failPoint, failInvoke string
 	}{
-		{name, "Runs the cloud_gaming idle watchdog", fmt.Sprintf("rate(%d minutes)", EveryMin), "", "cg-schedule",
+		{name, "Runs the ayis idle watchdog", fmt.Sprintf("rate(%d minutes)", EveryMin), "", "ayis-schedule",
 			"could not create the schedule " + name, "could not point the schedule at " + name, "could not let the schedule invoke " + name},
-		{StateRule(i.Host), "EC2 state changes and spot interruption warnings, for the cloud_gaming watchdog", "", StatePattern, "cg-state",
+		{StateRule(i.Host), "EC2 state changes and spot interruption warnings, for the ayis watchdog", "", StatePattern, "ayis-state",
 			"could not create the rule " + StateRule(i.Host), "could not point " + StateRule(i.Host) + " at " + name, "could not let " + StateRule(i.Host) + " invoke " + name},
 	} {
 		in := &eventbridge.PutRuleInput{Name: aws.String(r.name), State: ebtypes.RuleStateEnabled, Description: aws.String(r.desc)}
@@ -251,7 +251,7 @@ func (i *Installer) Install(ctx context.Context) error {
 	return nil
 }
 
-var markerRE = regexp.MustCompile(`cg-watchdog: .*`)
+var markerRE = regexp.MustCompile(`ayis-watchdog: .*`)
 
 // Proved is the dry run's outcome.
 type Proved struct {
@@ -275,7 +275,7 @@ func (i *Installer) Prove(ctx context.Context) Proved {
 		if raw, err := base64.StdEncoding.DecodeString(aws.ToString(o.LogResult)); err == nil {
 			for _, line := range strings.Split(string(raw), "\n") {
 				if m := markerRE.FindString(line); m != "" {
-					p.Lines = append(p.Lines, strings.TrimPrefix(m, "cg-watchdog: "))
+					p.Lines = append(p.Lines, strings.TrimPrefix(m, "ayis-watchdog: "))
 				}
 			}
 		}
@@ -298,7 +298,7 @@ func (i *Installer) Report(p Proved) {
 		return
 	}
 	if len(p.Lines) == 0 {
-		i.log("cloud watchdog: the check logged nothing - see: cg watchdog logs")
+		i.log("cloud watchdog: the check logged nothing - see: ayis watchdog logs")
 	}
 	for _, l := range p.Lines {
 		if strings.TrimSpace(l) != "" {
@@ -306,7 +306,7 @@ func (i *Installer) Report(p Proved) {
 		}
 	}
 	if p.Failed != "" {
-		i.log("  ^ the check FAILED (" + p.Failed + ") - see: cg watchdog logs")
+		i.log("  ^ the check FAILED (" + p.Failed + ") - see: ayis watchdog logs")
 	}
 	if all := strings.Join(p.Lines, "\n"); strings.Contains(all, "CANNOT QUERY AWS") || strings.Contains(all, "DENIED") || strings.Contains(all, "FAILED") {
 		i.log("  ^ it cannot act on your account - fix this or layer 3 is decoration")
@@ -364,7 +364,7 @@ func (i *Installer) Remove(ctx context.Context) {
 		i.log("deleted its logs")
 	}
 	// Its marks. Not counted as "something removed": deleting absent parameters succeeds.
-	p := "/cloud-gaming/" + i.Host + "/"
+	p := "/ayis/" + i.Host + "/"
 	_, _ = i.SSM.DeleteParameters(ctx, &ssm.DeleteParametersInput{Names: []string{p + "archive-last-seen", p + "archive-warned", p + "archive-deleted"}})
 
 	used, unknown := i.roleUsedElsewhere(ctx)

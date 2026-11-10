@@ -35,7 +35,7 @@ window.__errs = [];
 window.__ran = [];
 addEventListener('error', e => window.__errs.push(e.message));
 addEventListener('unhandledrejection', e => window.__errs.push('reject: ' + e.reason));
-window.cg = {
+window.ayis = {
   run: (args) => { window.__ran.push(args.join(' '));
                    window.__lastId = (window.__lastId || 0) + 1;
                    return Promise.resolve({ ok: true, id: window.__lastId }); },
@@ -94,7 +94,7 @@ cat > "$T/r/probe.js" <<'PROBE'
     asked = null; a.go(); await sleep();
     out.push('NOPM SAYS | ' + (asked ? asked.body.replace(/\n/g, ' ') : 'nothing'));
 
-    // Not read yet: offer it; cg says so if it cannot.
+    // Not read yet: offer it; ayis says so if it cannot.
     depsNow = null;
     out.push('UNREAD LABEL | ' + toolAction(['aws']).label);
 

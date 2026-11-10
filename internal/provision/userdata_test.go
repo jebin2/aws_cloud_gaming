@@ -38,7 +38,7 @@ func untar(t *testing.T, b []byte) map[string]string {
 func TestHostBundleStripsCommentsKeepsShebangsAndAddsTheNotifyAddress(t *testing.T) {
 	fsys := fstest.MapFS{
 		"host/a.sh":         {Data: []byte("#!/bin/bash\n# why this\necho hi\n#\n  # indented\necho bye\n")},
-		"host/cg-library":   {Data: []byte("#!/usr/bin/env python3\nx = 1\n")},
+		"host/ayis-library": {Data: []byte("#!/usr/bin/env python3\nx = 1\n")},
 		"host/unit.service": {Data: []byte("[Unit]\n# note\nDescription=d\n")},
 		"host/sub/ignored":  {Data: []byte("x")},
 	}
@@ -50,7 +50,7 @@ func TestHostBundleStripsCommentsKeepsShebangsAndAddsTheNotifyAddress(t *testing
 	if m["a.sh"] != "#!/bin/bash\necho hi\necho bye\n" || m["unit.service"] != "[Unit]\nDescription=d\n" || m["notify.url"] != "https://ntfy.example/topic\n" {
 		t.Errorf("%q", m)
 	}
-	if m["a.sh:exec"] != "yes" || m["cg-library:exec"] != "yes" || m["unit.service:exec"] == "yes" {
+	if m["a.sh:exec"] != "yes" || m["ayis-library:exec"] != "yes" || m["unit.service:exec"] == "yes" {
 		t.Errorf("scripts run, units do not: %v", m)
 	}
 	if _, ok := m["sub/ignored"]; ok {
@@ -67,19 +67,19 @@ func TestHostBundleStripsCommentsKeepsShebangsAndAddsTheNotifyAddress(t *testing
 func TestHostBundleCarriesTheHelpPictureUntouched(t *testing.T) {
 	pic := []byte("\x89PNG\r\n\x1a\n#not a comment\n# nor this\nIEND")
 	fsys := fstest.MapFS{
-		"host/a.sh":                  {Data: []byte("#!/bin/bash\necho hi\n")},
-		"lib/assets/gamepc-help.png": {Data: pic},
+		"host/a.sh":                {Data: []byte("#!/bin/bash\necho hi\n")},
+		"lib/assets/ayis-help.png": {Data: pic},
 	}
 	b, err := HostBundle(fsys, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := untar(t, b)["gamepc-help.png"]; got != string(pic) {
+	if got := untar(t, b)["ayis-help.png"]; got != string(pic) {
 		t.Errorf("the picture was changed: %q", got)
 	}
 	// And a bundle with no picture is just the scripts.
 	b, _ = HostBundle(fstest.MapFS{"host/a.sh": {Data: []byte("#!/bin/bash\n")}}, "")
-	if _, ok := untar(t, b)["gamepc-help.png"]; ok {
+	if _, ok := untar(t, b)["ayis-help.png"]; ok {
 		t.Error("no picture to carry")
 	}
 	// The real one is there, and is the real picture.
@@ -87,8 +87,8 @@ func TestHostBundleCarriesTheHelpPictureUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	real := untar(t, b)["gamepc-help.png"]
-	want, _ := os.ReadFile("../../lib/assets/gamepc-help.png")
+	real := untar(t, b)["ayis-help.png"]
+	want, _ := os.ReadFile("../../lib/assets/ayis-help.png")
 	if len(want) < 1000 || real != string(want) || !strings.HasPrefix(real, "\x89PNG") {
 		t.Errorf("the real picture: %d bytes in the bundle, %d on disk", len(real), len(want))
 	}
@@ -128,8 +128,8 @@ func TestHostBundleMatchesTheBashStripOnTheRealFiles(t *testing.T) {
 }
 
 func TestAssembleStaysUnderTheLimitForTheRealModules(t *testing.T) {
-	vars := map[string]string{"TS_AUTHKEY": "tskey-auth-" + strings.Repeat("x", 40), "TS_HOST": "gamevps", "HOST_TGZ_URL": "https://b.s3.ap-south-1.amazonaws.com/boot/host.tgz?" + strings.Repeat("a=b&", 90),
-		"S3_BUCKET": "cg-0123456789abcdef", "CG_APPS": "all", "CG_LOGIN": "use", "CG_RESERVE_GB": "20", "CG_DATA_GB": "0", "CG_EXTRA_APPS": "", "CG_STEAM_CLIENT_URL": "", "CG_TARGET": "aws", "CG_USER": "ubuntu", "CG_FAMILY": "ubuntu"}
+	vars := map[string]string{"TS_AUTHKEY": "tskey-auth-" + strings.Repeat("x", 40), "TS_HOST": "ayis", "HOST_TGZ_URL": "https://b.s3.ap-south-1.amazonaws.com/boot/host.tgz?" + strings.Repeat("a=b&", 90),
+		"S3_BUCKET": "ayis-0123456789abcdef", "AYIS_APPS": "all", "AYIS_LOGIN": "use", "AYIS_RESERVE_GB": "20", "AYIS_DATA_GB": "0", "AYIS_EXTRA_APPS": "", "AYIS_STEAM_CLIENT_URL": "", "AYIS_TARGET": "aws", "AYIS_USER": "ubuntu", "AYIS_FAMILY": "ubuntu"}
 	u, err := Assemble(os.DirFS("../.."), vars)
 	if err != nil {
 		t.Fatal(err)
@@ -179,14 +179,14 @@ func TestCrossRegionSaysWhatItCostsAndNotWhatItOnceDid(t *testing.T) {
 		t.Errorf("%s", got)
 	}
 	got = strings.Join(CrossRegion("ap-south-2", "ap-south-1", -1, nil, nil), "\n")
-	if !strings.Contains(got, "a per-GB price. The size could not be read - cg library list shows it.") {
+	if !strings.Contains(got, "a per-GB price. The size could not be read - ayis library list shows it.") {
 		t.Errorf("%s", got)
 	}
 }
 
 func TestTheBoxIsToldWhichGamesGoOnTheAddedDisk(t *testing.T) {
-	vars := map[string]string{"TS_AUTHKEY": "tskey-auth-" + strings.Repeat("x", 40), "TS_HOST": "gamevps", "HOST_TGZ_URL": "https://b.s3.ap-south-1.amazonaws.com/boot/host.tgz",
-		"S3_BUCKET": "cg-0123456789abcdef", "CG_APPS": "all", "CG_LOGIN": "use", "CG_RESERVE_GB": "20", "CG_DATA_GB": "190", "CG_EXTRA_APPS": "730,2344520", "CG_STEAM_CLIENT_URL": "https://example/steam-client", "CG_TARGET": "aws", "CG_USER": "ubuntu", "CG_FAMILY": "ubuntu"}
+	vars := map[string]string{"TS_AUTHKEY": "tskey-auth-" + strings.Repeat("x", 40), "TS_HOST": "ayis", "HOST_TGZ_URL": "https://b.s3.ap-south-1.amazonaws.com/boot/host.tgz",
+		"S3_BUCKET": "ayis-0123456789abcdef", "AYIS_APPS": "all", "AYIS_LOGIN": "use", "AYIS_RESERVE_GB": "20", "AYIS_DATA_GB": "190", "AYIS_EXTRA_APPS": "730,2344520", "AYIS_STEAM_CLIENT_URL": "https://example/steam-client", "AYIS_TARGET": "aws", "AYIS_USER": "ubuntu", "AYIS_FAMILY": "ubuntu"}
 	u, err := Assemble(os.DirFS("../.."), vars)
 	if err != nil {
 		t.Fatal(err)

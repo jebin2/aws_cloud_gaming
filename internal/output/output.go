@@ -1,5 +1,5 @@
-// Package output is how cg talks: plain lines, and the NDJSON event stream the
-// app reads on stderr when CG_JSON=1. Events are data, so escape codes are
+// Package output is how ayis talks: plain lines, and the NDJSON event stream the
+// app reads on stderr when AYIS_JSON=1. Events are data, so escape codes are
 // dropped rather than encoded - they are presentation.
 //
 // Stream rules, frozen: events on stderr, command data on stdout, answers on
@@ -23,7 +23,7 @@ import (
 // progress, so that a step ends when the next begins.
 type Out struct {
 	Stdout, Stderr io.Writer
-	JSON           bool             // CG_JSON=1: events instead of text
+	JSON           bool             // AYIS_JSON=1: events instead of text
 	Now            func() time.Time // the clock, for tests
 
 	open  bool      // a step is in progress

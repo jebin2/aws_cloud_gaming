@@ -13,13 +13,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
-// Setter takes the keys only a person can give cg, checks them, and only then
+// Setter takes the keys only a person can give ayis, checks them, and only then
 // keeps them.
 type Setter struct {
 	Out *output.Out
@@ -41,8 +41,8 @@ func VerifyKey(ctx context.Context, keyID, secret, region string) (string, error
 	if region == "" {
 		region = "us-east-1"
 	}
-	opts := sts.Options{Region: region, Credentials: credentials.NewStaticCredentialsProvider(keyID, secret, ""), AppID: "cg"}
-	if u := os.Getenv("CG_AWS_ENDPOINT"); u != "" {
+	opts := sts.Options{Region: region, Credentials: credentials.NewStaticCredentialsProvider(keyID, secret, ""), AppID: "ayis"}
+	if u := os.Getenv("AYIS_AWS_ENDPOINT"); u != "" {
 		opts.BaseEndpoint = aws.String(u)
 	}
 	r, err := sts.New(opts).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
@@ -64,14 +64,14 @@ func (s Setter) needAsk(what string) bool {
 	if s.Ask.CanAsk() {
 		return true
 	}
-	s.Out.Die("cg creds set " + what + " has to ask - run it in a terminal, or use the app")
+	s.Out.Die("ayis creds set " + what + " has to ask - run it in a terminal, or use the app")
 	return false
 }
 
 // SetAWS asks for an access key and keeps it if AWS takes it.
 //
 // It asks for the two things only a person has: a default region and an output
-// format are cg's to set, and it passes both on every call. The secret is read
+// format are ayis's to set, and it passes both on every call. The secret is read
 // without echo. The key is checked BEFORE it is written: the other order meant
 // one mistyped character replaced a key that worked, and every screen then
 // reported rejected credentials - about the key you had just destroyed.
@@ -204,7 +204,7 @@ func setINI(path, section string, kvs [][2]string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".cg-*")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".ayis-*")
 	if err != nil {
 		return err
 	}

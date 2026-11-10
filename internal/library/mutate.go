@@ -55,7 +55,7 @@ func (m Mutator) now() time.Time {
 }
 
 // Place is the bucket and region to act on: the one in use when none is named,
-// else the named one - only if cg made it for this account and host. A name typed
+// else the named one - only if ayis made it for this account and host. A name typed
 // or passed in is checked here, once, for every command that writes.
 func (m Mutator) Place(ctx context.Context, from string) (bucket, region string, err error) {
 	cur, ok := m.BucketName()
@@ -68,14 +68,14 @@ func (m Mutator) Place(ctx context.Context, from string) (bucket, region string,
 		bucket = cur
 	} else {
 		if m.Account == "" {
-			return "", "", errors.New("AWS did not answer - could not check that bucket is cg's")
+			return "", "", errors.New("AWS did not answer - could not check that bucket is ayis's")
 		}
 		r, err := m.S3.Location(ctx, from)
 		if err != nil {
 			return "", "", fmt.Errorf("no such bucket, or AWS did not answer: %s", from)
 		}
 		if !Ours(from, r, m.Account, m.Host) {
-			return "", "", fmt.Errorf("not one of this rig's buckets: %s (see: cg library elsewhere)", from)
+			return "", "", fmt.Errorf("not one of this rig's buckets: %s (see: ayis library elsewhere)", from)
 		}
 		return from, r, nil
 	}
@@ -212,13 +212,13 @@ func (m Mutator) ForgetAt(ctx context.Context, bucket, region, id string, apps [
 		return ErrIndex
 	}
 	if m.Marks != nil {
-		_ = m.Marks.Delete(ctx, fmt.Sprintf("/cloud-gaming/%s/kept/%s/%s", m.Host, bucket, id))
+		_ = m.Marks.Delete(ctx, fmt.Sprintf("/ayis/%s/kept/%s/%s", m.Host, bucket, id))
 	}
 	if cur, _ := m.BucketName(); len(left) == 0 && bucket != cur {
 		if m.W.DeleteBucket(ctx, bucket, region) == nil {
 			say(fmt.Sprintf("nothing else was saved in %s - removed it, so nothing bills there", region))
 		} else {
-			say(fmt.Sprintf("nothing else is saved in %s, but it could not be removed: cg library elsewhere", region))
+			say(fmt.Sprintf("nothing else is saved in %s, but it could not be removed: ayis library elsewhere", region))
 		}
 	}
 	return nil
@@ -228,7 +228,7 @@ func (m Mutator) ForgetAt(ctx context.Context, bucket, region, id string, apps [
 // after the later of "a machine was last seen" and this mark; it is an SSM
 // parameter, which costs nothing.
 func (m Mutator) Reset(ctx context.Context, bucket, id string) error {
-	return m.Marks.Put(ctx, fmt.Sprintf("/cloud-gaming/%s/kept/%s/%s", m.Host, bucket, id), m.now().UTC().Format("2006-01-02T15:04:05Z"))
+	return m.Marks.Put(ctx, fmt.Sprintf("/ayis/%s/kept/%s/%s", m.Host, bucket, id), m.now().UTC().Format("2006-01-02T15:04:05Z"))
 }
 
 // Orphans finds what the index does not know in the bucket in use.

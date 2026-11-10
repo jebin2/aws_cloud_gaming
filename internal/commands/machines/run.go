@@ -10,10 +10,10 @@ import (
 	awspricing "github.com/aws/aws-sdk-go-v2/service/pricing"
 	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/pricing"
 )
 
 // NewReader builds a reader for a region.
@@ -23,12 +23,12 @@ func NewReader(ctx context.Context, region string, get config.Lookup, products p
 		return nil, err
 	}
 	home, _ := os.UserHomeDir()
-	cache := filepath.Join(home, ".cache", "cg")
+	cache := filepath.Join(home, ".cache", "ayis")
 	if base, ok := get("XDG_CACHE_HOME"); ok && base != "" {
-		cache = filepath.Join(base, "cg")
+		cache = filepath.Join(base, "ayis")
 	}
 	r := &Reader{EC2: ec2.NewFromConfig(cfg), Quotas: servicequotas.NewFromConfig(cfg), Products: products, Region: region, CacheDir: cache}
-	if v, ok := get("CG_MACHINE_TYPES"); ok {
+	if v, ok := get("AYIS_MACHINE_TYPES"); ok {
 		r.Override = splitFields(v)
 	}
 	return r, nil
@@ -53,7 +53,7 @@ func splitFields(s string) []string {
 	return out
 }
 
-// Run is `cg machines [region] [--all]` (also `cg types`).
+// Run is `ayis machines [region] [--all]` (also `ayis types`).
 func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string, jsonFlag bool, out *output.Out) int {
 	region := env.Region()
 	if len(args) > 0 && IsRegion(args[0]) {
@@ -65,13 +65,13 @@ func Run(ctx context.Context, env *config.Env, get config.Lookup, args []string,
 		case "--all", "all", "1":
 			all = true
 		case "--sweep", "sweep":
-			out.Die("machines --sweep is not ported to Go yet (see: cg sweep)")
+			out.Die("machines --sweep is not ported to Go yet (see: ayis sweep)")
 			return 1
 		case "--json":
 			jsonFlag = true
 		case "--watch":
 		default:
-			out.Die(fmt.Sprintf("unknown option '%s' (see: cg help)", a))
+			out.Die(fmt.Sprintf("unknown option '%s' (see: ayis help)", a))
 			return 1
 		}
 	}

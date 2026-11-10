@@ -1,6 +1,6 @@
-// Package watcher is `cg watcher`: every guard that ends a box nobody is
+// Package watcher is `ayis watcher`: every guard that ends a box nobody is
 // using, whether each is armed, and what the last one decided. Layer 1 is the
-// session (cg open ends it when Moonlight quits), layer 2 the watchdog on the
+// session (ayis open ends it when Moonlight quits), layer 2 the watchdog on the
 // box, layer 3 the cloud watchdog that keeps working when the box is gone.
 package watcher
 
@@ -19,11 +19,11 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/status"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/watchdog"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	wd "github.com/jebin2/aws_cloud_gaming/internal/watchdog"
+	"github.com/jebin2/ayis/internal/commands/status"
+	"github.com/jebin2/ayis/internal/commands/watchdog"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/pricing"
+	wd "github.com/jebin2/ayis/internal/watchdog"
 )
 
 // The clients the watcher uses; the SDK ones satisfy them.
@@ -164,7 +164,7 @@ func (w *Watcher) Gather(ctx context.Context) Facts {
 	return f
 }
 
-// JSON is `cg watcher --json`: every guard as data - what it catches, whether
+// JSON is `ayis watcher --json`: every guard as data - what it catches, whether
 // it is armed, and what it last decided. The minutes each watchdog waits are
 // as they are set, not as they were when this was written.
 func (w *Watcher) JSON(f Facts, now time.Time) ([]byte, error) {
@@ -221,7 +221,7 @@ func (w *Watcher) JSON(f Facts, now time.Time) ([]byte, error) {
 		"guards": []any{
 			map[string]any{"layer": 1, "name": "session", "dies_with": "your laptop", "catches": "normal use",
 				"reaction": "on Moonlight exit", "armed": nil, "state": "always on",
-				"note": "cg open ends the session when Moonlight quits"},
+				"note": "ayis open ends the session when Moonlight quits"},
 			map[string]any{"layer": 2, "name": "on-host watchdog", "dies_with": "the box it protects",
 				"catches": "a forgotten disconnect, a crashed client", "reaction": reaction, "idle_min": idleMin,
 				"armed": armed, "state": layer2State, "note": layer2Note},

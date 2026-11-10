@@ -5,7 +5,7 @@
 # closed. Never touched while Steam runs - an edit under a running Steam is thrown
 # away when it exits.
 set -uo pipefail
-LIB="${CG_EXTRA_LIB:-/scratch2/steam}"
+LIB="${AYIS_EXTRA_LIB:-/scratch2/steam}"
 
 # The client itself, by exact name. Matching "/ubuntu12_64/steam" as a pattern also
 # matched steamwebhelper and the other processes Steam leaves running for a while

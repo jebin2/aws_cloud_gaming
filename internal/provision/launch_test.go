@@ -154,8 +154,8 @@ func rig(t *testing.T) (Provisioner, *cloud, *upFake, *[]string, Params) {
 	root := os.DirFS("../..")
 	p := Provisioner{EC2: c, SSM: ssmFake{}, Up: up, Src: root, Out: func(s string) { out = append(out, s) },
 		Now: func() time.Time { return time.Date(2026, 10, 25, 9, 8, 7, 0, time.UTC) }, Sleep: func(time.Duration) {}}
-	a := Params{Host: "gamevps", Region: "ap-south-1", Type: "g6.xlarge", DiskGB: 50, Spot: false, AuthKey: "tskey-auth-xxxxxxxxxxxxxxxx",
-		Bucket: "cg-bucket-1", BucketRegion: "ap-south-1", KeyFile: filepath.Join(t.TempDir(), "gamevps.pem"), ReserveGB: "20"}
+	a := Params{Host: "ayis", Region: "ap-south-1", Type: "g6.xlarge", DiskGB: 50, Spot: false, AuthKey: "tskey-auth-xxxxxxxxxxxxxxxx",
+		Bucket: "ayis-bucket-1", BucketRegion: "ap-south-1", KeyFile: filepath.Join(t.TempDir(), "ayis.pem"), ReserveGB: "20"}
 	return p, c, up, &out, a
 }
 
@@ -169,7 +169,7 @@ func TestAFreshOnDemandLaunch(t *testing.T) {
 	if aws.ToString(in.ImageId) != "ami-ubuntu" || in.InstanceType != "g6.xlarge" || in.InstanceInitiatedShutdownBehavior != ec2types.ShutdownBehaviorStop || in.InstanceMarketOptions != nil {
 		t.Errorf("on demand: shutdown must mean stop, no market options: %+v", in)
 	}
-	if aws.ToString(in.IamInstanceProfile.Name) != "gamevps-box" || aws.ToInt32(in.BlockDeviceMappings[0].Ebs.VolumeSize) != 50 || !aws.ToBool(in.BlockDeviceMappings[0].Ebs.DeleteOnTermination) {
+	if aws.ToString(in.IamInstanceProfile.Name) != "ayis-box" || aws.ToInt32(in.BlockDeviceMappings[0].Ebs.VolumeSize) != 50 || !aws.ToBool(in.BlockDeviceMappings[0].Ebs.DeleteOnTermination) {
 		t.Errorf("%+v", in)
 	}
 	if in.Placement != nil {
@@ -181,7 +181,7 @@ func TestAFreshOnDemandLaunch(t *testing.T) {
 			tags[string(ts.ResourceType)+":"+aws.ToString(tg.Key)] = aws.ToString(tg.Value)
 		}
 	}
-	if tags["instance:Name"] != "gamevps" || tags["instance:cg:host"] != "gamevps" || tags["volume:cg:host"] != "gamevps" {
+	if tags["instance:Name"] != "ayis" || tags["instance:ayis:host"] != "ayis" || tags["volume:ayis:host"] != "ayis" {
 		t.Errorf("%v", tags)
 	}
 	// The user-data is the gzip of the assembled build, base64 as the API wants it.
@@ -195,7 +195,7 @@ func TestAFreshOnDemandLaunch(t *testing.T) {
 		t.Errorf("user-data: %d bytes", len(raw))
 	}
 	// The host bundle went to S3 in the bucket's region, and the build fetches it by a presigned URL.
-	if len(up.put) != 1 || up.put["cg-bucket-1@ap-south-1/boot/host.tgz"] == nil || !strings.Contains(string(script), "https://cg-bucket-1.s3.ap-south-1.amazonaws.com/boot/host.tgz?X-Amz-Expires=2h0m0s&X-Amz-Signature=abc") {
+	if len(up.put) != 1 || up.put["ayis-bucket-1@ap-south-1/boot/host.tgz"] == nil || !strings.Contains(string(script), "https://ayis-bucket-1.s3.ap-south-1.amazonaws.com/boot/host.tgz?X-Amz-Expires=2h0m0s&X-Amz-Signature=abc") {
 		t.Errorf("%v", up.put)
 	}
 	if strings.Join(c.calls, ",") != "create-key,create-sg,ingress udp 41641 0.0.0.0/0" {
@@ -234,7 +234,7 @@ func TestARerunReusesTheBoxAndLaunchesNothing(t *testing.T) {
 	// A reused box with no instance role gets one.
 	p, c, _, out, a = rig(t)
 	c.existing, c.assoc = "i-0old", false
-	if _, err := p.Run(context.Background(), a); err != nil || strings.Join(c.calls, ",") != "associate" || !strings.Contains(strings.Join(*out, "\n"), "==> attaching instance profile gamevps-box to i-0old") {
+	if _, err := p.Run(context.Background(), a); err != nil || strings.Join(c.calls, ",") != "associate" || !strings.Contains(strings.Join(*out, "\n"), "==> attaching instance profile ayis-box to i-0old") {
 		t.Errorf("%v %v", err, c.calls)
 	}
 	c.assocErr = errors.New("UnauthorizedOperation")
@@ -264,7 +264,7 @@ func TestAnInstanceProfileThatIsNotVisibleYetIsRetried(t *testing.T) {
 	if err != nil || res.InstanceID != "i-new" || c.runs != 3 {
 		t.Fatalf("%v runs=%d", err, c.runs)
 	}
-	if !strings.Contains(strings.Join(*out, "\n"), "instance profile gamevps-box not visible yet (attempt 2) - waiting") {
+	if !strings.Contains(strings.Join(*out, "\n"), "instance profile ayis-box not visible yet (attempt 2) - waiting") {
 		t.Error(*out)
 	}
 	// Six tries and no more.
@@ -309,7 +309,7 @@ func TestTheOldGamesVolumeIsMentionedNotTouched(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := strings.Join(*out, "\n")
-	if !strings.Contains(g, "==> note: the old EBS game volume vol-legacy still exists and still bills") || !strings.Contains(g, "cg games --volume --delete") {
+	if !strings.Contains(g, "==> note: the old EBS game volume vol-legacy still exists and still bills") || !strings.Contains(g, "ayis games --volume --delete") {
 		t.Error(g)
 	}
 }
@@ -323,7 +323,7 @@ func TestACrossRegionBucketIsSaidAndPresignedForItsOwnRegion(t *testing.T) {
 	if _, err := p.Run(context.Background(), a); err != nil {
 		t.Fatal(err)
 	}
-	if up.put["cg-bucket-1@ap-south-2/boot/host.tgz"] == nil {
+	if up.put["ayis-bucket-1@ap-south-2/boot/host.tgz"] == nil {
 		t.Errorf("signed for the wrong region is a 400 that kills user-data before tailscale exists: %v", up.put)
 	}
 	if !strings.Contains(strings.Join(*out, "\n"), "!! the archive is in ap-south-2 but the box is in ap-south-1") {
@@ -333,7 +333,7 @@ func TestACrossRegionBucketIsSaidAndPresignedForItsOwnRegion(t *testing.T) {
 	p, c, up, _, a := rig(t)
 	up.err = errors.New("AccessDenied")
 	_, err := p.Run(context.Background(), a)
-	if err == nil || !strings.Contains(err.Error(), "could not upload host/ to s3://cg-bucket-1/boot/host.tgz") || c.runs != 0 {
+	if err == nil || !strings.Contains(err.Error(), "could not upload host/ to s3://ayis-bucket-1/boot/host.tgz") || c.runs != 0 {
 		t.Errorf("%v runs=%d", err, c.runs)
 	}
 }

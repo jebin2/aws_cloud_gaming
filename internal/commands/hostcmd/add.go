@@ -5,21 +5,21 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/ownhost"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/ownhost"
 )
 
-const addUsage = "usage: cg host add [name] --ssh <user@address>"
+const addUsage = "usage: ayis host add [name] --ssh <user@address>"
 
-// LetIn makes cg's key work on the machine, asking its password once when it
+// LetIn makes ayis's key work on the machine, asking its password once when it
 // does not: the first time a machine is added, and again whenever the key has
 // gone from it - taken off by removing a second entry for the same machine, or
 // by hand. Setup used to need the key already there, so a machine that lost it
-// could only be removed and added again. It reports whether cg can get in; it
+// could only be removed and added again. It reports whether ayis can get in; it
 // has said why when not.
 func (d Deps) LetIn(ctx context.Context, target string, out *output.Out) bool {
 	if err := d.Conn.EnsureKey(ctx); err != nil {
-		out.Die("could not make cg's ssh key (" + d.Conn.Key + ")")
+		out.Die("could not make ayis's ssh key (" + d.Conn.Key + ")")
 		return false
 	}
 	if _, err := d.Conn.Raw(ctx, target, "exit", nil); err == nil {
@@ -29,7 +29,7 @@ func (d Deps) LetIn(ctx context.Context, target string, out *output.Out) bool {
 		out.Die(fmt.Sprintf("ssh %s did not connect with a key, and there is no one to ask for its password -\n       run this in a terminal, or make 'ssh %s' work with a key first (ssh-copy-id %s)", target, target, target))
 		return false
 	}
-	out.Log("cg's key does not let it in: its password, once, puts the key on it, and is not kept")
+	out.Log("ayis's key does not let it in: its password, once, puts the key on it, and is not kept")
 	pw := d.Ask.Secret("host-ssh-password", "  password for "+target+": ")
 	if pw == "" {
 		out.Die("no password given - nothing was changed on " + target)
@@ -38,21 +38,21 @@ func (d Deps) LetIn(ctx context.Context, target string, out *output.Out) bool {
 	switch rc := d.Conn.InstallKey(ctx, target, pw); rc {
 	case 0:
 	case 3:
-		out.Die(fmt.Sprintf("logged in to %s, but cg's key did not stay in its ~/.ssh/authorized_keys - is that file or folder not yours to write?", target))
+		out.Die(fmt.Sprintf("logged in to %s, but ayis's key did not stay in its ~/.ssh/authorized_keys - is that file or folder not yours to write?", target))
 		return false
 	default:
-		out.Die(fmt.Sprintf("%s did not let cg in with that password. Check the address, user and password -\n       or, if it takes keys only, make 'ssh %s' work first (ssh-copy-id %s)", target, target, target))
+		out.Die(fmt.Sprintf("%s did not let ayis in with that password. Check the address, user and password -\n       or, if it takes keys only, make 'ssh %s' work first (ssh-copy-id %s)", target, target, target))
 		return false
 	}
 	if _, err := d.Conn.Raw(ctx, target, "exit", nil); err != nil {
-		out.Die(fmt.Sprintf("cg's key is on %s, but it still does not let cg in with it - is PubkeyAuthentication off in its sshd_config?", target))
+		out.Die(fmt.Sprintf("ayis's key is on %s, but it still does not let ayis in with it - is PubkeyAuthentication off in its sshd_config?", target))
 		return false
 	}
-	out.Log("cg's key is on " + target + ": no password from now on")
+	out.Log("ayis's key is on " + target + ": no password from now on")
 	return true
 }
 
-// Add is `cg host add [name] --ssh <target>`.
+// Add is `ayis host add [name] --ssh <target>`.
 func (d Deps) Add(ctx context.Context, args []string, out *output.Out) int {
 	name, target := "", ""
 	for i := 0; i < len(args); i++ {
@@ -99,7 +99,7 @@ func (d Deps) Add(ctx context.Context, args []string, out *output.Out) int {
 		return 1
 	}
 	// The same machine by another address - its IP once, its tailnet name now -
-	// added twice was two cards, two setups and two of cg's keys on one machine.
+	// added twice was two cards, two setups and two of ayis's keys on one machine.
 	key := ownhost.MachineKey(facts)
 	if why := ownhost.AddedAs(d.Store, key, target); why != "" {
 		out.Die(fmt.Sprintf("%s is a machine already added, as '%s' - the same machine, by another address", target, why))
@@ -133,24 +133,24 @@ func (d Deps) Add(ctx context.Context, args []string, out *output.Out) int {
 	}
 	out.Log("GPU: " + gpu)
 	if fam == "unsupported" {
-		out.Log("note: cg sets up Ubuntu, Debian, Arch (and its family) and Fedora - this one it can only stream from once you install Sunshine yourself")
+		out.Log("note: ayis sets up Ubuntu, Debian, Arch (and its family) and Fedora - this one it can only stream from once you install Sunshine yourself")
 	}
-	out.Log(fmt.Sprintf("added '%s'. Next: cg host setup %s", name, name))
+	out.Log(fmt.Sprintf("added '%s'. Next: ayis host setup %s", name, name))
 	return 0
 }
 
-// Remove is `cg host remove <name>`: cg's key off the machine, then the machine
+// Remove is `ayis host remove <name>`: ayis's key off the machine, then the machine
 // forgotten; nothing else on it is touched.
 func (d Deps) Remove(ctx context.Context, args []string, out *output.Out) int {
 	if len(args) == 0 || d.Store.Get(args[0]).Field("ssh") == "" {
-		out.Die("usage: cg host remove <name>")
+		out.Die("usage: ayis host remove <name>")
 		return 1
 	}
 	name := args[0]
 	if err := d.Conn.RemoveKey(ctx, d.Store.Get(name).Field("ssh")); err == nil {
-		out.Log("took cg's key off it")
+		out.Log("took ayis's key off it")
 	} else {
-		out.LogAs("warn", "could not reach it to take cg's key off - that one line stays in its ~/.ssh/authorized_keys")
+		out.LogAs("warn", "could not reach it to take ayis's key off - that one line stays in its ~/.ssh/authorized_keys")
 	}
 	if err := d.Store.Forget(name); err != nil {
 		out.Die("could not forget '" + name + "': " + err.Error())

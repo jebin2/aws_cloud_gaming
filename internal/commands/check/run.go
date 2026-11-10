@@ -9,23 +9,23 @@ import (
 	awspricing "github.com/aws/aws-sdk-go-v2/service/pricing"
 	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/creds"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/watchdog"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/laptop"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/commands/creds"
+	"github.com/jebin2/ayis/internal/commands/watchdog"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/laptop"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/pricing"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
 // New is a Checker for this computer and the settings in force.
 func New(env *config.Env, fix bool, out *output.Out) *Checker {
 	home, _ := os.UserHomeDir()
 	l := laptop.New(local.Exec{})
-	a := ask.New(out, os.Getenv("CG_YES") == "1")
+	a := ask.New(out, os.Getenv("AYIS_YES") == "1")
 	say := func(kind, text string) {
 		if kind == "log" {
 			out.Log(text)
@@ -63,7 +63,7 @@ func New(env *config.Env, fix bool, out *output.Out) *Checker {
 	}
 }
 
-// Run is `cg check [--fix]`.
+// Run is `ayis check [--fix]`.
 func Run(ctx context.Context, env *config.Env, args []string, out *output.Out) int {
 	fix := false
 	for _, a := range args {
@@ -76,15 +76,15 @@ func Run(ctx context.Context, env *config.Env, args []string, out *output.Out) i
 	if _, rc := New(env, fix, out).Run(ctx); rc != 0 {
 		return rc
 	}
-	// Events, not bare echo: a program driving cg should not have to read the
+	// Events, not bare echo: a program driving ayis should not have to read the
 	// two lines saying the check passed out of raw output.
 	if out.JSON {
 		out.LogAs("ok", "preflight passed - nothing was created.")
-		out.LogAs("info", "Run cg init to actually build the box.")
+		out.LogAs("info", "Run ayis init to actually build the box.")
 		return 0
 	}
 	out.Gap()
 	out.Echo("preflight passed - nothing was created.")
-	out.Echo("Run cg init to actually build the box.")
+	out.Echo("Run ayis init to actually build the box.")
 	return 0
 }

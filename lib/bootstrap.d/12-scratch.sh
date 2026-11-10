@@ -19,7 +19,7 @@ progress "setting up local NVMe at /scratch"
 cat > /usr/local/bin/mount-scratch.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-DATA_GB=__CG_DATA_GB__
+DATA_GB=__AYIS_DATA_GB__
 
 # The machine's own drive, at /scratch, always: it is the fast place, and games go
 # there first. A reboot keeps the instance store and its filesystem; only a stop
@@ -40,7 +40,7 @@ else
   echo "no instance store present"
 fi
 
-# The disk cg added for the games that do not fit the drive, at /scratch2: the EBS
+# The disk ayis added for the games that do not fit the drive, at /scratch2: the EBS
 # disk with nothing mounted on it (the root disk has its partitions mounted). It is
 # told apart from the root disk by that, because its device name depends on the
 # order the instance finds its disks in. Already mounted at /scratch2 counts too:
@@ -52,7 +52,7 @@ if (( DATA_GB > 0 )); then
     if [[ -z $mp || $mp == /scratch2 ]]; then EXTRA="/dev/$n"; break; fi
   done
   [[ -n $EXTRA ]] || { echo "the disk added for the games is not attached"; exit 1; }
-  blkid "$EXTRA" >/dev/null 2>&1 || mkfs.ext4 -q -F -m 0 -L cgextra "$EXTRA"
+  blkid "$EXTRA" >/dev/null 2>&1 || mkfs.ext4 -q -F -m 0 -L ayisextra "$EXTRA"
   mkdir -p /scratch2
   mountpoint -q /scratch2 || mount -o noatime "$EXTRA" /scratch2
   mkdir -p /scratch2/steam/steamapps/common
@@ -99,5 +99,5 @@ systemctl start scratch-disk.service || true
 verify "scratch mount script installed" test -x /usr/local/bin/mount-scratch.sh
 verify "/scratch mounted on local NVMe" mountpoint -q /scratch
 verify "steam library dir on /scratch" test -d /scratch/steam/steamapps
-if (( __CG_DATA_GB__ > 0 )); then verify "/scratch2 mounted (the disk added for the games)" mountpoint -q /scratch2; fi
+if (( __AYIS_DATA_GB__ > 0 )); then verify "/scratch2 mounted (the disk added for the games)" mountpoint -q /scratch2; fi
 fi

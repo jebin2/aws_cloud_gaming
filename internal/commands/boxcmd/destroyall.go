@@ -12,12 +12,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/destroy"
-	"github.com/jebin2/aws_cloud_gaming/internal/format"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/storage"
-	"github.com/jebin2/aws_cloud_gaming/internal/teardown"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	"github.com/jebin2/ayis/internal/destroy"
+	"github.com/jebin2/ayis/internal/format"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/storage"
+	"github.com/jebin2/ayis/internal/teardown"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
 // AllEC2 is what --all uses of EC2.
@@ -27,7 +27,7 @@ type AllEC2 interface {
 	DeleteKeyPair(context.Context, *ec2.DeleteKeyPairInput, ...func(*ec2.Options)) (*ec2.DeleteKeyPairOutput, error)
 }
 
-// AllDeps is what `cg destroy --all` uses beyond a plain destroy.
+// AllDeps is what `ayis destroy --all` uses beyond a plain destroy.
 type AllDeps struct {
 	EC2     AllEC2
 	Budgets interface {
@@ -44,7 +44,7 @@ type AllDeps struct {
 	Pem                        string
 }
 
-// destroyEverything is `cg destroy --all`: the box AND every game you have.
+// destroyEverything is `ayis destroy --all`: the box AND every game you have.
 //
 // `--all` used to mean "the box and the EBS game volume". The games moved to S3, so
 // a flag that deleted the volume and left the archive billing was promising
@@ -60,7 +60,7 @@ func (d Deps) destroyEverything(ctx context.Context, x DestroyDeps, a AllDeps, f
 	if a.Account == "" {
 		return d.die("could not read which AWS account this is (STS), so the budget could not be removed - nothing was deleted; try again")
 	}
-	// The bucket in use: .env's, else the one cg derives for this account.
+	// The bucket in use: .env's, else the one ayis derives for this account.
 	b, haveBucket := x.Lib.BucketName()
 	region := x.Lib.Region
 	if haveBucket {
@@ -99,7 +99,7 @@ func (d Deps) destroyEverything(ctx context.Context, x DestroyDeps, a AllDeps, f
 	if vol != nil {
 		d.Out.Echo(fmt.Sprintf("  old EBS volume  %s  %d GB", vol.ID, vol.GB))
 	}
-	d.Out.Echo("  the box         everything cg destroy normally removes")
+	d.Out.Echo("  the box         everything ayis destroy normally removes")
 	d.Out.Echo("")
 	if haveBucket {
 		d.Out.Echo("  the bucket      s3://" + b + " itself")
@@ -118,9 +118,9 @@ func (d Deps) destroyEverything(ctx context.Context, x DestroyDeps, a AllDeps, f
 		d.Out.Echo("  IAM             nothing - no role or watchdog exists")
 	}
 	d.Out.Echo("")
-	d.Out.Echo("  leftovers       cg's disks, images and snapshots, in every region")
+	d.Out.Echo("  leftovers       ayis's disks, images and snapshots, in every region")
 	d.Out.Echo("")
-	d.Out.Echo("Saved games and machines in other regions are cg aws disconnect's. cg init")
+	d.Out.Echo("Saved games and machines in other regions are ayis aws disconnect's. ayis init")
 	d.Out.Echo("recreates all of this - the bucket name comes from your account, this host and")
 	d.Out.Echo("the region, so it comes back identical.")
 	d.Out.Echo("")
@@ -140,7 +140,7 @@ func (d Deps) destroyEverything(ctx context.Context, x DestroyDeps, a AllDeps, f
 	// of it goes until the box is confirmed gone.
 	if !boxGone {
 		d.Out.LogAs("fail", "the box is not confirmed gone, so the game archive, the box's role and the cloud watchdog were NOT deleted - they are what guard it")
-		return d.die("stopped before the irreversible part: find out why the box did not terminate (cg status), then run cg destroy --all again")
+		return d.die("stopped before the irreversible part: find out why the box did not terminate (ayis status), then run ayis destroy --all again")
 	}
 
 	if haveBucket {
@@ -151,7 +151,7 @@ func (d Deps) destroyEverything(ctx context.Context, x DestroyDeps, a AllDeps, f
 		if err := a.W.DeleteBucket(ctx, b, region); err == nil {
 			d.Out.Log("bucket deleted - storage charges stop now")
 			// Out of .env only once it is gone. Removed whatever happened, a bucket
-			// that would not delete kept billing with nothing here pointing at it: cg
+			// that would not delete kept billing with nothing here pointing at it: ayis
 			// cost no longer showed it, and the next --all no longer tried.
 			_ = d.Env.Unset("GAME_S3_BUCKET")
 		} else {
@@ -184,19 +184,19 @@ func (d Deps) destroyEverything(ctx context.Context, x DestroyDeps, a AllDeps, f
 		if _, err := a.EC2.DeleteVolume(ctx, &ec2.DeleteVolumeInput{VolumeId: aws.String(vol.ID)}); err == nil {
 			d.Out.Log(fmt.Sprintf("deleted %s - storage charges stop now", vol.ID))
 		} else {
-			d.Out.LogAs("fail", fmt.Sprintf("could not delete %s; retry with: cg games --volume --delete", vol.ID))
+			d.Out.LogAs("fail", fmt.Sprintf("could not delete %s; retry with: ayis games --volume --delete", vol.ID))
 			failed = 1
 		}
 	}
 
-	// cg's disks, images and snapshots wherever they are: a region move left them
+	// ayis's disks, images and snapshots wherever they are: a region move left them
 	// behind, and only this region was ever looked at.
-	d.Out.Say("looking for cg's disks, images and snapshots in every region")
+	d.Out.Say("looking for ayis's disks, images and snapshots in every region")
 	if !a.Teardown.CleanEverywhere(ctx, a.Scan(ctx)) {
 		failed = 1
 	}
 	if failed != 0 {
-		return d.die("not everything could be deleted - see above; whatever is left still bills, and cg destroy --all can be run again")
+		return d.die("not everything could be deleted - see above; whatever is left still bills, and ayis destroy --all can be run again")
 	}
 	return 0
 }

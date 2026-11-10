@@ -11,7 +11,7 @@
 # issue no delete that could reach game B.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-SRC=host/cg-library
+SRC=host/ayis-library
 T=$(mktemp -d); pass=0; fail=0
 trap 'rm -rf "$T"' EXIT
 
@@ -78,9 +78,9 @@ ACF
 run() {
   : > "$T/s5.log"
   S5LOG="$T/s5.log" IDX="$T/index.json" PATH="$T/bin:$PATH" \
-  CG_EXTRA_LIBS="${CG_EXTRA_LIBS-}" CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam \
-  CG_STATE_DIR="$T/state" CG_S5CMD="$T/bin/s5cmd" CG_BOOT_ID_FILE="$T/bootid" \
-  CG_APPS="${CG_APPS:-all}" CG_DISK_BUDGET="${CG_DISK_BUDGET:-400000000000}" \
+  AYIS_EXTRA_LIBS="${AYIS_EXTRA_LIBS-}" AYIS_LIB_DIR="$T/scratch/steam" AYIS_S3_BUCKET=b AYIS_S3_PREFIX=steam \
+  AYIS_STATE_DIR="$T/state" AYIS_S5CMD="$T/bin/s5cmd" AYIS_BOOT_ID_FILE="$T/bootid" \
+  AYIS_APPS="${AYIS_APPS:-all}" AYIS_DISK_BUDGET="${AYIS_DISK_BUDGET:-400000000000}" \
   bash "$SRC" "$@" 2>&1
 }
 
@@ -184,13 +184,13 @@ out=$(run pull --apps 999999)
 contains "says nothing matched"       "$out" "nothing to restore"
 
 echo "8. a restore bigger than the disk skips games instead of filling it"
-# The laptop prompt refuses an oversized selection, but CG_APPS can still say
+# The laptop prompt refuses an oversized selection, but AYIS_APPS can still say
 # "all" - from an old .env, a scripted run, or a prompt that never ran. Filling
 # /scratch mid-restore fails in the least legible way there is: a half-restored
 # game that Steam reports as installed.
 # The index is ordered largest first, so Diablo (160 GB) is considered before
 # Wukong (128 GB) and is the one that will not fit a 150 GB budget.
-out=$(CG_DISK_BUDGET=150000000000 run pull --apps all)
+out=$(AYIS_DISK_BUDGET=150000000000 run pull --apps all)
 contains "skipped the one that does not fit" "$out" "SKIPPING Diablo IV"
 contains "took the one that does"    "$out" "restoring Black Myth: Wukong"
 contains "said how much was left"    "$out" "left"
@@ -210,7 +210,7 @@ rm -rf "$T/scratch/steam/steamapps"; mkdir -p "$T/scratch/steam/steamapps/common
 # also what the code under test measures.
 truncate -s 120000000000 "$T/scratch/steam/steamapps/common/BlackMythWukong/have.bin"
 # Budget of 100 GB: the full 128 GB would not fit, the remaining 8 GB does.
-out=$(CG_DISK_BUDGET=100000000000 run pull --apps 2358720)
+out=$(AYIS_DISK_BUDGET=100000000000 run pull --apps 2358720)
 lacks    "not skipped"        "$out" "SKIPPING Black Myth"
 contains "restored it"        "$out" "restoring Black Myth"
 
@@ -223,7 +223,7 @@ install_game 2358720 BlackMythWukong "Black Myth: Wukong" 1     # archive says 1
 out=$(run push)
 contains "refuses that game"      "$out" "SKIPPING Black Myth"
 contains "says why"               "$out" "less than half the archived"
-contains "names the deliberate route" "$out" "cg library forget 2358720"
+contains "names the deliberate route" "$out" "ayis library forget 2358720"
 check    "uploaded nothing"       "$(cnt 'sync')" "0"
 out=$(run push --force)
 contains "--force overrides"      "$out" "pushing Black Myth"
@@ -279,7 +279,7 @@ case "$args" in
 esac
 FAKE
 chmod +x "$T/bin/s5cmd"
-out=$(CG_DISK_BUDGET=400000000000 run pull --apps 2358720); rc=$?
+out=$(AYIS_DISK_BUDGET=400000000000 run pull --apps 2358720); rc=$?
 contains "says it is incomplete"   "$out" "INCOMPLETE"
 contains "gives both figures"      "$out" "on disk of"
 contains "predicts what Steam does" "$out" "re-download"
@@ -361,32 +361,32 @@ cat > "$T/other/steamapps/appmanifest_1145360.acf" <<ACF
 }
 ACF
 dd if=/dev/zero of="$T/other/steamapps/common/Hades/game.bin" bs=1M count=5 status=none
-out=$(CG_EXTRA_LIBS="$T/other" run push)
+out=$(AYIS_EXTRA_LIBS="$T/other" run push)
 contains "it is found"                "$out" "pushing Hades"
 contains "and said to be elsewhere"   "$out" "also in $T/other"
 contains "its files are synced from there" "$(cat "$T/s5.log")" "$T/other/steamapps/common/Hades/"
 lacks    "the archive is not told there is nothing" "$out" "no games installed"
 out=$(run push)
 contains "without being named, only the archive's own library is looked in (a test or a chosen place)" "$out" "no games installed"
-out=$(CG_EXTRA_LIBS="$T/other" run check)
+out=$(AYIS_EXTRA_LIBS="$T/other" run check)
 lacks    "check looks there too"      "$out" "no games installed"
 
-echo "19. on a real machine CG_LIB_DIR is always set (by its config), and the root disk is still looked in"
-# This is the case that was missed: scanning was keyed on CG_LIB_DIR being unset.
+echo "19. on a real machine AYIS_LIB_DIR is always set (by its config), and the root disk is still looked in"
+# This is the case that was missed: scanning was keyed on AYIS_LIB_DIR being unset.
 rm -rf "$T/homes" "$T/scratch/steam/steamapps/"*
 mkdir -p "$T/homes/ubuntu/.local/share/Steam/steamapps/common/Hades" "$T/homes/ubuntu/.local/share/Steam/steamapps/compatdata/1145360"
 cp "$T/other/steamapps/appmanifest_1145360.acf" "$T/homes/ubuntu/.local/share/Steam/steamapps/"
 dd if=/dev/zero of="$T/homes/ubuntu/.local/share/Steam/steamapps/common/Hades/game.bin" bs=1M count=3 status=none
-out=$(env -u CG_EXTRA_LIBS CG_HOMES="$T/homes" S5LOG="$T/s5.log" IDX="$T/index.json" PATH="$T/bin:$PATH" \
-  CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam CG_STATE_DIR="$T/state" \
-  CG_S5CMD="$T/bin/s5cmd" CG_BOOT_ID_FILE="$T/bootid" CG_APPS=all CG_DISK_BUDGET=400000000000 \
+out=$(env -u AYIS_EXTRA_LIBS AYIS_HOMES="$T/homes" S5LOG="$T/s5.log" IDX="$T/index.json" PATH="$T/bin:$PATH" \
+  AYIS_LIB_DIR="$T/scratch/steam" AYIS_S3_BUCKET=b AYIS_S3_PREFIX=steam AYIS_STATE_DIR="$T/state" \
+  AYIS_S5CMD="$T/bin/s5cmd" AYIS_BOOT_ID_FILE="$T/bootid" AYIS_APPS=all AYIS_DISK_BUDGET=400000000000 \
   bash "$SRC" push 2>&1)
 contains "a game in the user's own Steam folder is found" "$out" "pushing Hades"
 lacks    "  and the archive is not told there is nothing" "$out" "no games installed"
 
 echo "20. restoring: the games the laptop said do not fit the drive go on the added disk"
 rm -rf "$T/scratch/steam/steamapps/"* "$T/extra"; mkdir -p "$T/extra/steam"
-out=$(CG_EXTRA_APPS=2358720 CG_EXTRA_LIB="$T/extra/steam" run pull --apps 2344520,2358720)
+out=$(AYIS_EXTRA_APPS=2358720 AYIS_EXTRA_LIB="$T/extra/steam" run pull --apps 2344520,2358720)
 log=$(cat "$T/s5.log")
 contains "the game that fits goes on the drive"  "$log" "$T/scratch/steam/steamapps/common/Diablo IV/"
 contains "the game that does not goes on the added disk" "$log" "$T/extra/steam/steamapps/common/BlackMythWukong/"
@@ -399,7 +399,7 @@ check    "the login is said to be back, so the Steam update need not wait for th
 
 echo "21. an added disk that is not mounted is never replaced by the root disk"
 rm -rf "$T/extra"; printf '#!/usr/bin/env bash\n[[ $2 == "$T/scratch" ]]\n' > "$T/bin/mountpoint"; sed -i "s#\$T/scratch#$T/scratch#" "$T/bin/mountpoint"; chmod +x "$T/bin/mountpoint"
-out=$(CG_EXTRA_APPS=2358720 CG_EXTRA_LIB="$T/extra/steam" run pull --apps 2358720)
+out=$(AYIS_EXTRA_APPS=2358720 AYIS_EXTRA_LIB="$T/extra/steam" run pull --apps 2358720)
 contains "it says so and skips"   "$out" "that is not mounted"
 lacks    "nothing is written to the root disk" "$(cat "$T/s5.log")" "$T/extra/steam/steamapps/common"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$T/bin/mountpoint"

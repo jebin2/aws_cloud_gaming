@@ -13,7 +13,7 @@ import (
 // asking the filesystem - the app shows it, and a stale score is worse than no
 // score if nobody can tell.
 type Store struct {
-	Dir  string // XDG_CACHE_HOME/cg
+	Dir  string // XDG_CACHE_HOME/ayis
 	Name string // sweep.json
 	Now  func() time.Time
 }

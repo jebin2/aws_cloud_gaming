@@ -86,14 +86,14 @@ ENGINE="window.__after = async () => {
   await new Promise(r => setTimeout(r, 50));
   const reads = 'stop=' + (document.getElementById('cancel').hidden ? 'none' : document.getElementById('cancel-label').textContent.trim());
   // Something that changes something still gets its Stop, named.
-  runCg(['library', 'clean']);
+  runAyis(['library', 'clean']);
   await new Promise(r => setTimeout(r, 50));
   const write = document.getElementById('cancel').hidden ? 'none' : document.getElementById('cancel-label').textContent.trim();
   // A build has Cancel on its card, which deletes the machine too: no second
-  // button beside it that would stop cg and leave the machine billing.
+  // button beside it that would stop ayis and leave the machine billing.
   for (const [id, j] of jobs) window.__emit(id, { t: 'exit', rc: 0 });
   await new Promise(r => setTimeout(r, 50));
-  runCg(['init']);
+  runAyis(['init']);
   await new Promise(r => setTimeout(r, 50));
   const build = document.getElementById('cancel').hidden ? 'none' : document.getElementById('cancel-label').textContent.trim();
   return reads + ' | write=' + write + ' | build=' + build;

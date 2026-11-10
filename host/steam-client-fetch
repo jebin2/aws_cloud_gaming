@@ -11,8 +11,8 @@
 set -uo pipefail
 url=${1:?usage: steam-client-fetch <base url> <user>}
 user=${2:?usage: steam-client-fetch <base url> <user>}
-# CG_FETCH_HOME: a test puts it somewhere that is not the real home.
-home=${CG_FETCH_HOME:-$(getent passwd "$user" | cut -d: -f6)}
+# AYIS_FETCH_HOME: a test puts it somewhere that is not the real home.
+home=${AYIS_FETCH_HOME:-$(getent passwd "$user" | cut -d: -f6)}
 [ -n "$home" ] || { echo "no user $user"; exit 1; }
 dir=$home/.local/share/Steam
 as_user() { if [ "$(id -u)" = 0 ]; then sudo -u "$user" -H "$@"; else "$@"; fi; }

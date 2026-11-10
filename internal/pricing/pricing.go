@@ -1,10 +1,10 @@
-// Package pricing is where every rate cg prints comes from: AWS's Price List
+// Package pricing is where every rate ayis prints comes from: AWS's Price List
 // (free), kept for a day, with a stale answer standing in when AWS cannot be
 // asked and "unknown" when there has never been one. No price is written down
 // here. It replaces the old Bash rates and prices scripts.
 //
 // Precedence, per price: the environment; then a file of KEY=value lines named
-// by CG_PRICES_FILE (how tests run offline); then the cache; then AWS.
+// by AYIS_PRICES_FILE (how tests run offline); then the cache; then AWS.
 package pricing
 
 import (
@@ -23,8 +23,8 @@ import (
 
 // Keys are the environment names of the prices read from AWS.
 var Keys = []string{
-	"CG_S3_USD_GB_MONTH", "CG_EBS_USD_GB_MONTH", "CG_SNAPSHOT_USD_GB_MONTH",
-	"CG_EGRESS_USD_GB", "CG_CE_CALL_USD", "CG_XREGION_USD_GB", "CG_IPV4_USD_HOUR",
+	"AYIS_S3_USD_GB_MONTH", "AYIS_EBS_USD_GB_MONTH", "AYIS_SNAPSHOT_USD_GB_MONTH",
+	"AYIS_EGRESS_USD_GB", "AYIS_CE_CALL_USD", "AYIS_XREGION_USD_GB", "AYIS_IPV4_USD_HOUR",
 }
 
 // Rates is every price the reports use. A nil is unknown: it prints as unknown
@@ -41,7 +41,7 @@ type Rates struct {
 	// Not AWS prices: no API reports them, so they are the only two figures
 	// with a default. 100 GB a month of data out is free across every region
 	// (the Free Tier); GST is 18% on an account billed by AWS India (set
-	// CG_TAX_PCT=0 for one billed elsewhere).
+	// AYIS_TAX_PCT=0 for one billed elsewhere).
 	EgressFreeGB float64
 	TaxPct       float64
 
@@ -54,19 +54,19 @@ type Rates struct {
 
 func (r *Rates) field(key string) **float64 {
 	switch key {
-	case "CG_S3_USD_GB_MONTH":
+	case "AYIS_S3_USD_GB_MONTH":
 		return &r.S3GBMonth
-	case "CG_EBS_USD_GB_MONTH":
+	case "AYIS_EBS_USD_GB_MONTH":
 		return &r.EBSGBMonth
-	case "CG_SNAPSHOT_USD_GB_MONTH":
+	case "AYIS_SNAPSHOT_USD_GB_MONTH":
 		return &r.SnapshotGBMonth
-	case "CG_EGRESS_USD_GB":
+	case "AYIS_EGRESS_USD_GB":
 		return &r.EgressGB
-	case "CG_CE_CALL_USD":
+	case "AYIS_CE_CALL_USD":
 		return &r.CECallUSD
-	case "CG_XREGION_USD_GB":
+	case "AYIS_XREGION_USD_GB":
 		return &r.XRegionGB
-	case "CG_IPV4_USD_HOUR":
+	case "AYIS_IPV4_USD_HOUR":
 		return &r.IPv4Hour
 	}
 	return nil
@@ -85,7 +85,7 @@ type Source interface {
 // Options are what Load needs besides the environment.
 type Options struct {
 	Getenv   func(string) string // os.Getenv by default
-	CacheDir string              // XDG_CACHE_HOME/cg by default
+	CacheDir string              // XDG_CACHE_HOME/ayis by default
 	Now      func() time.Time
 	Source   Source
 }
@@ -103,7 +103,7 @@ func (o *Options) defaults() {
 			home, _ := os.UserHomeDir()
 			base = filepath.Join(home, ".cache")
 		}
-		o.CacheDir = filepath.Join(base, "cg")
+		o.CacheDir = filepath.Join(base, "ayis")
 	}
 }
 
@@ -122,7 +122,7 @@ func readLines(r *os.File) map[string]string {
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
 		k, v, ok := strings.Cut(sc.Text(), "=")
-		if ok && strings.HasPrefix(k, "CG_") && v != "" {
+		if ok && strings.HasPrefix(k, "AYIS_") && v != "" {
 			out[k] = v
 		}
 	}
@@ -202,7 +202,7 @@ func (o *Options) prices(ctx context.Context, region string) (map[string]string,
 // region.
 func For(ctx context.Context, o Options, region, key string) *float64 {
 	o.defaults()
-	if f := o.Getenv("CG_PRICES_FILE"); f != "" {
+	if f := o.Getenv("AYIS_PRICES_FILE"); f != "" {
 		if m, ok := readFile(f); ok {
 			return parse(m[key])
 		}
@@ -220,13 +220,13 @@ func Load(ctx context.Context, o Options, region string) Rates {
 	var r Rates
 	var fill map[string]string
 	need := false
-	for _, k := range append(append([]string{}, Keys...), "CG_TAX_PCT", "CG_EGRESS_FREE_GB") {
+	for _, k := range append(append([]string{}, Keys...), "AYIS_TAX_PCT", "AYIS_EGRESS_FREE_GB") {
 		if o.Getenv(k) == "" {
 			need = true
 		}
 	}
 	if need {
-		if f := o.Getenv("CG_PRICES_FILE"); f != "" {
+		if f := o.Getenv("AYIS_PRICES_FILE"); f != "" {
 			if m, ok := readFile(f); ok {
 				fill = m
 			}
@@ -245,18 +245,18 @@ func Load(ctx context.Context, o Options, region string) Rates {
 		*r.field(k) = parse(pick(k))
 	}
 	r.EgressFreeGB = 100
-	if v := parse(pick("CG_EGRESS_FREE_GB")); v != nil {
+	if v := parse(pick("AYIS_EGRESS_FREE_GB")); v != nil {
 		r.EgressFreeGB = *v
 	}
 	r.TaxPct = 18
-	if v := parse(pick("CG_TAX_PCT")); v != nil {
+	if v := parse(pick("AYIS_TAX_PCT")); v != nil {
 		r.TaxPct = *v
 	}
-	// A CG_INR_PER_USD given from outside with no exchange rate beside it is
+	// A AYIS_INR_PER_USD given from outside with no exchange rate beside it is
 	// taken as the exchange rate: that is what it meant before tax was counted.
-	r.FXINRPerUSD = parse(o.Getenv("CG_FX_INR_PER_USD"))
+	r.FXINRPerUSD = parse(o.Getenv("AYIS_FX_INR_PER_USD"))
 	if r.FXINRPerUSD == nil {
-		r.FXINRPerUSD = parse(o.Getenv("CG_INR_PER_USD"))
+		r.FXINRPerUSD = parse(o.Getenv("AYIS_INR_PER_USD"))
 	}
 	if r.FXINRPerUSD == nil {
 		r.FXINRPerUSD = o.fx(ctx)

@@ -6,7 +6,7 @@ package hosts
 
 import (
 	"encoding/json"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	"github.com/jebin2/ayis/internal/local"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,10 +15,10 @@ import (
 // Store is the file.
 type Store struct{ Path string }
 
-// PathFor is where it lives: $XDG_CONFIG_HOME/cg/hosts.json, else ~/.config.
+// PathFor is where it lives: $XDG_CONFIG_HOME/ayis/hosts.json, else ~/.config.
 func PathFor(get func(string) (string, bool)) string {
 	base := local.ConfigBase(get)
-	return filepath.Join(base, "cg", "hosts.json")
+	return filepath.Join(base, "ayis", "hosts.json")
 }
 
 // Record is one machine, as a free map: setup adds fields as it learns them.

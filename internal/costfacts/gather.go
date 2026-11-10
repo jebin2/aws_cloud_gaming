@@ -17,8 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/bucket"
-	"github.com/jebin2/aws_cloud_gaming/internal/costdaily"
+	"github.com/jebin2/ayis/internal/bucket"
+	"github.com/jebin2/ayis/internal/costdaily"
 )
 
 // The parts of each service client cost uses; the SDK clients satisfy them.
@@ -77,9 +77,9 @@ const ArchivePrefix = "steam/steamapps/"
 type Facts struct {
 	Account   Known[string]
 	Instance  Known[*Instance]
-	Volumes   Known[[]Volume] // the box's attached disks and cg's leftovers
+	Volumes   Known[[]Volume] // the box's attached disks and ayis's leftovers
 	Images    Known[[]Image]
-	Snapshots Known[[]Snapshot] // the snapshots behind cg's images, and cg's loose ones
+	Snapshots Known[[]Snapshot] // the snapshots behind ayis's images, and ayis's loose ones
 	EIPs      Known[int]
 	KeyPair   Known[bool]
 	SecGroup  Known[bool]
@@ -134,7 +134,7 @@ func (g *Gatherer) Gather(ctx context.Context) (Facts, error) {
 		g.Now = time.Now
 	}
 	if g.TagKey == "" {
-		g.TagKey = "cg:host"
+		g.TagKey = "ayis:host"
 	}
 	var f Facts
 	// AWS asked first, and its refusal said: a key AWS rejects must not end the
@@ -152,9 +152,9 @@ func (g *Gatherer) Gather(ctx context.Context) (Facts, error) {
 
 	f.Instance = g.instance(ctx)
 	// Every volume and snapshot bills, attached or not - orphans are the classic
-	// way to keep paying for a machine you think you deleted. cg's own: the box's
-	// disks and cg's leftovers, cg's images and the snapshots behind them, and
-	// cg's tagged snapshots.
+	// way to keep paying for a machine you think you deleted. ayis's own: the box's
+	// disks and ayis's leftovers, ayis's images and the snapshots behind them, and
+	// ayis's tagged snapshots.
 	f.Volumes = g.collectVolumes(ctx, f.Instance)
 	if imgs, err := g.images(ctx); err == nil {
 		f.Images = ok(imgs)
@@ -324,7 +324,7 @@ func (g *Gatherer) archive(ctx context.Context) Known[Archive] {
 			Bucket: aws.String(g.Bucket), Prefix: aws.String(ArchivePrefix), ContinuationToken: token})
 		if err != nil {
 			// A bucket that is not there holds nothing, and that is known: the first
-			// cg init makes it. Any other failure is unknown, not an empty archive.
+			// ayis init makes it. Any other failure is unknown, not an empty archive.
 			if code(err) == "NoSuchBucket" {
 				return ok(Archive{})
 			}

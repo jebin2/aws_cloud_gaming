@@ -1,8 +1,8 @@
 // Package laptop is what this computer needs to play: which tools are here,
 // what would install the ones that are not, and how this process could become
-// root to do it. `cg check` reports it and `cg check --fix` acts on it.
+// root to do it. `ayis check` reports it and `ayis check --fix` acts on it.
 //
-// The Bash cg needed six tools, because it was made of them: python3 rendered
+// The Bash ayis needed six tools, because it was made of them: python3 rendered
 // every JSON answer, curl fetched installers, and the AWS CLI was the only thing
 // that talked to AWS. The Go binary is all three, so what is left is what it
 // actually runs: ssh, Tailscale and Moonlight.
@@ -15,10 +15,10 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
+	"github.com/jebin2/ayis/internal/local"
 )
 
-// Tool is something cg runs.
+// Tool is something ayis runs.
 type Tool struct {
 	Key   string
 	Label string
@@ -28,7 +28,7 @@ type Tool struct {
 
 // Tools in install order.
 var Tools = []Tool{
-	{"ssh", "OpenSSH (ssh, scp)", "every command cg runs on the box goes through it", "all"},
+	{"ssh", "OpenSSH (ssh, scp)", "every command ayis runs on the box goes through it", "all"},
 	{"tailscale", "Tailscale", "the private network the box joins; there is no public SSH port", "all"},
 	{"moonlight", "Moonlight", "the stream itself - this is what you play on", "all"},
 }
@@ -127,12 +127,12 @@ func Manual(tool string) string {
 	switch tool {
 	case "tailscale":
 		return "https://tailscale.com/download"
-	// cg runs `moonlight`, which a Flatpak does not put on PATH.
+	// ayis runs `moonlight`, which a Flatpak does not put on PATH.
 	case "moonlight":
 		if runtime.GOOS != "linux" {
-			return "https://github.com/moonlight-stream/moonlight-qt/releases (install the app; cg finds it)"
+			return "https://github.com/moonlight-stream/moonlight-qt/releases (install the app; ayis finds it)"
 		}
-		return "https://github.com/moonlight-stream/moonlight-qt/releases (cg needs a moonlight command on PATH)"
+		return "https://github.com/moonlight-stream/moonlight-qt/releases (ayis needs a moonlight command on PATH)"
 	case "ssh":
 		switch runtime.GOOS {
 		case "windows":

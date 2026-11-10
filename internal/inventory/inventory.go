@@ -1,4 +1,4 @@
-// Package inventory is everything of cg's in this AWS account that a disconnect
+// Package inventory is everything of ayis's in this AWS account that a disconnect
 // would delete, read live, with what each bills a month. An unknown price is
 // null, never 0; "error" says AWS could not be asked, and then nothing else in
 // it can be trusted.
@@ -12,9 +12,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
-	"github.com/jebin2/aws_cloud_gaming/internal/storage"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/pricing"
+	"github.com/jebin2/ayis/internal/storage"
 )
 
 // Machine is a box in some region.
@@ -25,7 +25,7 @@ type Machine struct{ ID, State, Type string }
 type Cloud interface {
 	Account(ctx context.Context) (string, error)
 	Regions(ctx context.Context) ([]string, error)
-	// Machines are the boxes cg launched in a region, in any state that still
+	// Machines are the boxes ayis launched in a region, in any state that still
 	// bills or can come back.
 	Machines(ctx context.Context, region string) ([]Machine, error)
 	// Watchdog says whether the function is in the region. The watchdog is per
@@ -34,8 +34,8 @@ type Cloud interface {
 	Watchdog(ctx context.Context, region string) bool
 	Role(ctx context.Context) bool
 	Budget(ctx context.Context, account string) bool
-	// Settings are cg's names in SSM in a region: the watchdog's marks and each
-	// game's keep timer - free, but cg's.
+	// Settings are ayis's names in SSM in a region: the watchdog's marks and each
+	// game's keep timer - free, but ayis's.
 	Settings(ctx context.Context, region string) []string
 }
 
@@ -73,7 +73,7 @@ type SettingName struct {
 	Name   string `json:"name"`
 }
 
-// Result is `cg aws inventory --json`.
+// Result is `ayis aws inventory --json`.
 type Result struct {
 	Error     *string  `json:"error"`
 	Region    string   `json:"region"`
@@ -111,7 +111,7 @@ func (inv Inventory) Read(ctx context.Context) Result {
 	}
 	sort.Strings(regions)
 
-	// Machines cg launched, in every region, not only the one set here: a laptop
+	// Machines ayis launched, in every region, not only the one set here: a laptop
 	// whose settings say one region does not see a machine another launched in
 	// the next, and that one bills just the same.
 	type perRegion struct {
@@ -129,7 +129,7 @@ func (inv Inventory) Read(ctx context.Context) Result {
 			got[i].wd = inv.Cloud.Watchdog(ctx, r)
 		}(i, r)
 	}
-	// The saved games cg uses, and every other region's.
+	// The saved games ayis uses, and every other region's.
 	var el library.Elsewhere
 	var st storage.Everywhere
 	wg.Add(2)
@@ -216,7 +216,7 @@ func (inv Inventory) Read(ctx context.Context) Result {
 	}
 
 	// Disks, disk images and snapshots left over, which bill by the GB with
-	// nothing attached - cg's only, and in every region: a region move left them
+	// nothing attached - ayis's only, and in every region: a region move left them
 	// where only the current one was looked at.
 	if len(st.Failed) > 0 {
 		errs = append(errs, "volumes")
@@ -352,7 +352,7 @@ func Show(r Result) string {
 		fmt.Fprintf(&b, "  %-22s %s\n", i.Label, i.Detail)
 	}
 	if len(r.Items) == 0 {
-		b.WriteString("  nothing of cg is left in AWS\n")
+		b.WriteString("  nothing of ayis is left in AWS\n")
 	}
 	return b.String()
 }

@@ -15,12 +15,12 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 
-	cg "github.com/jebin2/aws_cloud_gaming"
+	ayis "github.com/jebin2/ayis"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/format"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/provision"
-	"github.com/jebin2/aws_cloud_gaming/internal/session"
+	"github.com/jebin2/ayis/internal/format"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/provision"
+	"github.com/jebin2/ayis/internal/session"
 )
 
 // waitFor waits for something to come up, a dot per try.
@@ -104,12 +104,12 @@ func (d Deps) moonlightSyskeys(ctx context.Context) {
 	}
 }
 
-// Open is `cg open`: start the box if it is stopped, wait for it, stream.
+// Open is `ayis open`: start the box if it is stopped, wait for it, stream.
 func (d Deps) Open(ctx context.Context) int {
 	d.moonlightSyskeys(ctx)
 	// A stream from this laptop is already running: a second Moonlight window
 	// would fight the first for the box's GPU and spend egress twice, and both
-	// `cg open` runs would try to end the session afterwards. Refuse, and say
+	// `ayis open` runs would try to end the session afterwards. Refuse, and say
 	// where the first one is.
 	if l, held := session.Running(d.SessionFile, d.Probe); held {
 		age := ""
@@ -143,12 +143,12 @@ func (d Deps) Open(ctx context.Context) int {
 	if err != nil {
 		e := err.Error()
 		if strings.Contains(e, "InvalidInstanceID.NotFound") || strings.Contains(e, "InvalidInstanceID.Malformed") {
-			return d.die("there is no machine to start - it was deleted, most likely by auto-stop after it sat idle or by AWS taking back a spot machine. Build a new one: cg init")
+			return d.die("there is no machine to start - it was deleted, most likely by auto-stop after it sat idle or by AWS taking back a spot machine. Build a new one: ayis init")
 		}
 		return d.die("could not read the machine from AWS: " + firstErrorLine(e))
 	}
 	if st == "terminated" || st == "shutting-down" {
-		return d.die("there is no machine to start - it was deleted, most likely by auto-stop after it sat idle or by AWS taking back a spot machine. Build a new one: cg init")
+		return d.die("there is no machine to start - it was deleted, most likely by auto-stop after it sat idle or by AWS taking back a spot machine. Build a new one: ayis init")
 	}
 	if st == "running" {
 		d.Out.Echo("instance already running")
@@ -169,12 +169,12 @@ func (d Deps) Open(ctx context.Context) int {
 					"",
 					"  Your games are in S3, so throwing this box away costs nothing:",
 					"",
-					"      cg destroy && cg init          # rebuild ("+d.Takes()+"), games restored",
+					"      ayis destroy && ayis init          # rebuild ("+d.Takes()+"), games restored",
 					"",
 					"  To get stop/start back, build on demand instead - dearer per hour,",
 					"  but it can be stopped and restarted as often as you like:",
 					"",
-					"      cg destroy && GAME_SPOT=0 cg init",
+					"      ayis destroy && GAME_SPOT=0 ayis init",
 					"")
 				return d.die(fmt.Sprintf("spot request is '%s'", srs))
 			}
@@ -319,15 +319,15 @@ func (d Deps) Open(ctx context.Context) int {
 
 	// Closing Moonlight ends the session and nothing else. The machine is kept for
 	// the next session; auto-stop ends it once it sits idle, and it can be deleted
-	// now from the app or with cg destroy.
+	// now from the app or with ayis destroy.
 	d.Out.Stage("open.ended", "session ended")
-	d.Out.Echo("session ended - the machine is still running and billing until auto-stop ends it when idle, or delete it now: cg destroy")
+	d.Out.Echo("session ended - the machine is still running and billing until auto-stop ends it when idle, or delete it now: ayis destroy")
 	return 0
 }
 
 // disks: root cannot be shrunk once grown, so its usage is the number worth
 // watching; /scratch is local NVMe and holds the games, and is wiped on every stop
-// - the S3 mirror is what makes that survivable (cg library).
+// - the S3 mirror is what makes that survivable (ayis library).
 func (d Deps) disks(ctx context.Context) string {
 	out, err := d.Box.SSH(ctx, `df -h --output=target,used,size,pcent / /scratch 2>/dev/null | sed "s/^/  /"`, nil)
 	if err != nil {
@@ -343,8 +343,8 @@ func (d Deps) disks(ctx context.Context) string {
 // caller still reports the plain timeout for every other cause.
 func (d Deps) noSunshine(ctx context.Context, ip string) bool {
 	out, err := d.Box.SSH(ctx, `test -x /usr/bin/sunshine && echo sunshine=yes || echo sunshine=no
-              test -f /var/lib/cloud-gaming-ready && echo marker=yes || echo marker=no
-              grep ">>> FAILED: " /var/log/cloud-gaming-bootstrap.log 2>/dev/null | tail -1`, nil)
+              test -f /var/lib/ayis-ready && echo marker=yes || echo marker=no
+              grep ">>> FAILED: " /var/log/ayis-bootstrap.log 2>/dev/null | tail -1`, nil)
 	if err != nil {
 		d.Out.Echo("  the box answers tailscale but not ssh, so I cannot ask it why")
 		return false
@@ -380,12 +380,12 @@ func (d Deps) noSunshine(ctx context.Context, ip string) bool {
 		"  There is nothing to repair here - the box is disposable and your games",
 		"  are in S3:",
 		"",
-		"      cg destroy && cg init",
+		"      ayis destroy && ayis init",
 		"",
 		"  To read the whole build log first:",
 		"",
 		"      ssh -i ~/.ssh/"+d.Box.Host+".pem ubuntu@"+ip,
-		"      sudo tail -50 /var/log/cloud-gaming-bootstrap.log",
+		"      sudo tail -50 /var/log/ayis-bootstrap.log",
 		"")
 	d.block("This box never finished building", lines...)
 	return true
@@ -521,9 +521,9 @@ func tailscaleWords(state string, p peerState) string {
 // stopped half-way it leaves a game with its manifest and part of its files, which
 // Steam would call installed.
 func (d Deps) settleBootRestore(ctx context.Context) int {
-	_ = d.relay(ctx, "sudo sed -i 's/^CG_APPS=.*/CG_APPS=none/' /etc/cg-library.conf 2>/dev/null || true")
+	_ = d.relay(ctx, "sudo sed -i 's/^AYIS_APPS=.*/AYIS_APPS=none/' /etc/ayis-library.conf 2>/dev/null || true")
 	active := func() bool {
-		out, _ := d.Box.SSH(ctx, "systemctl is-active cg-library-restore.service", nil)
+		out, _ := d.Box.SSH(ctx, "systemctl is-active ayis-library-restore.service", nil)
 		return strings.TrimSpace(string(out)) == "activating"
 	}
 	if !active() {
@@ -661,7 +661,7 @@ func (d Deps) syncIdle(ctx context.Context) {
 	if min <= 0 {
 		return
 	}
-	script, err := cg.Files.ReadFile("host/idle-watchdog.sh")
+	script, err := ayis.Files.ReadFile("host/idle-watchdog.sh")
 	if err != nil {
 		return
 	}
@@ -669,7 +669,7 @@ func (d Deps) syncIdle(ctx context.Context) {
 		d.Out.Log("  the idle setting was not put on the machine; it keeps its own: " + firstErrorLine(err.Error()))
 		return
 	}
-	if _, err := d.Box.SSH(ctx, fmt.Sprintf("echo IDLE_LIMIT=%d | sudo tee /etc/cg-idle.conf >/dev/null", min), nil); err != nil {
+	if _, err := d.Box.SSH(ctx, fmt.Sprintf("echo IDLE_LIMIT=%d | sudo tee /etc/ayis-idle.conf >/dev/null", min), nil); err != nil {
 		d.Out.Log("  the idle setting was not put on the machine: " + firstErrorLine(err.Error()))
 		return
 	}

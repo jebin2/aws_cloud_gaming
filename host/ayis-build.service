@@ -1,13 +1,13 @@
 [Unit]
-Description=Run the build's stages (cg-build)
+Description=Run the build's stages (ayis-build)
 # The build is not finished by one run of anything: this starts again if it dies,
-# and on every boot, and carries on from the record it keeps in /var/lib/cg-build.
+# and on every boot, and carries on from the record it keeps in /var/lib/ayis-build.
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /usr/local/bin/cg-build run
+ExecStart=/usr/bin/python3 /usr/local/bin/ayis-build run
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=0

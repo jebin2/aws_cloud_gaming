@@ -20,7 +20,7 @@ type res struct {
 }
 
 // cloud is an account: instances, images and disks with tags. Filters are
-// honoured, so a test that forgets cg's tag finds another project's AMI and fails.
+// honoured, so a test that forgets ayis's tag finds another project's AMI and fails.
 type cloud struct {
 	instances, images, volumes []res
 	spot                       map[string]string // instance -> request
@@ -154,20 +154,20 @@ func (c *cloud) DeleteVolume(_ context.Context, in *ec2.DeleteVolumeInput, _ ...
 }
 
 func account() *cloud {
-	mine := map[string]string{"cg:host": "gamevps"}
+	mine := map[string]string{"ayis:host": "ayis"}
 	return &cloud{
-		instances: []res{{id: "i-mine", tags: map[string]string{"Name": "gamevps"}, state: "running"}, {id: "i-dead", tags: map[string]string{"Name": "gamevps"}, state: "terminated"},
+		instances: []res{{id: "i-mine", tags: map[string]string{"Name": "ayis"}, state: "running"}, {id: "i-dead", tags: map[string]string{"Name": "ayis"}, state: "terminated"},
 			{id: "i-other", tags: map[string]string{"Name": "work"}, state: "running"}},
-		images: []res{{id: "ami-mine", tags: mine, snaps: []string{"snap-1", "snap-2"}}, {id: "ami-old", tags: map[string]string{"Name": "gamevps-image"}},
+		images: []res{{id: "ami-mine", tags: mine, snaps: []string{"snap-1", "snap-2"}}, {id: "ami-old", tags: map[string]string{"Name": "ayis-image"}},
 			{id: "ami-work", tags: map[string]string{"Name": "work-image"}}},
-		volumes: []res{{id: "vol-left", tags: mine, state: "available"}, {id: "vol-games", tags: map[string]string{"Name": "gamevps-games"}, state: "available"},
-			{id: "vol-theirs", tags: map[string]string{"Name": "gamevps-scratch"}, state: "available"}, {id: "vol-busy", tags: mine, state: "in-use"}},
+		volumes: []res{{id: "vol-left", tags: mine, state: "available"}, {id: "vol-games", tags: map[string]string{"Name": "ayis-games"}, state: "available"},
+			{id: "vol-theirs", tags: map[string]string{"Name": "ayis-scratch"}, state: "available"}, {id: "vol-busy", tags: mine, state: "in-use"}},
 		spot: map[string]string{"i-mine": "sir-9"},
 	}
 }
 
 func TestReadFindsOnlyWhatIsCgs(t *testing.T) {
-	p, err := Read(context.Background(), account(), "gamevps", "cg:host")
+	p, err := Read(context.Background(), account(), "ayis", "ayis:host")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,13 +182,13 @@ func TestReadFindsOnlyWhatIsCgs(t *testing.T) {
 		t.Errorf("the games volume is kept and a disk in use is not detached: %v", p.Volumes)
 	}
 	if !strings.Contains(j(p.Others), "ami-work") || !strings.Contains(j(p.Others), "vol-theirs") || strings.Contains(j(p.Others), "ami-mine") || strings.Contains(j(p.Others), "vol-games") {
-		t.Errorf("not cg's, and said: %v", p.Others)
+		t.Errorf("not ayis's, and said: %v", p.Others)
 	}
 }
 
 func TestRunCancelsTheSpotRequestFirstAndTakesTheSnapshotsToo(t *testing.T) {
 	c := account()
-	p, _ := Read(context.Background(), c, "gamevps", "cg:host")
+	p, _ := Read(context.Background(), c, "ayis", "ayis:host")
 	var said, failed []string
 	rm := Remover{C: c, Say: func(s string) { said = append(said, s) }, Log: func(string) {}, Fail: func(s string) { failed = append(failed, s) },
 		Wait: func(context.Context, string) bool { return true }}
@@ -215,7 +215,7 @@ func TestFailuresAreCollectedNotSuppressed(t *testing.T) {
 	c := account()
 	c.failSnap = map[string]bool{"snap-2": true}
 	c.failVolume = map[string]bool{"vol-left": true}
-	p, _ := Read(context.Background(), c, "gamevps", "cg:host")
+	p, _ := Read(context.Background(), c, "ayis", "ayis:host")
 	var failed []string
 	rm := Remover{C: c, Say: func(string) {}, Log: func(string) {}, Fail: func(s string) { failed = append(failed, s) }, Wait: func(context.Context, string) bool { return true }}
 	f, gone := rm.Run(context.Background(), p)
@@ -225,7 +225,7 @@ func TestFailuresAreCollectedNotSuppressed(t *testing.T) {
 	// A box that cannot be terminated stops everything after it: nothing is deleted from under a running machine.
 	c = account()
 	c.failTerminate = true
-	p, _ = Read(context.Background(), c, "gamevps", "cg:host")
+	p, _ = Read(context.Background(), c, "ayis", "ayis:host")
 	f, gone = (Remover{C: c, Say: func(string) {}, Log: func(string) {}, Fail: func(string) {}}).Run(context.Background(), p)
 	if gone || len(f) != 1 || strings.Contains(strings.Join(c.calls, ","), "deregister") {
 		t.Errorf("%v %v %v", f, gone, c.calls)
@@ -233,7 +233,7 @@ func TestFailuresAreCollectedNotSuppressed(t *testing.T) {
 	// An image that will not deregister keeps its snapshots: they are still its.
 	c = account()
 	c.failDeregister = map[string]bool{"ami-mine": true}
-	p, _ = Read(context.Background(), c, "gamevps", "cg:host")
+	p, _ = Read(context.Background(), c, "ayis", "ayis:host")
 	_, _ = (Remover{C: c, Say: func(string) {}, Log: func(string) {}, Fail: func(string) {}, Wait: func(context.Context, string) bool { return true }}).Run(context.Background(), p)
 	if strings.Contains(strings.Join(c.calls, ","), "delete-snapshot snap-1") {
 		t.Error("deleted the snapshots of an image that is still registered")
@@ -243,13 +243,13 @@ func TestFailuresAreCollectedNotSuppressed(t *testing.T) {
 func TestDescribeSaysWhenTheArchiveGoes(t *testing.T) {
 	p := Plan{Instances: []string{"i-1"}, Others: []string{"ami-x"}}
 	now := time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
-	got := Describe(p, "gamevps", 14, now)
-	for _, want := range []string{"instances       i-1", "images          none", "security group  gamevps-sg", "it is DELETED after 14 days with no box - around 2026-11-08.", "Left alone - not cg's: ami-x"} {
+	got := Describe(p, "ayis", 14, now)
+	for _, want := range []string{"instances       i-1", "images          none", "security group  ayis-sg", "it is DELETED after 14 days with no box - around 2026-11-08.", "Left alone - not ayis's: ami-x"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}
 	}
-	if forever := Describe(Plan{}, "gamevps", 0, now); !strings.Contains(forever, "GAME_ARCHIVE_EXPIRY_DAYS=0 keeps it forever.") || strings.Contains(forever, "Left alone") {
+	if forever := Describe(Plan{}, "ayis", 0, now); !strings.Contains(forever, "GAME_ARCHIVE_EXPIRY_DAYS=0 keeps it forever.") || strings.Contains(forever, "Left alone") {
 		t.Errorf("%s", forever)
 	}
 }
@@ -263,7 +263,7 @@ func TestAnInstanceWhoseSpotRequestCannotBeHandledIsNotTerminated(t *testing.T) 
 	} {
 		c := account()
 		set(c)
-		p, _ := Read(context.Background(), c, "gamevps", "cg:host")
+		p, _ := Read(context.Background(), c, "ayis", "ayis:host")
 		var failed []string
 		rm := Remover{C: c, Say: func(string) {}, Log: func(string) {}, Fail: func(s string) { failed = append(failed, s) }, Sleep: func(time.Duration) {},
 			Wait: func(context.Context, string) bool { return true }}
@@ -285,7 +285,7 @@ func TestAnInstanceWhoseSpotRequestCannotBeHandledIsNotTerminated(t *testing.T) 
 func TestAnImageWhoseSnapshotsCannotBeReadIsNotDeregistered(t *testing.T) {
 	c := account()
 	c.failImageRead = true
-	p, _ := Read(context.Background(), c, "gamevps", "cg:host")
+	p, _ := Read(context.Background(), c, "ayis", "ayis:host")
 	var failed []string
 	rm := Remover{C: c, Say: func(string) {}, Log: func(string) {}, Fail: func(s string) { failed = append(failed, s) }, Wait: func(context.Context, string) bool { return true }}
 	f, _ := rm.Run(context.Background(), p)

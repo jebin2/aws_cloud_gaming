@@ -13,8 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	wd "github.com/jebin2/aws_cloud_gaming/internal/watchdog"
+	"github.com/jebin2/ayis/internal/awscfg"
+	wd "github.com/jebin2/ayis/internal/watchdog"
 )
 
 // AWS is the real Cloud.
@@ -137,7 +137,7 @@ func (a *AWS) Settings(ctx context.Context, region string) []string {
 		return nil
 	}
 	var out []string
-	pg := ssm.NewGetParametersByPathPaginator(ssm.NewFromConfig(c), &ssm.GetParametersByPathInput{Path: aws.String("/cloud-gaming/" + a.Host), Recursive: aws.Bool(true)})
+	pg := ssm.NewGetParametersByPathPaginator(ssm.NewFromConfig(c), &ssm.GetParametersByPathInput{Path: aws.String("/ayis/" + a.Host), Recursive: aws.Bool(true)})
 	for pg.HasMorePages() {
 		o, err := pg.NextPage(ctx)
 		if err != nil {

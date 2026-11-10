@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/bucket"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/bucket"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 const archive = `{"apps":[{"appid":1091500,"name":"Cyberpunk 2077","bytes":107374182400,"pushed":"2026-10-01T10:11:12Z"},{"appid":2,"name":"Diablo IV","bytes":53687091200,"pushed":"2026-10-02T10:11:12Z"},{"appid":3,"name":"Hades","bytes":8589934592}]}`
@@ -31,14 +31,14 @@ func newChoose(t *testing.T, input string, tty bool, dotenv string) *chooseRig {
 	_ = os.WriteFile(filepath.Join(dir, ".env"), []byte(dotenv), 0o600)
 	env := config.Load(func(string) (string, bool) { return "", false }, dir)
 	s := library.NewMemStore()
-	b := bucket.Name("123", "gamevps", "ap-south-1")
+	b := bucket.Name("123", "ayis", "ap-south-1")
 	s.Add(b, "ap-south-1", "steam/index.json", 0)
 	s.Objs[b]["steam/index.json"] = []byte(archive)
 	var o, e, p bytes.Buffer
 	out := &output.Out{Stdout: &o, Stderr: &e}
 	a := &ask.Asker{Out: out, In: bufio.NewReader(strings.NewReader(input)), Prompts: &p, TTY: tty}
 	avail := 150.0
-	return &chooseRig{c: Chooser{Lib: library.Library{S3: s, Host: "gamevps", Region: "ap-south-1", Account: "123"}, Env: env, Out: out, Ask: a, AvailGB: &avail, ReserveGB: 20},
+	return &chooseRig{c: Chooser{Lib: library.Library{S3: s, Host: "ayis", Region: "ap-south-1", Account: "123"}, Env: env, Out: out, Ask: a, AvailGB: &avail, ReserveGB: 20},
 		prompts: &p, env: env, store: s}
 }
 
@@ -50,7 +50,7 @@ func TestAnArchiveThatWasNeverMadeRestoresAllOfNothing(t *testing.T) {
 		t.Errorf("%q", got)
 	}
 	r = newChoose(t, "", true, "")
-	_ = r.store.Put(context.Background(), bucket.Name("123", "gamevps", "ap-south-1"), "ap-south-1", "steam/index.json", []byte(`{"apps":[]}`))
+	_ = r.store.Put(context.Background(), bucket.Name("123", "ayis", "ap-south-1"), "ap-south-1", "steam/index.json", []byte(`{"apps":[]}`))
 	if r.c.Choose(context.Background()) != "all" {
 		t.Error("an index with no apps is nothing to ask about")
 	}

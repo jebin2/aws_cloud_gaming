@@ -2,13 +2,13 @@
 # The packaged app could not run a single command, and said nothing about it.
 #
 # Reported from a fresh Omarchy VM: the header sat on
-# `running: cg refresh, cg config, cg machines` forever. Two bugs, and the
+# `running: ayis refresh, ayis config, ayis machines` forever. Two bugs, and the
 # second is what made the first invisible:
 #
-#   1. findRepo tested existsSync(dir + "/cg"), which is TRUE for a directory
-#      named cg. A packaged build puts the scripts in resources/cg/, so
+#   1. findRepo tested existsSync(dir + "/ayis"), which is TRUE for a directory
+#      named ayis. A packaged build puts the scripts in resources/ayis/, so
 #      resources/ contains exactly that - and resources/ was chosen as the repo,
-#      making every command spawn `./cg` against a directory. Node: EACCES.
+#      making every command spawn `./ayis` against a directory. Node: EACCES.
 #   2. A spawn that fails emits 'error' and 'close' but NOT 'exit'. The app
 #      deletes a job when it sees 'exit', so the job stayed in the map for the
 #      life of the window: permanently "running", and because note() is behind
@@ -35,10 +35,10 @@ REPO=$PWD
 
 echo "1. the packaged layout, which is the one that was broken"
 # Exactly what electron-builder produces: resources/app.asar, and the scripts in
-# resources/cg/ - so resources/ holds a DIRECTORY called cg.
-mkdir -p "$T/pkg/resources/cg/lib" "$T/pkg/resources/app.asar/main"
-printf '#!/usr/bin/env bash\necho hi\n' > "$T/pkg/resources/cg/cg"
-chmod +x "$T/pkg/resources/cg/cg"
+# resources/ayis/ - so resources/ holds a DIRECTORY called ayis.
+mkdir -p "$T/pkg/resources/ayis/lib" "$T/pkg/resources/app.asar/main"
+printf '#!/usr/bin/env bash\necho hi\n' > "$T/pkg/resources/ayis/ayis"
+chmod +x "$T/pkg/resources/ayis/ayis"
 got=$(node -e '
 const { findRepo } = require(process.argv[1] + "/app/main/repo.js");
 console.log(findRepo({
@@ -47,19 +47,19 @@ console.log(findRepo({
   resourcesPath: process.argv[2] + "/pkg/resources",
   homedir: process.argv[2],
 }));' "$REPO" "$T")
-check "the repo is resources/cg, where the script is" "$got" "$T/pkg/resources/cg"
+check "the repo is resources/ayis, where the script is" "$got" "$T/pkg/resources/ayis"
 # The old behaviour, pinned so it cannot come back: resources/ must NOT win just
-# because something called cg exists inside it.
+# because something called ayis exists inside it.
 if [[ $got != "$T/pkg/resources" ]]; then echo "  ok     and never resources/ itself"; pass=$((pass+1));
 else echo "  FAIL   it chose resources/ again - the directory won"; fail=$((fail+1)); fi
-# The directory it used to choose really does contain a `cg` entry, so this is
+# The directory it used to choose really does contain a `ayis` entry, so this is
 # a live trap and not a hypothetical one.
-check "  the trap is real: resources/cg exists as a directory" \
-      "$([[ -d $T/pkg/resources/cg ]] && echo yes)" "yes"
+check "  the trap is real: resources/ayis exists as a directory" \
+      "$([[ -d $T/pkg/resources/ayis ]] && echo yes)" "yes"
 
 echo "2. a checkout still wins over the bundled copy"
 mkdir -p "$T/src/app/main"
-printf '#!/usr/bin/env bash\n' > "$T/src/cg"; chmod +x "$T/src/cg"
+printf '#!/usr/bin/env bash\n' > "$T/src/ayis"; chmod +x "$T/src/ayis"
 got=$(node -e '
 const { findRepo } = require(process.argv[1] + "/app/main/repo.js");
 console.log(findRepo({ env: {},
@@ -68,32 +68,32 @@ console.log(findRepo({ env: {},
   homedir: process.argv[2] }));' "$REPO" "$T")
 check "source beside the app is preferred" "$got" "$T/src"
 
-echo "3. CG_REPO overrides both"
+echo "3. AYIS_REPO overrides both"
 got=$(node -e '
 const { findRepo } = require(process.argv[1] + "/app/main/repo.js");
-console.log(findRepo({ env: { CG_REPO: process.argv[2] + "/src" },
+console.log(findRepo({ env: { AYIS_REPO: process.argv[2] + "/src" },
   dirname: process.argv[2] + "/pkg/resources/app.asar/main",
   resourcesPath: process.argv[2] + "/pkg/resources",
   homedir: process.argv[2] }));' "$REPO" "$T")
-check "CG_REPO is taken" "$got" "$T/src"
+check "AYIS_REPO is taken" "$got" "$T/src"
 # An override pointing nowhere must not be returned as if it worked.
 got=$(node -e '
 const { findRepo } = require(process.argv[1] + "/app/main/repo.js");
-console.log(findRepo({ env: { CG_REPO: "/nope/nowhere" },
+console.log(findRepo({ env: { AYIS_REPO: "/nope/nowhere" },
   dirname: process.argv[2] + "/pkg/resources/app.asar/main",
   resourcesPath: process.argv[2] + "/pkg/resources",
   homedir: process.argv[2] }));' "$REPO" "$T")
-check "a dead CG_REPO falls through to the real copy" "$got" "$T/pkg/resources/cg"
+check "a dead AYIS_REPO falls through to the real copy" "$got" "$T/pkg/resources/ayis"
 
-echo "4. a directory named cg never beats a real script"
-# The bug shape itself: an EARLIER candidate holds a directory called cg, a
+echo "4. a directory named ayis never beats a real script"
+# The bug shape itself: an EARLIER candidate holds a directory called ayis, a
 # later one holds the script. The earlier one used to win.
-mkdir -p "$T/trap/cg"
+mkdir -p "$T/trap/ayis"
 got=$(node -e '
 const { findRepo } = require(process.argv[1] + "/app/main/repo.js");
 console.log(findRepo({ env: {}, dirname: process.argv[2] + "/trap/a/b",
   resourcesPath: process.argv[2] + "/pkg/resources", homedir: process.argv[2] }));' "$REPO" "$T")
-check "the real script wins over the directory" "$got" "$T/pkg/resources/cg"
+check "the real script wins over the directory" "$got" "$T/pkg/resources/ayis"
 # And with nothing anywhere, the documented fallback: the checkout guess, so the
 # spawn error names a path someone recognises rather than undefined.
 got=$(node -e '
@@ -111,7 +111,7 @@ const seen = [];
 run({ repo: process.argv[2], args: ["status"], onEvent: e => seen.push(e.t) });
 setTimeout(() => console.log(seen.join(",")), 900);' "$REPO" "$1"
 }
-mkdir -p "$T/isdir/cg"
+mkdir -p "$T/isdir/ayis"
 out=$(events "$T/isdir")
 contains "spawning a directory reports the error" "$out" "error"
 contains "  AND emits an exit, so the job clears" "$out" "exit"
@@ -119,7 +119,7 @@ check    "  exactly one exit, never two" "$(grep -o exit <<<"$out" | wc -l)" "1"
 
 echo "6. a normal run still ends in one exit"
 mkdir -p "$T/good"
-printf '#!/usr/bin/env bash\nexit 3\n' > "$T/good/cg"; chmod +x "$T/good/cg"
+printf '#!/usr/bin/env bash\nexit 3\n' > "$T/good/ayis"; chmod +x "$T/good/ayis"
 out=$(events "$T/good")
 check "one exit and no spawn error" "$out" "exit"
 rc=$(node -e '
@@ -159,7 +159,7 @@ check "the failure is recorded after updateHeader" "$order" "updateHeader || fai
 contains "a throwing painter is reported too" "$js" "Could not show"
 contains "  and names the painter it could not find" "$js" "no painter for"
 # Nothing writes a command name into the window's furniture any more: the
-# header line that did is gone, and the pipeline's pane carries cg's own output
+# header line that did is gone, and the pipeline's pane carries ayis's own output
 # instead - see tests/startup-gate-*.sh.
 check "the header has no command line"   "$(grep -c 'job-line' app/renderer/index.html app/renderer/app.js | grep -vc ':0')" "0"
 

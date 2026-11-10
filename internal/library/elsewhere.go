@@ -22,13 +22,13 @@ type Place struct {
 	LoginDetail *Login   `json:"login_detail"`
 }
 
-// Elsewhere is `cg library elsewhere --json`: games saved somewhere cg is not
+// Elsewhere is `ayis library elsewhere --json`: games saved somewhere ayis is not
 // looking.
 //
 // Every other read uses ONE bucket, the one .env names. A region move made a new
 // one and left 162.8 GB of a game in the old region, billing with nothing
 // pointing at it: Library said no games, a build offered none. AWS lists every
-// bucket in the account in one call; cg keeps the ones it made for this account
+// bucket in the account in one call; ayis keeps the ones it made for this account
 // and host - never anything merely named like them. Region lookups are free;
 // reading inside is a handful of LIST requests.
 type Elsewhere struct {
@@ -58,7 +58,7 @@ func (l Library) ReadElsewhere(ctx context.Context, p Params, prices Prices, exp
 	marks := ReadMarks(ctx, p, l.Host)
 	places := []Place{}
 	for _, b := range names {
-		if !strings.HasPrefix(b, "cg-library-") || b == cur {
+		if !strings.HasPrefix(b, "ayis-library-") || b == cur {
 			continue
 		}
 		r, err := l.S3.Location(ctx, b)
@@ -99,8 +99,8 @@ func (l Library) ReadElsewhere(ctx context.Context, p Params, prices Prices, exp
 func (l Library) place(ctx context.Context, b, region string, marks *Marks, prices Prices) Place {
 	rp := region
 	pl := Place{Bucket: b, Region: &rp, Games: []Game{}}
-	s3 := prices(ctx, region, "CG_S3_USD_GB_MONTH")
-	pl.XRegionUSD = prices(ctx, region, "CG_XREGION_USD_GB")
+	s3 := prices(ctx, region, "AYIS_S3_USD_GB_MONTH")
+	pl.XRegionUSD = prices(ctx, region, "AYIS_XREGION_USD_GB")
 	// An empty prefix lists nothing and says nothing: that is an empty bucket.
 	// Anything said as an error is a listing that failed, which is not.
 	objs, err := l.S3.List(ctx, b, region, "steam/")
@@ -174,7 +174,7 @@ func ShowElsewhere(d Elsewhere, inr *float64) (string, bool) {
 		}
 	}
 	if len(shown) == 0 {
-		return "  nothing saved anywhere else - every game is in the archive cg uses\n", true
+		return "  nothing saved anywhere else - every game is in the archive ayis uses\n", true
 	}
 	for _, p := range shown {
 		region := "?"
@@ -197,8 +197,8 @@ func ShowElsewhere(d Elsewhere, inr *float64) (string, bool) {
 			b.WriteString("      (and a Steam login)\n")
 		}
 	}
-	b.WriteString("\n  cg does not use these. Bring one here: cg library move <appid> --from <bucket>\n")
-	b.WriteString("  or stop paying for it:                 cg library forget <appid> --from <bucket>\n")
+	b.WriteString("\n  ayis does not use these. Bring one here: ayis library move <appid> --from <bucket>\n")
+	b.WriteString("  or stop paying for it:                 ayis library forget <appid> --from <bucket>\n")
 	return b.String(), true
 }
 

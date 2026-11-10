@@ -10,12 +10,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	cg "github.com/jebin2/aws_cloud_gaming"
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/watchdog"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/local"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
+	ayis "github.com/jebin2/ayis"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/commands/watchdog"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/local"
+	"github.com/jebin2/ayis/internal/output"
 )
 
 // Options are what the command line said.
@@ -31,13 +31,13 @@ func ParseArgs(args []string) (Options, error) {
 		case "--watch":
 			o.Watch = true
 		default:
-			return o, fmt.Errorf("unknown option '%s' (see: cg help)", a)
+			return o, fmt.Errorf("unknown option '%s' (see: ayis help)", a)
 		}
 	}
 	return o, nil
 }
 
-// Run is `cg watcher`.
+// Run is `ayis watcher`.
 func Run(ctx context.Context, env *config.Env, opts Options, out *output.Out) int {
 	region := env.Region()
 	cfg, err := awscfg.New(ctx, region)
@@ -61,7 +61,7 @@ func Run(ctx context.Context, env *config.Env, opts Options, out *output.Out) in
 	if node == "" {
 		node = host
 	}
-	script, _ := cg.Files.ReadFile("host/idle-watchdog.sh")
+	script, _ := ayis.Files.ReadFile("host/idle-watchdog.sh")
 	w := &Watcher{
 		EC2: ec2.NewFromConfig(cfg), Budgets: budgets.NewFromConfig(us), STS: sts.NewFromConfig(cfg), Reader: reader,
 		Runner: local.Exec{}, Host: host, Node: node, InstanceID: env.Get("GAME_INSTANCE_ID"), Home: home,
@@ -71,7 +71,7 @@ func Run(ctx context.Context, env *config.Env, opts Options, out *output.Out) in
 	if opts.Watch {
 		ip := w.nodeIP(ctx)
 		if ip == "" {
-			out.Die(fmt.Sprintf("'%s' is not on the tailnet. Is the box running? Try: cg status", node))
+			out.Die(fmt.Sprintf("'%s' is not on the tailnet. Is the box running? Try: ayis status", node))
 			return 1
 		}
 		err := w.Runner.Stream(ctx, out.Stdout, "ssh", "-i", home+"/.ssh/"+host+".pem", "-o", "StrictHostKeyChecking=accept-new",
@@ -95,7 +95,7 @@ func Run(ctx context.Context, env *config.Env, opts Options, out *output.Out) in
 	return 0
 }
 
-// hostIdle is the machine's idle minutes: the setting when it is set (cg open puts
+// hostIdle is the machine's idle minutes: the setting when it is set (ayis open puts
 // it on the machine), else what the on-host script defaults to.
 func hostIdle(setting int, script []byte) int {
 	if setting > 0 {

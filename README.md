@@ -1,4 +1,6 @@
-# Cloud Gaming
+# Ayis
+
+**All Yours, Instantly Streamed.**
 
 Stream games to your laptop from a GPU machine rented on AWS, or from a Linux server of your own.
 A desktop app for Linux, built on [Sunshine](https://github.com/LizardByte/Sunshine),
@@ -9,13 +11,13 @@ A desktop app for Linux, built on [Sunshine](https://github.com/LizardByte/Sunsh
 
 ## Install
 
-Download from [Releases](https://github.com/jebin2/aws_cloud_gaming/releases):
+Download from [Releases](https://github.com/jebin2/ayis/releases):
 
 | File | For | Install |
 |---|---|---|
 | `.pacman` | Arch, CachyOS, Omarchy | `sudo pacman -U <file>` |
 | `.deb` | Debian, Ubuntu, Mint | `sudo dpkg -i <file>` |
-| `.tar.gz` | Any Linux | Extract and run `cg` |
+| `.tar.gz` | Any Linux | Extract and run `ayis` |
 | `.AppImage` | Any Linux with FUSE 2 | Make executable and run |
 
 ## What you need
@@ -39,10 +41,10 @@ default, adjustable on the Games page.
 
 ## From source
 
-    git clone https://github.com/jebin2/aws_cloud_gaming.git
-    cd aws_cloud_gaming/app && npm install && npm start
+    git clone https://github.com/jebin2/ayis.git
+    cd ayis/app && npm install && npm start
 
-The app runs `cg`, a Go program built from this repository (`npm start` builds it first; Go is needed). To use it directly: `go build -o cg ./cmd/cg`, then `./cg help` - or see [docs/commands.md](docs/commands.md).
+The app runs `ayis`, a Go program built from this repository (`npm start` builds it first; Go is needed). To use it directly: `go build -o ayis ./cmd/ayis`, then `./ayis help` - or see [docs/commands.md](docs/commands.md).
 
 ## Documentation
 

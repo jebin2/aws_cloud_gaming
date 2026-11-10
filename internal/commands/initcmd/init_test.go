@@ -23,14 +23,14 @@ import (
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/aws/smithy-go"
 
-	cg "github.com/jebin2/aws_cloud_gaming"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/check"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/provision"
-	"github.com/jebin2/aws_cloud_gaming/internal/sunshine"
-	fx "github.com/jebin2/aws_cloud_gaming/internal/testfixture"
-	"github.com/jebin2/aws_cloud_gaming/internal/tskey"
+	ayis "github.com/jebin2/ayis"
+	"github.com/jebin2/ayis/internal/commands/check"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/provision"
+	"github.com/jebin2/ayis/internal/sunshine"
+	fx "github.com/jebin2/ayis/internal/testfixture"
+	"github.com/jebin2/ayis/internal/tskey"
 )
 
 // aws is a whole account in one fake: an EC2 that remembers, an S3 and an IAM
@@ -265,12 +265,12 @@ func newRig(t *testing.T) *rig {
 		switch {
 		case line == "tailscale status --json":
 			if joined {
-				return true, `{"Peer":{"nodekey:new":{"DNSName":"gamevps.t.ts.net.","PublicKey":"nodekey:new"}}}`, nil
+				return true, `{"Peer":{"nodekey:new":{"DNSName":"ayis.t.ts.net.","PublicKey":"nodekey:new"}}}`, nil
 			}
 			return true, `{"Peer":{"nodekey:phone":{"DNSName":"phone.t.ts.net.","PublicKey":"nodekey:phone"}}}`, nil
 		case line == "tailscale status":
 			if joined {
-				return true, "100.64.0.7   gamevps   me@   linux   -\n100.64.0.2   phone   me@   android   -\n", nil
+				return true, "100.64.0.7   ayis   me@   linux   -\n100.64.0.2   phone   me@   android   -\n", nil
 			}
 			return true, "100.64.0.2   phone   me@   android   -\n", nil
 		case strings.HasPrefix(line, "tailscale ip -4"):
@@ -282,7 +282,7 @@ func newRig(t *testing.T) *rig {
 			return true, "pong\n", nil
 		case strings.Contains(line, "tail -n +"):
 			return true, rg.buildLog, nil
-		case strings.Contains(line, "test -f /var/lib/cloud-gaming-ready"):
+		case strings.Contains(line, "test -f /var/lib/ayis-ready"):
 			if rg.ready {
 				return true, "", nil
 			}
@@ -328,12 +328,12 @@ func newRig(t *testing.T) *rig {
 			return check.Result{Type: "g6.xlarge", Region: "ap-south-2", VCPUs: 4, Spot: false, AuthKey: "tskey-auth-xxxxxxxxxxxxxxxx"}, 0
 		},
 		Lib: func(b string) provision.Library {
-			return provision.Library{S3: s3ok{}, IAM: iamok{}, Account: "123456789012", Host: "gamevps", Region: "ap-south-2", Named: b, Sleep: func(time.Duration) {}}
+			return provision.Library{S3: s3ok{}, IAM: iamok{}, Account: "123456789012", Host: "ayis", Region: "ap-south-2", Named: b, Sleep: func(time.Duration) {}}
 		},
 		BucketRegion: func(context.Context, string) (string, error) { return "ap-south-2", nil },
-		Provisioner:  provision.Provisioner{EC2: a, SSM: ssmok{}, Up: rg.up, Src: cg.Files, Now: func() time.Time { return time.Date(2026, 10, 25, 9, 8, 7, 0, time.UTC) }, Sleep: func(time.Duration) {}},
+		Provisioner:  provision.Provisioner{EC2: a, SSM: ssmok{}, Up: rg.up, Src: ayis.Files, Now: func() time.Time { return time.Date(2026, 10, 25, 9, 8, 7, 0, time.UTC) }, Sleep: func(time.Duration) {}},
 		Budget: func(inr float64) provision.Budget {
-			return provision.Budget{C: rg.budgets, Account: "123456789012", Host: "gamevps", INR: inr, FX: &fx2, Email: "a@b.c"}
+			return provision.Budget{C: rg.budgets, Account: "123456789012", Host: "ayis", INR: inr, FX: &fx2, Email: "a@b.c"}
 		},
 		Shutdown: a, EC2: a,
 		TS:  func(token string) tskey.Client { return tskey.Client{Token: token, Base: tsSrv.URL} },
@@ -362,7 +362,7 @@ func TestAFreshBuildFromNothingToReady(t *testing.T) {
 	got := r.o.String()
 	// The order the steps are said in is the order they happen.
 	order := []string{"arming the budget before anything launches", "provisioning instance", "ensuring the S3 game library", "==> launching g6.xlarge", "confirming what shutdown does to this instance",
-		"waiting for the box to join the tailnet", "turning off Tailscale key expiry for 'gamevps'", "building the box", "refreshing the on-host watchdog", "Sunshine account", "moonlight pairing", "waiting for Steam to finish installing", "Box          i-0new"}
+		"waiting for the box to join the tailnet", "turning off Tailscale key expiry for 'ayis'", "building the box", "refreshing the on-host watchdog", "Sunshine account", "moonlight pairing", "waiting for Steam to finish installing", "Box          i-0new"}
 	last := -1
 	for _, want := range order {
 		at := strings.Index(got, want)
@@ -371,7 +371,7 @@ func TestAFreshBuildFromNothingToReady(t *testing.T) {
 		}
 		last = at
 	}
-	for k, want := range map[string]string{"GAME_INSTANCE_ID": "i-0new", "GAME_TS_NODE": "gamevps", "GAME_TS_HOST": "gamevps", "GAME_REGION": r.env.Region()} {
+	for k, want := range map[string]string{"GAME_INSTANCE_ID": "i-0new", "GAME_TS_NODE": "ayis", "GAME_TS_HOST": "ayis", "GAME_REGION": r.env.Region()} {
 		if r.env.Get(k) != want {
 			t.Errorf("%s = %q, want %q", k, r.env.Get(k), want)
 		}
@@ -379,7 +379,7 @@ func TestAFreshBuildFromNothingToReady(t *testing.T) {
 	if r.env.Get("GAME_S3_BUCKET") == "" {
 		t.Error("the bucket is remembered")
 	}
-	if !strings.Contains(got, "Tailscale    gamevps · 100.64.0.7 · key expiry ON - see below") {
+	if !strings.Contains(got, "Tailscale    ayis · 100.64.0.7 · key expiry ON - see below") {
 		t.Errorf("the summary: %s", got)
 	}
 	if len(r.notes) != 1 || r.notes[0] != "Your game PC is ready|default|video_game" {
@@ -460,7 +460,7 @@ func TestARerunFindsTheSameBoxAndLaunchesNoSecond(t *testing.T) {
 		t.Errorf("no second instance on a rerun: %d launches", r.a.runs)
 	}
 	got := r.o.String()
-	for _, want := range []string{"reusing existing instance i-0new", "reusing the existing box, already on the tailnet as 'gamevps'", "path up"} {
+	for _, want := range []string{"reusing existing instance i-0new", "reusing the existing box, already on the tailnet as 'ayis'", "path up"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q in:\n%s", want, got)
 		}
@@ -475,7 +475,7 @@ func TestAStoppedBoxIsStartedBeforeWaitingForItsNode(t *testing.T) {
 	r.a.state, r.a.id, r.a.shutdown = "stopped", "i-0old", "stop"
 	r.joined = func() bool { return r.a.state == "running" }
 	// The node is known from before, in .env and on the tailnet once the box runs.
-	_ = r.env.Set("GAME_TS_NODE", "gamevps")
+	_ = r.env.Set("GAME_TS_NODE", "ayis")
 	if rc := r.i.Run(context.Background()); rc != 0 {
 		t.Fatalf("%s\n%s", r.o, r.e)
 	}
@@ -531,7 +531,7 @@ func TestABuildThatStopsLeavesTheBoxAndSaysItIsBilling(t *testing.T) {
 	r.ready = false
 	prev := r.r.Hook
 	r.r.Hook = func(line string) (bool, string, error) {
-		if strings.Contains(line, "cloud-gaming-bootstrap.rc") {
+		if strings.Contains(line, "ayis-bootstrap.rc") {
 			return true, "exited|no\n", nil
 		}
 		return prev(line)
@@ -539,7 +539,7 @@ func TestABuildThatStopsLeavesTheBoxAndSaysItIsBilling(t *testing.T) {
 	if rc := r.i.Run(context.Background()); rc != 1 {
 		t.Fatalf("rc %d\n%s", rc, r.o)
 	}
-	if !strings.Contains(r.e.String(), "the build did not finish. The instance is still running and still") || !strings.Contains(r.e.String(), "stop it with cg stop once you have looked at the log.") {
+	if !strings.Contains(r.e.String(), "the build did not finish. The instance is still running and still") || !strings.Contains(r.e.String(), "stop it with ayis stop once you have looked at the log.") {
 		t.Errorf("%s", r.e)
 	}
 	if len(r.notes) != 1 || r.notes[0] != "Your game PC could not be set up|high|warning" {
@@ -556,12 +556,12 @@ func TestAnOfflineNodeFromAnEarlierBoxIsSaid(t *testing.T) {
 	prev := r.r.Hook
 	r.r.Hook = func(line string) (bool, string, error) {
 		if line == "tailscale status" && !r.a.exists() {
-			return true, "100.64.0.9   gamevps   me@   linux   offline, last seen 3d ago\n", nil
+			return true, "100.64.0.9   ayis   me@   linux   offline, last seen 3d ago\n", nil
 		}
 		return prev(line)
 	}
 	_ = r.i.Run(context.Background())
-	if !strings.Contains(r.o.String(), "note: an offline 'gamevps' node is left from an earlier box - it is pruned before launch, so the new box takes the name") {
+	if !strings.Contains(r.o.String(), "note: an offline 'ayis' node is left from an earlier box - it is pruned before launch, so the new box takes the name") {
 		t.Errorf("%s", r.o)
 	}
 }

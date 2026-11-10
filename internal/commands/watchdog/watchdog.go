@@ -1,4 +1,4 @@
-// Package watchdog is `cg watchdog` and the guard rows of `cg watcher` that
+// Package watchdog is `ayis watchdog` and the guard rows of `ayis watcher` that
 // come from layer 3, the cloud watchdog: the Lambda that keeps working when the
 // box and this laptop are both gone.
 package watchdog
@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	wd "github.com/jebin2/aws_cloud_gaming/internal/watchdog"
+	wd "github.com/jebin2/ayis/internal/watchdog"
 )
 
-// Status is `cg watchdog status`: is it installed, is the schedule on, what
+// Status is `ayis watchdog status`: is it installed, is the schedule on, what
 // does the archive countdown say, and what did it last decide.
 func Status(ctx context.Context, r *wd.Reader, expiryDays int) string {
 	st := r.Current(ctx)
@@ -20,7 +20,7 @@ func Status(ctx context.Context, r *wd.Reader, expiryDays int) string {
 	if st.Installed {
 		fmt.Fprintf(&b, "  function  %s  %s %s\n", wd.Name(r.Host), st.FnState, st.FnRuntime)
 	} else {
-		b.WriteString("  function  not installed - cg init creates it\n")
+		b.WriteString("  function  not installed - ayis init creates it\n")
 	}
 	if st.Rule != "" {
 		fmt.Fprintf(&b, "  schedule  every %d minutes, %s\n", wd.EveryMin, st.Rule)
@@ -33,7 +33,7 @@ func Status(ctx context.Context, r *wd.Reader, expiryDays int) string {
 	switch {
 	case len(st.Recent) > 0:
 		for _, e := range st.Recent {
-			fmt.Fprintf(&b, "    %s %s\n", time.UnixMilli(e.MS).Local().Format("2006-01-02 15:04:05"), strings.TrimPrefix(e.Msg, "cg-watchdog: "))
+			fmt.Fprintf(&b, "    %s %s\n", time.UnixMilli(e.MS).Local().Format("2006-01-02 15:04:05"), strings.TrimPrefix(e.Msg, "ayis-watchdog: "))
 		}
 	case st.LogUnknown:
 		b.WriteString("    (the log could not be read)\n")
@@ -55,7 +55,7 @@ func ArchiveText(st wd.State, days int, now time.Time) string {
 	return fmt.Sprintf("deleted after %d days with no box - not checked yet (hourly)", days)
 }
 
-// WatcherLines are layer 3's rows in `cg watcher`: is the schedule firing, and
+// WatcherLines are layer 3's rows in `ayis watcher`: is the schedule firing, and
 // what did it last decide. Each is (kind, text).
 func WatcherLines(ctx context.Context, r *wd.Reader) [][2]string {
 	return RowsFor(r.Current(ctx), r.Host, r.Now())

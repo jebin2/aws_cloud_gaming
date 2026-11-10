@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/render"
+	"github.com/jebin2/ayis/internal/render"
 )
 
-// Stage is one step of the AWS box's build, run by cg-build on the box. File is its
+// Stage is one step of the AWS box's build, run by ayis-build on the box. File is its
 // module in lib/bootstrap.d. Needs are the stages that must be done first. Lock
 // names a resource only one stage at a time may use (the package installer).
 // Timeout is seconds; Retries are the extra attempts after a failure.
@@ -197,7 +197,7 @@ func AssembleSupervised(fsys fs.FS, vars map[string]string) (UserData, error) {
 	if err != nil {
 		return UserData{}, err
 	}
-	v := map[string]string{"CG_ENV_LINES": lines}
+	v := map[string]string{"AYIS_ENV_LINES": lines}
 	for k, val := range vars {
 		v[k] = val
 	}

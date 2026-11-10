@@ -195,7 +195,7 @@ func TestAddDiskGrowsTheGamesDiskWhileItIsInUse(t *testing.T) {
 	if rc := r.d.AddDisk(context.Background(), f, 95); rc != 0 {
 		t.Fatalf("%s%s", r.o, r.w)
 	}
-	// 95 is rounded up to the 10 GB the rest of cg works in.
+	// 95 is rounded up to the 10 GB the rest of ayis works in.
 	if got := strings.Join(f.calls, ";"); got != "modify vol-games 200" {
 		t.Errorf("%s", got)
 	}
@@ -240,12 +240,12 @@ func TestAddDiskOnTheMachinesOwnDriveAttachesASecondDiskAndMovesNothing(t *testi
 	if rc := r.d.AddDisk(context.Background(), f, 120); rc != 0 {
 		t.Fatalf("%s%s", r.o, r.w)
 	}
-	want := []string{"create 120GB gp3 ap-south-1b Name=gamevps,cg:host=gamevps,", "attach vol-new /dev/sdg", "mark /dev/sdg vol-new delete-with-box=true"}
+	want := []string{"create 120GB gp3 ap-south-1b Name=ayis,ayis:host=ayis,", "attach vol-new /dev/sdg", "mark /dev/sdg vol-new delete-with-box=true"}
 	if got := strings.Join(f.calls, ";"); got != strings.Join(want, ";") {
 		t.Errorf("%s", got)
 	}
 	ssh := sshLines(r.r)
-	for _, want := range []string{"mkfs.ext4", "cgextra", "/scratch2", "steam-add-extra-library", "cg-extra-library.service", "base64 -d", "MOUNTPOINT"} {
+	for _, want := range []string{"mkfs.ext4", "ayisextra", "/scratch2", "steam-add-extra-library", "ayis-extra-library.service", "base64 -d", "MOUNTPOINT"} {
 		if !strings.Contains(ssh, want) {
 			t.Errorf("lacks %q in\n%s", want, ssh)
 		}
@@ -256,7 +256,7 @@ func TestAddDiskOnTheMachinesOwnDriveAttachesASecondDiskAndMovesNothing(t *testi
 			t.Errorf("moved or closed something (%q):\n%s", never, ssh)
 		}
 	}
-	if !strings.Contains(r.o.String()+r.w.String(), "Settings > Storage > Add Drive > pick the drive at /scratch2 (named cgextra)") {
+	if !strings.Contains(r.o.String()+r.w.String(), "Settings > Storage > Add Drive > pick the drive at /scratch2 (named ayisextra)") {
 		t.Errorf("it says what to do next: %s%s", r.o, r.w)
 	}
 	if len(f.deleted) != 0 {

@@ -3,7 +3,7 @@ package games
 // remoteScript is what the box is asked: every Steam manifest, the disk, what is
 // staged for download, and the inbound rate sampled twice three seconds apart - a
 // rate averaged over the whole boot is not the rate right now, and "right now" is
-// what an ETA needs. It is the script the Bash cg has always sent, unchanged,
+// what an ETA needs. It is the script the Bash ayis has always sent, unchanged,
 // because it runs on the box.
 const remoteScript = `
     # Every Steam library on the box: the archive's own, an added disk, and the

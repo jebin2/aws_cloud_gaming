@@ -13,7 +13,7 @@ way in.
 flowchart LR
   subgraph laptop["💻 Your laptop"]
     ml["Moonlight"]
-    cg["cg CLI"]
+    ayis["ayis CLI"]
   end
 
   tunnel(["🔒 Tailscale tunnel<br/>WireGuard · UDP 41641"])
@@ -25,7 +25,7 @@ flowchart LR
   end
 
   ml -->|"video down · input up"| tunnel
-  cg -->|"commands"| tunnel
+  ayis -->|"commands"| tunnel
   tunnel --> sun
   tunnel --> sshd
   sun --- desk
@@ -36,17 +36,17 @@ terminates a box nobody is using.
 
 ```mermaid
 flowchart LR
-  cg["💻 cg on your laptop"]
+  ayis["💻 ayis on your laptop"]
   ec2["🖥️ EC2 box<br/>one-time spot · ap-south-2"]
   s3[("🪣 S3<br/>games + Steam login")]
   bud["💰 AWS Budget"]
   lam["⚡ Lambda<br/>cloud watchdog"]
 
-  cg -->|"launch · terminate"| ec2
+  ayis -->|"launch · terminate"| ec2
   ec2 <-->|"restore at boot<br/>push on destroy"| s3
   lam -.->|"terminate if idle"| ec2
   lam -.->|"delete after 14 days<br/>with no box"| s3
-  bud -.->|"email"| cg
+  bud -.->|"email"| ayis
   ntfy(["📱 ntfy · your phone"])
   lam -.->|"notifications"| ntfy
   ec2 -.->|"notifications"| ntfy
@@ -60,7 +60,7 @@ UDP 41641, and that is Tailscale's.
 
 | Layer | Uses | Runs on | Why this |
 |---|---|---|---|
-| Control | `cg` (bash) and `lib/`, tested offline in `tests/` | laptop | one command per job; risky paths proven with stubs |
+| Control | `ayis` (bash) and `lib/`, tested offline in `tests/` | laptop | one command per job; risky paths proven with stubs |
 | Compute | EC2 `g6.xlarge` - 4 vCPU, NVIDIA L4 | AWS `ap-south-2` | the only GPU type there that fits a 4 vCPU quota |
 | Purchase | one-time spot, terminated on shutdown | AWS | ~INR 20/hour against ~INR 85 on demand |
 | Build | Ubuntu 24.04, configured by user-data in 16 stages (`lib/bootstrap.d/`) | box | a clean box every session, no image to maintain |
@@ -75,24 +75,24 @@ UDP 41641, and that is Tailscale's.
 | S3 access | EC2 instance role | box | no access key on the box to leak |
 | Guards | on-host watchdog, cloud watchdog (Lambda + EventBridge), AWS Budget | box, AWS | two independent ways to stop a forgotten box, and an email |
 | Notifications | ntfy (optional, `GAME_NTFY_URL`) | box, Lambda, laptop | push to a phone with no account and nothing to confirm |
-| Spend | Cost Explorer (for `cg cost`) | AWS | $0.01 a call - that and S3 requests are the only charges beyond the box |
+| Spend | Cost Explorer (for `ayis cost`) | AWS | $0.01 a call - that and S3 requests are the only charges beyond the box |
 
 ## Where things live
 
 ```mermaid
 flowchart TB
-  subgraph box["🖥️ EC2 box - deleted by cg destroy"]
+  subgraph box["🖥️ EC2 box - deleted by ayis destroy"]
     root["Root EBS · 50 GB gp3<br/>Ubuntu · NVIDIA driver<br/>Sunshine · Steam client<br/>Steam login"]
     nvme["Local NVMe · /scratch<br/>229 GB<br/>games · shader caches<br/>downloads"]
   end
-  s3[("S3 · cg-library-…<br/>one archive per game<br/>index.json<br/>steam-account.tgz")]
+  s3[("S3 · ayis-library-…<br/>one archive per game<br/>index.json<br/>steam-account.tgz")]
   nvme <-->|"pull at boot<br/>push on destroy"| s3
   root -->|"Steam login<br/>archived on push"| s3
 ```
 
-| | Lives on | Survives `cg destroy`? |
+| | Lives on | Survives `ayis destroy`? |
 |---|---|---|
-| OS, driver, Sunshine, Steam client | root EBS | no - rebuilt by the next `cg init` |
+| OS, driver, Sunshine, Steam client | root EBS | no - rebuilt by the next `ayis init` |
 | Your games, their saves and shader caches | NVMe, archived to S3 | **yes**, in S3 - deleted after 14 days with no box ([why](cost-guards.md#game-archive-expiry)) |
 | Steam login | root EBS, archived to S3 | **yes**, in S3 |
 | Proton and the Steam runtime | NVMe | no - Steam re-downloads them in under a minute |
@@ -104,67 +104,67 @@ wiped whenever the instance stops, which is why S3 holds the durable copy.
 **Games that do not fit the NVMe.** Some types have an NVMe of about 115 GB, some none. The machine's
 own drive is filled first: the games chosen at Play (nothing is chosen at build) go on it largest first
 (`provision.PlaceGames`), each if it still fits what is left after the `GAME_DISK_RESERVE_GB` kept free,
-and the ones that do not fit are the overflow. `cg open --extra-gb N --extra-apps ids` adds a gp3 disk for the overflow (the app sizes it: their size plus
+and the ones that do not fit are the overflow. `ayis open --extra-gb N --extra-apps ids` adds a gp3 disk for the overflow (the app sizes it: their size plus
 room for later downloads, rounded up to 10 GB, at most 1000 GB, deleted with the box) and `--games` names
 what to copy; the app's `placeGames` sets the split, and the Play popup shows the disk and its price,
 which can be made larger. The NVMe stays at `/scratch`; the
-added disk is at `/scratch2` (`lib/bootstrap.d/12-scratch.sh`), and `cg-extra-library` keeps it in
-Steam's list of folders. Restore puts each game where it was told (`cmd_pull` in `host/cg-library`, with a
+added disk is at `/scratch2` (`lib/bootstrap.d/12-scratch.sh`), and `ayis-extra-library` keeps it in
+Steam's list of folders. Restore puts each game where it was told (`cmd_pull` in `host/ayis-library`, with a
 budget per library, and never on the root disk if the added disk is not mounted). The added disk survives
 a stop, so its games are already there at the next start; the NVMe's are restored from the archive.
 It costs $0.0912/GB-month while the box exists. Details: [game-library.md](game-library.md).
 
-**Adding space to a running box** (`cg disk add <GB>`, the Add disk button on the Machine page). A box
+**Adding space to a running box** (`ayis disk add <GB>`, the Add disk button on the Machine page). A box
 with an added disk has it made bigger: `ModifyVolume`, then `resize2fs` on the mounted disk, so the game,
 Steam and the archive carry on unaware (the build's disk is `/dev/sdf` and the later one `/dev/sdg`; both are `/scratch2`). AWS allows one change per disk every 6 hours. A box whose games sit
 on its own NVMe only, which cannot grow, gets the added disk at `/dev/sdg`, mounted at `/scratch2` by label
 (`nofail`) with a `steam/steamapps` folder in it. Nothing is copied or closed. `steam-add-extra-library`
 waits for Steam to be closed (it rewrites its list of folders as it exits, so an entry added under a
 running Steam is thrown away) and then adds `/scratch2/steam` to `libraryfolders.vdf`. A running Steam does not
-need to be closed: the person can add the drive in Steam's Settings > Storage. Steam's Add Drive lists drives by their disk label (`cgextra`) and
-creates its own folder on the one picked (`/scratch2/SteamLibrary`), not the folder cg made, so the check, the
+need to be closed: the person can add the drive in Steam's Settings > Storage. Steam's Add Drive lists drives by their disk label (`ayisextra`) and
+creates its own folder on the one picked (`/scratch2/SteamLibrary`), not the folder ayis made, so the check, the
 idle guard, the game-ready notice and the archive all read the libraries Steam lists in `libraryfolders.vdf`. The app's window stays
-until they press Done (no Esc), and Done asks `cg disk --json` whether Steam lists the folder
+until they press Done (no Esc), and Done asks `ayis disk --json` whether Steam lists the folder
 (`extra_in_steam`: any library on `/scratch2`); a Steam that does not yet, or a box that cannot be reached, offers Close anyway. Add disk
-after that grows the second disk. `cg disk --json` says which of the two
+after that grows the second disk. `ayis disk --json` says which of the two
 will happen (`second`), the room left and the most that can be added. Games already on the NVMe stay
-there. Push, check and `cg games` look in every library on the box.
+there. Push, check and `ayis games` look in every library on the box.
 
-## Flow 1 - `cg init`: build a box
+## Flow 1 - `ayis init`: build a box
 
 ```mermaid
 sequenceDiagram
   autonumber
   actor You
-  participant cg as cg (laptop)
+  participant ayis as ayis (laptop)
   participant AWS
   participant EC2 as EC2 box
   participant S3
   participant TS as Tailscale API
 
-  You->>cg: ./cg init
-  cg->>AWS: is the cloud watchdog current? arm or repair it
-  cg->>You: which archived games to restore?
-  cg->>AWS: preflight - plan, GPU quota, region
-  cg->>TS: prune offline nodes of earlier boxes
-  cg->>AWS: budget, bucket and role, launch one-time spot with user-data
-  EC2->>EC2: install Tailscale, join the tailnet, start cg-build
-  cg->>TS: turn off key expiry for the new node
+  You->>ayis: ./ayis init
+  ayis->>AWS: is the cloud watchdog current? arm or repair it
+  ayis->>You: which archived games to restore?
+  ayis->>AWS: preflight - plan, GPU quota, region
+  ayis->>TS: prune offline nodes of earlier boxes
+  ayis->>AWS: budget, bucket and role, launch one-time spot with user-data
+  EC2->>EC2: install Tailscale, join the tailnet, start ayis-build
+  ayis->>TS: turn off key expiry for the new node
   EC2->>S3: start restoring games in the background
-  EC2->>EC2: cg-build runs the stages: driver, Steam, desktop, Xorg, Sunshine - Steam's update beside them
+  EC2->>EC2: ayis-build runs the stages: driver, Steam, desktop, Xorg, Sunshine - Steam's update beside them
   S3-->>EC2: games and Steam login land on the NVMe
   EC2->>EC2: reboot for the driver, restore resumes
-  cg->>EC2: follow cg-build's record over ssh
-  cg->>EC2: create the Sunshine account, pair Moonlight
-  cg-->>You: summary - box, games, Steam login, guards (10 to 20 min)
+  ayis->>EC2: follow ayis-build's record over ssh
+  ayis->>EC2: create the Sunshine account, pair Moonlight
+  ayis-->>You: summary - box, games, Steam login, guards (10 to 20 min)
 ```
 
 The game restore runs **alongside** the build, so a 160 GB game is usually on disk by the time
 the desktop is. The box is only reported ready once the restore has finished.
 
 **The box builds itself, and keeps at it.** The user-data is small: it joins the tailnet (so the box can
-always be reached), fetches the bundle from S3 and starts `cg-build`, a service. Everything else is a
-**stage** in a plan that `cg init` writes (`provision.Plan`, checked before a box is paid for): what each
+always be reached), fetches the bundle from S3 and starts `ayis-build`, a service. Everything else is a
+**stage** in a plan that `ayis init` writes (`provision.Plan`, checked before a box is paid for): what each
 needs, what lock it takes (the package installer lets one stage in at a time, in the plan's order),
 its timeout and its retries. Stages that need nothing from each other run together: the disks, the idle
 watchdog and the game restore at once, Steam's client update the moment Steam is installed, beside the
@@ -183,66 +183,66 @@ always did, so a missing release costs time and never a build. The archive is Va
 release; that is the owner's call to make, and `workflow_dispatch` with `publish` off only keeps it as a build
 artifact. Scheduled runs only start once the workflow is on the default branch.
 
-`cg-build` is restart-resistant. It is a service that starts again if it dies and on every boot, and it
-keeps a record in `/var/lib/cg-build`: `state.json` (each stage pending, running, done, failed or blocked)
+`ayis-build` is restart-resistant. It is a service that starts again if it dies and on every boot, and it
+keeps a record in `/var/lib/ayis-build`: `state.json` (each stage pending, running, done, failed or blocked)
 and `events.jsonl` (every change, numbered). A stage is done only when it exited cleanly; one that was
 running when the machine or the supervisor was cut off is run again (so every stage is safe to run
 twice) without spending a retry. A failed stage is retried after a pause, then stops what needs it while
 the rest carry on; the build ends failed and says which stage and why. The laptop closing changes
-nothing: `cg init` only reads the record (`cg-build events --since N`, resuming where it stopped),
-and the app shows pieces running together. Each stage's own output is `/var/log/cg-build/<stage>.log`.
-`cg-build status` is the state, `cg-build retry [stage]` runs failed stages again. For anything that reads
+nothing: `ayis init` only reads the record (`ayis-build events --since N`, resuming where it stopped),
+and the app shows pieces running together. Each stage's own output is `/var/log/ayis-build/<stage>.log`.
+`ayis-build status` is the state, `ayis-build retry [stage]` runs failed stages again. For anything that reads
 the older single log, the supervisor still writes its progress lines to
-`/var/log/cloud-gaming-bootstrap.log` and its result to `/var/lib/cloud-gaming-bootstrap.rc`. A machine
+`/var/log/ayis-bootstrap.log` and its result to `/var/lib/ayis-bootstrap.rc`. A machine
 of yours is not supervised: it gets the same modules as one script over ssh, as before.
 
 Where the install time goes: on the AWS box every `apt-get` and every `update-initramfs` is timed into
-`/var/log/cg-timings.log` (`start end dpkg-start command`; the moment dpkg began comes from an apt hook, so
+`/var/log/ayis-timings.log` (`start end dpkg-start command`; the moment dpkg began comes from an apt hook, so
 a command's time splits into fetching and unpacking). The build's last lines print the ten slowest as
 `timing: 90s (fetch 15s, dpkg 75s) apt-get install ...`. The timers are taken out again before the box runs.
 
-## Flow 2 - `cg open`: play
+## Flow 2 - `ayis open`: play
 
 ```mermaid
 sequenceDiagram
   autonumber
   actor You
-  participant cg as cg (laptop)
+  participant ayis as ayis (laptop)
   participant EC2 as EC2 box
 
-  You->>cg: ./cg open
-  cg->>EC2: wait for Tailscale and Sunshine
-  cg->>EC2: moonlight stream Desktop
+  You->>ayis: ./ayis open
+  ayis->>EC2: wait for Tailscale and Sunshine
+  ayis->>EC2: moonlight stream Desktop
   You->>EC2: play - video down, input up, over WireGuard
-  You->>cg: quit Moonlight
-  cg-->>You: [d] destroy (recommended) or [n] leave it running
+  You->>ayis: quit Moonlight
+  ayis-->>You: [d] destroy (recommended) or [n] leave it running
 ```
 
 On a spot box there is no stop, only destroy - a stopped one-time spot instance can never start
-again. With `GAME_SPOT=0` the box is on demand, and `cg open` starts it if it is stopped.
+again. With `GAME_SPOT=0` the box is on demand, and `ayis open` starts it if it is stopped.
 
-## Flow 3 - `cg destroy`: save and delete
+## Flow 3 - `ayis destroy`: save and delete
 
 ```mermaid
 sequenceDiagram
   autonumber
   actor You
-  participant cg as cg (laptop)
+  participant ayis as ayis (laptop)
   participant EC2 as EC2 box
   participant S3
   participant AWS
 
-  You->>cg: ./cg destroy
-  cg->>EC2: cg-library push (ssh)
+  You->>ayis: ./ayis destroy
+  ayis->>EC2: ayis-library push (ssh)
   EC2->>S3: Steam login
   EC2->>S3: changed game files only
-  cg->>AWS: cancel the spot request, terminate the instance
+  ayis->>AWS: cancel the spot request, terminate the instance
   EC2->>S3: shutdown push - nothing left to send
-  AWS-->>cg: terminated, root disk deleted
-  Note over cg,AWS: Kept for next time - S3 archive (14 days with no box),<br/>budget, security group, key pair
+  AWS-->>ayis: terminated, root disk deleted
+  Note over ayis,AWS: Kept for next time - S3 archive (14 days with no box),<br/>budget, security group, key pair
 ```
 
-If the push fails, `cg destroy` stops and deletes nothing. What it removes and keeps:
+If the push fails, `ayis destroy` stops and deletes nothing. What it removes and keeps:
 [destroy.md](destroy.md).
 
 ## Flow 4 - you forget the box
@@ -259,7 +259,7 @@ flowchart TB
 
   p2 --> os["Graceful OS shutdown"]
   api --> os
-  os --> push["cg-library-shutdown.service<br/>pushes games to S3<br/>up to 30 minutes"]
+  os --> push["ayis-library-shutdown.service<br/>pushes games to S3<br/>up to 30 minutes"]
   push --> gone["Instance terminated<br/>games safe in S3"]
   push -.->|"still stuck<br/>after 1 hour"| force["Cloud watchdog forces it<br/>skipping the OS shutdown"]
   force -.-> gone
@@ -268,14 +268,14 @@ flowchart TB
 ```
 
 Both guards end in the **same place**: a graceful OS shutdown, where
-`cg-library-shutdown.service` pushes the games to S3 before the machine goes down. The on-host
+`ayis-library-shutdown.service` pushes the games to S3 before the machine goes down. The on-host
 watchdog also pushes before it calls `shutdown`, so its shutdown push finds nothing left to send;
 the cloud watchdog runs outside the box and can only ask AWS to terminate it, which AWS turns into
 that same graceful shutdown. Two pushes never run at once - a second one waits for the first.
 
 The shutdown push is allowed 30 minutes (`TimeoutStopSec=1800`). When AWS itself terminates the
 box it may cut the power sooner than that, and a spot interruption gives only two minutes, so
-`cg destroy` - which pushes first and deletes nothing if that fails - stays the safe way out.
+`ayis destroy` - which pushes first and deletes nothing if that fails - stays the safe way out.
 
 Each guard is independent, so one failing is caught by the other. Both wait 20 minutes after
 boot before they arm, so a build is never mistaken for idleness. A box still going down an hour later -
@@ -288,19 +288,19 @@ backstop that tells you. Details: [cost-guards.md](cost-guards.md).
 flowchart TB
   tick["Cloud watchdog<br/>once an hour"] --> off{"GAME_ARCHIVE_EXPIRY_DAYS<br/>set to 0?"}
   off -->|yes| forever["Kept forever"]
-  off -->|no| box{"A gamevps box exists?<br/>running or stopped"}
+  off -->|no| box{"An ayis box exists?<br/>running or stopped"}
   box -->|yes| stamp["Kept<br/>last-seen mark set to now"]
   box -->|no| bucket{"S3 size metric:<br/>an archive?"}
   bucket -->|no| none["Nothing to do"]
   bucket -->|yes| mark{"Last-seen mark<br/>in SSM"}
   mark -->|missing| start["Kept<br/>counting starts now"]
-  mark -->|under 14 days old| count["Kept<br/>countdown in cg status"]
-  mark -->|14 days or older| trail{"CloudTrail: a gamevps<br/>launch in 14 days?"}
+  mark -->|under 14 days old| count["Kept<br/>countdown in ayis status"]
+  mark -->|14 days or older| trail{"CloudTrail: an ayis<br/>launch in 14 days?"}
   trail -->|yes| moved["Kept<br/>mark moves to that launch"]
   trail -->|no| again{"One last look:<br/>a box now?"}
   again -->|yes| kept["Kept"]
   again -->|no| del["Empty and delete<br/>the S3 bucket"]
-  del --> next["Next cg init: empty bucket,<br/>Steam downloads games,<br/>sign in to Steam again"]
+  del --> next["Next ayis init: empty bucket,<br/>Steam downloads games,<br/>sign in to Steam again"]
 
   err["Any error, gap or<br/>unreadable answer"] -.->|"stops the check"| safe["Kept - nothing deleted"]
 ```
@@ -310,7 +310,7 @@ unused. That deletes the only copy of every game, so both records must agree fir
 watchdog keeps fresh while a box exists, and CloudTrail's launch history - and anything uncertain
 keeps it. The countdown starts when AWS reports the box gone, not at the last hourly look. Until it
 deletes, it makes no S3 request at all: its marks are free SSM parameters, and
-whether there is an archive comes from S3's free daily size metric. `cg watchdog check` runs every
+whether there is an archive comes from S3's free daily size metric. `ayis watchdog check` runs every
 step as a dry run. Details, and what is lost:
 [cost-guards.md](cost-guards.md#game-archive-expiry).
 
@@ -326,7 +326,7 @@ flowchart LR
     ev["EventBridge<br/>EC2's own events"]
     lam["⚡ Cloud watchdog"]
   end
-  cg["💻 cg init"]
+  ayis["💻 ayis init"]
   ntfy(["🔔 ntfy topic"])
   phone["📱 Your phone"]
 
@@ -334,7 +334,7 @@ flowchart LR
   lam -->|"idle box ended · slow or stuck shutdown<br/>archive expiring · watchdog failing"| ntfy
   ohw -->|"idle shutdown<br/>upload hanging"| ntfy
   sp -->|"upload failed<br/>or cut off"| ntfy
-  cg -->|"box ready<br/>build failed"| ntfy
+  ayis -->|"box ready<br/>build failed"| ntfy
   ntfy --> phone
 ```
 
@@ -375,13 +375,13 @@ allowances. The full list: [cost-guards.md](cost-guards.md#notifications).
 - **A Lambda, not a machine to keep alive.** The cloud watchdog runs every 5 minutes on an IAM role,
   and its idle decision keeps no state: every run reads the last 30 minutes of metrics rather than
   counting idle checks, so a missed run cannot corrupt a counter and a dry run
-  (`cg watchdog check`) changes nothing. What it does keep - the archive's last-seen mark, and
+  (`ayis watchdog check`) changes nothing. What it does keep - the archive's last-seen mark, and
   which notices it has already sent - is a free SSM parameter or a tag. It replaced a watchdog on an always-on VPS that needed a long-lived AWS key.
 - **Every guard ends in the same graceful shutdown.** Terminating through the API gives the OS its
   shutdown, where the games are mirrored to S3 with up to 30 minutes (`TimeoutStopSec=1800`). A box
   still going down an hour later is forced, whichever guard started it - by then the upload has had
   its window.
-- **One upload at a time.** `cg-library push` takes a lock and a second push waits, so a shutdown
+- **One upload at a time.** `ayis-library push` takes a lock and a second push waits, so a shutdown
   push that starts while a watchdog push is running resumes from what the first landed instead of
   racing it and rewriting `index.json` from a stale copy.
 - **Where the limits come from.**
@@ -391,7 +391,7 @@ allowances. The full list: [cost-guards.md](cost-guards.md#notifications).
   | on-host watchdog idle | 15 min | fixed |
   | cloud watchdog idle | 30 min | `GAME_WATCHDOG_IDLE_MIN` |
   | boot grace, both watchdogs | 20 min | fixed |
-  | shutdown upload window | 30 min | `TimeoutStopSec` in `host/cg-library-shutdown.service` |
+  | shutdown upload window | 30 min | `TimeoutStopSec` in `host/ayis-library-shutdown.service` |
   | stuck shutdown forced after | 60 min | `GAME_WATCHDOG_STUCK_MIN` (at least 40) |
   | game archive kept with no box | 14 days | `GAME_ARCHIVE_EXPIRY_DAYS` (0 is off) |
 
@@ -400,9 +400,9 @@ allowances. The full list: [cost-guards.md](cost-guards.md#notifications).
 - **Cost first.** Everything added around the box fits inside AWS's free allowances, and anything
   that would bill is designed out rather than accepted as small: the archive-expiry marks are free
   SSM parameters rather than bucket tags, and the archive's size comes from S3's free daily
-  CloudWatch metric rather than an S3 request. With no box, the S3 archive is the only charge cg
-  means to leave. A disk, image or snapshot still there is a leftover, and `cg cost` names it with
-  its monthly cost; an Elastic IP is listed too, though cg never makes one.
+  CloudWatch metric rather than an S3 request. With no box, the S3 archive is the only charge ayis
+  means to leave. A disk, image or snapshot still there is a leftover, and `ayis cost` names it with
+  its monthly cost; an Elastic IP is listed too, though ayis never makes one.
 - **Games on local NVMe, kept in S3.** The instance store is the fastest disk on the box and free,
   and S3 pins no availability zone. It replaced an EBS volume costing INR 1,284 a month. See
   [game-library.md](game-library.md).
@@ -419,21 +419,21 @@ allowances. The full list: [cost-guards.md](cost-guards.md#notifications).
   [Flow 5](#flow-5---nobody-plays-for-two-weeks).
 - **Roles, not keys.** The box reads and writes its bucket through an instance role, and the
   cloud watchdog runs on a Lambda role allowed only to describe, tag, stop or terminate the
-  `gamevps`-tagged instance - plus, while archive expiry is on, its own marks and the one archive
+  `ayis`-tagged instance - plus, while archive expiry is on, its own marks and the one archive
   bucket. Nothing holds a long-lived AWS secret. See
   [cost-guards.md](cost-guards.md).
 
 ### Automation and notifications
 
-- **Tailscale through its API.** With `TAILSCALE_API_KEY`, `cg init` prunes offline nodes of earlier
+- **Tailscale through its API.** With `TAILSCALE_API_KEY`, `ayis init` prunes offline nodes of earlier
   boxes before launch and turns off key expiry on the new one. The new box is recognised by its node
   key, not its name: a pruned node's name is free for the next box to take. A rejected token turns
-  both into manual steps rather than stopping the build. See [Flow 1](#flow-1---cg-init-build-a-box).
+  both into manual steps rather than stopping the build. See [Flow 1](#flow-1---ayis-init-build-a-box).
 - **Notifications are never load-bearing.** ntfy is optional (`GAME_NTFY_URL`), a send that fails is
   logged and ignored, and no guard's decision depends on one. The box cannot report its own end, so
-  "box gone" comes from EC2's own events. The topic is a secret: `cg` never prints it. See
+  "box gone" comes from EC2's own events. The topic is a secret: `ayis` never prints it. See
   [Notifications](#notifications---what-reaches-your-phone).
-- **`cg init` ends with a summary, not chores.** Pairing and key expiry happen on their own, so the
+- **`ayis init` ends with a summary, not chores.** Pairing and key expiry happen on their own, so the
   build ends with what the box has - Steam login and games checked on the box itself - and lists a
   step only when one is genuinely left. The Sunshine password is never printed; it stays in `.env`.
 

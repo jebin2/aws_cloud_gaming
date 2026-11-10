@@ -19,7 +19,7 @@ if [[ ! -d app/node_modules ]]; then
 fi
 command -v node >/dev/null || { echo "  SKIP - node is not installed"; exit 0; }
 
-echo "1. the runner, against a fake cg"
+echo "1. the runner, against a fake ayis"
 # TAP, because its "# fail 0" line is the one thing worth grepping for.
 out=$(cd app && node --test --test-reporter=tap test/*.test.mjs 2>&1)
 if grep -qE '^# fail 0' <<<"$out"; then
@@ -30,8 +30,8 @@ else
 fi
 
 echo "2. the app holds no AWS logic"
-# No SDK, no bucket names, no keys, no prices: it asks cg and renders the answer.
-hits=$(grep -rniE 'aws-sdk|@aws-sdk|boto3|cg-library-|AKIA[0-9A-Z]{8}|s3\.amazonaws' \
+# No SDK, no bucket names, no keys, no prices: it asks ayis and renders the answer.
+hits=$(grep -rniE 'aws-sdk|@aws-sdk|boto3|ayis-library-|AKIA[0-9A-Z]{8}|s3\.amazonaws' \
          app/main app/renderer app/package.json 2>/dev/null | wc -l)
 check "no AWS SDK or identifiers"        "$hits" "0"
 check "  and no AWS dependency"          "$(node -e 'const p=require("./app/package.json");console.log(Object.keys({...p.dependencies,...p.devDependencies}).filter(d=>/aws/i.test(d)).length)')" "0"
@@ -101,8 +101,8 @@ fi
 # Destroy stayed visible after they were hidden.
 contains "hidden beats a display class"  "$(cat app/renderer/src.css)" "[hidden] { display: none !important; }"
 
-echo "3c. the package carries cg, and cg carries what it sends to the box"
-# cg is one Go binary. What it tars up and sends to the box - host/, the
+echo "3c. the package carries ayis, and ayis carries what it sends to the box"
+# ayis is one Go binary. What it tars up and sends to the box - host/, the
 # bootstrap modules, the Lambda - is compiled into it (embed.go), so the package
 # ships the binary and .env.example and nothing else. A directory of scripts
 # beside it would be a second copy that could disagree with the first.
@@ -113,24 +113,24 @@ res = list(d["build"]["extraResources"])
 for k in ("linux", "mac", "win"):
     res += d["build"][k].get("extraResources", [])
 print(" ".join(r["from"].removeprefix("../") for r in res))')
-contains "  cg itself ships"             "$packed" "cg"
+contains "  ayis itself ships"             "$packed" "ayis"
 contains "  and .env.example with it"    "$packed" ".env.example"
 for d in lib host lambda; do
   lacks "  no loose $d/ in the package" " $packed " " $d "
 done
 for d in host lib/bootstrap.d lambda/cloud_watchdog.py; do
-  contains "  cg embeds $d" "$(cat embed.go)" "$d"
+  contains "  ayis embeds $d" "$(cat embed.go)" "$d"
 done
 
 echo "4. the promises the app makes about cost and safety"
-contains "cg is run with CG_JSON=1"      "$(cat app/main/runner.js)" "CG_JSON: '1'"
+contains "ayis is run with AYIS_JSON=1"      "$(cat app/main/runner.js)" "AYIS_JSON: '1'"
 # Reads are independent, so they run together; anything that changes something
-# runs alone, because cg takes its own locks.
-# Which commands must run alone is cg's to say: it takes the locks. The app
+# runs alone, because ayis takes its own locks.
+# Which commands must run alone is ayis's to say: it takes the locks. The app
 # used to write the list down - twice, in two processes - and the two disagreed
 # three times, each time silently, because a command that is never started
 # looks exactly like one that returned nothing.
-contract=$(./cg --contract)
+contract=$(./ayis --contract)
 check "the contract is valid JSON" \
       "$(python3 -I -c 'import json,sys;json.load(sys.stdin);print("yes")' <<<"$contract")" "yes"
 alone=$(python3 -I -c 'import json,sys
@@ -148,7 +148,7 @@ contains "  and installing a tool"       "$alone" "deps install"
 for free in status watcher machines sweep regions quota; do
   lacks "  $free is not in it"           "$alone" "$free"
 done
-contains "the main process reads it"     "$main" "cg --contract"
+contains "the main process reads it"     "$main" "ayis --contract"
 contains "  assuming the worst if it cannot" "$main" "every command will run alone"
 contains "  and skipping the flags first" "$main" "FLAG_TAKES_VALUE"
 contains "a write waits for everything"  "$main" "[...jobs.values()].find(waitsFor)"
@@ -157,24 +157,24 @@ contains "  and a read waits only for a write" "$main" "find(j => !j.readOnly &&
 contains "the verdict travels with the job" "$main" "write: !readOnly"
 contains "  and the renderer uses it"    "$js" "j.write"
 lacks    "  with no list of its own"     "$js" "const WRITES = new Set("
-# The ids cg asks under are cg's. The window answers two of them from a dialog
-# it has already shown - and when an id is renamed in cg, that pre-answer
+# The ids ayis asks under are ayis's. The window answers two of them from a dialog
+# it has already shown - and when an id is renamed in ayis, that pre-answer
 # silently stops matching and a modal appears in the middle of a build.
 asks=$(python3 -I -c 'import json,sys
 print(" ".join(json.load(sys.stdin)["asks"]))' <<<"$contract")
-contains "cg lists what it asks for"     "$asks" "aws-access-key-id"
+contains "ayis lists what it asks for"     "$asks" "aws-access-key-id"
 contains "  including the ones with a dialog" "$asks" "tailscale-auth-key"
-contains "the main process hands the list over" "$main" "ipcMain.handle('cg:asks'"
-contains "  across the bridge"           "$(cat app/main/preload.js)" "cg:asks"
+contains "the main process hands the list over" "$main" "ipcMain.handle('ayis:asks'"
+contains "  across the bridge"           "$(cat app/main/preload.js)" "ayis:asks"
 contains "the window checks its own names against it" "$js" "async function checkAsks()"
-contains "  and says so when they differ" "$js" "cg no longer asks under"
-# Every id the window names must be one cg actually asks under.
+contains "  and says so when they differ" "$js" "ayis no longer asks under"
+# Every id the window names must be one ayis actually asks under.
 for id in $(python3 -I -c "
 import re, sys
 src = open('app/renderer/app.js').read()
 block = re.search(r'const ASK = \{(.*?)\n\};', src, re.S).group(1)
 print(' '.join(re.findall(r\"'([^']+)'\", block)))"); do
-  contains "  $id is one of cg's"        "$asks" "$id"
+  contains "  $id is one of ayis's"        "$asks" "$id"
 done
 # And each is written down once: a second copy is the drift this removed.
 for id in aws-access-key-id aws-secret-access-key tailscale-api-token tailscale-auth-key; do
@@ -184,15 +184,15 @@ contains "quitting mid-run asks first"   "$main" "before-quit"
 contains "the cost refresh carries its price" "$(tr -s ' ' < app/renderer/index.html)" 'id="refresh-cost"'
 contains "  shown only on the cost screen" "$js" "refresh-cost').hidden = view !== 'cost'"
 # Nothing POLLS AWS: a window that asked AWS something every so often would bill
-# for it without anyone touching the machine, and `cg cost` is $0.01 a call. The one
-# read on a timer asks the MACHINE (cg games --json --box, over SSH), only on the
+# for it without anyone touching the machine, and `ayis cost` is $0.01 a call. The one
+# read on a timer asks the MACHINE (ayis games --json --box, over SSH), only on the
 # Games page, and stops when it is left; the next check holds it to that.
 check    "nothing repeats on an interval"    "$(grep -c 'setInterval' app/renderer/app.js)" "0"
-contains "  the one timed read asks the machine, never AWS" "$js" "runCg(['games', '--json', '--box'], { capture: true })"
+contains "  the one timed read asks the machine, never AWS" "$js" "runAyis(['games', '--json', '--box'], { capture: true })"
 contains "  only on the Games page"           "$js" "if (view !== 'library' || !box || box.state !== 'running' || pcReading) return paintBoxGames();"
 # A machine moved to another region re-reads BOTH halves of the library: the old
 # list of other places still held the bucket that is now the machine's own.
-contains "a move re-reads the other places too" "$js" "runCg(['library', 'elsewhere', '--json'], { json: 'elsewhere' })]);"
+contains "a move re-reads the other places too" "$js" "runAyis(['library', 'elsewhere', '--json'], { json: 'elsewhere' })]);"
 echo "5. the screens, and what each reads"
 for v in dashboard build library guards cost settings logs; do
   contains "a $v screen"                 "$html" "data-view=\"$v\""
@@ -206,7 +206,7 @@ contains "  and cost is not one of them" "$js" "it waits for its button"
 contains "  and load when it is opened"  "$js" "if (NEEDS[view] && !loaded.has(view)) refresh()"
 contains "refresh is per screen"         "$js" "async function refresh(each, need = readsFor(view))"
 contains "stop belongs to the screen that started the run" "$js" "j.view === view"
-# A tab's button answers for that tab: only a build or destroy, which cg runs
+# A tab's button answers for that tab: only a build or destroy, which ayis runs
 # alone, disables anything elsewhere.
 contains "only a write blocks a read"    "$js" "jobs.size > 0"
 contains "  refresh waits for a write only" "$js" 'refresh'"'"').disabled = busy'
@@ -268,16 +268,16 @@ contains "the steps have their own buttons" "$js" "const ONB_ACTION = {"
 contains "  and fall back to the rung's"  "$js" "[{ label: x.problem.label, go: x.problem.go }]"
 contains "the install runs in the pane"  "$js" "return runInPipeline('tools', ['deps', 'install'"
 contains "  so does the sign-in"         "$js" "return runInPipeline('tailnet', ['creds', 'tailscale', 'signin']"
-# Stopping has to reach cg: a sign-in waits on a browser that may never answer.
-contains "a run in flight can be stopped" "$js" "if (onbJob !== null) window.cg.cancel(onbJob)"
+# Stopping has to reach ayis: a sign-in waits on a browser that may never answer.
+contains "a run in flight can be stopped" "$js" "if (onbJob !== null) window.ayis.cancel(onbJob)"
 # Where it runs is a stage, judged on whether AWS will actually let you launch
 # there - not on whether a button was pressed.
 contains "where it runs is a stage"      "$js" "{ key: 'where', reads: 'machines', name: whereDone()"
 contains "  judged on what fits"         "$js" "(machinesNow.machines || []).some(m => m.fits_spot || m.fits_ondemand)"
 contains "  and chosen in a dialog"      "$html" 'id="whereto"'
 contains "  that can measure again"      "$html" 'id="whereto-measure"'
-# Every figure in that dialog is cg's: latency, rupees, and whether it fits.
-contains "the choice shows cg's numbers" "$js" "best ? best.inr_hour_spot : null"
+# Every figure in that dialog is ayis's: latency, rupees, and whether it fits.
+contains "the choice shows ayis's numbers" "$js" "best ? best.inr_hour_spot : null"
 contains "  and why one cannot be used"  "$js" "No GPU limit here yet"
 # The popup and the header line are gone, and nothing may bring them back.
 check "no popup is left"                 "$(grep -c \"id=.stage\" app/renderer/index.html)" "0"
@@ -302,31 +302,31 @@ contains "  with the button that reopens its steps" "$js" "onclick = () => openA
 contains "a stage being read says so"    "$js" "(waiting ? 'checking' : 'unknown')"
 
 echo "5a2. no engine, and a read that cannot be painted"
-# Without cg every read fails identically - a spawn error each - and six broken
+# Without ayis every read fails identically - a spawn error each - and six broken
 # reads is not what happened. Only main can see it: the renderer has no
 # filesystem, so it asks.
-contains "main says whether cg is there"  "$main" 'function engineFacts()'
-contains "  over the bridge"              "$(cat app/main/preload.js)" 'cg:engine'
+contains "main says whether ayis is there"  "$main" 'function engineFacts()'
+contains "  over the bridge"              "$(cat app/main/preload.js)" 'ayis:engine'
 contains "  and re-reads the contract"    "$main" 'if (found && !CONTRACT.runs_alone) loadContract();'
 contains "a stopped machine bills from the start, not its old launch" "$js" "box && box.state !== 'running' ? Date.now()"
 contains "the machine is read again once the session is up" "$js" "defs[at].id === 'open.sunshine' && !run.reread"
 contains "more room can be added in the middle of a game" "$main" "const BESIDE_SESSION = [['disk'], ['clip'], ['games'], ['status']];"
 contains "the window asks before reading" "$js" 'if (!(await engineReady())) return;'
 contains "  and says the one true thing"  "$js" "'Scripts not found'"
-contains "  naming where it looked"       "$js" 'Expected at ${engineGone.cg}'
+contains "  naming where it looked"       "$js" 'Expected at ${engineGone.ayis}'
 # A main process too old to answer, or a test stub, is taken at its word.
-contains "  an unanswered ask carries on" "$js" 'try { e = await window.cg.engine(); } catch { return true; }'
+contains "  an unanswered ask carries on" "$js" 'try { e = await window.ayis.engine(); } catch { return true; }'
 # Reads do not block each other, so a second set would leave the stuck ones in
 # `jobs` - and a job in flight is what disables Build, Play and Destroy.
-contains "trying again cancels first"     "$js" 'if (!job.write && !hostRun(job)) await window.cg.cancel(id)'
-# The key's sentence is cg's answer, not a guess at an error string.
-contains "why a key failed comes from cg" "$js" "switch (credsNow && credsNow.reason)"
+contains "trying again cancels first"     "$js" 'if (!job.write && !hostRun(job)) await window.ayis.cancel(id)'
+# The key's sentence is ayis's answer, not a guess at an error string.
+contains "why a key failed comes from ayis" "$js" "switch (credsNow && credsNow.reason)"
 contains "  unreachable is not rejected"  "$js" 'Network error. The key was not rejected.'
-contains "  and an old cg still works"    "$js" "title: 'AWS rejected this access key'"
+contains "  and an old ayis still works"    "$js" "title: 'AWS rejected this access key'"
 
 echo "5b. the build screen, as the design draws it"
 # The archive table, the allocation bar and the machine strip are the parts the
-# mockup has; each is fed by a field from cg, never by a number typed in here.
+# mockup has; each is fed by a field from ayis, never by a number typed in here.
 lacks    "no games are picked on the Build page" "$html" 'id="b-games"'
 lacks    "  by name, not by Steam's id"   "$js" 'appid ${g.appid}'
 contains "  and when each is deleted"    "$js" "deleteOn(g, days, seen, marks)"
@@ -343,15 +343,15 @@ contains "  the window closes when Moonlight is starting" "$js" "if (event.id ==
 contains "  a game that failed can be tried again" "$html" 'id="restoredlg-retry"'
 contains "  the games are asked for by id and size" "$js" "'--games', pick.games.map"
 contains "  the steps list has the restore only when games were asked for" "$js" "d.id !== 'open.restore' || (r && r.restore)"
-contains "the machine comes from cg"     "$js" "const spec = s.spec || {}"
+contains "the machine comes from ayis"     "$js" "const spec = s.spec || {}"
 check    "  with no type hardcoded"      "$(grep -c 'g6\.xlarge\|L4\|16 GiB' app/renderer/app.js)" "0"
 lacks    "no build time, no second rate line" "$js" "from the moment it starts"
-# cg's dozen-odd steps, and the box's own, are placed in eight plain ones.
+# ayis's dozen-odd steps, and the box's own, are placed in eight plain ones.
 contains "steps are the eight plain ones" "$js" "const BUILD_STEPS = ["
 contains "  and only move forwards"       "$js" "if (at > run.idx)"
 contains "  and carry how long they took" "$js" "function buildStepEnd(event)"
 contains "  the live line shows in the strip" "$js" "\$('b-prog-step').textContent = event.text"
-# A box that is already up cannot be built again - cg would refuse, so the
+# A box that is already up cannot be built again - ayis would refuse, so the
 # screen offers what you can actually do with it instead.
 contains "a machine replaces the build button" "$js" '$(`${p}-build`).hidden = !!box'
 contains "  with play and delete"        "$js" '$(`${p}-destroy`).hidden = !box'
@@ -369,8 +369,8 @@ contains "  with a bar"                   "$html" 'id="b-prog"'
 contains "  the time and the bill in its heading" "$js" "\$('b-strip-meta').textContent"
 contains "  the steps"                    "$html" 'id="b-steps"'
 contains "  and the full log folded away" "$html" 'id="b-logbox"'
-contains "the transcript keeps cg's headings" "$js" "head.className = 'step flex items-baseline"
-# The bar is time against the estimate, not steps done: cg never says how many
+contains "the transcript keeps ayis's headings" "$js" "head.className = 'step flex items-baseline"
+# The bar is time against the estimate, not steps done: ayis never says how many
 # steps a run has, so a fraction built from the ones seen so far would go
 # backwards the moment another arrived.
 contains "the bar measures time, not steps" "$js" "const RUN_EXPECT = { init: 20 }"
@@ -380,17 +380,17 @@ contains "the log follows only if asked" "$js" '$('"'"'b-follow'"'"').checked'
 check    "  and it is still not a timer" "$(grep -c 'setInterval' app/renderer/app.js)" "0"
 # A failed build used to report itself as the words "stopped (exit 1)" in a
 # small label, with the actual AWS error somewhere in a 200-line auto-scrolling
-# log that had already moved past it. cg marks the headline as `fail`; the panel
+# log that had already moved past it. ayis marks the headline as `fail`; the panel
 # keeps that and everything under it until the next step.
 contains "a failure gets its own panel"    "$html" 'id="b-fail"'
 contains "  hidden until something fails"  "$html" '<div class="hidden" id="b-fail">'
-# The headline above the fold, cg's full text behind a disclosure, and the two
-# or three things worth doing as buttons - because "cg config set GAME_SPOT 0"
+# The headline above the fold, ayis's full text behind a disclosure, and the two
+# or three things worth doing as buttons - because "ayis config set GAME_SPOT 0"
 # is a command to type at someone who is looking at a window.
 contains "  with a headline"               "$html" 'id="b-fail-head"'
 contains "  what it means"                 "$html" 'id="b-fail-why"'
 contains "  what to do about it"           "$html" 'id="b-fail-acts"'
-contains "  and cg's own words kept"       "$html" ">Details</summary>"
+contains "  and ayis's own words kept"       "$html" ">Details</summary>"
 contains "the actions are keyed by the AWS code" "$js" "const FAIL_ACTS = {"
 contains "  spot capacity offers another machine"   "$js" "InsufficientInstanceCapacity: () => [['Pick another machine'"
 contains "  a quota failure offers the ask"      "$js" "Ask AWS for a higher GPU limit"
@@ -402,12 +402,12 @@ check    "  and sits in the strip, not the panel" \
 contains "  the bar gives way to it"       "$js" "\$('b-bar-track').hidden = true"
 contains "  and comes back on the next run" "$js" "\$('b-bar-track').hidden = false"
 contains "  and the step that failed holds it" "$js" "if (state === 'failed') body.append(fail);"
-# A fixed "launch failed" heading sat directly above cg's own "launch failed:
+# A fixed "launch failed" heading sat directly above ayis's own "launch failed:
 # InsufficientInstanceCapacity", which read as the same sentence twice.
 contains "  the heading says it stopped"  "$js" "failed: 'Build failed'"
 check    "  with no second heading under it" \
          "$(grep -c 'b-error-title' app/renderer/app.js app/renderer/index.html | awk -F: '{s+=$2} END{print s}')" "0"
-contains "  fed by the lines cg marked"    "$js" "if (event.kind === 'fail') { buildFailing = true;"
+contains "  fed by the lines ayis marked"    "$js" "if (event.kind === 'fail') { buildFailing = true;"
 contains "  and the report under them"     "$js" "else if (buildFailing && event.t === 'line')"
 contains "  an error event lands there too" "$js" "if (event.t === 'error') buildFail(event.text)"
 contains "  a nonzero exit is never silent" "$js" 'exited without an error message'
@@ -424,7 +424,7 @@ contains "  and the next run clears it"    "$js" "buildFailClear();"
 # and picking a PRICE sets all three settings together. What it RENDERS is
 # pinned in tests/chooser-dom.sh, which loads the real page; this file holds
 # the wiring either side of it.
-contains "the table is fed by cg sweep"   "$js" "[['sweep', '--cached', '--json'], 'sweep']"
+contains "the table is fed by ayis sweep"   "$js" "[['sweep', '--cached', '--json'], 'sweep']"
 # --cached, never a fresh scan: a scan is 90 seconds and an opening window must
 # not wait on it.
 contains "  the remembered scan, not a new one" "$js" "[['sweep', '--cached', '--json'], 'sweep'],"
@@ -437,7 +437,7 @@ contains "  or the region is not enabled" "$js" "!row.enabled) why = 'needs opt-
 contains "  capacity is shown beside price" "$js" "row.score >= 7 ? 'good'"
 contains "choosing one writes the type"   "$js" "'config', 'set', 'GAME_INSTANCE_TYPE'"
 contains "  and the purchase model"       "$js" "'config', 'set', 'GAME_SPOT'"
-contains "  and the region, last"         "$js" "if (moving) await runCg(['config', 'set', 'GAME_REGION'"
+contains "  and the region, last"         "$js" "if (moving) await runAyis(['config', 'set', 'GAME_REGION'"
 contains "  after confirming the rate"    "$js" 'title: `Use ${row.type} in ${placeName(row.region)}?`' 
 contains "  saying what each model means" "$js" "Not reclaimed."
 contains "  and warning when capacity says no" "$js" "A spot launch will likely fail."
@@ -491,7 +491,7 @@ contains "  and a total"                  "$html" 'id="lib-foot"'
 contains "  kept for: one setting, applied at once" "$js" "['library', 'keep-for', String(n)]"
 contains "  the Steam login is a card of its own" "$html" 'id="lib-login-box"'
 # A fallback that looks like an answer is worse than no answer: the app used to
-# print 209 GB of box disk and a rupee rate of 88 when cg had told it neither.
+# print 209 GB of box disk and a rupee rate of 88 when ayis had told it neither.
 check    "no disk size is guessed"        "$(grep -c '|| 209' app/renderer/app.js)" "0"
 check    "  nor a starting value for one"  "$(grep -c 'selectable_gb: 209' app/renderer/app.js)" "0"
 contains "  no disk is sized on a guess"  "$js" "unknown: true"
@@ -508,9 +508,9 @@ contains "  and the egress hours from your bitrate" "$js" "setting('GAME_BITRATE
 check    "  reading the same registry"    "$(grep -c 'function setting(key, fallback)' app/renderer/app.js)" "1"
 
 echo "5d. a stream the app never started"
-# Closing the window does not end `cg open`; reopening it must not start a
-# second Moonlight. The app asks cg, which holds the lock.
-contains "the app reads the session from cg" "$js" "sessionNow = s.session || null"
+# Closing the window does not end `ayis open`; reopening it must not start a
+# second Moonlight. The app asks ayis, which holds the lock.
+contains "the app reads the session from ayis" "$js" "sessionNow = s.session || null"
 contains "  play refuses while one runs"  "$js" "if (sessionNow) return refresh()"
 contains "  and the button says so"       "$js" "live ? 'Streaming' : 'Play'"
 contains "  on both screens"              "$js" "['d-open', 'b-open']"
@@ -533,18 +533,18 @@ contains "  and the free reads follow it" "$js" "refreshAll();"
 echo "5f. the app holds no prices"
 # This is the rule, checked rather than asserted: while the Cost and Library
 # screens were built, $0.025, $0.0912 and $0.1093 all found their way into the
-# renderer. Every one of them now arrives from cg.
+# renderer. Every one of them now arrives from ayis.
 check "no price literal in the renderer" \
       "$(grep -vE '^\s*(//|\*)' app/renderer/app.js | grep -cE '[^0-9.](0\.[0-9]{2,})')" "0"
 # None, buttons included: Refresh on the Cost page takes the dashboard's
 # price, which comes from status, in rupees.
 check "  nor in the markup"              "$(grep -cE '\$0\.[0-9]+' app/renderer/index.html)" "0"
 contains "  which is what Refresh costs" "$html" 'id="refresh-cost"'
-contains "  priced from cg, in rupees"   "$js" "\$('refresh-cost').textContent = \$('d-cost-price').textContent"
-contains "rates come from cg"            "$js" "const rate = d.rates || {}"
+contains "  priced from ayis, in rupees"   "$js" "\$('refresh-cost').textContent = \$('d-cost-price').textContent"
+contains "rates come from ayis"            "$js" "const rate = d.rates || {}"
 contains "  the standby burn too"        "$js" "const standby = d.standby || {}"
 contains "  and each game's monthly cost" "$js" "r(g.usd_month)"
-# `cg cost --json` and `cg status --json` both carry it, from internal/pricing.
+# `ayis cost --json` and `ayis status --json` both carry it, from internal/pricing.
 lacks    "the build confirm quotes no rate" "$js" "an hour on spot"
 
 echo "5g. the dashboard and guards screens"
@@ -566,27 +566,27 @@ contains "spend comes from a fetch"      "$js" "function paintSpend(d)"
 # One place reads the bill: Spending's Refresh. Home's Exact cost goes there
 # and presses it, rather than being a second paid call of its own.
 check    "  which is the only paid button" \
-         "$(grep -c "runCg(\['cost', '--json'\]\|v === 'cost' ? \[\[\['cost', '--json'\]" app/renderer/app.js)" "1"
+         "$(grep -c "runAyis(\['cost', '--json'\]\|v === 'cost' ? \[\[\['cost', '--json'\]" app/renderer/app.js)" "1"
 contains "  Exact cost opens Spending and refreshes it" "$js" "\$('d-cost').onclick = () => { goView('cost'); \$('refresh').click(); };"
 contains "  and it carries the price"    "$html" 'id="d-cost-price"'
 contains "activity is this window's own" "$js" "function note(text, tone)"
-# What happened, not which command did it: "cg library push started" named a
+# What happened, not which command did it: "ayis library push started" named a
 # command, and the one it named was wrong - see the duplicate key below.
-contains "  recording what happened"     "$js" 'note(`${cgName(args)} started`'
-# Guards: one card per layer cg reports, never a layer the app invented.
+contains "  recording what happened"     "$js" 'note(`${ayisName(args)} started`'
+# Guards: one card per layer ayis reports, never a layer the app invented.
 contains "guards come from the watcher"  "$js" "for (const g of guards) {"
-# The minutes are cg's: the page wrote "30 min" and "1 h" whatever was set.
-contains "  with cg's minutes"           "$js" "\${g.idle_min ?? '?'} min without a stream"
+# The minutes are ayis's: the page wrote "30 min" and "1 h" whatever was set.
+contains "  with ayis's minutes"           "$js" "\${g.idle_min ?? '?'} min without a stream"
 lacks    "  and no minutes of its own"   "$js" 'g.idle_min || '
 contains "  and the last check, aged"    "$js" 'Last check ${ago(cloud.last_decision_age_s)}'
 # Rupees only: the budget read "$57 a month" from AWS's own figure.
 contains "the budget is in rupees"       "$js" '${rs(Number(v))} a month'
 lacks    "  never dollars"               "$js" '`$${b.usd} a month`'
 contains "the knobs are settings rows"   "$js" "const WANT = ['GAME_BUDGET_INR'"
-contains "  edited through cg"           "$js" "editSetting(r, row)"
+contains "  edited through ayis"           "$js" "editSetting(r, row)"
 # The Logs screen names the cloud watchdog in a heading, which is a label, not
 # a guard definition; no guard's state, timing or existence is in the markup.
-# id="d-armed" and id="g-armed" are placeholders cg fills; what must not be in
+# id="d-armed" and id="g-armed" are placeholders ayis fills; what must not be in
 # the markup is a guard's name, its timing or its state.
 check    "no guard is hardcoded"         "$(grep -c '15 min\|30 min\|ARMED\|watchdog idle' app/renderer/index.html)" "0"
 
@@ -607,7 +607,7 @@ echo "5h. the logs and settings screens"
 # Both are gone: the chooser table owns region, type and model together, and
 # this screen is where it lives.
 contains "the chooser table is on this screen"    "$html" 'id="s-chooser"'
-contains "  and settings asks cg for its rows"    "$js" "[['config', '--json'], 'config'], [['machines', '--json'], 'machines']"
+contains "  and settings asks ayis for its rows"    "$js" "[['config', '--json'], 'config'], [['machines', '--json'], 'machines']"
 lacks    "  no second editor for what it owns"    "$js" "r.key === 'GAME_INSTANCE_TYPE' && machinesNow"
 contains "  those rows point at the table"        "$js" "set under Machine"
 # The row is flex/justify-between with a shrink-0 right side, so the editor's
@@ -624,12 +624,12 @@ contains "the event stream can be filtered" "$js" "function applyLogFilter(which
 contains "  and copied"                  "$html" 'id="log-copy"'
 contains "  and cleared"                 "$html" 'id="log-clear"'
 check    "  it keeps a bounded number"   "$(grep -c "log.children.length > 2000" app/renderer/app.js)" "1"
-contains "the watchdog's own log is reachable" "$js" "runCg(['watchdog', 'logs']"
+contains "the watchdog's own log is reachable" "$js" "runAyis(['watchdog', 'logs']"
 contains "  and reading it is free"      "$html" "Free to load"
-# Which card a setting belongs on is cg's answer now; this file keeps the
+# Which card a setting belongs on is ayis's answer now; this file keeps the
 # ORDER of the cards and the sentence under each heading, which is layout.
-contains "the registry carries the grouping" "$(./cg config --json)" '"group"'
-contains "  and the name to show"            "$(./cg config --json)" '"label"'
+contains "the registry carries the grouping" "$(./ayis config --json)" '"group"'
+contains "  and the name to show"            "$(./ayis config --json)" '"label"'
 # Settings shows only what nothing else sets: the stream, the disk and the two
 # accounts. Each other setting has one home on the page it is about.
 contains "Settings is the stream and the disk" "$js" "['GAME_RES', 'GAME_FPS', 'GAME_BITRATE_KBPS']"
@@ -638,33 +638,33 @@ lacks    "  not the guards' settings again" "$js" "'The guards': "
 lacks    "  nor the jargon line"          "$html" "Editing one here runs"
 lacks    "  not by editing the file"     "$html" "or by editing the file"
 # The archive's destructive actions were unreachable: the orphan line said
-# "remove with: cg library clean" and there was no button.
+# "remove with: ayis library clean" and there was no button.
 contains "orphans can be cleaned"        "$js" "libraryRun(['library', 'clean']"
 contains "  a game can be forgotten"     "$js" "libraryRun(['library', 'forget'"
 contains "  both ask for the word, once"  "$js" "word: 'DELETE'"
 # They stay on Library: the Build page is for builds, deletes and sessions.
 lacks    "  and never go to the Build page" "$js" "startRun(['library'"
 # The line that used to be drawn in both processes - and drifted - is drawn by
-# cg now, once, and the app is told the verdict with the job.
-contains "  and both count as writes"    "$(./cg --contract | tr -d ' \n')" '["library","forget"]'
-contains "  cleaning too"                "$(./cg --contract | tr -d ' \n')" '["library","clean"]'
+# ayis now, once, and the app is told the verdict with the job.
+contains "  and both count as writes"    "$(./ayis --contract | tr -d ' \n')" '["library","forget"]'
+contains "  cleaning too"                "$(./ayis --contract | tr -d ' \n')" '["library","clean"]'
 lacks    "  with no copy in the renderer" "$js" "'push', 'pull', 'forget', 'clean', 'account'"
 
 echo "5i. packaging keeps the scripts outside the package"
-# A cg bundled into the .asar would be a second, stale engine. The app finds
+# An ayis bundled into the .asar would be a second, stale engine. The app finds
 # the repo instead - and still works when it is somewhere else.
 check "the build config exists"          "$(node -e 'console.log(require("./app/package.json").build ? 1 : 0)')" "1"
 check "  and ships only the app"         "$(node -e 'console.log(require("./app/package.json").build.files.join(","))')" "main/**,renderer/**,package.json"
 # findRepo lives in main/repo.js, not in here: inside index.js it could not be
 # required without starting Electron, and the bug that shipped - a DIRECTORY
-# named cg winning over the script - went uncaught for exactly that reason.
+# named ayis winning over the script - went uncaught for exactly that reason.
 contains "the scripts are found, wherever they are" "$main" "require('./repo')"
 repo=$(cat app/main/repo.js)
-contains "  CG_REPO can say where it is" "$repo" "env.CG_REPO"
-contains "  and cg must be a file, not a directory" "$repo" "isFile()"
-lacks    "  the old existsSync test is gone" "$repo" "existsSync(path.join(dir, 'cg'))"
+contains "  AYIS_REPO can say where it is" "$repo" "env.AYIS_REPO"
+contains "  and ayis must be a file, not a directory" "$repo" "isFile()"
+lacks    "  the old existsSync test is gone" "$repo" "existsSync(path.join(dir, 'ayis'))"
 check "an icon is committed"             "$([[ -s app/build/icon.png ]] && echo yes || echo no)" "yes"
-check "  the binary is called cg"        "$(node -e 'console.log(require("./app/package.json").build.executableName)')" "cg"
+check "  the binary is called ayis"        "$(node -e 'console.log(require("./app/package.json").build.executableName)')" "ayis"
 # Four Linux formats, because one was not enough. A type-2 AppImage dlopens
 # libfuse.so.2 and distributions have moved to fuse3, so on Arch the "standalone"
 # download dies with "error loading libfuse.so.2" until a package is installed.
@@ -703,8 +703,8 @@ contains "  and warns what the AppImage needs" "$(cat .github/workflows/desktop-
 check "  and the build output is ignored" \
       "$(git check-ignore app/dist/any-built-file >/dev/null 2>&1 && echo yes || echo no)" "yes"
 contains "the README says Windows is untested" "$(cat app/README.md)" "Windows is written but untested"
-# Verified by running it: `npm run pack` produced dist/linux-unpacked/cg, whose
-# app.asar holds the app and nothing else - no cg, no lib/*.sh.
+# Verified by running it: `npm run pack` produced dist/linux-unpacked/ayis, whose
+# app.asar holds the app and nothing else - no ayis, no lib/*.sh.
 contains "  and how it was proven"       "$(cat app/README.md)" "verified by packing it"
 # A tag builds the release. The workflow runs this very suite first, so a
 # release cannot ship an app that grew AWS logic or a price of its own.
@@ -715,19 +715,19 @@ contains "  and it runs these checks first" "$(cat .github/workflows/desktop-rel
 # The release notes used to say the download needed a checkout. It carries the
 # scripts now, so saying otherwise would send people to clone a repo they do
 # not need - and the notes are the only instructions a downloader ever sees.
-contains "  the release says cg is included" \
+contains "  the release says ayis is included" \
          "$(cat .github/workflows/desktop-release.yml)" "travels with the app"
 contains "  and where settings go instead"  \
-         "$(cat .github/workflows/desktop-release.yml)" "~/.config/cg/.env"
+         "$(cat .github/workflows/desktop-release.yml)" "~/.config/ayis/.env"
 lacks    "  not that a checkout is required" \
          "$(cat .github/workflows/desktop-release.yml)" "This app needs the repo"
-# Three platforms, each with its own cg: the program is named for the system it is
+# Three platforms, each with its own ayis: the program is named for the system it is
 # built for, and the packager takes the right one.
 wf="$(cat .github/workflows/desktop-release.yml)"
 contains "it builds for macOS"                "$wf" "runs-on: macos-latest"
 contains "  and for Windows"                  "$wf" "runs-on: windows-latest"
 contains "  the DMG for Intel and for Apple Silicon" "$wf" "--mac --x64"
-contains "  (cg built for each)"              "$wf" "CG_GOARCH: arm64"
+contains "  (ayis built for each)"              "$wf" "AYIS_GOARCH: arm64"
 contains "  a portable Windows exe"           "$wf" "artifacts/**/*-portable.exe"
 contains "  and the dmgs go in the release"   "$wf" "artifacts/**/*.dmg"
 contains "  only a tag publishes"             "$wf" "if: startsWith(github.ref, 'refs/tags/v')"
@@ -735,8 +735,8 @@ contains "  and says they are unsigned and new" "$wf" "Not signed."
 contains "  and what has been tried"          "$wf" "built but not yet used by a person"
 check    "mac builds a dmg"                  "$(node -e 'console.log(require("./app/package.json").build.mac.target.join(","))')" "dmg"
 check    "  windows builds portable"          "$(node -e 'console.log(require("./app/package.json").build.win.target.join(","))')" "portable"
-check    "  each carries its own cg"          "$(node -e 'const b=require("./app/package.json").build;console.log([b.linux,b.mac,b.win].map(p=>p.extraResources[0].to).join(","))')" "cg/cg,cg/cg,cg/cg.exe"
-check    "  built by one script that knows the name" "$(node -e 'console.log(require("fs").readFileSync("app/scripts/build-cg.js","utf8").includes("cg.exe") ? "yes" : "no")')" "yes"
+check    "  each carries its own ayis"          "$(node -e 'const b=require("./app/package.json").build;console.log([b.linux,b.mac,b.win].map(p=>p.extraResources[0].to).join(","))')" "ayis/ayis,ayis/ayis,ayis/ayis.exe"
+check    "  built by one script that knows the name" "$(node -e 'console.log(require("fs").readFileSync("app/scripts/build-ayis.js","utf8").includes("ayis.exe") ? "yes" : "no")')" "yes"
 check    "the deb can be built"          "$(node -e 'const b=require("./app/package.json");console.log(b.homepage && b.build.linux.maintainer ? "yes" : "no")')" "yes"
 
 echo "6. the actions that spend money ask first"
@@ -750,18 +750,18 @@ contains "a build confirms, with its rate" "$js" 'Billed ${rate != null ? `${rat
 contains "  and passes the chosen games" "$js" "GAME_APPS: apps"
 contains "a delete confirms"             "$js" "Delete the machine?"
 contains "only GAME_APPS may cross"      "$(cat app/main/index.js)" "['GAME_APPS']"
-contains "cg's contract names what may cross" "$(cat internal/contract/contract.go)" 'var Env = []string{"GAME_APPS", "GAME_EXTRA_DISK_GB"}'
+contains "ayis's contract names what may cross" "$(cat internal/contract/contract.go)" 'var Env = []string{"GAME_APPS", "GAME_EXTRA_DISK_GB"}'
 check    "no secret is rendered"         "$(grep -cE 'TAILSCALE_AUTH_KEY|SUNSHINE_PASS|GAME_NTFY_URL *=' app/renderer/app.js)" "0"
 # Settings are read from the registry and written back through it: the app
 # never touches .env, and a secret can be replaced but not read.
 contains "settings read the registry"    "$js" "settings:  [[['config', '--json']"
-contains "  and write through cg"        "$js" "runCg(['config', 'set', r.key, value]"
+contains "  and write through ayis"        "$js" "runAyis(['config', 'set', r.key, value]"
 contains "  showing a secret as set"     "$js" "r.is_set ? 'Set' : 'Not set'"
 contains "  replacing, never revealing"  "$js" "r.secret ? '' : (r.value || '')"
 contains "  and confirming a clear"      "$js" "will not be asked for again"
 # "1" means nothing to a person, and a secret is worth seeing once, on purpose.
 contains "a choice is shown in words"    "$js" "'1': 'Spot', '0': 'On-demand'"
-contains "a secret can be revealed"      "$js" "runCg(['config', 'get', r.key]"
+contains "a secret can be revealed"      "$js" "runAyis(['config', 'get', r.key]"
 contains "  deliberately, then hidden"   "$js" "click again to hide it"
 # A machine's card: ending the session and stopping the machine live on it, and
 # a button that cannot be pressed is not shown.

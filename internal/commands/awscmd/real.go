@@ -8,16 +8,16 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 
-	"github.com/jebin2/aws_cloud_gaming/internal/ask"
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/box"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/boxcmd"
-	"github.com/jebin2/aws_cloud_gaming/internal/commands/watchdog"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/inventory"
-	"github.com/jebin2/aws_cloud_gaming/internal/library"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/storage"
+	"github.com/jebin2/ayis/internal/ask"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/box"
+	"github.com/jebin2/ayis/internal/commands/boxcmd"
+	"github.com/jebin2/ayis/internal/commands/watchdog"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/inventory"
+	"github.com/jebin2/ayis/internal/library"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/storage"
 )
 
 // runForget wires the forget to the real account.
@@ -68,7 +68,7 @@ func newDisconnector(ctx context.Context, env *config.Env, inv inventory.Invento
 		return nil, err
 	}
 	get := config.OSLookup
-	d := &Disconnector{Out: out, Ask: ask.New(out, os.Getenv("CG_YES") == "1"), Env: env,
+	d := &Disconnector{Out: out, Ask: ask.New(out, os.Getenv("AYIS_YES") == "1"), Env: env,
 		Inventory: func(ctx context.Context) inventory.Result { return inv.Read(ctx) }}
 	// Everything the current region has goes through destroy --all --force, as the
 	// Bash ran cmd_destroy --all --force; one failure there must not stop the rest.

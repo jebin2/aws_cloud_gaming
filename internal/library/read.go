@@ -24,7 +24,7 @@ func ReadMarks(ctx context.Context, p Params, host string) *Marks {
 	if p == nil {
 		return nil
 	}
-	prefix := "/cloud-gaming/" + host + "/"
+	prefix := "/ayis/" + host + "/"
 	all, err := p.Path(ctx, prefix)
 	if err != nil {
 		return nil
@@ -58,7 +58,7 @@ type SteamAccount struct {
 	LastUsed   *int64  `json:"last_used"`
 }
 
-// Login is `cg library account --json`.
+// Login is `ayis library account --json`.
 type Login struct {
 	Bucket   *string
 	Key      string

@@ -22,7 +22,7 @@ func TestEveryLaunchCodeHasAPlainKind(t *testing.T) {
 	}
 	// What a phone or a window must never show: ids, setting names, quota codes,
 	// AWS service names, commands.
-	jargon := regexp.MustCompile(`\b(S3|EC2|IAM|vCPU|quota|instance|spot|GAME_[A-Z_]+|L-[0-9A-F]{8}|cg [a-z]+|i-[0-9a-f]{4,}|SSH|key pair)\b`)
+	jargon := regexp.MustCompile(`\b(S3|EC2|IAM|vCPU|quota|instance|spot|GAME_[A-Z_]+|L-[0-9A-F]{8}|ayis [a-z]+|i-[0-9a-f]{4,}|SSH|key pair)\b`)
 	for code, kind := range cases {
 		for _, spot := range []bool{true, false} {
 			p := LaunchFailure{Code: code, Spot: spot}.Plain()

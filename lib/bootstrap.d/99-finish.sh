@@ -11,11 +11,11 @@ aws_box && { chown -R "$USER_NAME:$USER_NAME" "$USER_HOME/.config" "$USER_HOME/.
 progress "finishing up"
 if aws_box; then
 # Back to the safe setting for the machine that will run for hours (see 10-base.sh).
-rm -f /etc/dpkg/dpkg.cfg.d/99-cg-build-unsafe-io
+rm -f /etc/dpkg/dpkg.cfg.d/99-ayis-build-unsafe-io
 # The slowest commands of the build, and where each spent its time. Read whole by
 # sort and sed, not cut short by head: under pipefail a reader that stops early
 # kills the writer (exit 141).
-if [ -s /var/log/cg-timings.log ]; then
+if [ -s /var/log/ayis-timings.log ]; then
   # Each install line is tab-separated: sort key, the timing, and what it brought in.
   awk '$1 == "pkgs" { w[$2] = $3 " packages, " $4 " MB; largest:"; for (i=5;i<=NF;i++) w[$2] = w[$2] " " $i; next }
        { s=$1; e=$2; d=$3; t=e-s; lab=$4; for (i=5;i<=NF;i++) lab=lab" "$i
@@ -23,40 +23,40 @@ if [ -s /var/log/cg-timings.log ]; then
          if (d != "-" && d >= s) line=sprintf("%.0fs (fetch %.0fs, dpkg %.0fs) %s", t, d-s, e-d, lab)
          else line=sprintf("%.0fs %s", t, lab)
          L[s] = sprintf("%06.1f\t%s", t, line) }
-       END { for (k in L) { split(L[k], p, "\t"); printf "%s\t%s\t%s\n", p[1], p[2], (k in w) ? w[k] : "" } }' /var/log/cg-timings.log \
+       END { for (k in L) { split(L[k], p, "\t"); printf "%s\t%s\t%s\n", p[1], p[2], (k in w) ? w[k] : "" } }' /var/log/ayis-timings.log \
     | sort -rn | sed -n 1,10p | { _i=0; while IFS=$'\t' read -r _k _l _w; do
         _i=$((_i + 1)); progress "timing: $_l"
         if [ "$_i" -le 3 ] && [ -n "$_w" ]; then progress "timing:   brought in $_w"; fi
       done; }
 fi
-rm -f /etc/apt/apt.conf.d/99-cg-build-timing /usr/local/sbin/update-initramfs
-cat > /etc/systemd/system/cloud-gaming-ready.service <<'EOF'
+rm -f /etc/apt/apt.conf.d/99-ayis-build-timing /usr/local/sbin/update-initramfs
+cat > /etc/systemd/system/ayis-ready.service <<'EOF'
 [Unit]
 Description=Signal that the streaming desktop is up
-# Also after the library restore: the marker is what `cg init` waits for, and
+# Also after the library restore: the marker is what `ayis init` waits for, and
 # reporting the box ready while 140 GB is still arriving would send you to a
 # Steam that thinks nothing is installed.
-After=graphical.target cg-library-restore.service
-Wants=cg-library-restore.service
+After=graphical.target ayis-library-restore.service
+Wants=ayis-library-restore.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/touch /var/lib/cloud-gaming-ready
+ExecStart=/usr/bin/touch /var/lib/ayis-ready
 RemainAfterExit=yes
 
 [Install]
 WantedBy=graphical.target
 EOF
-systemctl enable cloud-gaming-ready.service
+systemctl enable ayis-ready.service
 
 echo "bootstrap complete; rebooting into the desktop"
 # The supervisor reboots after this stage is recorded done, so that it is not run
 # again after the boot; run on its own, this script does it itself.
-[ -n "${CG_SUPERVISED:-}" ] || reboot
+[ -n "${AYIS_SUPERVISED:-}" ] || reboot
 else
   # A machine of yours is ready now, and never rebooted by this build. A driver
   # added for an NVIDIA card loads at the next boot, which is yours to choose.
   [ -n "${NVIDIA_ADDED:-}" ] && progress "the NVIDIA driver loads at the next boot - restart this machine when it suits you"
-  touch /var/lib/cloud-gaming-ready
+  touch /var/lib/ayis-ready
   echo "bootstrap complete"
 fi

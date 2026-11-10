@@ -15,7 +15,7 @@
 #     no games installed, or nothing restored this boot (cases 7 and 8)
 set -uo pipefail
 cd "$(dirname "$0")/.."
-SRC=host/cg-library
+SRC=host/ayis-library
 T=$(mktemp -d); pass=0; fail=0
 trap 'rm -rf "$T"' EXIT
 
@@ -64,11 +64,11 @@ mkdir -p "$T/remote"
 
 run() {
   S5LOG="$T/s5.log" REMOTE="$T/remote" PATH="$T/bin:$PATH" T_UP="$T/up" \
-  CG_EXTRA_LIBS="${CG_EXTRA_LIBS-}" CG_LIB_DIR="$T/scratch/steam" CG_S3_BUCKET=b CG_S3_PREFIX=steam \
-  CG_STATE_DIR="$T/state" CG_S5CMD="$T/bin/s5cmd" CG_BOOT_ID_FILE="$T/bootid" \
-  CG_STEAM_BASE="$T/home" CG_STEAM_DIR="$SD" HOME="$T/home" \
+  AYIS_EXTRA_LIBS="${AYIS_EXTRA_LIBS-}" AYIS_LIB_DIR="$T/scratch/steam" AYIS_S3_BUCKET=b AYIS_S3_PREFIX=steam \
+  AYIS_STATE_DIR="$T/state" AYIS_S5CMD="$T/bin/s5cmd" AYIS_BOOT_ID_FILE="$T/bootid" \
+  AYIS_STEAM_BASE="$T/home" AYIS_STEAM_DIR="$SD" HOME="$T/home" \
   MOUNTED="${MOUNTED:-1}" UPLOAD_FAILS="${UPLOAD_FAILS:-0}" \
-  CG_STEAM_SHUTDOWN="${CG_STEAM_SHUTDOWN:-1}" \
+  AYIS_STEAM_SHUTDOWN="${AYIS_STEAM_SHUTDOWN:-1}" \
     timeout 60 bash "$SRC" "$@" 2>&1
   # timeout, not bare bash: a tar that follows a symlink loop under userdata/
   # does not fail, it spins - and a hung suite reads as "still running", not as
@@ -91,7 +91,7 @@ make_login() {
   dd if=/dev/zero of="$T/home/$SD/userdata/12345678/config/librarycache/b" bs=1M count=5 status=none
   ln -sfn "$T/home/$SD" "$T/home/.steam/steam"
 }
-reset() { unset MOUNTED UPLOAD_FAILS CG_STEAM_SHUTDOWN; rm -f "$T/up"; : > "$T/s5.log"; }
+reset() { unset MOUNTED UPLOAD_FAILS AYIS_STEAM_SHUTDOWN; rm -f "$T/up"; : > "$T/s5.log"; }
 members() { tar -tzf "$T/remote/account.tgz" 2>/dev/null; }
 
 echo "1. push archives the files that carry the login"
@@ -176,7 +176,7 @@ echo "6b. a Steam that refuses to exit is archived anyway, and says so"
 # Losing the login because a process would not die is the wrong trade: the file
 # on disk is almost always the valid token already.
 reset; make_login; touch "$T/up"
-out=$(CG_STEAM_SHUTDOWN=0 run account push)
+out=$(AYIS_STEAM_SHUTDOWN=0 run account push)
 contains "notes the risk" "$out" "still running"
 contains "archives anyway" "$out" "steam account: archived"
 

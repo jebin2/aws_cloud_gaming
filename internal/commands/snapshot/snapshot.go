@@ -1,4 +1,4 @@
-// Package snapshot is `cg snapshot`. Only the listing is ported so far.
+// Package snapshot is `ayis snapshot`. Only the listing is ported so far.
 //
 // Images bill every month, forever, and nothing else here lists them - a
 // create-only snapshot command is a slow leak.
@@ -15,10 +15,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 
 	awspricing "github.com/aws/aws-sdk-go-v2/service/pricing"
-	"github.com/jebin2/aws_cloud_gaming/internal/awscfg"
-	"github.com/jebin2/aws_cloud_gaming/internal/config"
-	"github.com/jebin2/aws_cloud_gaming/internal/output"
-	"github.com/jebin2/aws_cloud_gaming/internal/pricing"
+	"github.com/jebin2/ayis/internal/awscfg"
+	"github.com/jebin2/ayis/internal/config"
+	"github.com/jebin2/ayis/internal/output"
+	"github.com/jebin2/ayis/internal/pricing"
 )
 
 // Image is a saved image of the box, newest first.
@@ -88,11 +88,11 @@ func Show(imgs []Image, rate, inr *float64) string {
 		}
 		fmt.Fprintf(&b, "\nat most %.2f USD/month%s for %d image(s)\n", tot, more, len(imgs))
 	}
-	b.WriteString("delete one with:  cg snapshot --delete <image-id>\n")
+	b.WriteString("delete one with:  ayis snapshot --delete <image-id>\n")
 	return b.String()
 }
 
-// Run is `cg snapshot`.
+// Run is `ayis snapshot`.
 func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out *output.Out) int {
 	sub := "create"
 	if len(args) > 0 {
@@ -104,7 +104,7 @@ func Run(ctx context.Context, env *config.Env, args []string, jsonFlag bool, out
 		out.Die("snapshot " + sub + " is not ported to Go yet")
 		return 1
 	default:
-		out.Die("usage: cg snapshot [create|--list|--delete <id>]")
+		out.Die("usage: ayis snapshot [create|--list|--delete <id>]")
 		return 1
 	}
 	cfg, err := awscfg.New(ctx, env.Region())
