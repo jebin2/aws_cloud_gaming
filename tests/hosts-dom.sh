@@ -513,7 +513,7 @@ for gone in cli key authkey email where; do
   lacks  "  no AWS step: $gone"                  "$(row 'ADD STAGES')" " $gone:"
 done
 check    "connecting is ayis host add"             "$(row 'PW RAN')" "PW RAN | host add --ssh me@10.0.0.5"
-check    "four fields, the password among them" "$(row 'PW FIELDS')" "PW FIELDS | add-addr,add-user,add-pw,add-name"
+check    "five fields, the port and the password among them" "$(row 'PW FIELDS')" "PW FIELDS | add-addr,add-port,add-user,add-pw,add-name"
 check    "  shown from the start"                "$(row 'PW UPFRONT')" "PW UPFRONT | true"
 check    "its password is asked in the form, no popup" "$(row 'PW OPEN')" "PW OPEN | false"
 check    "  the field appears in the server step" "$(row 'PW SHOWN')" "PW SHOWN | true in-step:true"
