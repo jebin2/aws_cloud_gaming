@@ -7,8 +7,9 @@
 //     with a password nothing here knew, and every pairing failed.
 //  2. The saved login is checked against the machine, not assumed - which also
 //     catches a reply lost after Sunshine took the password.
-//  3. When they disagree, it is set again ON the machine (sunshine --creds over
-//     ssh), which needs no old password.
+//  3. When they disagree, it is set again ON the machine by writing Sunshine's
+//     own state file over ssh, which needs no old password. The password is
+//     never a command-line argument, where another local account could read it.
 package sunshine
 
 import (

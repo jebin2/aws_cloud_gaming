@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"sort"
 	"strings"
@@ -20,6 +21,8 @@ import (
 // Remote runs a command on the machine under sh.
 type Remote interface {
 	SSH(ctx context.Context, command string) ([]byte, error)
+	// SSHInput is SSH with stdin, for what must not be an argument.
+	SSHInput(ctx context.Context, command string, stdin io.Reader) ([]byte, error)
 }
 
 // ErrStopped: the build did not finish, and has said why.

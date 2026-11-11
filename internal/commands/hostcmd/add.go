@@ -9,7 +9,7 @@ import (
 	"github.com/jebin2/ayis/internal/ownhost"
 )
 
-const addUsage = "usage: ayis host add [name] --ssh <user@address>"
+const addUsage = "usage: ayis host add [name] --ssh <user@address[:port]>"
 
 // LetIn makes ayis's key work on the machine, asking its password once when it
 // does not: the first time a machine is added, and again whenever the key has
@@ -25,8 +25,9 @@ func (d Deps) LetIn(ctx context.Context, target string, out *output.Out) bool {
 	if _, err := d.Conn.Raw(ctx, target, "exit", nil); err == nil {
 		return true
 	}
+	sshCmd, copyCmd := ownhost.ByHand("ssh", target), ownhost.ByHand("ssh-copy-id", target)
 	if !d.Ask.CanAsk() {
-		out.Die(fmt.Sprintf("ssh %s did not connect with a key, and there is no one to ask for its password -\n       run this in a terminal, or make 'ssh %s' work with a key first (ssh-copy-id %s)", target, target, target))
+		out.Die(fmt.Sprintf("%s did not connect with a key, and there is no one to ask for its password -\n       run this in a terminal, or make '%s' work with a key first (%s)", sshCmd, sshCmd, copyCmd))
 		return false
 	}
 	out.Log("ayis's key does not let it in: its password, once, puts the key on it, and is not kept")
@@ -41,7 +42,7 @@ func (d Deps) LetIn(ctx context.Context, target string, out *output.Out) bool {
 		out.Die(fmt.Sprintf("logged in to %s, but ayis's key did not stay in its ~/.ssh/authorized_keys - is that file or folder not yours to write?", target))
 		return false
 	default:
-		out.Die(fmt.Sprintf("%s did not let ayis in with that password. Check the address, user and password -\n       or, if it takes keys only, make 'ssh %s' work first (ssh-copy-id %s)", target, target, target))
+		out.Die(fmt.Sprintf("%s did not let ayis in with that password. Check the address, user and password -\n       or, if it takes keys only, make '%s' work first (%s)", target, sshCmd, copyCmd))
 		return false
 	}
 	if _, err := d.Conn.Raw(ctx, target, "exit", nil); err != nil {

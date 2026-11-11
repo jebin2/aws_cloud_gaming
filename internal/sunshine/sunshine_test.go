@@ -147,16 +147,41 @@ func TestAFirstRunMakesAnAccountAndSavesItBeforeTheMachineHasIt(t *testing.T) {
 	}
 }
 
+func TestNewSaltIsSixteenLettersAndDigits(t *testing.T) {
+	const alnum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	for i := 0; i < 100; i++ {
+		if s := newSalt(); len(s) != 16 || strings.Trim(s, alnum) != "" {
+			t.Fatalf("newSalt() = %q", s)
+		}
+	}
+}
+
+func TestSunshineHashIsTheOneItsStateFileStores(t *testing.T) {
+	for _, c := range []struct{ pass, salt, want string }{
+		{"secret", "abcdefghijklmnop", "C300DCD6629E7508FBB5F5863CEC08529E491246F650470AE1F09F5B764CCDE1"},
+		{"hunter2", "Z8kQ2wR7xT1pLmN4", "CE6F3BB72D2B0E35AD3955E501CC524B08BF5FF34EDD6A91ED93C976660B9402"},
+	} {
+		if got := sunshineHash(c.pass, c.salt); got != c.want {
+			t.Errorf("sunshineHash(%q, %q) = %s, want %s", c.pass, c.salt, got, c.want)
+		}
+	}
+}
+
 func TestAStaleLoginIsResetOnTheMachineItself(t *testing.T) {
 	s, c := newServer(t)
 	s.user, s.pass = "admin", "machines-own"
 	l := &Login{User: "admin", Pass: "stale"}
 	var said []string
-	var ran string
+	var ran, inUser, inSalt, inHash string
 	e := &Ensure{C: c, IP: "ip", Login: l, Save: func(string, string) {}, Say: func(x string) { said = append(said, x) }, Sleep: noSleep,
-		OnMachine: func(_ context.Context, cmd string) error {
+		OnMachine: func(_ context.Context, cmd string, stdin io.Reader) error {
 			ran = cmd
-			// `sunshine --creds` on the machine sets the login it is given.
+			b, _ := io.ReadAll(stdin)
+			lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+			if len(lines) == 3 {
+				inUser, inSalt, inHash = lines[0], lines[1], lines[2]
+			}
+			// The state file on the machine now holds the login it was given.
 			s.mu.Lock()
 			s.pass = l.Pass
 			s.mu.Unlock()
@@ -165,7 +190,13 @@ func TestAStaleLoginIsResetOnTheMachineItself(t *testing.T) {
 	if !e.Run(context.Background(), false) {
 		t.Fatal(said)
 	}
-	if !strings.Contains(ran, "sunshine --creds 'admin' '"+l.Pass+"'") || l.Pass == "stale" || said[0] != "the machine's Sunshine login is not the one saved here - setting it again on the machine" || said[len(said)-1] != "reset; credentials saved" {
+	if strings.Contains(ran, l.Pass) || strings.Contains(ran, "--creds") {
+		t.Errorf("the password goes through the command line: %q", ran)
+	}
+	if inUser != "admin" || len(inSalt) != 16 || inHash != sunshineHash(l.Pass, inSalt) {
+		t.Errorf("the state file gets user %q salt %q hash %q for %q", inUser, inSalt, inHash, l.Pass)
+	}
+	if l.Pass == "stale" || said[0] != "the machine's Sunshine login is not the one saved here - setting it again on the machine" || said[len(said)-1] != "reset; credentials saved" {
 		t.Errorf("%q %v", ran, said)
 	}
 	// A login that already works is left alone.

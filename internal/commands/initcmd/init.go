@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -559,4 +560,8 @@ type remoteBox struct{ b box.Box }
 
 func (r remoteBox) SSH(ctx context.Context, command string) ([]byte, error) {
 	return r.b.SSH(ctx, command, nil)
+}
+
+func (r remoteBox) SSHInput(ctx context.Context, command string, stdin io.Reader) ([]byte, error) {
+	return r.b.SSH(ctx, command, stdin)
 }

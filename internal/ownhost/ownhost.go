@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	ayis "github.com/jebin2/ayis"
@@ -141,20 +142,75 @@ func (c Conn) opts(connect string) []string {
 	return o
 }
 
+// SplitTarget takes a target as it is written - "user@address", or
+// "user@address:port" when the machine's ssh server is not on 22 - into the
+// address ssh is given and the port ("" for 22). A bracketed IPv6 address keeps
+// its brackets; an unbracketed one is left whole, since its colons are not a port.
+func SplitTarget(target string) (dest, port string) {
+	at := strings.LastIndexByte(target, '@')
+	host := target[at+1:]
+	if strings.HasPrefix(host, "[") {
+		if end := strings.LastIndexByte(host, ']'); end >= 0 && end+1 < len(host) && host[end+1] == ':' {
+			if p := sshPort(host[end+2:]); p != "" {
+				return target[:at+1] + host[:end+1], p
+			}
+		}
+		return target, ""
+	}
+	if strings.Count(host, ":") == 1 {
+		i := strings.LastIndexByte(target, ':')
+		if p := sshPort(target[i+1:]); p != "" {
+			return target[:i], p
+		}
+	}
+	return target, ""
+}
+
+// sshPort is a port ssh can be given, "" when s is not one.
+func sshPort(s string) string {
+	if s == "" || strings.HasPrefix(s, "+") || strings.TrimLeft(s, "0123456789") != "" {
+		return ""
+	}
+	if n, err := strconv.Atoi(s); err != nil || n < 1 || n > 65535 {
+		return ""
+	}
+	return s
+}
+
+// ByHand is a command to run on this laptop that reaches target - "ssh me@pc",
+// or "ssh -p 2222 me@pc" - for telling a person.
+func ByHand(tool, target string) string {
+	dest, port := SplitTarget(target)
+	if port != "" {
+		return tool + " -p " + port + " " + dest
+	}
+	return tool + " " + dest
+}
+
 // Raw runs a command as you would: your keys, your ~/.ssh/config, plus ayis's own
 // key. A key, never a password: BatchMode turns a password prompt into a clear
 // failure. Standard input only when given, for data piped on purpose: otherwise
 // ssh reads ayis's own, where the app's answers arrive, and would swallow the next.
 func (c Conn) Raw(ctx context.Context, target, command string, stdin io.Reader) ([]byte, error) {
-	args := append(c.opts("10"), target, command)
+	dest, port := SplitTarget(target)
+	args := c.opts("10")
+	if port != "" {
+		args = append(args, "-p", port)
+	}
+	args = append(args, dest, command)
 	return c.R.Run(ctx, local.Cmd{Name: "ssh", Args: args, Stdin: stdin})
 }
 
 // SSH runs a command under sh whatever the login shell is - ayis's one way of
 // reaching any machine - with your own ssh setup.
 func (c Conn) SSH(ctx context.Context, target, command string, stdin io.Reader) ([]byte, error) {
+	dest, port := SplitTarget(target)
 	q := "'\\''"
-	args := append(c.opts("8"), target, "sh -c '"+strings.ReplaceAll(command, "'", q)+"'")
+	args := c.opts("8")
+	if port != "" {
+		args = append(args, "-p", port)
+	}
+	args = append(args, dest, "sh -c '"+strings.ReplaceAll(command, "'", q)+"'")
 	return c.R.Run(ctx, local.Cmd{Name: "ssh", Args: args, Stdin: stdin})
 }
 
@@ -186,8 +242,14 @@ func (c Conn) InstallKey(ctx context.Context, target, password string) int {
 		display = ":0"
 	}
 	remote := `sh -c 'umask 077; mkdir -p "$HOME/.ssh"; f="$HOME/.ssh/authorized_keys"; touch "$f"; [ -n "$1" ] || exit 3; grep -qxF "$1" "$f" || printf "%s\n" "$1" >> "$f"; grep -qxF "$1" "$f" || exit 3' _ '` + pub + `'`
-	_, err = c.R.Run(ctx, local.Cmd{Name: "ssh", Args: []string{"-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new", "-o", "PubkeyAuthentication=no",
-		"-o", "PreferredAuthentications=password,keyboard-interactive", "-o", "NumberOfPasswordPrompts=1", target, remote},
+	dest, port := SplitTarget(target)
+	args := []string{"-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new", "-o", "PubkeyAuthentication=no",
+		"-o", "PreferredAuthentications=password,keyboard-interactive", "-o", "NumberOfPasswordPrompts=1"}
+	if port != "" {
+		args = append(args, "-p", port)
+	}
+	args = append(args, dest, remote)
+	_, err = c.R.Run(ctx, local.Cmd{Name: "ssh", Args: args,
 		Env: []string{"AYIS_SSH_PASSWORD=" + password, "SSH_ASKPASS=" + f.Name(), "SSH_ASKPASS_REQUIRE=force", "DISPLAY=" + display}})
 	return local.ExitCode(err)
 }

@@ -3,10 +3,14 @@ package sunshine
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -68,8 +72,9 @@ type Ensure struct {
 	Login *Login
 	Save  Keeper
 	Say   func(string)
-	// OnMachine runs a command on the machine (over ssh); nil when it cannot.
-	OnMachine func(ctx context.Context, command string) error
+	// OnMachine runs a command on the machine (over ssh) with stdin; nil when it
+	// cannot.
+	OnMachine func(ctx context.Context, command string, stdin io.Reader) error
 	Sleep     func(time.Duration)
 	Tries     int // how many 3-second checks after the reset; 20 by default
 }
@@ -79,6 +84,55 @@ func newPass() string {
 	_, _ = rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
 }
+
+// newSalt is a Sunshine state-file salt: 16 letters and digits.
+func newSalt() string {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	for i := range b {
+		b[i] = alphabet[int(b[i])%len(alphabet)]
+	}
+	return string(b)
+}
+
+// sunshineHash is the password Sunshine stores in its state file:
+// SHA-256(password + salt), the digest's bytes reversed and hex in upper case -
+// save_user_creds in Sunshine's src/httpcommon.cpp, Hex in src/utility.h.
+func sunshineHash(pass, salt string) string {
+	sum := sha256.Sum256([]byte(pass + salt))
+	for i, j := 0, len(sum)-1; i < j; i, j = i+1, j-1 {
+		sum[i], sum[j] = sum[j], sum[i]
+	}
+	return strings.ToUpper(hex.EncodeToString(sum[:]))
+}
+
+// stateScript writes a Sunshine login into its state file in Sunshine's own
+// format. The username, salt and hash arrive on stdin, one per line, so the
+// password is never an argument to anything - `sunshine --creds` put it in the
+// process's command line, where any other local account could read it from
+// /proc/<pid>/cmdline. A state file that is there but unreadable is left alone
+// rather than replaced: it holds the paired devices. The service is restarted so
+// the running Sunshine reads the new login.
+const stateScript = `IFS= read -r u && IFS= read -r s && IFS= read -r h || { echo "no Sunshine login on stdin" >&2; exit 1; }
+d="${XDG_CONFIG_HOME:-$HOME/.config}/sunshine"
+st="$d/sunshine_state.json"
+mkdir -p "$d"
+if [ -s "$st" ] && ! jq . "$st" >/dev/null 2>&1; then
+  echo "the Sunshine state file is not valid JSON - leaving it alone" >&2
+  exit 1
+fi
+if [ -s "$st" ]; then
+  (umask 077; jq --arg u "$u" --arg s "$s" --arg p "$h" '.username = $u | .salt = $s | .password = $p' "$st" > "$st.new") || { rm -f "$st.new"; exit 1; }
+else
+  (umask 077; jq -nc --arg u "$u" --arg s "$s" --arg p "$h" '{username: $u, salt: $s, password: $p}' > "$st.new") || { rm -f "$st.new"; exit 1; }
+fi
+mv "$st.new" "$st"
+unit=$(XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user list-unit-files '*unshine*' --no-legend 2>/dev/null | awk 'NR==1{print $1}')
+if [ -n "$unit" ]; then
+  XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user restart "$unit"
+fi
+`
 
 func (e *Ensure) fresh() {
 	if e.Login.User == "" {
@@ -109,12 +163,13 @@ func (e *Ensure) Run(ctx context.Context, firstRun bool) bool {
 		e.Say("the machine's Sunshine login is not the one saved here - setting it again on the machine")
 	}
 	e.fresh()
-	// sunshine --creds writes the login and exits; a restart makes the running
-	// Sunshine read it. The unit is found rather than named: the package names it
-	// differently from one distribution to the next.
+	// The state file is written on the machine and Sunshine restarted, so the
+	// running one reads it. The unit is found rather than named: the package names
+	// it differently from one distribution to the next.
 	if e.OnMachine != nil {
-		cmd := fmt.Sprintf(`sunshine --creds '%s' '%s' >/dev/null 2>&1 && u=$(XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user list-unit-files '*unshine*' --no-legend 2>/dev/null | awk 'NR==1{print $1}') && XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user restart "$u"`, e.Login.User, e.Login.Pass)
-		if e.OnMachine(ctx, cmd) == nil {
+		salt := newSalt()
+		in := strings.NewReader(e.Login.User + "\n" + salt + "\n" + sunshineHash(e.Login.Pass, salt) + "\n")
+		if e.OnMachine(ctx, stateScript, in) == nil {
 			n := e.Tries
 			if n == 0 {
 				n = 20

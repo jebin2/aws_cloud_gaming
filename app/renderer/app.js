@@ -5538,6 +5538,7 @@ function openAdd(kind) {
   // and no log from the last attempt - except a step still running.
   if (!connecting) {
     for (const id of ['add-addr', 'add-user', 'add-pw', 'add-name']) serverForm.querySelector('#' + id).value = '';
+    serverForm.querySelector('#add-port').value = '22';
     const log = serverForm.querySelector('#add-log');
     log.textContent = ''; log.hidden = true; log.classList.remove('text-error');
   }
@@ -5591,7 +5592,22 @@ const serverForm = (() => {
     wrap.append(l);
     return i;
   };
-  field('Host', 'add-addr', 'IP address or hostname');
+  // Host and its ssh port on one line: 22 unless the machine's ssh server
+  // listens elsewhere. The port is only written into the target when it is
+  // not 22, so an ordinary machine stays "user@address".
+  const hostRow = el('div', 'flex items-start gap-space-sm');
+  const hostLabel = el('label', 'block flex-1 font-body-sm text-body-sm text-on-surface-variant', 'Host');
+  const addr = el('input', 'mt-space-xs field');
+  addr.id = 'add-addr'; addr.placeholder = 'IP address or hostname';
+  addr.autocomplete = 'off'; addr.spellcheck = false;
+  hostLabel.append(addr);
+  const portLabel = el('label', 'block w-24 shrink-0 font-body-sm text-body-sm text-on-surface-variant', 'Port');
+  const port = el('input', 'mt-space-xs field text-center');
+  port.id = 'add-port'; port.value = '22'; port.inputMode = 'numeric'; port.maxLength = 5;
+  port.autocomplete = 'off'; port.spellcheck = false; port.title = 'SSH port';
+  portLabel.append(port);
+  hostRow.append(hostLabel, portLabel);
+  wrap.append(hostRow);
   field('Username', 'add-user', 'SSH user');
   // Its password, here in the form rather than in a dialog on top of it. Only
   // asked of it when no key of the app's gets in yet - so empty is fine for a
@@ -5651,16 +5667,23 @@ async function connectServer() {
   }
   if (connecting) return;
   const addr = $('add-addr').value.trim(), user = $('add-user').value.trim(), name = $('add-name').value.trim();
+  const portText = $('add-port').value.trim() || '22';
   const log = $('add-log');
   log.hidden = false;
   log.classList.remove('text-error');
   if (!addr || !user) { log.textContent = 'Host and username are required.'; log.classList.add('text-error'); return; }
+  const port = Number(portText);
+  if (!/^\d+$/.test(portText) || port < 1 || port > 65535) {
+    log.textContent = 'Port must be a whole number from 1 to 65535.'; log.classList.add('text-error'); return;
+  }
+  // 22 needs no saying: the target stays the address alone.
+  const target = port === 22 ? `${user}@${addr}` : `${user}@${addr}:${port}`;
   connecting = true;
   log.textContent = 'Connecting…';
   log.dataset.fresh = 'yes';
   paintOnboard();
   const before = new Set((hostsNow || []).map(h => h.name));
-  const { rc } = await runAyis(['host', 'add', ...(name ? [name] : []), '--ssh', `${user}@${addr}`],
+  const { rc } = await runAyis(['host', 'add', ...(name ? [name] : []), '--ssh', target],
                              { collect: 'add-log', wantRc: true });
   if (rc !== 0) { connecting = false; log.classList.add('text-error'); paintOnboard(); return; }
   await refreshHosts();

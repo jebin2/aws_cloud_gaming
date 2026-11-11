@@ -174,7 +174,7 @@ func TestSetupRefusesWhatItCannotBuild(t *testing.T) {
 		}
 	}
 	r := ready(t, "", onTailnet)
-	if rc := r.d.Setup(context.Background(), []string{"nope"}, r.out); rc != 1 || !strings.Contains(r.e.String(), "no machine called 'nope' - add it: ayis host add nope --ssh <user@address>") {
+	if rc := r.d.Setup(context.Background(), []string{"nope"}, r.out); rc != 1 || !strings.Contains(r.e.String(), "no machine called 'nope' - add it: ayis host add nope --ssh <user@address[:port]>") {
 		t.Error(r.e.String())
 	}
 }

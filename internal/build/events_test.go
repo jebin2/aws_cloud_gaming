@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -67,6 +68,10 @@ func (r *evRemote) SSH(_ context.Context, cmd string) ([]byte, error) {
 		return []byte("last line one\nlast line two\n"), nil
 	}
 	return nil, nil
+}
+
+func (r *evRemote) SSHInput(ctx context.Context, cmd string, _ io.Reader) ([]byte, error) {
+	return r.SSH(ctx, cmd)
 }
 
 func evFollower(r *evRemote) (Follower, *[]string, *[]string, *[]string) {

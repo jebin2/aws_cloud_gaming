@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -71,6 +72,10 @@ func (r *remote) SSH(_ context.Context, cmd string) ([]byte, error) {
 		return []byte(r.phase), nil
 	}
 	return nil, nil
+}
+
+func (r *remote) SSHInput(ctx context.Context, cmd string, _ io.Reader) ([]byte, error) {
+	return r.SSH(ctx, cmd)
 }
 
 func fmtSscan(cmd string, n *int) (int, error) {

@@ -46,6 +46,7 @@ else.
 ## How it would work
 
 1. **Add it:** `ayis host add mypc --ssh user@192.168.1.20`
+   (`user@192.168.1.20:2222` when its ssh server is not on port 22)
    Connects over ssh, detects Linux or Windows and the GPU (NVIDIA, AMD or
    Intel - Sunshine encodes on all three). Uses your ssh keys and config; never
    asks for or stores a password.
@@ -108,8 +109,9 @@ else.
 - A sudo password, when the machine needs one, is asked once per setup and
   handed to sudo on the machine's stdin; never saved, never on a command line.
   The Tailscale auth key goes in a 0600 temp file on the machine, not argv.
-- The Sunshine login uses the same code as the AWS build (lib/sunshine-login.sh):
-  saved first, checked, set again on the machine when they disagree.
+- The Sunshine login uses the same code as the AWS build: saved first, checked,
+  set again on the machine when they disagree by writing Sunshine's state file -
+  never on a command line.
 - A name that the AWS clean-up could match (`ayis`, `ayis-2`) is refused.
 
 ## Open questions

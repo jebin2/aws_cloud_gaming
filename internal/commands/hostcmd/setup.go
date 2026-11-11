@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -25,6 +26,10 @@ type remote struct {
 
 func (r remote) SSH(ctx context.Context, cmd string) ([]byte, error) {
 	return r.c.SSH(ctx, r.t, cmd, nil)
+}
+
+func (r remote) SSHInput(ctx context.Context, cmd string, stdin io.Reader) ([]byte, error) {
+	return r.c.SSH(ctx, r.t, cmd, stdin)
 }
 
 // died is an error the command stops on, with what to say.
@@ -92,7 +97,7 @@ func (d Deps) setup(ctx context.Context, args []string, out *output.Out) error {
 	}
 	t := d.Store.Get(name).Field("ssh")
 	if t == "" {
-		return died(fmt.Sprintf("no machine called '%s' - add it: ayis host add %s --ssh <user@address>", name, name))
+		return died(fmt.Sprintf("no machine called '%s' - add it: ayis host add %s --ssh <user@address[:port]>", name, name))
 	}
 	// In, before anything: a machine whose key was taken off asks once for its
 	// password here, rather than failing every step after.

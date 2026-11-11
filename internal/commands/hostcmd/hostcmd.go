@@ -25,7 +25,7 @@ import (
 	"github.com/jebin2/ayis/internal/tskey"
 )
 
-const usage = "usage: ayis host [list|add [name] --ssh <user@address>|setup <name>|status <name>|open <name>|remove <name>]"
+const usage = "usage: ayis host [list|add [name] --ssh <user@address[:port]>|setup <name>|status <name>|open <name>|remove <name>]"
 
 // List is `ayis host list`: the machines as data (without any password), or as a
 // table for a person.
@@ -40,7 +40,7 @@ func List(s hosts.Store, jsonOut bool) string {
 		return string(b) + "\n"
 	}
 	if len(names) == 0 {
-		return "  no machines of your own yet - add one: ayis host add <name> --ssh <user@address>\n"
+		return "  no machines of your own yet - add one: ayis host add <name> --ssh <user@address[:port]>\n"
 	}
 	var b strings.Builder
 	for _, n := range names {

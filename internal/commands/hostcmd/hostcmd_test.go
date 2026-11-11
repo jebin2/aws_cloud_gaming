@@ -44,7 +44,7 @@ func TestListForAPerson(t *testing.T) {
 	if text != "  desk             me@desk                      linux\n  homeserver       user@192.168.1.10            linux\n" {
 		t.Errorf("%q", text)
 	}
-	if got := List(store(t, ""), false); !strings.Contains(got, "no machines of your own yet - add one: ayis host add <name> --ssh <user@address>") {
+	if got := List(store(t, ""), false); !strings.Contains(got, "no machines of your own yet - add one: ayis host add <name> --ssh <user@address[:port]>") {
 		t.Errorf("%q", got)
 	}
 	// A file that is not JSON is no machines, not a crash.

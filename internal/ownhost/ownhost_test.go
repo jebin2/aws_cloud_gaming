@@ -184,3 +184,55 @@ func TestSSHQuotesTheCommandForSh(t *testing.T) {
 		t.Errorf("%s", r.Ran[0])
 	}
 }
+
+func TestATargetCarriesItsSSHPortOnlyWhenItIsNot22(t *testing.T) {
+	for _, c := range []struct{ in, dest, port string }{
+		{"me@pc", "me@pc", ""},
+		{"me@pc:2222", "me@pc", "2222"},
+		{"me@pc:22", "me@pc", "22"},
+		{"me@pc:0", "me@pc:0", ""},
+		{"me@pc:70000", "me@pc:70000", ""},
+		{"me@pc:ssh", "me@pc:ssh", ""},
+		{"me@[2001:db8::1]", "me@[2001:db8::1]", ""},
+		{"me@[2001:db8::1]:2222", "me@[2001:db8::1]", "2222"},
+		{"me@2001:db8::1", "me@2001:db8::1", ""},
+	} {
+		dest, port := SplitTarget(c.in)
+		if dest != c.dest || port != c.port {
+			t.Errorf("%q: %q %q, want %q %q", c.in, dest, port, c.dest, c.port)
+		}
+	}
+}
+
+func TestAnSSHPortReachesSSHAsItsOwnFlag(t *testing.T) {
+	c, r := conn(t)
+	_, _ = c.SSH(context.Background(), "me@pc:2222", "exit", nil)
+	if !strings.Contains(r.Ran[0], "-p 2222 me@pc sh -c") {
+		t.Errorf("%s", r.Ran[0])
+	}
+	c, r = conn(t)
+	_, _ = c.Raw(context.Background(), "me@[2001:db8::1]:2222", "exit", nil)
+	if !strings.Contains(r.Ran[0], "-p 2222 me@[2001:db8::1] exit") {
+		t.Errorf("%s", r.Ran[0])
+	}
+	c, r = conn(t)
+	_, _ = c.Raw(context.Background(), "me@pc", "exit", nil)
+	if strings.Contains(r.Ran[0], "-p ") {
+		t.Errorf("an ordinary machine gained a port: %s", r.Ran[0])
+	}
+}
+
+func TestThePasswordIsAskedOnTheMachinesPort(t *testing.T) {
+	c, r := conn(t)
+	if err := os.MkdirAll(filepath.Dir(c.Key), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(c.Key, []byte("private"), 0o600)
+	_ = os.WriteFile(c.Key+".pub", []byte("ssh-ed25519 AAAAC3Nza ayis@laptop\n"), 0o644)
+	if rc := c.InstallKey(context.Background(), "me@pc:2222", "hunter2-pw"); rc != 0 {
+		t.Fatalf("rc %d", rc)
+	}
+	if !strings.Contains(r.Ran[0], "-p 2222 me@pc sh -c") {
+		t.Errorf("%s", r.Ran[0])
+	}
+}

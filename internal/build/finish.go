@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/jebin2/ayis/internal/local"
@@ -76,7 +77,10 @@ func (f *Finisher) Finish(ctx context.Context) error {
 		// The login: saved here first, checked against the box, set again on the
 		// box when they disagree.
 		e := &sunshine.Ensure{C: f.Sun, IP: f.IP, Login: f.Login, Save: f.Save, Say: f.Log, Sleep: f.Sleep,
-			OnMachine: func(ctx context.Context, cmd string) error { _, err := f.Follow.R.SSH(ctx, cmd); return err }}
+			OnMachine: func(ctx context.Context, cmd string, in io.Reader) error {
+				_, err := f.Follow.R.SSHInput(ctx, cmd, in)
+				return err
+			}}
 		e.Run(ctx, first)
 	}
 

@@ -107,6 +107,22 @@ func TestAddWithTheKeyAlreadyThereAsksNothing(t *testing.T) {
 	}
 }
 
+func TestAddKeepsTheMachinesSSHPort(t *testing.T) {
+	r := newRig(t, "", true)
+	if rc := r.d.Add(context.Background(), []string{"mypc", "--ssh", "me@pc:2222"}, r.out); rc != 0 || r.d.Store.Get("mypc").Field("ssh") != "me@pc:2222" {
+		t.Fatalf("rc %d\n%s%s", rc, r.o, r.e)
+	}
+	found := false
+	for _, l := range r.r.Ran {
+		if strings.Contains(l, "-p 2222 me@pc") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ssh never asked for the port: %v", r.r.Ran)
+	}
+}
+
 func TestAddRefusesWhatWouldBeAddedTwice(t *testing.T) {
 	r := newRig(t, "", true)
 	ctx := context.Background()
@@ -122,8 +138,8 @@ func TestAddRefusesWhatWouldBeAddedTwice(t *testing.T) {
 		{[]string{"b", "--ssh", "me@100.64.0.9"}, "is a machine already added, as 'a' - the same machine, by another address"},
 		{[]string{"Bad Name", "--ssh", "me@x"}, "use lowercase letters, digits and dashes"},
 		{[]string{"ayis-2", "--ssh", "me@x"}, "clean-up would delete it"},
-		{[]string{"b", "--ssh"}, "usage: ayis host add [name] --ssh <user@address>"},
-		{[]string{"b"}, "usage: ayis host add [name] --ssh <user@address>"},
+		{[]string{"b", "--ssh"}, "usage: ayis host add [name] --ssh <user@address[:port]>"},
+		{[]string{"b"}, "usage: ayis host add [name] --ssh <user@address[:port]>"},
 	} {
 		r.e.Reset()
 		if rc := r.d.Add(ctx, c.args, r.out); rc != 1 || !strings.Contains(r.e.String(), c.want) {

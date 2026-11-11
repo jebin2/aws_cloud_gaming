@@ -19,9 +19,10 @@ sunshine_package() {
 # not command -v alone. A check that differed from the install's left a build in
 # /usr/local/bin installing nothing and then stopping at the /usr/bin verify.
 sunshine_native() { command -v sunshine >/dev/null || test -x /usr/bin/sunshine || test -x /usr/local/bin/sunshine; }
-# Sunshine as a Flatpak, system-wide or the user's own. ayis sets its login with
-# sunshine --creds, which a Flatpak does not give it - and a native one beside
-# it would fight it for port 47990, with the login set on the wrong one.
+# Sunshine as a Flatpak, system-wide or the user's own. ayis sets its login by
+# writing its state file, and a Flatpak keeps that inside its sandbox, where
+# ayis's write would not reach - and a native one beside it would fight it for
+# port 47990, with the login set on the wrong one.
 sunshine_flatpak() {
   command -v flatpak >/dev/null || return 1
   { flatpak list --app --columns=application 2>/dev/null
