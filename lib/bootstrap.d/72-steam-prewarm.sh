@@ -78,9 +78,23 @@ steam_running() {
   pgrep -x steam >/dev/null 2>&1 && return 0
   pgrep -u "$(id -u)" -f '/ubuntu12_(32|64)/steam' >/dev/null 2>&1
 }
+# Asked twice, then killed. A client left at its sign-in window once outlived the
+# single request it was sent, and the build waited on it for half an hour, until
+# it was stopped by hand - at which point the library registered at once.
 steam_stop() {
-  pkill -x steam 2>/dev/null || true
-  pkill -u "$(id -u)" -f '/ubuntu12_(32|64)/steam' 2>/dev/null || true
+  local sig
+  for sig in TERM TERM KILL; do
+    pkill "-$sig" -x steam 2>/dev/null || true
+    pkill "-$sig" -u "$(id -u)" -f '/ubuntu12_(32|64)/steam' 2>/dev/null || true
+    for _ in $(seq 1 5); do steam_running || return 0; sleep 3; done
+  done
+}
+# The launcher ends when the client does. It is given ten seconds to, and is
+# never waited on without a limit.
+steam_reap() {
+  for _ in $(seq 1 10); do kill -0 "$1" 2>/dev/null || break; sleep 1; done
+  kill -KILL "$1" 2>/dev/null || true
+  wait "$1" 2>/dev/null || true
 }
 
 healthy() {
@@ -162,7 +176,7 @@ INNER
   SPID=$!
   for _ in $(seq 1 20); do steam_running && break; sleep 3; done
   for _ in $(seq 1 40); do steam_running || break; sleep 3; done   # let it exit
-  steam_stop; wait "$SPID" 2>/dev/null || true; sleep 3
+  steam_stop; steam_reap "$SPID"; sleep 3
 
   if healthy; then say "registered (attempt $attempt, cid $CID)"; exit 0; fi
   say "attempt $attempt did not stick"
@@ -235,9 +249,23 @@ steam_running() {
   pgrep -x steam >/dev/null 2>&1 && return 0
   pgrep -u "$(id -u)" -f '/ubuntu12_(32|64)/steam' >/dev/null 2>&1
 }
+# Asked twice, then killed. A client left at its sign-in window once outlived the
+# single request it was sent, and the build waited on it for half an hour, until
+# it was stopped by hand - at which point the library registered at once.
 steam_stop() {
-  pkill -x steam 2>/dev/null || true
-  pkill -u "$(id -u)" -f '/ubuntu12_(32|64)/steam' 2>/dev/null || true
+  local sig
+  for sig in TERM TERM KILL; do
+    pkill "-$sig" -x steam 2>/dev/null || true
+    pkill "-$sig" -u "$(id -u)" -f '/ubuntu12_(32|64)/steam' 2>/dev/null || true
+    for _ in $(seq 1 5); do steam_running || return 0; sleep 3; done
+  done
+}
+# The launcher ends when the client does. It is given ten seconds to, and is
+# never waited on without a limit.
+steam_reap() {
+  for _ in $(seq 1 10); do kill -0 "$1" 2>/dev/null || break; sleep 1; done
+  kill -KILL "$1" 2>/dev/null || true
+  wait "$1" 2>/dev/null || true
 }
 
 # graphical.target is reached before X actually accepts connections, so the
@@ -308,7 +336,7 @@ while (( attempt < 3 )) && ! client_installed; do
     sleep 15; waited=$(( waited + 15 ))
   done
   steam_stop
-  wait "$SPID" 2>/dev/null || true
+  steam_reap "$SPID"
   echo "attempt $attempt: settled at ${prev}MB after ${waited}s; installed: $(client_installed && echo yes || echo no)" >>"$LOG"
   client_installed || sleep 10
 done

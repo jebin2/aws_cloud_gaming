@@ -9,7 +9,7 @@
 #
 # Covers: a fresh client with no libraryfolders.vdf, the no-op healthy path, the
 # marker being wiped (every stop reformats /scratch), and Steam dropping the
-# entry (what a first sign-in can do).
+# entry (what a first sign-in can do), and a Steam that does not exit when asked.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 MOD=lib/bootstrap.d/72-steam-prewarm.sh
@@ -99,5 +99,16 @@ echo "5. no client installed - must do nothing and not fail"
 setup; rm -rf "$ROOT/ubuntu12_64"; rc=$(run)
 check "exit 0" "$rc" "0"
 check "wrote nothing" "$([[ -f $CONF ]] && echo yes || echo no)" "no"
+
+echo "6. steam never exits and ignores the first request - what a client at its sign-in window did"
+setup
+# Stays up for ten minutes, and goes only when it is killed: the build once waited
+# on such a client until it was stopped by hand.
+printf '#!/usr/bin/env bash\ntouch %s/running\necho $$ > %s/pid\nexec sleep 600\n' "$T" "$T" > "$T/bin/steam"
+printf '#!/bin/sh\ncase "$1" in -KILL) rm -f %s/running;; esac\n' "$T" > "$T/bin/pkill"
+rc=$(PATH="$T/bin:$PATH" timeout 60 bash "$T/ensure.sh" >/dev/null 2>&1; echo $?)
+check "it finishes instead of waiting for ever" "$rc" "0"
+check "the library is registered" "$(ecid)" "$(mcid)"
+check "no launcher is left behind" "$(kill -0 "$(cat "$T/pid")" 2>/dev/null && echo alive || echo gone)" "gone"
 
 echo; echo "passed $pass, failed $fail"; rm -rf "$T"; [[ $fail -eq 0 ]]
